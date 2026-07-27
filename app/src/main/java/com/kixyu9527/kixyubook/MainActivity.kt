@@ -25,7 +25,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalView
@@ -166,8 +165,9 @@ private fun KixyuNavHost(navController: NavHostController) {
     // destination underneath can therefore occupy the full window; the bar is
     // introduced only after the pop has committed to a top-level destination.
     val showBar = topLevelActive
-    // Keep the floating bar composed while secondary destinations are shown.
-    // Its visibility no longer changes the content insets of either route.
+    // Delay its return until the top-level destination has committed. On exit,
+    // AnimatedVisibility removes the bar after the short transition so an
+    // invisible navigation item cannot intercept touches on secondary pages.
     var bottomBarPresented by remember { mutableStateOf(showBar) }
     LaunchedEffect(showBar) {
         if (showBar) {
@@ -177,11 +177,6 @@ private fun KixyuNavHost(navController: NavHostController) {
             bottomBarPresented = false
         }
     }
-    val bottomBarAlpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (bottomBarPresented) 1f else 0f,
-        animationSpec = tween(if (bottomBarPresented) 140 else 100),
-        label = "bottomBarVisibility",
-    )
     val navBackground = kixyuPageBackground()
     Box(Modifier.fillMaxSize().background(navBackground)) {
         NavHost(
@@ -230,11 +225,11 @@ private fun KixyuNavHost(navController: NavHostController) {
                 ReaderRoute(onExit = { navController.popBackStack() })
             }
         }
-        Box(
-            modifier = Modifier.align(Alignment.BottomCenter).graphicsLayer {
-                alpha = bottomBarAlpha
-                translationY = (1f - bottomBarAlpha) * size.height / 8f
-            },
+        AnimatedVisibility(
+            visible = bottomBarPresented,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(140)) + slideInVertically(tween(140)) { height -> height / 8 },
+            exit = fadeOut(tween(100)) + slideOutVertically(tween(100)) { height -> height / 8 },
         ) {
             KixyuNavigationBar(
                 items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },

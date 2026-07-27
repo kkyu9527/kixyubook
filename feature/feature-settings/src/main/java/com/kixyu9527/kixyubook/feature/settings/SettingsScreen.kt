@@ -65,8 +65,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuEdgeToEdgeDialogProperties
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
@@ -127,7 +127,7 @@ fun SettingsRoute(
                             append(state.settings.theme.displayName())
                             append(" · ")
                             append(state.settings.appUiStyle.displayName())
-                            if (state.settings.customThemeEnabled) append(" · 自定义阅读配色")
+                            if (state.settings.customThemeEnabled) append(" · 自定义配色")
                             append(" · ")
                             append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
                         },
@@ -298,12 +298,9 @@ fun AppearanceRoute(
         ) {
             item {
                 KixyuSection(title = "界面") {
-                    KixyuDropdownRow(
-                        title = "界面风格",
-                        selected = state.settings.appUiStyle,
-                        options = AppUiStyle.entries,
-                        optionLabel = AppUiStyle::displayName,
-                        onSelected = { style -> viewModel.update { it.copy(appUiStyle = style) } },
+                    KixyuAppUiStyleControl(
+                        settings = state.settings,
+                        onSettingsChange = { updated -> viewModel.update { updated } },
                     )
                     KixyuDivider()
                     KixyuSettingsRow(

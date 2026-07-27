@@ -55,7 +55,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -67,6 +66,8 @@ import androidx.core.view.ViewCompat
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
@@ -331,20 +332,18 @@ private fun ReaderScreen(
                     volumeTurns = volumeTurns,
                 )
             }
-            ReaderPageControls(
+            ReaderPageNumber(
                 info = pageInfo.takeIf { state.settings.showPageNumber && state.searchResults.isEmpty() },
-                showChapterActions = controls,
-                progress = backProgress,
                 palette = palette,
-                hasPreviousChapter = state.chapterIndex > 0,
-                hasNextChapter = state.chapterIndex < state.chapters.lastIndex,
-                onPreviousChapter = { moveChapter(-1, false) },
-                onNextChapter = { moveChapter(1, false) },
             )
             ReaderControls(
                 visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
                 currentPageBookmarked = currentPageBookmark != null,
+                hasPreviousChapter = state.chapterIndex > 0,
+                hasNextChapter = state.chapterIndex < state.chapters.lastIndex,
+                onPreviousChapter = { moveChapter(-1, false) },
+                onNextChapter = { moveChapter(1, false) },
                 onExit = exitReader, onDirectory = { sheet = ReaderSheet.DIRECTORY },
                 onSettings = { menu = !menu; toolsMenu = false },
                 onTools = { toolsMenu = !toolsMenu; menu = false },
@@ -646,6 +645,10 @@ private fun ReaderControls(
     progress: Float,
     bookTitle: String,
     currentPageBookmarked: Boolean,
+    hasPreviousChapter: Boolean,
+    hasNextChapter: Boolean,
+    onPreviousChapter: () -> Unit,
+    onNextChapter: () -> Unit,
     onExit: () -> Unit,
     onDirectory: () -> Unit,
     onSettings: () -> Unit,
@@ -747,72 +750,50 @@ private fun ReaderControls(
                     ),
                 )
             }
+            Row(
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = KixyuSize.readerControlInset)
+                    .then(controlsBackModifier),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                KixyuTonalIconButton(
+                    onClick = onPreviousChapter,
+                    enabled = hasPreviousChapter,
+                    modifier = Modifier.size(KixyuSize.readerControlButton),
+                ) {
+                    Icon(Icons.Outlined.SkipPrevious, "上一章")
+                }
+                Spacer(Modifier.width(KixyuSize.readerChapterActionGap))
+                KixyuTonalIconButton(
+                    onClick = onNextChapter,
+                    enabled = hasNextChapter,
+                    modifier = Modifier.size(KixyuSize.readerControlButton),
+                ) {
+                    Icon(Icons.Outlined.SkipNext, "下一章")
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun ReaderPageControls(
+private fun ReaderPageNumber(
     info: ReaderPageInfo?,
-    showChapterActions: Boolean,
-    progress: Float,
     palette: ReaderRenderPalette,
-    hasPreviousChapter: Boolean,
-    hasNextChapter: Boolean,
-    onPreviousChapter: () -> Unit,
-    onNextChapter: () -> Unit,
 ) {
-    Box(Modifier.fillMaxSize()) {
-        if (info != null) {
-            Box(
-                Modifier.align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(bottom = KixyuSpacing.hairline)
-                    .zIndex(0f),
-            ) {
-                Text(
-                    "${info.current}/${info.total}",
-                    color = palette.secondary,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                )
-            }
-        }
+    if (info != null) {
         Box(
             Modifier.fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .zIndex(1f),
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(bottom = KixyuSpacing.hairline),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            ReaderControlVisibility(
-                visible = showChapterActions,
-                modifier = Modifier.align(Alignment.BottomCenter)
-                    .padding(bottom = KixyuSize.readerControlInset)
-                    .zIndex(1f),
-            ) {
-                KixyuPopupSurface(
-                    modifier = Modifier.predictivePopupTransform(progress),
-                    shadowElevation = 0.dp,
-                ) {
-                    Row(
-                        modifier = Modifier.height(KixyuSize.readerControlButton),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        KixyuIconButton(
-                            onClick = onPreviousChapter,
-                            enabled = showChapterActions && hasPreviousChapter,
-                        ) {
-                            Icon(Icons.Outlined.SkipPrevious, "上一章")
-                        }
-                        Spacer(Modifier.width(KixyuSize.readerChapterActionGap))
-                        KixyuIconButton(
-                            onClick = onNextChapter,
-                            enabled = showChapterActions && hasNextChapter,
-                        ) {
-                            Icon(Icons.Outlined.SkipNext, "下一章")
-                        }
-                    }
-                }
-            }
+            Text(
+                "${info.current}/${info.total}",
+                color = palette.secondary,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -1146,7 +1127,14 @@ private fun SearchSheet(
     ) {
         item { Text("阅读主题", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
-            KixyuSection {
+            KixyuSection(title = "应用界面") {
+                KixyuAppUiStyleControl(settings) { updated -> update { updated } }
+                KixyuDivider()
+                KixyuAppColorControl(settings) { updated -> update { updated } }
+            }
+        }
+        item {
+            KixyuSection(title = "阅读配色") {
                 KixyuReaderThemeControls(settings, { updated -> update { updated } }, modeTitle = "显示模式")
             }
         }

@@ -410,7 +410,7 @@ fun KixyuReaderThemeControls(
     )
     KixyuDivider()
     KixyuSettingsRow(
-        title = "自定义阅读配色",
+        title = "自定义配色",
         onClick = { onSettingsChange(settings.copy(customThemeEnabled = !settings.customThemeEnabled)) },
         trailing = {
             Row(
@@ -466,6 +466,20 @@ fun KixyuAppColorControl(
         options = AppColorTheme.entries,
         optionLabel = AppColorTheme::displayName,
         onSelected = { onSettingsChange(settings.copy(appColorTheme = it)) },
+    )
+}
+
+@Composable
+fun KixyuAppUiStyleControl(
+    settings: ReaderSettings,
+    onSettingsChange: (ReaderSettings) -> Unit,
+) {
+    KixyuDropdownRow(
+        title = "界面风格",
+        selected = settings.appUiStyle,
+        options = AppUiStyle.entries,
+        optionLabel = AppUiStyle::displayName,
+        onSelected = { onSettingsChange(settings.copy(appUiStyle = it)) },
     )
 }
 
