@@ -29,7 +29,7 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    fun migration1To3PreservesContentAndRemovesLegacyPatches() {
+    fun migration1To4PreservesContentAndCreatesBookmarks() {
         createV1Database().use { helper ->
             helper.writableDatabase.apply {
                 execSQL("INSERT INTO books VALUES(1, '旧书名', '旧作者', NULL, ?, 'TXT', 1234)", arrayOf(context.filesDir.resolve("legacy.txt").absolutePath))
@@ -40,7 +40,7 @@ class DatabaseMigrationTest {
         }
 
         val database = Room.databaseBuilder(context, KixyuDatabase::class.java, TEST_DATABASE)
-            .addMigrations(migration1To2(context), migration2To3)
+            .addMigrations(migration1To2(context), migration2To3, migration3To4)
             .allowMainThreadQueries()
             .build()
         val sqlite = database.openHelper.writableDatabase
@@ -70,6 +70,10 @@ class DatabaseMigrationTest {
         sqlite.query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'text_edit_patches'").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals(0, cursor.getInt(0))
+        }
+        sqlite.query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'bookmarks'").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
         }
         database.close()
     }

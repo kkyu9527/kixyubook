@@ -151,6 +151,7 @@ class LocalBookRepository @Inject constructor(
             val previousChapters = dao.getChapters(bookUuid)
             val previousChapterIndex = previousChapters.withIndex().associate { it.value.id to it.index }
             val previousProgress = dao.getProgress(bookUuid)
+            val previousBookmarks = dao.getBookmarks(bookUuid)
             val previousProgressText = previousProgress?.let { progress ->
                 dao.getParagraph(progress.chapterId, progress.position)?.text
             }
@@ -169,6 +170,24 @@ class LocalBookRepository @Inject constructor(
                 require(chapterIndex > 0) { "未找到可阅读章节" }
                 val paragraphsByChapter = chapterIds.associateWith { chapterId ->
                     dao.getParagraphs(chapterId)
+                }
+
+                previousBookmarks.forEach { bookmark ->
+                    val targetChapterId = chapterIds[bookmark.chapterIndex.coerceIn(chapterIds.indices)]
+                    val targetPosition = bookmark.position.coerceIn(
+                        0,
+                        paragraphsByChapter[targetChapterId].orEmpty().lastIndex.coerceAtLeast(0),
+                    )
+                    dao.insertBookmark(
+                        BookmarkEntity(
+                            uuid = bookmark.uuid,
+                            bookUuid = bookUuid,
+                            chapterId = targetChapterId,
+                            position = targetPosition,
+                            preview = bookmark.preview,
+                            createdTime = bookmark.createdTime,
+                        ),
+                    )
                 }
 
                 previousProgress?.let { progress ->
@@ -251,11 +270,38 @@ class LocalBookRepository @Inject constructor(
     }
 
     override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) { dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" }) }
+
+    override fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>> =
+        dao.observeBookmarks(bookUuid).map { rows -> rows.map { it.toModel() } }
+
+    override suspend fun addBookmark(bookmark: Bookmark): Unit = withContext(Dispatchers.IO) {
+        dao.insertBookmark(
+            BookmarkEntity(
+                uuid = bookmark.uuid,
+                bookUuid = bookmark.bookUuid,
+                chapterId = bookmark.chapterId,
+                position = bookmark.position,
+                preview = bookmark.preview,
+                createdTime = bookmark.createdTime,
+            ),
+        )
+    }
+
+    override suspend fun deleteBookmark(bookmarkUuid: String) = withContext(Dispatchers.IO) {
+        dao.deleteBookmark(bookmarkUuid)
+    }
+
+    override suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult> = withContext(Dispatchers.IO) {
+        val escaped = query.trim().replace("~", "~~").replace("%", "~%").replace("_", "~_")
+        if (escaped.isBlank()) emptyList() else dao.searchBook(bookUuid, escaped).map { it.toModel() }
+    }
 }
 
 private fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category)
 private fun ChapterEntity.toModel() = Chapter(id, bookUuid, title, chapterIndex)
 private fun ReadingProgressEntity.toModel() = ReadingProgress(bookUuid, chapterId, position, offset, updatedTime, fraction)
+private fun BookmarkRow.toModel() = Bookmark(uuid, bookUuid, chapterId, chapterTitle, chapterIndex, position, preview, createdTime)
+private fun BookSearchResultRow.toModel() = BookSearchResult(chapterId, chapterTitle, chapterIndex, paragraphIndex, text)
 
 private fun File.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")

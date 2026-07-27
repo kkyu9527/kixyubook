@@ -45,6 +45,42 @@ data class ReadingProgressEntity(
     val fraction: Float,
 )
 
+@Entity(
+    tableName = "bookmarks",
+    foreignKeys = [
+        ForeignKey(entity = BookEntity::class, parentColumns = ["uuid"], childColumns = ["bookUuid"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = ChapterEntity::class, parentColumns = ["id"], childColumns = ["chapterId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("bookUuid"), Index("chapterId"), Index(value = ["bookUuid", "chapterId", "position"], unique = true)],
+)
+data class BookmarkEntity(
+    @PrimaryKey val uuid: String,
+    val bookUuid: String,
+    val chapterId: Long,
+    val position: Int,
+    val preview: String,
+    val createdTime: Long,
+)
+
+data class BookmarkRow(
+    val uuid: String,
+    val bookUuid: String,
+    val chapterId: Long,
+    val chapterTitle: String,
+    val chapterIndex: Int,
+    val position: Int,
+    val preview: String,
+    val createdTime: Long,
+)
+
+data class BookSearchResultRow(
+    val chapterId: Long,
+    val chapterTitle: String,
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val text: String,
+)
+
 @Entity(tableName = "metadata_edits", indices = [Index("bookUuid")])
 data class MetadataEditEntity(
     @PrimaryKey val uuid: String,

@@ -102,6 +102,15 @@ val migration2To3 = object : Migration(2, 3) {
     }
 }
 
+val migration3To4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `bookmarks` (`uuid` TEXT NOT NULL, `bookUuid` TEXT NOT NULL, `chapterId` INTEGER NOT NULL, `position` INTEGER NOT NULL, `preview` TEXT NOT NULL, `createdTime` INTEGER NOT NULL, PRIMARY KEY(`uuid`), FOREIGN KEY(`bookUuid`) REFERENCES `books`(`uuid`) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(`chapterId`) REFERENCES `chapters`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_bookmarks_bookUuid` ON `bookmarks` (`bookUuid`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_bookmarks_chapterId` ON `bookmarks` (`chapterId`)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_bookmarks_bookUuid_chapterId_position` ON `bookmarks` (`bookUuid`, `chapterId`, `position`)")
+    }
+}
+
 private fun SupportSQLiteDatabase.dropUserIndexes(table: String) {
     val names = buildList {
         query("PRAGMA index_list(`$table`)").use { cursor ->

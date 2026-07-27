@@ -36,6 +36,25 @@ data class ReadingProgress(
     val fraction: Float = 0f,
 )
 
+data class Bookmark(
+    val uuid: String,
+    val bookUuid: String,
+    val chapterId: Long,
+    val chapterTitle: String,
+    val chapterIndex: Int,
+    val position: Int,
+    val preview: String,
+    val createdTime: Long,
+)
+
+data class BookSearchResult(
+    val chapterId: Long,
+    val chapterTitle: String,
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val text: String,
+)
+
 data class LibraryBook(val book: Book, val progress: ReadingProgress?)
 
 enum class ReaderTheme { SYSTEM, DAY, NIGHT }
@@ -66,6 +85,11 @@ data class ReaderSettings(
     ),
     val fontUuid: String? = null,
     val appColorTheme: AppColorTheme = AppColorTheme.DYNAMIC,
+    val showStatusBar: Boolean = true,
+    val showPageNumber: Boolean = true,
+    val volumeKeyPageTurn: Boolean = false,
+    val keepScreenOn: Boolean = true,
+    val showChapterTitle: Boolean = true,
 )
 
 data class ChapterContent(val chapter: Chapter, val paragraphs: List<Paragraph>)

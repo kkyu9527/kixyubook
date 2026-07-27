@@ -19,6 +19,19 @@ interface BookDao {
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId ORDER BY paragraphIndex") suspend fun getParagraphs(chapterId: Long): List<ParagraphEntity>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId AND paragraphIndex = :index") suspend fun getParagraph(chapterId: Long, index: Int): ParagraphEntity?
     @Query("SELECT EXISTS(SELECT 1 FROM metadata_edits WHERE bookUuid = :uuid)") suspend fun hasMetadataEdits(uuid: String): Boolean
+    @Query("""SELECT b.uuid, b.bookUuid, b.chapterId, c.title AS chapterTitle, c.chapterIndex, b.position, b.preview, b.createdTime
+        FROM bookmarks b JOIN chapters c ON c.id = b.chapterId
+        WHERE b.bookUuid = :uuid ORDER BY c.chapterIndex, b.position""")
+    fun observeBookmarks(uuid: String): Flow<List<BookmarkRow>>
+    @Query("""SELECT b.uuid, b.bookUuid, b.chapterId, c.title AS chapterTitle, c.chapterIndex, b.position, b.preview, b.createdTime
+        FROM bookmarks b JOIN chapters c ON c.id = b.chapterId
+        WHERE b.bookUuid = :uuid ORDER BY c.chapterIndex, b.position""")
+    suspend fun getBookmarks(uuid: String): List<BookmarkRow>
+    @Query("""SELECT c.id AS chapterId, c.title AS chapterTitle, c.chapterIndex,
+        p.paragraphIndex, p.text FROM paragraphs p JOIN chapters c ON c.id = p.chapterId
+        WHERE c.bookUuid = :uuid AND p.text LIKE '%' || :query || '%' ESCAPE '~'
+        ORDER BY c.chapterIndex, p.paragraphIndex LIMIT 1000""")
+    suspend fun searchBook(uuid: String, query: String): List<BookSearchResultRow>
 
     @Insert suspend fun insertBook(book: BookEntity)
     @Insert suspend fun insertChapter(chapter: ChapterEntity): Long
@@ -26,6 +39,7 @@ interface BookDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveProgress(progress: ReadingProgressEntity)
     @Insert suspend fun insertMetadataEdit(edit: MetadataEditEntity)
     @Insert suspend fun insertSession(session: ReadingSessionEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertBookmark(bookmark: BookmarkEntity): Long
 
     @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid AND format = 'TXT'") suspend fun updateTxtMetadata(uuid: String, title: String, author: String, description: String): Int
     @Query("UPDATE books SET contentHash = :contentHash WHERE uuid = :uuid") suspend fun updateContentHash(uuid: String, contentHash: String)
@@ -35,6 +49,7 @@ interface BookDao {
     @Query("DELETE FROM reading_progress WHERE bookUuid = :uuid") suspend fun deleteProgress(uuid: String)
     @Query("DELETE FROM chapters WHERE bookUuid = :uuid") suspend fun deleteChapters(uuid: String)
     @Query("SELECT * FROM reading_sessions ORDER BY startedTime") fun observeSessions(): Flow<List<ReadingSessionEntity>>
+    @Query("DELETE FROM bookmarks WHERE uuid = :uuid") suspend fun deleteBookmark(uuid: String)
 
     @Transaction
     suspend fun insertParagraphsChunked(chapterId: Long, values: List<String>) {

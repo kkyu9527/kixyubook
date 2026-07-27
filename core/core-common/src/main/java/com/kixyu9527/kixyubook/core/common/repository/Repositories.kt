@@ -17,6 +17,10 @@ interface BookRepository {
     suspend fun reparseTxt(bookUuid: String): Result<Unit>
     suspend fun updateTxtParagraph(bookUuid: String, chapterIndex: Int, paragraphIndex: Int, replacementText: String): Result<Unit>
     suspend fun setCategory(bookUuid: String, category: String)
+    fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>>
+    suspend fun addBookmark(bookmark: Bookmark)
+    suspend fun deleteBookmark(bookmarkUuid: String)
+    suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult>
 }
 
 interface ReaderSettingsRepository {

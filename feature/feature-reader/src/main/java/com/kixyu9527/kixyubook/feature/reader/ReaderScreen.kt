@@ -1,10 +1,14 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Color.parseColor
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -15,22 +19,42 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.focusable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Toc
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageModeControl
@@ -44,18 +68,35 @@ import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlin.math.roundToInt
 
-private enum class ReaderSheet { DIRECTORY, FONT, THEME, LAYOUT }
+private enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, SETTINGS, SEARCH }
 private data class ReaderPageInfo(val current: Int, val total: Int)
 
 @Composable
 fun ReaderRoute(onExit: () -> Unit, viewModel: ReaderViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     DisposableEffect(Unit) { onDispose(viewModel::finishSession) }
-    ReaderScreen(state, onExit, viewModel::moveChapter, viewModel::jumpToChapter, viewModel::savePosition, viewModel::saveTextEdit, viewModel::updateSettings)
+    ReaderScreen(
+        state = state,
+        onExit = onExit,
+        moveChapter = viewModel::moveChapter,
+        jumpChapter = viewModel::jumpToChapter,
+        jumpPosition = viewModel::jumpToPosition,
+        savePosition = viewModel::savePosition,
+        saveEdit = viewModel::saveTextEdit,
+        updateSettings = viewModel::updateSettings,
+        addBookmark = viewModel::addBookmark,
+        deleteBookmark = viewModel::deleteBookmark,
+        search = viewModel::search,
+        selectSearchResult = viewModel::selectSearchResult,
+        moveSearchResult = viewModel::moveSearchResult,
+        clearSearch = viewModel::clearSearch,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,31 +106,87 @@ private fun ReaderScreen(
     onExit: () -> Unit,
     moveChapter: (Int, Boolean) -> Unit,
     jumpChapter: (Int) -> Unit,
+    jumpPosition: (Int, Int) -> Unit,
     savePosition: (Int, Boolean) -> Unit,
     saveEdit: (Int, String) -> Unit,
     updateSettings: ((ReaderSettings) -> ReaderSettings) -> Unit,
+    addBookmark: () -> Unit,
+    deleteBookmark: (String) -> Unit,
+    search: (String) -> Unit,
+    selectSearchResult: (Int) -> Unit,
+    moveSearchResult: (Int) -> Unit,
+    clearSearch: () -> Unit,
 ) {
     var controls by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var toolsMenu by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
     var editing by remember { mutableStateOf<Pair<Int, String>?>(null) }
     var pageInfo by remember { mutableStateOf<ReaderPageInfo?>(null) }
     var backProgress by remember { mutableFloatStateOf(0f) }
+    val volumeTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
+    val focusRequester = remember { FocusRequester() }
+    val context = LocalContext.current
+    val view = LocalView.current
     val modalSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    DisposableEffect(state.settings.showStatusBar, view) {
+        val window = context.findActivity()?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        if (state.settings.showStatusBar) {
+            controller?.show(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller?.hide(WindowInsetsCompat.Type.statusBars())
+        }
+        onDispose { controller?.show(WindowInsetsCompat.Type.statusBars()) }
+    }
+    DisposableEffect(state.settings.keepScreenOn, view) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = state.settings.keepScreenOn
+        onDispose { view.keepScreenOn = previous }
+    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     LaunchedEffect(state.settings.pageMode) {
         if (state.settings.pageMode == PageMode.SCROLL) pageInfo = null
     }
-    PredictiveBackHandler(enabled = sheet == null && editing == null && (menu || controls)) { events ->
+    PredictiveBackHandler(
+        enabled = sheet == null && editing == null && (menu || toolsMenu || controls || state.searchResults.isNotEmpty()),
+    ) { events ->
         try {
             events.collect { backProgress = it.progress }
-            if (menu) menu = false else controls = false
+            when {
+                toolsMenu -> toolsMenu = false
+                menu -> menu = false
+                state.searchResults.isNotEmpty() -> clearSearch()
+                else -> controls = false
+            }
         } catch (_: CancellationException) { } finally { backProgress = 0f }
     }
 
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val palette = readerPalette(state.settings, systemDark)
+    val currentPageBookmark = state.chapter?.let { chapter ->
+        state.bookmarks.firstOrNull { bookmark ->
+            bookmark.chapterId == chapter.id && bookmark.position == state.currentPosition
+        }
+    }
     CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {
-        Box(Modifier.fillMaxSize().background(palette.background)) {
+        Box(
+            Modifier.fillMaxSize()
+                .background(palette.background)
+                .focusRequester(focusRequester)
+                .onPreviewKeyEvent { event ->
+                    val isVolumeKey = event.key == Key.VolumeUp || event.key == Key.VolumeDown
+                    if (!state.settings.volumeKeyPageTurn || !isVolumeKey) return@onPreviewKeyEvent false
+                    if (event.type == KeyEventType.KeyDown) {
+                        controls = false
+                        menu = false
+                        toolsMenu = false
+                        volumeTurns.tryEmit(if (event.key == Key.VolumeUp) -1 else 1)
+                    }
+                    true
+                }
+                .focusable(),
+        ) {
             when {
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = palette.accent)
                 state.error != null -> Text(state.error, color = palette.body, modifier = Modifier.align(Alignment.Center))
@@ -98,14 +195,15 @@ private fun ReaderScreen(
                     palette = palette,
                     savePosition = savePosition,
                     moveChapter = moveChapter,
-                    middleTap = { controls = !controls; if (!controls) menu = false },
-                    dismissControls = { controls = false; menu = false },
+                    middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
+                    dismissControls = { controls = false; menu = false; toolsMenu = false },
                     edit = { index, text -> editing = index to text },
                     onPageInfo = { pageInfo = it },
+                    volumeTurns = volumeTurns,
                 )
             }
             ReaderPageControls(
-                info = pageInfo,
+                info = pageInfo.takeIf { state.settings.showPageNumber },
                 showChapterActions = controls,
                 palette = palette,
                 hasPreviousChapter = state.chapterIndex > 0,
@@ -114,10 +212,26 @@ private fun ReaderScreen(
                 onNextChapter = { moveChapter(1, false) },
             )
             ReaderControls(
-                visible = controls, menuVisible = menu, progress = backProgress,
-                bookTitle = state.book?.title.orEmpty(),
+                visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
+                bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
+                currentPageBookmarked = currentPageBookmark != null,
                 onExit = onExit, onDirectory = { sheet = ReaderSheet.DIRECTORY },
-                onSettings = { menu = !menu }, onSheet = { sheet = it },
+                onSettings = { menu = !menu; toolsMenu = false },
+                onTools = { toolsMenu = !toolsMenu; menu = false },
+                onToggleBookmark = {
+                    currentPageBookmark?.let { deleteBookmark(it.uuid) } ?: addBookmark()
+                    toolsMenu = false
+                },
+                onSearch = { sheet = ReaderSheet.SEARCH; toolsMenu = false },
+                onSheet = { sheet = it },
+            )
+            SearchNavigator(
+                modifier = Modifier.align(Alignment.TopCenter),
+                state = state,
+                visible = state.searchResults.isNotEmpty() && sheet == null,
+                progress = backProgress,
+                onMove = moveSearchResult,
+                onClose = clearSearch,
             )
         }
     }
@@ -129,14 +243,80 @@ private fun ReaderScreen(
             contentWindowInsets = { WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal) },
         ) {
             when (active) {
-                ReaderSheet.DIRECTORY -> DirectorySheet(state, { index -> jumpChapter(index); sheet = null })
-                ReaderSheet.FONT -> FontSheet(state, updateSettings)
+                ReaderSheet.DIRECTORY -> DirectorySheet(
+                    state = state,
+                    selectChapter = { index -> jumpChapter(index); sheet = null },
+                    selectBookmark = { bookmark -> jumpPosition(bookmark.chapterIndex, bookmark.position); sheet = null },
+                    deleteBookmark = deleteBookmark,
+                )
                 ReaderSheet.THEME -> ThemeSheet(state.settings, updateSettings)
-                ReaderSheet.LAYOUT -> LayoutSheet(state.settings, updateSettings)
+                ReaderSheet.LAYOUT -> LayoutSheet(state, updateSettings)
+                ReaderSheet.SETTINGS -> ReaderSettingsSheet(state.settings, updateSettings)
+                ReaderSheet.SEARCH -> SearchSheet(
+                    state = state,
+                    onSearch = search,
+                    onSelect = { index ->
+                        selectSearchResult(index)
+                        controls = false
+                        menu = false
+                        toolsMenu = false
+                        sheet = null
+                    },
+                )
             }
         }
     }
     editing?.let { (index, original) -> EditParagraphDialog(original, { editing = null }, { saveEdit(index, it); editing = null }) }
+}
+
+@Composable
+private fun SearchNavigator(
+    modifier: Modifier = Modifier,
+    state: ReaderUiState,
+    visible: Boolean,
+    progress: Float,
+    onMove: (Int) -> Unit,
+    onClose: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier.windowInsetsPadding(WindowInsets.statusBars)
+            .padding(top = KixyuSpacing.small),
+        enter = fadeIn() + slideInVertically { -it / 2 },
+        exit = fadeOut() + slideOutVertically { -it / 2 },
+    ) {
+        Surface(
+            modifier = Modifier.predictivePopupTransform(progress)
+                .height(KixyuSize.readerControlButton)
+                .widthIn(max = 280.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = KixyuSpacing.extraSmall,
+        ) {
+            Row(
+                Modifier.padding(start = KixyuSpacing.medium),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${state.searchQuery}  ${state.selectedSearchIndex + 1}/${state.searchResults.size}",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                IconButton(
+                    onClick = { onMove(-1) },
+                    enabled = state.selectedSearchIndex > 0,
+                ) { Icon(Icons.Outlined.KeyboardArrowUp, "上一个结果") }
+                IconButton(
+                    onClick = { onMove(1) },
+                    enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
+                ) { Icon(Icons.Outlined.KeyboardArrowDown, "下一个结果") }
+                IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "退出搜索") }
+            }
+        }
+    }
 }
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
@@ -150,6 +330,7 @@ private fun ReaderContent(
     dismissControls: () -> Unit,
     edit: (Int, String) -> Unit,
     onPageInfo: (ReaderPageInfo?) -> Unit,
+    volumeTurns: SharedFlow<Int>,
 ) {
     val chapter = state.chapter ?: return
     val density = LocalDensity.current
@@ -158,7 +339,7 @@ private fun ReaderContent(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val safeViewportHeight = (maxHeight.value - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
         val spec = ReaderLayoutSpec(maxWidth.value, safeViewportHeight, state.settings.fontSize, state.settings.lineHeight, state.settings.letterSpacing, state.settings.margin)
-        key(chapter.id, state.settings.pageMode, spec) {
+        key(chapter.id, state.settings.pageMode, spec, state.navigationVersion) {
             if (state.settings.pageMode == PageMode.SCROLL) {
                 LaunchedEffect(chapter.id) { onPageInfo(null) }
                 val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
@@ -188,6 +369,19 @@ private fun ReaderContent(
                         if (scrolling) dismissControls()
                     }
                 }
+                LaunchedEffect(listState, volumeTurns) {
+                    volumeTurns.collect { direction ->
+                        dismissControls()
+                        when {
+                            direction < 0 && !listState.canScrollBackward -> moveChapter(-1, true)
+                            direction > 0 && !listState.canScrollForward -> moveChapter(1, false)
+                            else -> {
+                                val viewport = listState.layoutInfo.run { viewportEndOffset - viewportStartOffset }
+                                listState.animateScrollBy(viewport * direction.toFloat())
+                            }
+                        }
+                    }
+                }
                 ReaderScrollRenderer(
                     chapter, listState, spec, palette, state.fontPath, state.book?.isEditable == true, edit,
                     { fraction -> if (fraction in .33f..67f) middleTap() else dismissControls() },
@@ -195,6 +389,7 @@ private fun ReaderContent(
                     state.chapterIndex > 0, state.chapterIndex < state.chapters.lastIndex,
                     topInsetDp, bottomInsetDp,
                     Modifier.fillMaxSize(),
+                    highlightQuery = state.searchQuery,
                 )
             } else {
                 Box(
@@ -203,6 +398,7 @@ private fun ReaderContent(
                     PagedReader(
                         state, chapter, spec, palette, savePosition, moveChapter,
                         middleTap, dismissControls, edit, onPageInfo,
+                        volumeTurns,
                     )
                 }
             }
@@ -222,8 +418,14 @@ private fun PagedReader(
     dismissControls: () -> Unit,
     edit: (Int, String) -> Unit,
     onPageInfo: (ReaderPageInfo?) -> Unit,
+    volumeTurns: SharedFlow<Int>,
 ) {
-    val pages = rememberMeasuredReaderPages(chapter, spec, state.fontPath)
+    val pages = rememberMeasuredReaderPages(
+        chapter = chapter,
+        spec = spec,
+        fontPath = state.fontPath,
+        showRegularChapterTitle = state.settings.showChapterTitle,
+    )
     val positions = remember { ReaderPositionManager() }
     val hasPrevious = state.chapterIndex > 0; val hasNext = state.chapterIndex < state.chapters.lastIndex
     val leading = if (hasPrevious) 1 else 0
@@ -259,6 +461,13 @@ private fun PagedReader(
             if (scrolling) dismissControls()
         }
     }
+    LaunchedEffect(pager, volumeTurns) {
+        volumeTurns.collect { direction ->
+            dismissControls()
+            val target = (pager.currentPage + direction).coerceIn(0, virtualCount - 1)
+            if (target != pager.currentPage) pager.animateScrollToPage(target)
+        }
+    }
     HorizontalPager(pager, Modifier.fillMaxSize()) { virtualPage ->
         val actual = virtualPage - leading
         if (actual !in pages.indices) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(if (actual < 0) "上一章" else "下一章", color = palette.secondary) }
@@ -275,6 +484,8 @@ private fun PagedReader(
                     else -> middleTap()
                 }
             } },
+            showRegularChapterTitle = state.settings.showChapterTitle,
+            highlightQuery = state.searchQuery,
         )
     }
 }
@@ -283,15 +494,21 @@ private fun PagedReader(
 private fun ReaderControls(
     visible: Boolean,
     menuVisible: Boolean,
+    toolsMenuVisible: Boolean,
     progress: Float,
     bookTitle: String,
+    currentPageBookmarked: Boolean,
     onExit: () -> Unit,
     onDirectory: () -> Unit,
     onSettings: () -> Unit,
+    onTools: () -> Unit,
+    onToggleBookmark: () -> Unit,
+    onSearch: () -> Unit,
     onSheet: (ReaderSheet) -> Unit,
 ) {
-    val controlsBackModifier = if (menuVisible) Modifier else Modifier.predictivePopupTransform(progress)
-    val menuBackModifier = if (menuVisible) Modifier.predictivePopupTransform(progress) else Modifier
+    val popupVisible = menuVisible || toolsMenuVisible
+    val controlsBackModifier = if (popupVisible) Modifier else Modifier.predictivePopupTransform(progress)
+    val menuBackModifier = if (popupVisible) Modifier.predictivePopupTransform(progress) else Modifier
     AnimatedVisibility(
         visible = visible,
         modifier = Modifier.fillMaxSize(),
@@ -303,30 +520,68 @@ private fun ReaderControls(
                 Surface(
                     modifier = Modifier.align(Alignment.TopCenter)
                         .padding(top = KixyuSize.readerTopControlInset)
+                        .height(KixyuSize.readerControlButton)
                         .widthIn(max = KixyuSize.readerBookTitleMaxWidth)
                         .then(controlsBackModifier),
                     shape = MaterialTheme.shapes.extraLarge,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = KixyuSpacing.extraSmall,
                 ) {
-                    Text(
-                        bookTitle,
-                        modifier = Modifier.padding(
-                            horizontal = KixyuSpacing.large,
-                            vertical = KixyuSpacing.small,
-                        ),
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
+                    Box(
+                        Modifier.fillMaxHeight().padding(horizontal = KixyuSpacing.small),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            bookTitle,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
             FilledTonalIconButton(
                 onExit,
                 Modifier.align(Alignment.TopEnd)
                     .padding(top = KixyuSize.readerTopControlInset, end = KixyuSize.readerControlInset)
+                    .size(KixyuSize.readerControlButton)
                     .then(controlsBackModifier),
             ) { Icon(Icons.Outlined.Close, "退出") }
+            Box(
+                Modifier.align(Alignment.TopStart)
+                    .padding(top = KixyuSize.readerTopControlInset, start = KixyuSize.readerControlInset),
+            ) {
+                FilledTonalIconButton(
+                    onClick = onTools,
+                    modifier = Modifier.size(KixyuSize.readerControlButton).then(controlsBackModifier),
+                ) { Icon(Icons.Outlined.MoreHoriz, "阅读工具") }
+                DropdownMenu(
+                    expanded = toolsMenuVisible,
+                    onDismissRequest = onTools,
+                    offset = DpOffset(0.dp, KixyuSpacing.small),
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
+                                maxLines = 1,
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                if (currentPageBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkAdd,
+                                null,
+                            )
+                        },
+                        onClick = onToggleBookmark,
+                    )
+                    DropdownMenuItem(
+                        text = { Text("全文搜索", maxLines = 1) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                        onClick = onSearch,
+                    )
+                }
+            }
             FilledTonalIconButton(onDirectory, Modifier.align(Alignment.BottomStart).padding(KixyuSize.readerControlInset).then(controlsBackModifier)) { Icon(Icons.AutoMirrored.Outlined.Toc, "目录") }
             FilledTonalIconButton(onSettings, Modifier.align(Alignment.BottomEnd).padding(KixyuSize.readerControlInset).then(controlsBackModifier)) { Icon(Icons.Outlined.Settings, "设置") }
             AnimatedVisibility(
@@ -339,9 +594,9 @@ private fun ReaderControls(
                 exit = fadeOut() + scaleOut(),
             ) {
                 Surface(modifier = menuBackModifier, shape = MaterialTheme.shapes.large, tonalElevation = KixyuSpacing.small, shadowElevation = KixyuSpacing.small) { Column(Modifier.padding(vertical = KixyuSpacing.extraSmall)) {
-                    MenuRow(Icons.Outlined.FontDownload, "字体") { onSheet(ReaderSheet.FONT) }
                     MenuRow(Icons.Outlined.Palette, "主题") { onSheet(ReaderSheet.THEME) }
                     MenuRow(Icons.Outlined.ViewCarousel, "页面布局") { onSheet(ReaderSheet.LAYOUT) }
+                    MenuRow(Icons.Outlined.Tune, "阅读设置") { onSheet(ReaderSheet.SETTINGS) }
                 } }
             }
         }
@@ -393,7 +648,7 @@ private fun ReaderPageControls(
                     IconButton(onClick = onPreviousChapter, enabled = hasPreviousChapter) {
                         Icon(Icons.Outlined.SkipPrevious, "上一章")
                     }
-                    Spacer(Modifier.width(KixyuSize.readerPageIndicatorWidth))
+                    Spacer(Modifier.width(KixyuSize.readerChapterActionGap))
                     IconButton(onClick = onNextChapter, enabled = hasNextChapter) {
                         Icon(Icons.Outlined.SkipNext, "下一章")
                     }
@@ -418,45 +673,132 @@ private fun Modifier.predictivePopupTransform(progress: Float): Modifier = graph
     ) { Icon(icon, null, Modifier.size(KixyuSize.icon)); Text(text, maxLines = 1) }
 }
 
-@Composable private fun DirectorySheet(state: ReaderUiState, select: (Int) -> Unit) {
+private enum class DirectoryView { CHAPTERS, BOOKMARKS }
+
+@Composable
+private fun DirectorySheet(
+    state: ReaderUiState,
+    selectChapter: (Int) -> Unit,
+    selectBookmark: (Bookmark) -> Unit,
+    deleteBookmark: (String) -> Unit,
+) {
+    var directoryView by rememberSaveable { mutableStateOf(DirectoryView.CHAPTERS) }
+    val bookmarkedChapterIds = remember(state.bookmarks) { state.bookmarks.mapTo(mutableSetOf(), Bookmark::chapterId) }
     val currentIndex = state.chapterIndex.coerceIn(0, state.chapters.lastIndex.coerceAtLeast(0))
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = currentIndex)
     LaunchedEffect(currentIndex, state.chapters.size) {
         if (state.chapters.isNotEmpty()) listState.scrollToItem(currentIndex)
     }
     Column(Modifier.fillMaxWidth()) {
-        Text(
-            "目录 · ${state.chapters.size} 章",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = KixyuSpacing.large, vertical = KixyuSpacing.medium),
-            maxLines = 1,
-        )
-        Box(Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent)) {
-            androidx.compose.foundation.lazy.LazyColumn(
-                modifier = Modifier.fillMaxWidth().padding(
-                    end = if (state.chapters.size >= FAST_SCROLLER_MIN_CHAPTERS) {
-                        KixyuSize.directoryFastScrollerWidth
-                    } else 0.dp,
-                ),
-                state = listState,
-            ) {
-                items(state.chapters.size) { index ->
-                    val current = index == state.chapterIndex
-                    ListItem(
-                        headlineContent = { Text(state.chapters[index].title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
-                        leadingContent = { if (current) Icon(Icons.Outlined.PlayArrow, null, Modifier.size(KixyuSize.icon), tint = MaterialTheme.colorScheme.primary) },
-                        colors = ListItemDefaults.colors(containerColor = if (current) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent),
-                        modifier = Modifier.pointerInput(index) { detectTapGestures { select(index) } },
-                    )
-                }
-                item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
-            }
-            if (state.chapters.size >= FAST_SCROLLER_MIN_CHAPTERS) {
-                DirectoryFastScroller(
-                    itemCount = state.chapters.size,
-                    listState = listState,
-                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+        Row(
+            Modifier.fillMaxWidth().padding(start = KixyuSpacing.large, end = KixyuSpacing.small),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (directoryView == DirectoryView.CHAPTERS) "目录 · ${state.chapters.size} 章" else "书签 · ${state.bookmarks.size}",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            IconButton(onClick = {
+                directoryView = if (directoryView == DirectoryView.CHAPTERS) DirectoryView.BOOKMARKS else DirectoryView.CHAPTERS
+            }) {
+                Icon(
+                    if (directoryView == DirectoryView.CHAPTERS) Icons.Outlined.Bookmarks else Icons.AutoMirrored.Outlined.Toc,
+                    if (directoryView == DirectoryView.CHAPTERS) "查看书签" else "查看目录",
                 )
+            }
+        }
+        AnimatedContent(
+            targetState = directoryView,
+            transitionSpec = {
+                if (targetState == DirectoryView.BOOKMARKS) {
+                    (slideInHorizontally { it / 3 } + fadeIn()) togetherWith
+                        (slideOutHorizontally { -it / 3 } + fadeOut())
+                } else {
+                    (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith
+                        (slideOutHorizontally { it / 3 } + fadeOut())
+                }
+            },
+            label = "directoryBookmarks",
+        ) { view ->
+            if (view == DirectoryView.CHAPTERS) {
+                Box(Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent)) {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.fillMaxWidth().padding(
+                            end = if (state.chapters.size >= FAST_SCROLLER_MIN_CHAPTERS) {
+                                KixyuSize.directoryFastScrollerWidth
+                            } else 0.dp,
+                        ),
+                        state = listState,
+                    ) {
+                        items(state.chapters.size) { index ->
+                            val current = index == state.chapterIndex
+                            val hasBookmark = state.chapters[index].id in bookmarkedChapterIds
+                            ListItem(
+                                headlineContent = { Text(state.chapters[index].title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                                leadingContent = { if (current) Icon(Icons.Outlined.PlayArrow, null, Modifier.size(KixyuSize.icon), tint = MaterialTheme.colorScheme.primary) },
+                                trailingContent = {
+                                    if (hasBookmark) {
+                                        Icon(
+                                            Icons.Filled.Bookmark,
+                                            "本章有书签",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                },
+                                colors = ListItemDefaults.colors(
+                                    containerColor = when {
+                                        current -> MaterialTheme.colorScheme.secondaryContainer
+                                        hasBookmark -> MaterialTheme.colorScheme.surfaceContainerHigh
+                                        else -> Color.Transparent
+                                    },
+                                ),
+                                modifier = Modifier.pointerInput(index) { detectTapGestures { selectChapter(index) } },
+                            )
+                        }
+                        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+                    }
+                    if (state.chapters.size >= FAST_SCROLLER_MIN_CHAPTERS) {
+                        DirectoryFastScroller(
+                            itemCount = state.chapters.size,
+                            listState = listState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                        )
+                    }
+                }
+            } else if (state.bookmarks.isEmpty()) {
+                Box(
+                    Modifier.fillMaxWidth().height(180.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("还没有书签", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn(
+                    Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
+                ) {
+                    items(state.bookmarks, key = Bookmark::uuid) { bookmark ->
+                        ListItem(
+                            headlineContent = { Text(bookmark.chapterTitle, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                            supportingContent = {
+                                Text(
+                                    bookmark.preview.ifBlank { "第 ${bookmark.position + 1} 段" },
+                                    maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                )
+                            },
+                            leadingContent = { Icon(Icons.Outlined.Bookmark, null) },
+                            trailingContent = {
+                                IconButton(onClick = { deleteBookmark(bookmark.uuid) }) {
+                                    Icon(Icons.Outlined.DeleteOutline, "删除书签")
+                                }
+                            },
+                            modifier = Modifier.pointerInput(bookmark.uuid) { detectTapGestures { selectBookmark(bookmark) } },
+                        )
+                    }
+                    item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+                }
             }
         }
     }
@@ -539,32 +881,90 @@ private fun DirectoryFastScroller(
     }
 }
 
-@Composable private fun FontSheet(state: ReaderUiState, update: ((ReaderSettings) -> ReaderSettings) -> Unit) {
-    androidx.compose.foundation.lazy.LazyColumn(
+@Composable
+private fun SearchSheet(
+    state: ReaderUiState,
+    onSearch: (String) -> Unit,
+    onSelect: (Int) -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf(state.searchQuery) }
+    val focusManager = LocalFocusManager.current
+    fun submit() {
+        onSearch(query)
+        focusManager.clearFocus()
+    }
+    Column(
         Modifier.fillMaxWidth().imePadding(),
-        contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
-        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
     ) {
-        item { Text("字体", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
-        item {
-            KixyuSection {
-                KixyuSettingsRow("系统默认", onClick = { update { it.copy(fontUuid = null) } }) {
-                    RadioButton(state.settings.fontUuid == null, null)
+        Text(
+            "全文搜索",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = KixyuSpacing.large),
+            maxLines = 1,
+        )
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = KixyuSpacing.large),
+            placeholder = { Text("搜索书中内容", maxLines = 1) },
+            leadingIcon = { Icon(Icons.Outlined.Search, null) },
+            trailingIcon = {
+                IconButton(onClick = ::submit, enabled = query.isNotBlank()) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowForward, "搜索")
                 }
-                state.availableFonts.forEach { font ->
-                    KixyuDivider()
-                    KixyuSettingsRow(font.name, onClick = { update { it.copy(fontUuid = font.uuid) } }) {
-                        RadioButton(state.settings.fontUuid == font.uuid, null)
+            },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { submit() }),
+        )
+        when {
+            state.searchResults.isNotEmpty() -> {
+                Text(
+                    "${state.searchResults.size} 个匹配结果",
+                    modifier = Modifier.padding(horizontal = KixyuSpacing.large),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                androidx.compose.foundation.lazy.LazyColumn(
+                    Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                ) {
+                    items(state.searchResults.size) { index ->
+                        val result = state.searchResults[index]
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    result.chapterTitle,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    result.text,
+                                    maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                )
+                            },
+                            leadingContent = { Text("${index + 1}", style = MaterialTheme.typography.labelMedium) },
+                            trailingContent = { Icon(Icons.Outlined.ChevronRight, null) },
+                            colors = ListItemDefaults.colors(
+                                containerColor = if (index == state.selectedSearchIndex) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else Color.Transparent,
+                            ),
+                            modifier = Modifier.pointerInput(index) { detectTapGestures { onSelect(index) } },
+                        )
                     }
                 }
             }
-        }
-        item {
-            ReaderSettingStepper("字号", state.settings.fontSize, .5f, 15f..30f, "sp") { value ->
-                update { it.copy(fontSize = value) }
+            state.searchQuery.isNotBlank() -> {
+                Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                    Text("没有找到匹配内容", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
-        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+        Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
     }
 }
 
@@ -584,13 +984,32 @@ private fun DirectoryFastScroller(
     }
 }
 
-@Composable private fun LayoutSheet(settings: ReaderSettings, update: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+@Composable private fun LayoutSheet(state: ReaderUiState, update: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+    val settings = state.settings
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
         item { Text("页面布局", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item {
+            KixyuSection(title = "字体") {
+                KixyuSettingsRow("系统默认", onClick = { update { it.copy(fontUuid = null) } }) {
+                    RadioButton(settings.fontUuid == null, null)
+                }
+                state.availableFonts.forEach { font ->
+                    KixyuDivider()
+                    KixyuSettingsRow(font.name, onClick = { update { it.copy(fontUuid = font.uuid) } }) {
+                        RadioButton(settings.fontUuid == font.uuid, null)
+                    }
+                }
+            }
+        }
+        item {
+            ReaderSettingStepper("字号", settings.fontSize, .5f, 15f..30f, "sp") { value ->
+                update { it.copy(fontSize = value) }
+            }
+        }
         item { KixyuSection { KixyuPageModeControl(settings) { updated -> update { updated } } } }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
@@ -600,6 +1019,70 @@ private fun DirectoryFastScroller(
             }
         }
         item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+    }
+}
+
+@Composable
+private fun ReaderSettingsSheet(
+    settings: ReaderSettings,
+    update: ((ReaderSettings) -> ReaderSettings) -> Unit,
+) {
+    androidx.compose.foundation.lazy.LazyColumn(
+        Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
+        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+    ) {
+        item { Text("阅读设置", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item {
+            KixyuSection {
+                ReaderSwitchRow(
+                    title = "显示状态栏",
+                    supportingText = "阅读时显示时间和系统状态",
+                    checked = settings.showStatusBar,
+                ) { enabled -> update { it.copy(showStatusBar = enabled) } }
+                KixyuDivider()
+                ReaderSwitchRow(
+                    title = "显示页码",
+                    supportingText = "翻页模式底部显示当前页/总页数",
+                    checked = settings.showPageNumber,
+                ) { enabled -> update { it.copy(showPageNumber = enabled) } }
+                KixyuDivider()
+                ReaderSwitchRow(
+                    title = "显示章节名",
+                    supportingText = "非章节首页顶部显示当前章节名",
+                    checked = settings.showChapterTitle,
+                ) { enabled -> update { it.copy(showChapterTitle = enabled) } }
+                KixyuDivider()
+                ReaderSwitchRow(
+                    title = "音量键翻页",
+                    supportingText = "音量加键上一页，音量减键下一页",
+                    checked = settings.volumeKeyPageTurn,
+                ) { enabled -> update { it.copy(volumeKeyPageTurn = enabled) } }
+                KixyuDivider()
+                ReaderSwitchRow(
+                    title = "保持屏幕常亮",
+                    supportingText = "阅读期间不自动熄屏",
+                    checked = settings.keepScreenOn,
+                ) { enabled -> update { it.copy(keepScreenOn = enabled) } }
+            }
+        }
+        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+    }
+}
+
+@Composable
+private fun ReaderSwitchRow(
+    title: String,
+    supportingText: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    KixyuSettingsRow(
+        title = title,
+        supportingText = supportingText,
+        onClick = { onCheckedChange(!checked) },
+    ) {
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -683,3 +1166,9 @@ private fun readerPalette(settings: ReaderSettings, systemDark: Boolean): Reader
 }
 
 private fun String.colorOr(fallback: Color) = runCatching { Color(parseColor(this)) }.getOrDefault(fallback)
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}

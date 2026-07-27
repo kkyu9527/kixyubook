@@ -23,13 +23,14 @@ fun rememberMeasuredReaderPages(
     chapter: ReaderChapter,
     spec: ReaderLayoutSpec,
     fontPath: String?,
+    showRegularChapterTitle: Boolean = true,
 ): List<ReaderPage> {
     val measurer = rememberTextMeasurer(cacheSize = TEXT_MEASURE_CACHE_SIZE)
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val family = rememberReaderFont(fontPath)
-    return remember(chapter, spec, fontPath, family, density.density, density.fontScale, layoutDirection) {
-        MeasuredReaderPaginator(measurer, density).paginate(chapter, spec, family)
+    return remember(chapter, spec, fontPath, showRegularChapterTitle, family, density.density, density.fontScale, layoutDirection) {
+        MeasuredReaderPaginator(measurer, density).paginate(chapter, spec, family, showRegularChapterTitle)
     }
 }
 
@@ -41,6 +42,7 @@ private class MeasuredReaderPaginator(
         chapter: ReaderChapter,
         spec: ReaderLayoutSpec,
         family: androidx.compose.ui.text.font.FontFamily,
+        showRegularChapterTitle: Boolean,
     ): List<ReaderPage> {
         val widthPx = with(density) {
             (spec.viewportWidthDp - spec.horizontalMarginDp * 2f).coerceAtLeast(MIN_BODY_WIDTH_DP).dp.roundToPx()
@@ -52,7 +54,7 @@ private class MeasuredReaderPaginator(
         var opening = true
         val openingHeading = splitReaderChapterHeading(chapter.title)
 
-        fun bodyHeightPx(): Float = availableBodyHeightPx(spec, opening, openingHeading)
+        fun bodyHeightPx(): Float = availableBodyHeightPx(spec, opening, openingHeading, showRegularChapterTitle)
         fun flush() {
             if (blocks.isEmpty()) return
             pages += ReaderPage(pages.size, chapter.index, chapter.title, opening, blocks.toList())
@@ -117,6 +119,7 @@ private class MeasuredReaderPaginator(
         spec: ReaderLayoutSpec,
         opening: Boolean,
         heading: ReaderChapterHeading,
+        showRegularChapterTitle: Boolean,
     ): Float = with(density) {
         val hasOrdinalAndName = heading.ordinal != null && heading.name.isNotEmpty()
         val viewport = spec.viewportHeightDp.dp.toPx()
@@ -125,15 +128,20 @@ private class MeasuredReaderPaginator(
                 ReaderPageMetrics.openingTopDp + (if (hasOrdinalAndName) ReaderPageMetrics.openingOrdinalGapDp else 0f) +
                 ReaderPageMetrics.openingGapDp + ReaderPageMetrics.footerGapDp +
                 ReaderPageMetrics.footerHeightDp + ReaderPageMetrics.safetyDp
-        } else {
+        } else if (showRegularChapterTitle) {
             ReaderPageMetrics.topPaddingDp + ReaderPageMetrics.bottomPaddingDp + ReaderPageMetrics.regularGapDp +
+                ReaderPageMetrics.footerGapDp + ReaderPageMetrics.footerHeightDp + ReaderPageMetrics.safetyDp
+        } else {
+            ReaderPageMetrics.topPaddingDp + ReaderPageMetrics.bottomPaddingDp +
                 ReaderPageMetrics.footerGapDp + ReaderPageMetrics.footerHeightDp + ReaderPageMetrics.safetyDp
         }
         val headerSp = if (opening) {
             (if (heading.ordinal != null) OPENING_ORDINAL_LINE_HEIGHT_SP else 0f) +
                 (if (heading.name.isNotEmpty()) OPENING_TITLE_LINE_HEIGHT_SP else 0f)
-        } else {
+        } else if (showRegularChapterTitle) {
             REGULAR_TITLE_LINE_HEIGHT_SP
+        } else {
+            0f
         }
         (viewport - fixedDp.dp.toPx() - headerSp.sp.toPx()).coerceAtLeast(MIN_BODY_HEIGHT_DP.dp.toPx())
     }

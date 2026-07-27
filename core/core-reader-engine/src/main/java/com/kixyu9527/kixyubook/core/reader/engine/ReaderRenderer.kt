@@ -20,6 +20,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextIndent
@@ -53,6 +56,7 @@ fun ReaderScrollRenderer(
     topInsetDp: Float,
     bottomInsetDp: Float,
     modifier: Modifier = Modifier,
+    highlightQuery: String = "",
 ) {
     val family = rememberReaderFont(fontPath)
     val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
@@ -73,7 +77,7 @@ fun ReaderScrollRenderer(
             Spacer(Modifier.height(24.dp))
         }
         itemsIndexed(contentParagraphs, key = { _, paragraph -> paragraph.id }) { _, paragraph ->
-            ReaderBodyText(paragraph.text, spec, palette.body, family, editable, { onEditParagraph(paragraph.index, paragraph.text) }, onTapFraction)
+            ReaderBodyText(paragraph.text, spec, palette.body, family, editable, { onEditParagraph(paragraph.index, paragraph.text) }, onTapFraction, highlightQuery = highlightQuery, highlightColor = palette.accent)
         }
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -97,6 +101,8 @@ fun ReaderPageRenderer(
     onEditParagraph: (Int, String) -> Unit,
     onTapFraction: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    showRegularChapterTitle: Boolean = true,
+    highlightQuery: String = "",
 ) {
     val family = rememberReaderFont(fontPath)
     Column(
@@ -115,7 +121,7 @@ fun ReaderPageRenderer(
             Spacer(Modifier.height(ReaderPageMetrics.openingTopDp.dp))
             ReaderChapterOpeningTitle(page.chapterTitle, palette, family)
             Spacer(Modifier.height(ReaderPageMetrics.openingGapDp.dp))
-        } else {
+        } else if (showRegularChapterTitle) {
             Text(page.chapterTitle, color = palette.secondary, style = MaterialTheme.typography.labelLarge, maxLines = 1)
             Spacer(Modifier.height(ReaderPageMetrics.regularGapDp.dp))
         }
@@ -130,6 +136,8 @@ fun ReaderPageRenderer(
                 onTapFraction,
                 indent = !block.continuation,
                 bottomSpacing = block.bottomSpacing,
+                highlightQuery = highlightQuery,
+                highlightColor = palette.accent,
             )
         }
         Spacer(Modifier.weight(1f))
@@ -186,9 +194,11 @@ private fun ReaderBodyText(
     onTapFraction: (Float) -> Unit,
     indent: Boolean = true,
     bottomSpacing: Boolean = true,
+    highlightQuery: String = "",
+    highlightColor: Color = Color.Transparent,
 ) {
     Text(
-        text = text,
+        text = text.highlighted(highlightQuery, highlightColor),
         color = color,
         style = readerBodyTextStyle(spec, family, indent),
         modifier = Modifier.fillMaxWidth()
@@ -200,6 +210,26 @@ private fun ReaderBodyText(
             }
             .padding(bottom = if (bottomSpacing) (spec.fontSizeSp * 0.9f).dp else 0.dp),
     )
+}
+
+private fun String.highlighted(query: String, color: Color) = buildAnnotatedString {
+    if (query.isBlank()) {
+        append(this@highlighted)
+        return@buildAnnotatedString
+    }
+    var cursor = 0
+    while (cursor < length) {
+        val match = indexOf(query, cursor, ignoreCase = true)
+        if (match < 0) {
+            append(substring(cursor))
+            break
+        }
+        append(substring(cursor, match))
+        withStyle(SpanStyle(background = color.copy(alpha = .28f))) {
+            append(substring(match, match + query.length))
+        }
+        cursor = match + query.length
+    }
 }
 
 @Composable

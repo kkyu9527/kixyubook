@@ -57,6 +57,12 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("customNightBody", settings.customNightTheme.bodyHex)
                     setProperty("customNightTitle", settings.customNightTheme.titleHex)
                     setProperty("customNightAccent", settings.customNightTheme.accentHex)
+                    setProperty("showStatusBar", settings.showStatusBar.toString())
+                    setProperty("showPageNumber", settings.showPageNumber.toString())
+                    setProperty("volumeKeyPageTurn", settings.volumeKeyPageTurn.toString())
+                    setProperty("keepScreenOn", settings.keepScreenOn.toString())
+                    setProperty("appColorTheme", settings.appColorTheme.name)
+                    setProperty("showChapterTitle", settings.showChapterTitle.toString())
                     settings.fontUuid?.let { setProperty("fontUuid", it) }
                     setProperty("readingGoalMinutes", goal.toString())
                 }
@@ -196,6 +202,12 @@ class LocalBackupRepository @Inject constructor(
                 accentHex = properties.getProperty("customNightAccent", current.customNightTheme.accentHex),
             ),
             fontUuid = properties.getProperty("fontUuid"),
+            showStatusBar = properties.boolean("showStatusBar", current.showStatusBar),
+            showPageNumber = properties.boolean("showPageNumber", current.showPageNumber),
+            volumeKeyPageTurn = properties.boolean("volumeKeyPageTurn", current.volumeKeyPageTurn),
+            keepScreenOn = properties.boolean("keepScreenOn", current.keepScreenOn),
+            appColorTheme = properties.enum("appColorTheme", current.appColorTheme),
+            showChapterTitle = properties.boolean("showChapterTitle", current.showChapterTitle),
         ) }
         settingsRepository.setReadingGoalMinutes(properties.getProperty("readingGoalMinutes")?.toIntOrNull() ?: 30)
     }
@@ -208,8 +220,8 @@ class LocalBackupRepository @Inject constructor(
 
     private companion object {
         const val DATABASE_NAME = "kixyu-books.db"
-        const val DATABASE_VERSION = 3
-        const val BACKUP_VERSION = 3
+        const val DATABASE_VERSION = 4
+        const val BACKUP_VERSION = 4
         const val MANIFEST_ENTRY = "manifest.properties"
         const val DATABASE_ENTRY = "database/kixyu-books.db"
         const val MAX_ENTRIES = 100_000
@@ -230,4 +242,5 @@ private fun ZipOutputStream.putTree(root: File, entryRoot: String) {
 
 private fun File.treeSize(): Long = takeIf(File::exists)?.walkTopDown()?.filter(File::isFile)?.sumOf(File::length) ?: 0L
 private fun Properties.float(key: String, fallback: Float) = getProperty(key)?.toFloatOrNull() ?: fallback
+private fun Properties.boolean(key: String, fallback: Boolean) = getProperty(key)?.toBooleanStrictOrNull() ?: fallback
 private inline fun <reified T : Enum<T>> Properties.enum(key: String, fallback: T): T = getProperty(key)?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback

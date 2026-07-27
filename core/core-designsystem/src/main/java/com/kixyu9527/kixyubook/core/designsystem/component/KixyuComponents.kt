@@ -81,7 +81,7 @@ object KixyuSize {
     val readerControlInset = 12.dp
     val readerTopControlInset = 0.dp
     val readerControlButton = 48.dp
-    val readerPageIndicatorWidth = 52.dp
+    val readerChapterActionGap = 4.dp
     val readerBookTitleMaxWidth = 200.dp
     val stepperButton = 36.dp
     val stepperValueWidth = 64.dp
