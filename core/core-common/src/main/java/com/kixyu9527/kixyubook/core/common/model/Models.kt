@@ -59,7 +59,8 @@ data class LibraryBook(val book: Book, val progress: ReadingProgress?)
 
 enum class ReaderTheme { SYSTEM, DAY, NIGHT }
 enum class PageMode { SCROLL, PAGED }
-enum class AppColorTheme { DYNAMIC, SAGE, OCEAN, VIOLET, AMBER }
+enum class AppColorTheme { DEFAULT, DYNAMIC, SAGE, OCEAN, VIOLET, AMBER }
+enum class AppUiStyle { MATERIAL, MIUIX }
 
 data class CustomReaderTheme(
     val backgroundHex: String = "#F7F4EC",
@@ -84,7 +85,8 @@ data class ReaderSettings(
         accentHex = "#B8CCBD",
     ),
     val fontUuid: String? = null,
-    val appColorTheme: AppColorTheme = AppColorTheme.DYNAMIC,
+    val appColorTheme: AppColorTheme = AppColorTheme.DEFAULT,
+    val appUiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     val showStatusBar: Boolean = true,
     val showPageNumber: Boolean = true,
     val volumeKeyPageTurn: Boolean = false,

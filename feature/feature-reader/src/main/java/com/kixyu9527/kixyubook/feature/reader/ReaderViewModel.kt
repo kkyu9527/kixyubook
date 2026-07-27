@@ -178,6 +178,15 @@ class ReaderViewModel @Inject constructor(
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { settingsRepository.update(transform) } }
 
+    fun importFont(uri: String) = viewModelScope.launch { fonts.importFont(uri) }
+
+    fun deleteFont(font: UserFont) = viewModelScope.launch {
+        if (_uiState.value.settings.fontUuid == font.uuid) {
+            settingsRepository.update { it.copy(fontUuid = null) }
+        }
+        fonts.deleteFont(font.uuid)
+    }
+
     fun addBookmark() = viewModelScope.launch {
         val state = _uiState.value
         val chapter = state.chapter ?: return@launch

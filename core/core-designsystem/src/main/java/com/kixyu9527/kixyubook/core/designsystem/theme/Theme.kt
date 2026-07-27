@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -11,6 +12,9 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -19,7 +23,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
+import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeController
 
 private data class ThemeSeed(
     val lightPrimary: Color,
@@ -100,10 +108,71 @@ private val KixyuShapes = Shapes(
     extraLarge = RoundedCornerShape(22.dp),
 )
 
+private val KixyuMiuixShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }
+
+/** The opaque window background shared by navigation and page scaffolds. */
+@Composable
+fun kixyuPageBackground(): Color = if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+    MiuixTheme.colorScheme.surface
+} else {
+    MaterialTheme.colorScheme.background
+}
+
+/**
+ * Material components are still used for a few controls inside MIUIX pages.
+ * Bridge MIUIX semantic colors into MaterialTheme so those controls follow the
+ * active MIUIX palette instead of leaking Material's default purple tokens.
+ */
+@Composable
+private fun miuixMaterialColorScheme(base: ColorScheme): ColorScheme {
+    val miuix = MiuixTheme.colorScheme
+    return base.copy(
+        primary = miuix.primary,
+        onPrimary = miuix.onPrimary,
+        primaryContainer = miuix.primaryContainer,
+        onPrimaryContainer = miuix.onPrimaryContainer,
+        secondary = miuix.secondary,
+        onSecondary = miuix.onSecondary,
+        secondaryContainer = miuix.secondaryContainer,
+        onSecondaryContainer = miuix.onSecondaryContainer,
+        tertiary = miuix.primaryVariant,
+        onTertiary = miuix.onPrimaryVariant,
+        tertiaryContainer = miuix.tertiaryContainer,
+        onTertiaryContainer = miuix.onTertiaryContainer,
+        error = miuix.error,
+        onError = miuix.onError,
+        errorContainer = miuix.errorContainer,
+        onErrorContainer = miuix.onErrorContainer,
+        background = miuix.background,
+        onBackground = miuix.onBackground,
+        surface = miuix.surface,
+        onSurface = miuix.onSurface,
+        surfaceVariant = miuix.surfaceVariant,
+        onSurfaceVariant = miuix.onSurfaceSecondary,
+        outline = miuix.outline,
+        outlineVariant = miuix.dividerLine,
+        surfaceTint = miuix.primary,
+        surfaceContainerLowest = miuix.surfaceContainer,
+        surfaceContainerLow = miuix.surfaceContainer,
+        surfaceContainer = miuix.surfaceContainer,
+        surfaceContainerHigh = miuix.surfaceContainerHigh,
+        surfaceContainerHighest = miuix.surfaceContainerHighest,
+    )
+}
+
 @Composable
 fun KixyuBookTheme(
     themeMode: ReaderTheme = ReaderTheme.SYSTEM,
-    colorTheme: AppColorTheme = AppColorTheme.DYNAMIC,
+    colorTheme: AppColorTheme = AppColorTheme.DEFAULT,
+    uiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -113,17 +182,49 @@ fun KixyuBookTheme(
         ReaderTheme.SYSTEM -> systemDark
     }
     val context = LocalContext.current
-    val colors = if (colorTheme == AppColorTheme.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else if (darkTheme) {
-        darkColors(colorTheme)
-    } else {
-        lightColors(colorTheme)
+    val colors = when {
+        colorTheme == AppColorTheme.DEFAULT -> {
+            if (darkTheme) darkColorScheme() else lightColorScheme()
+        }
+        colorTheme == AppColorTheme.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        colorTheme == AppColorTheme.DYNAMIC -> {
+            if (darkTheme) darkColorScheme() else lightColorScheme()
+        }
+        darkTheme -> darkColors(colorTheme)
+        else -> lightColors(colorTheme)
+    }
+    val themedContent: @Composable () -> Unit = {
+        CompositionLocalProvider(LocalAppUiStyle provides uiStyle) {
+            if (uiStyle == AppUiStyle.MIUIX) {
+                val miuixMode = when (colorTheme) {
+                    AppColorTheme.DEFAULT -> if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light
+                    else -> if (darkTheme) ColorSchemeMode.MonetDark else ColorSchemeMode.MonetLight
+                }
+                val keyColor = colors.primary.takeIf {
+                    colorTheme != AppColorTheme.DEFAULT && colorTheme != AppColorTheme.DYNAMIC
+                }
+                val controller = remember(miuixMode, keyColor) {
+                    ThemeController(colorSchemeMode = miuixMode, keyColor = keyColor)
+                }
+                MiuixTheme(controller = controller) {
+                    MaterialTheme(
+                        colorScheme = miuixMaterialColorScheme(colors),
+                        typography = KixyuTypography,
+                        shapes = KixyuMiuixShapes,
+                        content = content,
+                    )
+                }
+            } else {
+                content()
+            }
+        }
     }
     MaterialTheme(
         colorScheme = colors,
         typography = KixyuTypography,
-        shapes = KixyuShapes,
-        content = content,
+        shapes = if (uiStyle == AppUiStyle.MIUIX) KixyuMiuixShapes else KixyuShapes,
+        content = themedContent,
     )
 }

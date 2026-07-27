@@ -1,7 +1,11 @@
 package com.kixyu9527.kixyubook.core.reader.engine
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.AnnotatedString
@@ -12,6 +16,10 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.ceil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Paginates with the same Compose text measurement used by the renderer.
@@ -29,9 +37,37 @@ fun rememberMeasuredReaderPages(
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val family = rememberReaderFont(fontPath)
-    return remember(chapter, spec, fontPath, showRegularChapterTitle, family, density.density, density.fontScale, layoutDirection) {
-        MeasuredReaderPaginator(measurer, density).paginate(chapter, spec, family, showRegularChapterTitle)
+    val paginationMutex = remember(measurer) { Mutex() }
+    var pages by remember(
+        chapter,
+        spec,
+        fontPath,
+        showRegularChapterTitle,
+        family,
+        density.density,
+        density.fontScale,
+        layoutDirection,
+    ) {
+        mutableStateOf(emptyList<ReaderPage>())
     }
+    LaunchedEffect(
+        chapter,
+        spec,
+        fontPath,
+        showRegularChapterTitle,
+        family,
+        density.density,
+        density.fontScale,
+        layoutDirection,
+    ) {
+        pages = withContext(Dispatchers.Default) {
+            paginationMutex.withLock {
+                MeasuredReaderPaginator(measurer, density)
+                    .paginate(chapter, spec, family, showRegularChapterTitle)
+            }
+        }
+    }
+    return pages
 }
 
 private class MeasuredReaderPaginator(

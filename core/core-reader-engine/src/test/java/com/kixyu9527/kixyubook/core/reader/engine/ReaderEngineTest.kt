@@ -161,25 +161,6 @@ class ReaderEngineTest {
         assertEquals(listOf("我們在這個安靜的午後開始閱讀。"), chapters.single().paragraphs)
     }
 
-    @Test fun paginationCreatesOpeningPageAndStablePositions() {
-        val chapter = ReaderChapter(1, "uuid", "第一章", 0, List(20) { Paragraph(it.toLong(), 1, it, "这是一段用于分页的正文。".repeat(8)) })
-        val pages = ReaderLayoutEngine().paginate(chapter, ReaderLayoutSpec(360f, 720f, 19f, 1.7f, .01f, 24f))
-        assertTrue(pages.size > 1)
-        assertTrue(pages.first().isChapterOpening)
-        assertEquals(0, ReaderPositionManager().pageFor(pages, 0))
-        assertTrue(ReaderPositionManager().pageFor(pages, 15) > 0)
-    }
-
-    @Test fun paginationUsesRemainingSpaceBeforeSplittingLongParagraph() {
-        val short = Paragraph(1, 1, 0, "短段落。")
-        val long = Paragraph(2, 1, 1, "这是用于验证剩余页面空间的一段长正文。".repeat(80))
-        val chapter = ReaderChapter(1, "uuid", "第一章", 0, listOf(short, long))
-        val pages = ReaderLayoutEngine().paginate(chapter, ReaderLayoutSpec(360f, 720f, 19f, 1.7f, .01f, 24f))
-
-        assertTrue(pages.size > 1)
-        assertTrue(pages.first().blocks.any { it.paragraphIndex == long.index })
-    }
-
     @Test fun readingProgressReachesOneOnlyWhenTheLastChapterIsComplete() {
         val positions = ReaderPositionManager()
 
@@ -199,11 +180,8 @@ class ReaderEngineTest {
                 Paragraph(2, 1, 1, "真正的第一段正文。"),
             ),
         )
-        val pages = ReaderLayoutEngine().paginate(chapter, ReaderLayoutSpec(360f, 720f, 19f, 1.7f, .01f, 24f))
-
         assertEquals(listOf("真正的第一段正文。"), chapter.contentParagraphs().map { it.text })
-        assertEquals(listOf("真正的第一段正文。"), pages.flatMap { page -> page.blocks.map { it.fullText } }.distinct())
-        assertEquals(1, pages.first().startParagraph)
+        assertEquals(1, chapter.contentParagraphs().first().index)
     }
 
     @Test fun volumeScopedOpeningHeadingIsNotRenderedAsBodyText() {

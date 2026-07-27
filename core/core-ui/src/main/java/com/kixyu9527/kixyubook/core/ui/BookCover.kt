@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.ui
 
 import android.graphics.BitmapFactory
+import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -10,16 +11,41 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+private object BookCoverMemoryCache {
+    private const val MAX_CACHE_BYTES = 16 * 1024 * 1024
+    private val bitmaps = object : LruCache<String, ImageBitmap>(MAX_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int =
+            (value.width.toLong() * value.height.toLong() * 4L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+    }
+
+    operator fun get(path: String): ImageBitmap? = bitmaps.get(path)
+
+    suspend fun load(path: String): ImageBitmap? = withContext(Dispatchers.IO) {
+        bitmaps.get(path) ?: runCatching {
+            BitmapFactory.decodeFile(path)?.asImageBitmap()?.also { bitmaps.put(path, it) }
+        }.getOrNull()
+    }
+}
 
 @Composable
 fun BookCover(
@@ -27,9 +53,13 @@ fun BookCover(
     coverPath: String?,
     modifier: Modifier = Modifier,
 ) {
-    val bitmap = remember(coverPath) {
-        coverPath?.let { runCatching { BitmapFactory.decodeFile(it)?.asImageBitmap() }.getOrNull() }
+    var bitmap by remember(coverPath) {
+        mutableStateOf(coverPath?.let(BookCoverMemoryCache::get))
     }
+    LaunchedEffect(coverPath) {
+        bitmap = coverPath?.let { BookCoverMemoryCache.load(it) }
+    }
+    val currentBitmap = bitmap
     Box(
         modifier = modifier
             .clip(MaterialTheme.shapes.medium)
@@ -40,8 +70,8 @@ fun BookCover(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
-            Image(bitmap, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (currentBitmap != null) {
+            Image(currentBitmap, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Text(
                 text = title.take(12),

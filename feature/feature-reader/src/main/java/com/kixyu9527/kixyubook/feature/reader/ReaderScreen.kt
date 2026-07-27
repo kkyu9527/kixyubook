@@ -5,7 +5,10 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Color.parseColor
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -33,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -51,19 +55,35 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.ViewCompat
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageModeControl
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuStepperRow
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.debounce
@@ -72,15 +92,62 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 private enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, SETTINGS, SEARCH }
 private data class ReaderPageInfo(val current: Int, val total: Int)
 
+/** All floating reader controls share one enter/exit clock and transform. */
 @Composable
-fun ReaderRoute(onExit: () -> Unit, viewModel: ReaderViewModel = hiltViewModel()) {
+private fun ReaderControlVisibility(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable AnimatedVisibilityScope.() -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)) +
+            scaleIn(tween(KixyuMotion.ReaderPopupEnterMillis), initialScale = .9f),
+        exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)) +
+            scaleOut(tween(KixyuMotion.ReaderPopupExitMillis), targetScale = .9f),
+        content = content,
+    )
+}
+
+@Composable
+fun ReaderRoute(
+    onExit: () -> Unit,
+    viewModel: ReaderViewModel = hiltViewModel(),
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    DisposableEffect(Unit) { onDispose(viewModel::finishSession) }
+    val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { viewModel.importFont(it.toString()) }
+    }
+    DisposableEffect(viewModel) { onDispose(viewModel::finishSession) }
+    var entryAnimationFinished by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(KixyuMotion.PageNavigationMillis.toLong())
+        // Do not install the text-heavy reader tree on the final navigation
+        // frame. One settled frame keeps the route transition uninterrupted.
+        withFrameNanos { }
+        entryAnimationFinished = true
+    }
+    if (!entryAnimationFinished) {
+        val palette = readerPalette(state.settings, androidx.compose.foundation.isSystemInDarkTheme())
+        Box(
+            modifier = Modifier.fillMaxSize().background(palette.background),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(KixyuSize.stepperButton),
+                color = palette.accent,
+                strokeWidth = 2.dp,
+            )
+        }
+        return
+    }
     ReaderScreen(
         state = state,
         onExit = onExit,
@@ -96,6 +163,10 @@ fun ReaderRoute(onExit: () -> Unit, viewModel: ReaderViewModel = hiltViewModel()
         selectSearchResult = viewModel::selectSearchResult,
         moveSearchResult = viewModel::moveSearchResult,
         clearSearch = viewModel::clearSearch,
+        addFont = {
+            fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
+        },
+        deleteFont = viewModel::deleteFont,
     )
 }
 
@@ -116,6 +187,8 @@ private fun ReaderScreen(
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
     clearSearch: () -> Unit,
+    addFont: () -> Unit,
+    deleteFont: (UserFont) -> Unit,
 ) {
     var controls by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -128,16 +201,46 @@ private fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     val context = LocalContext.current
     val view = LocalView.current
-    val modalSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    DisposableEffect(state.settings.showStatusBar, view) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    var exitRequested by remember { mutableStateOf(false) }
+    var retainedSheet by remember { mutableStateOf<ReaderSheet?>(null) }
+    var retainedEditing by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val palette = readerPalette(state.settings, systemDark)
+    LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
+    LaunchedEffect(editing) { editing?.let { retainedEditing = it } }
+    DisposableEffect(state.settings.showStatusBar, palette.background, view) {
         val window = context.findActivity()?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        val useDarkSystemIcons = palette.background.luminance() > .5f
+        controller?.isAppearanceLightNavigationBars = useDarkSystemIcons
+        controller?.isAppearanceLightStatusBars = useDarkSystemIcons
         if (state.settings.showStatusBar) {
             controller?.show(WindowInsetsCompat.Type.statusBars())
         } else {
             controller?.hide(WindowInsetsCompat.Type.statusBars())
         }
         onDispose { controller?.show(WindowInsetsCompat.Type.statusBars()) }
+    }
+    // Navigation starts its pop transition before this composition is disposed.
+    // Restore the status-bar inset at ON_PAUSE as well, so the destination
+    // underneath is never laid out once against the reader's fullscreen inset.
+    DisposableEffect(lifecycleOwner, state.settings.showStatusBar, view) {
+        val window = context.findActivity()?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        val observer = LifecycleEventObserver { _, event ->
+            if (!state.settings.showStatusBar) {
+                when (event) {
+                    Lifecycle.Event.ON_PAUSE -> controller?.show(WindowInsetsCompat.Type.statusBars())
+                    Lifecycle.Event.ON_RESUME -> controller?.hide(WindowInsetsCompat.Type.statusBars())
+                    else -> Unit
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     DisposableEffect(state.settings.keepScreenOn, view) {
         val previous = view.keepScreenOn
@@ -149,7 +252,8 @@ private fun ReaderScreen(
         if (state.settings.pageMode == PageMode.SCROLL) pageInfo = null
     }
     PredictiveBackHandler(
-        enabled = sheet == null && editing == null && (menu || toolsMenu || controls || state.searchResults.isNotEmpty()),
+        enabled = sheet == null && editing == null &&
+            (menu || toolsMenu || state.searchResults.isNotEmpty()),
     ) { events ->
         try {
             events.collect { backProgress = it.progress }
@@ -157,20 +261,45 @@ private fun ReaderScreen(
                 toolsMenu -> toolsMenu = false
                 menu -> menu = false
                 state.searchResults.isNotEmpty() -> clearSearch()
-                else -> controls = false
             }
-        } catch (_: CancellationException) { } finally { backProgress = 0f }
+        } catch (_: CancellationException) { } finally {
+            backProgress = 0f
+        }
     }
 
-    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
-    val palette = readerPalette(state.settings, systemDark)
     val currentPageBookmark = state.chapter?.let { chapter ->
         state.bookmarks.firstOrNull { bookmark ->
             bookmark.chapterId == chapter.id && bookmark.position == state.currentPosition
         }
     }
-    CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {
-        Box(
+    val exitReader: () -> Unit = {
+        if (!exitRequested) {
+            exitRequested = true
+            val controller = context.findActivity()?.window?.let {
+                WindowCompat.getInsetsController(it, view)
+            }
+            controller?.show(WindowInsetsCompat.Type.statusBars())
+            scope.launch {
+                if (!state.settings.showStatusBar) {
+                    var previousTop = -1
+                    var stableFrames = 0
+                    for (frame in 0 until 12) {
+                        withFrameNanos { }
+                        val top = ViewCompat.getRootWindowInsets(view)
+                            ?.getInsets(WindowInsetsCompat.Type.statusBars())
+                            ?.top ?: 0
+                        stableFrames = if (top > 0 && top == previousTop) stableFrames + 1 else 0
+                        previousTop = top
+                        if (stableFrames >= 1) break
+                    }
+                }
+                onExit()
+            }
+        }
+    }
+    KixyuOverlayHost(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {
+            Box(
             Modifier.fillMaxSize()
                 .background(palette.background)
                 .focusRequester(focusRequester)
@@ -186,7 +315,7 @@ private fun ReaderScreen(
                     true
                 }
                 .focusable(),
-        ) {
+            ) {
             when {
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = palette.accent)
                 state.error != null -> Text(state.error, color = palette.body, modifier = Modifier.align(Alignment.Center))
@@ -205,6 +334,7 @@ private fun ReaderScreen(
             ReaderPageControls(
                 info = pageInfo.takeIf { state.settings.showPageNumber && state.searchResults.isEmpty() },
                 showChapterActions = controls,
+                progress = backProgress,
                 palette = palette,
                 hasPreviousChapter = state.chapterIndex > 0,
                 hasNextChapter = state.chapterIndex < state.chapters.lastIndex,
@@ -215,7 +345,7 @@ private fun ReaderScreen(
                 visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
                 currentPageBookmarked = currentPageBookmark != null,
-                onExit = onExit, onDirectory = { sheet = ReaderSheet.DIRECTORY },
+                onExit = exitReader, onDirectory = { sheet = ReaderSheet.DIRECTORY },
                 onSettings = { menu = !menu; toolsMenu = false },
                 onTools = { toolsMenu = !toolsMenu; menu = false },
                 onToggleBookmark = {
@@ -232,16 +362,15 @@ private fun ReaderScreen(
                 onMove = moveSearchResult,
                 onClose = clearSearch,
             )
+            }
         }
-    }
 
-    sheet?.let { active ->
-        ModalBottomSheet(
+        val activeSheet = sheet ?: retainedSheet
+        KixyuBottomSheet(
+            show = sheet != null,
             onDismissRequest = { sheet = null },
-            sheetState = modalSheetState,
-            contentWindowInsets = { WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal) },
         ) {
-            when (active) {
+            when (activeSheet) {
                 ReaderSheet.DIRECTORY -> DirectorySheet(
                     state = state,
                     selectChapter = { index -> jumpChapter(index); sheet = null },
@@ -249,7 +378,7 @@ private fun ReaderScreen(
                     deleteBookmark = deleteBookmark,
                 )
                 ReaderSheet.THEME -> ThemeSheet(state.settings, updateSettings)
-                ReaderSheet.LAYOUT -> LayoutSheet(state, updateSettings)
+                ReaderSheet.LAYOUT -> LayoutSheet(state, updateSettings, addFont, deleteFont)
                 ReaderSheet.SETTINGS -> ReaderSettingsSheet(state.settings, updateSettings)
                 ReaderSheet.SEARCH -> SearchSheet(
                     state = state,
@@ -262,10 +391,20 @@ private fun ReaderScreen(
                         sheet = null
                     },
                 )
+                null -> Unit
             }
         }
+        val activeEditing = editing ?: retainedEditing
+        if (activeEditing != null) {
+            val (index, original) = activeEditing
+            EditParagraphDialog(
+                show = editing != null,
+                original = original,
+                dismiss = { editing = null },
+                save = { saveEdit(index, it); editing = null },
+            )
+        }
     }
-    editing?.let { (index, original) -> EditParagraphDialog(original, { editing = null }, { saveEdit(index, it); editing = null }) }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -285,13 +424,10 @@ private fun SearchNavigator(
                 .padding(bottom = KixyuSpacing.small, start = KixyuSpacing.large, end = KixyuSpacing.large),
             contentAlignment = Alignment.BottomCenter,
         ) {
-            Surface(
+            KixyuPopupSurface(
                 modifier = Modifier
                     .height(KixyuSize.readerControlButton)
                     .widthIn(max = 280.dp),
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = KixyuSpacing.extraSmall,
             ) {
                 Row(
                     Modifier.padding(start = KixyuSpacing.medium),
@@ -305,15 +441,15 @@ private fun SearchNavigator(
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
-                    IconButton(
+                    KixyuIconButton(
                         onClick = { onMove(-1) },
                         enabled = state.selectedSearchIndex > 0,
                     ) { Icon(Icons.Outlined.KeyboardArrowUp, "上一个结果") }
-                    IconButton(
+                    KixyuIconButton(
                         onClick = { onMove(1) },
                         enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
                     ) { Icon(Icons.Outlined.KeyboardArrowDown, "下一个结果") }
-                    IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "退出搜索") }
+                    KixyuIconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "退出搜索") }
                 }
             }
         }
@@ -427,6 +563,17 @@ private fun PagedReader(
         fontPath = state.fontPath,
         showRegularChapterTitle = state.settings.showChapterTitle,
     )
+    if (pages.isEmpty()) {
+        LaunchedEffect(chapter.id) { onPageInfo(null) }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(KixyuSize.stepperButton),
+                color = palette.accent,
+                strokeWidth = 2.dp,
+            )
+        }
+        return
+    }
     val positions = remember { ReaderPositionManager() }
     val hasPrevious = state.chapterIndex > 0; val hasNext = state.chapterIndex < state.chapters.lastIndex
     val leading = if (hasPrevious) 1 else 0
@@ -509,24 +656,18 @@ private fun ReaderControls(
 ) {
     val popupVisible = menuVisible || toolsMenuVisible
     val controlsBackModifier = if (popupVisible) Modifier else Modifier.predictivePopupTransform(progress)
-    val menuBackModifier = if (popupVisible) Modifier.predictivePopupTransform(progress) else Modifier
-    AnimatedVisibility(
+    ReaderControlVisibility(
         visible = visible,
         modifier = Modifier.fillMaxSize(),
-        enter = fadeIn() + scaleIn(initialScale = .9f),
-        exit = fadeOut() + scaleOut(targetScale = .9f),
     ) {
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             if (bookTitle.isNotBlank()) {
-                Surface(
+                KixyuPopupSurface(
                     modifier = Modifier.align(Alignment.TopCenter)
                         .padding(top = KixyuSize.readerTopControlInset)
                         .height(KixyuSize.readerControlButton)
                         .widthIn(max = KixyuSize.readerBookTitleMaxWidth)
                         .then(controlsBackModifier),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    tonalElevation = KixyuSpacing.extraSmall,
                 ) {
                     Box(
                         Modifier.fillMaxHeight().padding(horizontal = KixyuSpacing.small),
@@ -541,9 +682,9 @@ private fun ReaderControls(
                     }
                 }
             }
-            FilledTonalIconButton(
-                onExit,
-                Modifier.align(Alignment.TopEnd)
+            KixyuTonalIconButton(
+                onClick = onExit,
+                modifier = Modifier.align(Alignment.TopEnd)
                     .padding(top = KixyuSize.readerTopControlInset, end = KixyuSize.readerControlInset)
                     .size(KixyuSize.readerControlButton)
                     .then(controlsBackModifier),
@@ -552,53 +693,59 @@ private fun ReaderControls(
                 Modifier.align(Alignment.TopStart)
                     .padding(top = KixyuSize.readerTopControlInset, start = KixyuSize.readerControlInset),
             ) {
-                FilledTonalIconButton(
+                KixyuTonalIconButton(
                     onClick = onTools,
                     modifier = Modifier.size(KixyuSize.readerControlButton).then(controlsBackModifier),
                 ) { Icon(Icons.Outlined.MoreHoriz, "阅读工具") }
-                DropdownMenu(
+                KixyuPopupMenu(
                     expanded = toolsMenuVisible,
-                    onDismissRequest = onTools,
+                    onDismissRequest = { if (toolsMenuVisible) onTools() },
                     offset = DpOffset(0.dp, KixyuSpacing.small),
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
-                                maxLines = 1,
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                if (currentPageBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkAdd,
-                                null,
-                            )
-                        },
-                        onClick = onToggleBookmark,
-                    )
-                    DropdownMenuItem(
-                        text = { Text("全文搜索", maxLines = 1) },
-                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                        onClick = onSearch,
-                    )
-                }
+                    items = listOf(
+                        KixyuPopupMenuItem(
+                            label = if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
+                            icon = if (currentPageBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkAdd,
+                            onClick = onToggleBookmark,
+                        ),
+                        KixyuPopupMenuItem(
+                            label = "全文搜索",
+                            icon = Icons.Outlined.Search,
+                            onClick = onSearch,
+                        ),
+                    ),
+                )
             }
-            FilledTonalIconButton(onDirectory, Modifier.align(Alignment.BottomStart).padding(KixyuSize.readerControlInset).then(controlsBackModifier)) { Icon(Icons.AutoMirrored.Outlined.Toc, "目录") }
-            FilledTonalIconButton(onSettings, Modifier.align(Alignment.BottomEnd).padding(KixyuSize.readerControlInset).then(controlsBackModifier)) { Icon(Icons.Outlined.Settings, "设置") }
-            AnimatedVisibility(
-                visible = menuVisible,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(
-                    end = KixyuSpacing.large,
-                    bottom = KixyuSize.readerMenuBottomOffset,
-                ),
-                enter = fadeIn() + scaleIn(transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 1f)),
-                exit = fadeOut() + scaleOut(),
+            KixyuTonalIconButton(
+                onClick = onDirectory,
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .padding(KixyuSize.readerControlInset)
+                    .size(KixyuSize.readerControlButton)
+                    .then(controlsBackModifier),
+            ) { Icon(Icons.AutoMirrored.Outlined.Toc, "目录") }
+            Box(
+                Modifier.align(Alignment.BottomEnd)
+                    .padding(KixyuSize.readerControlInset),
             ) {
-                Surface(modifier = menuBackModifier, shape = MaterialTheme.shapes.large, tonalElevation = KixyuSpacing.small, shadowElevation = KixyuSpacing.small) { Column(Modifier.padding(vertical = KixyuSpacing.extraSmall)) {
-                    MenuRow(Icons.Outlined.Palette, "主题") { onSheet(ReaderSheet.THEME) }
-                    MenuRow(Icons.Outlined.ViewCarousel, "页面布局") { onSheet(ReaderSheet.LAYOUT) }
-                    MenuRow(Icons.Outlined.Tune, "阅读设置") { onSheet(ReaderSheet.SETTINGS) }
-                } }
+                KixyuTonalIconButton(
+                    onClick = onSettings,
+                    modifier = Modifier.size(KixyuSize.readerControlButton).then(controlsBackModifier),
+                ) { Icon(Icons.Outlined.Settings, "设置") }
+                KixyuPopupMenu(
+                    expanded = menuVisible,
+                    onDismissRequest = { if (menuVisible) onSettings() },
+                    alignEnd = true,
+                    items = listOf(
+                        KixyuPopupMenuItem("阅读主题", Icons.Outlined.Palette) {
+                            onSettings(); onSheet(ReaderSheet.THEME)
+                        },
+                        KixyuPopupMenuItem("页面外观", Icons.Outlined.ViewCarousel) {
+                            onSettings(); onSheet(ReaderSheet.LAYOUT)
+                        },
+                        KixyuPopupMenuItem("阅读设置", Icons.Outlined.Tune) {
+                            onSettings(); onSheet(ReaderSheet.SETTINGS)
+                        },
+                    ),
+                )
             }
         }
     }
@@ -608,50 +755,61 @@ private fun ReaderControls(
 private fun ReaderPageControls(
     info: ReaderPageInfo?,
     showChapterActions: Boolean,
+    progress: Float,
     palette: ReaderRenderPalette,
     hasPreviousChapter: Boolean,
     hasNextChapter: Boolean,
     onPreviousChapter: () -> Unit,
     onNextChapter: () -> Unit,
 ) {
-    if (info == null && !showChapterActions) return
-    if (info != null && !showChapterActions) {
-        Box(
-            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(bottom = KixyuSpacing.hairline),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Text(
-                "${info.current}/${info.total}",
-                color = palette.secondary,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
-        }
-    }
-    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        AnimatedVisibility(
-            visible = showChapterActions,
-            modifier = Modifier.align(Alignment.BottomCenter)
-                .padding(bottom = KixyuSize.readerControlInset),
-            enter = fadeIn() + scaleIn(initialScale = .9f),
-            exit = fadeOut() + scaleOut(targetScale = .9f),
-        ) {
-            Surface(
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = KixyuSpacing.extraSmall,
+    Box(Modifier.fillMaxSize()) {
+        if (info != null) {
+            Box(
+                Modifier.align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = KixyuSpacing.hairline)
+                    .zIndex(0f),
             ) {
-                Row(
-                    modifier = Modifier.height(KixyuSize.readerControlButton),
-                    verticalAlignment = Alignment.CenterVertically,
+                Text(
+                    "${info.current}/${info.total}",
+                    color = palette.secondary,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+            }
+        }
+        Box(
+            Modifier.fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .zIndex(1f),
+        ) {
+            ReaderControlVisibility(
+                visible = showChapterActions,
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = KixyuSize.readerControlInset)
+                    .zIndex(1f),
+            ) {
+                KixyuPopupSurface(
+                    modifier = Modifier.predictivePopupTransform(progress),
+                    shadowElevation = 0.dp,
                 ) {
-                    IconButton(onClick = onPreviousChapter, enabled = hasPreviousChapter) {
-                        Icon(Icons.Outlined.SkipPrevious, "上一章")
-                    }
-                    Spacer(Modifier.width(KixyuSize.readerChapterActionGap))
-                    IconButton(onClick = onNextChapter, enabled = hasNextChapter) {
-                        Icon(Icons.Outlined.SkipNext, "下一章")
+                    Row(
+                        modifier = Modifier.height(KixyuSize.readerControlButton),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        KixyuIconButton(
+                            onClick = onPreviousChapter,
+                            enabled = showChapterActions && hasPreviousChapter,
+                        ) {
+                            Icon(Icons.Outlined.SkipPrevious, "上一章")
+                        }
+                        Spacer(Modifier.width(KixyuSize.readerChapterActionGap))
+                        KixyuIconButton(
+                            onClick = onNextChapter,
+                            enabled = showChapterActions && hasNextChapter,
+                        ) {
+                            Icon(Icons.Outlined.SkipNext, "下一章")
+                        }
                     }
                 }
             }
@@ -683,6 +841,7 @@ private fun DirectorySheet(
     selectBookmark: (Bookmark) -> Unit,
     deleteBookmark: (String) -> Unit,
 ) {
+    val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     var directoryView by rememberSaveable { mutableStateOf(DirectoryView.CHAPTERS) }
     val bookmarkedChapterIds = remember(state.bookmarks) { state.bookmarks.mapTo(mutableSetOf(), Bookmark::chapterId) }
     val currentIndex = state.chapterIndex.coerceIn(0, state.chapters.lastIndex.coerceAtLeast(0))
@@ -701,7 +860,7 @@ private fun DirectorySheet(
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
             )
-            IconButton(onClick = {
+            KixyuIconButton(onClick = {
                 directoryView = if (directoryView == DirectoryView.CHAPTERS) DirectoryView.BOOKMARKS else DirectoryView.CHAPTERS
             }) {
                 Icon(
@@ -714,11 +873,15 @@ private fun DirectorySheet(
             targetState = directoryView,
             transitionSpec = {
                 if (targetState == DirectoryView.BOOKMARKS) {
-                    (slideInHorizontally { it / 3 } + fadeIn()) togetherWith
-                        (slideOutHorizontally { -it / 3 } + fadeOut())
+                    (slideInHorizontally(tween(KixyuMotion.ReaderPopupEnterMillis)) { it / 3 } +
+                        fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis))) togetherWith
+                        (slideOutHorizontally(tween(KixyuMotion.ReaderPopupExitMillis)) { -it / 3 } +
+                            fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)))
                 } else {
-                    (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith
-                        (slideOutHorizontally { it / 3 } + fadeOut())
+                    (slideInHorizontally(tween(KixyuMotion.ReaderPopupEnterMillis)) { -it / 3 } +
+                        fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis))) togetherWith
+                        (slideOutHorizontally(tween(KixyuMotion.ReaderPopupExitMillis)) { it / 3 } +
+                            fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)))
                 }
             },
             label = "directoryBookmarks",
@@ -736,10 +899,24 @@ private fun DirectorySheet(
                         items(state.chapters.size) { index ->
                             val current = index == state.chapterIndex
                             val hasBookmark = state.chapters[index].id in bookmarkedChapterIds
-                            ListItem(
-                                headlineContent = { Text(state.chapters[index].title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
-                                leadingContent = { if (current) Icon(Icons.Outlined.PlayArrow, null, Modifier.size(KixyuSize.icon), tint = MaterialTheme.colorScheme.primary) },
-                                trailingContent = {
+                            KixyuListRow(
+                                title = state.chapters[index].title,
+                                selected = current,
+                                highlighted = hasBookmark,
+                                onClick = { selectChapter(index) },
+                                leading = {
+                                    Box(Modifier.size(KixyuSize.icon), contentAlignment = Alignment.Center) {
+                                        if (current) {
+                                            Icon(
+                                                Icons.Outlined.PlayArrow,
+                                                null,
+                                                Modifier.size(KixyuSize.icon),
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
+                                },
+                                trailing = {
                                     if (hasBookmark) {
                                         Icon(
                                             Icons.Filled.Bookmark,
@@ -748,14 +925,9 @@ private fun DirectorySheet(
                                         )
                                     }
                                 },
-                                colors = ListItemDefaults.colors(
-                                    containerColor = when {
-                                        current -> MaterialTheme.colorScheme.secondaryContainer
-                                        hasBookmark -> MaterialTheme.colorScheme.surfaceContainerHigh
-                                        else -> Color.Transparent
-                                    },
-                                ),
-                                modifier = Modifier.pointerInput(index) { detectTapGestures { selectChapter(index) } },
+                                modifier = if (isMiuix) {
+                                    Modifier.padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.extraSmall)
+                                } else Modifier,
                             )
                         }
                         item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
@@ -780,22 +952,19 @@ private fun DirectorySheet(
                     Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
                 ) {
                     items(state.bookmarks, key = Bookmark::uuid) { bookmark ->
-                        ListItem(
-                            headlineContent = { Text(bookmark.chapterTitle, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
-                            supportingContent = {
-                                Text(
-                                    bookmark.preview.ifBlank { "第 ${bookmark.position + 1} 段" },
-                                    maxLines = 2,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                )
-                            },
-                            leadingContent = { Icon(Icons.Outlined.Bookmark, null) },
-                            trailingContent = {
-                                IconButton(onClick = { deleteBookmark(bookmark.uuid) }) {
+                        KixyuListRow(
+                            title = bookmark.chapterTitle,
+                            supportingText = bookmark.preview.ifBlank { "第 ${bookmark.position + 1} 段" },
+                            onClick = { selectBookmark(bookmark) },
+                            leading = { Icon(Icons.Outlined.Bookmark, null) },
+                            trailing = {
+                                KixyuIconButton(onClick = { deleteBookmark(bookmark.uuid) }) {
                                     Icon(Icons.Outlined.DeleteOutline, "删除书签")
                                 }
                             },
-                            modifier = Modifier.pointerInput(bookmark.uuid) { detectTapGestures { selectBookmark(bookmark) } },
+                            modifier = if (isMiuix) {
+                                Modifier.padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.extraSmall)
+                            } else Modifier,
                         )
                     }
                     item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
@@ -911,7 +1080,7 @@ private fun SearchSheet(
             placeholder = { Text("搜索书中内容", maxLines = 1) },
             leadingIcon = { Icon(Icons.Outlined.Search, null) },
             trailingIcon = {
-                IconButton(onClick = ::submit, enabled = query.isNotBlank()) {
+                KixyuIconButton(onClick = ::submit, enabled = query.isNotBlank()) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowForward, "搜索")
                 }
             },
@@ -975,7 +1144,7 @@ private fun SearchSheet(
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("主题", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("阅读主题", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
             KixyuSection {
                 KixyuReaderThemeControls(settings, { updated -> update { updated } }, modeTitle = "显示模式")
@@ -985,38 +1154,34 @@ private fun SearchSheet(
     }
 }
 
-@Composable private fun LayoutSheet(state: ReaderUiState, update: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+@Composable
+private fun LayoutSheet(
+    state: ReaderUiState,
+    update: ((ReaderSettings) -> ReaderSettings) -> Unit,
+    addFont: () -> Unit,
+    deleteFont: (UserFont) -> Unit,
+) {
     val settings = state.settings
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("页面布局", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("页面外观", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
             KixyuSection(title = "字体") {
-                KixyuSettingsRow("系统默认", onClick = { update { it.copy(fontUuid = null) } }) {
-                    RadioButton(settings.fontUuid == null, null)
-                }
-                state.availableFonts.forEach { font ->
-                    KixyuDivider()
-                    KixyuSettingsRow(font.name, onClick = { update { it.copy(fontUuid = font.uuid) } }) {
-                        RadioButton(settings.fontUuid == font.uuid, null)
-                    }
-                }
+                KixyuFontControls(
+                    fonts = state.availableFonts,
+                    selectedFontUuid = settings.fontUuid,
+                    onSelectFont = { uuid -> update { it.copy(fontUuid = uuid) } },
+                    onAddFont = addFont,
+                    onDeleteFont = deleteFont,
+                )
             }
         }
         item {
-            ReaderSettingStepper("字号", settings.fontSize, .5f, 15f..30f, "sp") { value ->
-                update { it.copy(fontSize = value) }
-            }
-        }
-        item { KixyuSection { KixyuPageModeControl(settings) { updated -> update { updated } } } }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-                ReaderSettingStepper("行间距", settings.lineHeight, .1f, 1.2f..2.2f) { value -> update { it.copy(lineHeight = value) } }
-                ReaderSettingStepper("字间距", settings.letterSpacing, .1f, 0f..0.2f, "em") { value -> update { it.copy(letterSpacing = value) } }
-                ReaderSettingStepper("页边距", settings.margin, .1f, 12f..52f, "dp") { value -> update { it.copy(margin = value) } }
+            KixyuSection(title = "排版") {
+                KixyuReaderLayoutControls(settings) { updated -> update { updated } }
             }
         }
         item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
@@ -1036,114 +1201,42 @@ private fun ReaderSettingsSheet(
         item { Text("阅读设置", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
             KixyuSection {
-                ReaderSwitchRow(
-                    title = "显示状态栏",
-                    supportingText = "阅读时显示时间和系统状态",
-                    checked = settings.showStatusBar,
-                ) { enabled -> update { it.copy(showStatusBar = enabled) } }
-                KixyuDivider()
-                ReaderSwitchRow(
-                    title = "显示页码",
-                    supportingText = "翻页模式底部显示当前页/总页数",
-                    checked = settings.showPageNumber,
-                ) { enabled -> update { it.copy(showPageNumber = enabled) } }
-                KixyuDivider()
-                ReaderSwitchRow(
-                    title = "显示章节名",
-                    supportingText = "非章节首页顶部显示当前章节名",
-                    checked = settings.showChapterTitle,
-                ) { enabled -> update { it.copy(showChapterTitle = enabled) } }
-                KixyuDivider()
-                ReaderSwitchRow(
-                    title = "音量键翻页",
-                    supportingText = "音量加键上一页，音量减键下一页",
-                    checked = settings.volumeKeyPageTurn,
-                ) { enabled -> update { it.copy(volumeKeyPageTurn = enabled) } }
-                KixyuDivider()
-                ReaderSwitchRow(
-                    title = "保持屏幕常亮",
-                    supportingText = "阅读期间不自动熄屏",
-                    checked = settings.keepScreenOn,
-                ) { enabled -> update { it.copy(keepScreenOn = enabled) } }
+                KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
             }
         }
         item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
     }
 }
 
-@Composable
-private fun ReaderSwitchRow(
-    title: String,
-    supportingText: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
+@Composable private fun EditParagraphDialog(
+    show: Boolean,
+    original: String,
+    dismiss: () -> Unit,
+    save: (String) -> Unit,
 ) {
-    KixyuSettingsRow(
-        title = title,
-        supportingText = supportingText,
-        onClick = { onCheckedChange(!checked) },
-    ) {
-        Switch(checked = checked, onCheckedChange = null)
-    }
-}
-
-@Composable
-private fun ReaderSettingStepper(
-    title: String,
-    value: Float,
-    step: Float,
-    range: ClosedFloatingPointRange<Float>,
-    suffix: String = "",
-    update: (Float) -> Unit,
-) {
-    val label = String.format(
-        java.util.Locale.getDefault(),
-        "%.1f%s",
-        value,
-        if (suffix.isEmpty()) "" else " $suffix",
-    )
-    KixyuStepperRow(
-        title = title,
-        valueLabel = label,
-        onDecrease = { update(value.stepped(-1, step, range)) },
-        onIncrease = { update(value.stepped(1, step, range)) },
-        decreaseEnabled = value > range.start,
-        increaseEnabled = value < range.endInclusive,
-    )
-}
-
-private fun Float.stepped(
-    direction: Int,
-    step: Float,
-    range: ClosedFloatingPointRange<Float>,
-): Float {
-    val tick = (this / step).roundToInt() + direction
-    return ((tick * step * 1_000f).roundToInt() / 1_000f).coerceIn(range)
-}
-
-@Composable private fun EditParagraphDialog(original: String, dismiss: () -> Unit, save: (String) -> Unit) {
-    var text by remember { mutableStateOf(original) }
-    AlertDialog(
+    var text by remember(original) { mutableStateOf(original) }
+    KixyuActionDialog(
+        show = show,
         onDismissRequest = dismiss,
-        title = { Text("编辑 TXT 正文", maxLines = 1) },
-        text = {
-            Column {
-                Text(
-                    "修改会直接写入已导入的 TXT 原始文件，并重新解析当前书籍。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    text,
-                    { text = it },
-                    Modifier.fillMaxWidth().padding(top = KixyuSpacing.medium),
-                    minLines = 5,
-                )
-            }
-        },
-        confirmButton = { TextButton({ save(text) }, enabled = text != original && text.isNotBlank()) { Text("保存修改") } },
-        dismissButton = { TextButton(dismiss) { Text("取消") } },
-    )
+        title = "编辑 TXT 正文",
+        confirmLabel = "保存修改",
+        onConfirm = { save(text) },
+        confirmEnabled = text != original && text.isNotBlank(),
+    ) {
+        Column {
+            Text(
+                "修改会直接写入已导入的 TXT 原始文件，并重新解析当前书籍。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                text,
+                { text = it },
+                Modifier.fillMaxWidth().padding(top = KixyuSpacing.medium),
+                minLines = 5,
+            )
+        }
+    }
 }
 
 private fun readerPalette(settings: ReaderSettings, systemDark: Boolean): ReaderRenderPalette {

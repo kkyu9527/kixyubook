@@ -27,12 +27,11 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Flag
-import androidx.compose.material.icons.outlined.FontDownload
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.SaveAlt
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,7 +42,6 @@ import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -65,13 +63,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuEdgeToEdgeDialogProperties
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
 import com.kixyu9527.kixyubook.core.designsystem.component.displayName
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -82,6 +89,7 @@ import kotlin.system.exitProcess
 @Composable
 fun SettingsRoute(
     onAppearance: () -> Unit,
+    onReadingSettings: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -98,21 +106,9 @@ fun SettingsRoute(
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(Unit) { viewModel.restoreCompleted.collect { restored = true } }
 
-    val topAppBarState = rememberTopAppBarState()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
-    Scaffold(
-        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-        topBar = {
-            LargeTopAppBar(
-                title = { Text("设置", maxLines = 1) },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            )
-        },
+    KixyuPageScaffold(
+        title = "设置",
+        modifier = Modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbar) },
     ) { innerPadding ->
         LazyColumn(
@@ -129,6 +125,8 @@ fun SettingsRoute(
                         title = "外观",
                         supportingText = buildString {
                             append(state.settings.theme.displayName())
+                            append(" · ")
+                            append(state.settings.appUiStyle.displayName())
                             if (state.settings.customThemeEnabled) append(" · 自定义阅读配色")
                             append(" · ")
                             append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
@@ -156,6 +154,15 @@ fun SettingsRoute(
                         steps = 22,
                         modifier = Modifier.padding(horizontal = KixyuSpacing.rowHorizontal),
                     )
+                    KixyuDivider()
+                    KixyuSettingsRow(
+                        title = "阅读设置",
+                        supportingText = "页面外观、翻页与阅读行为",
+                        icon = Icons.Outlined.Tune,
+                        onClick = onReadingSettings,
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
+                    }
                 }
             }
             item {
@@ -197,6 +204,7 @@ fun SettingsRoute(
     pendingRestore?.let { uri ->
         AlertDialog(
             onDismissRequest = { pendingRestore = null },
+            properties = KixyuEdgeToEdgeDialogProperties,
             title = { Text("恢复完整备份？", maxLines = 1) },
             text = { Text("当前书库和设置将被备份内容替换，完成后需要重新启动应用。") },
             confirmButton = { TextButton({ pendingRestore = null; viewModel.restoreBackup(uri) }) { Text("开始恢复") } },
@@ -206,10 +214,54 @@ fun SettingsRoute(
     if (restored) {
         AlertDialog(
             onDismissRequest = {},
+            properties = KixyuEdgeToEdgeDialogProperties,
             title = { Text("恢复完成", maxLines = 1) },
             text = { Text("请关闭后重新打开应用，以加载恢复后的书库。") },
             confirmButton = { Button({ (context as? Activity)?.finishAffinity(); exitProcess(0) }) { Text("关闭应用") } },
         )
+    }
+}
+
+@Composable
+fun ReadingSettingsRoute(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    KixyuPageScaffold(
+        title = "阅读设置",
+        largeTitle = false,
+        modifier = Modifier.fillMaxSize(),
+        navigationIcon = {
+            KixyuIconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+            }
+        },
+    ) { innerPadding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
+            contentPadding = PaddingValues(
+                horizontal = KixyuSpacing.screenHorizontal,
+                vertical = KixyuSpacing.screenVertical,
+            ),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+        ) {
+            item {
+                KixyuSection(title = "页面外观") {
+                    KixyuReaderLayoutControls(state.settings) { updated ->
+                        viewModel.update { updated }
+                    }
+                }
+            }
+            item {
+                KixyuSection(title = "阅读行为") {
+                    KixyuReaderBehaviorControls(state.settings) { updated ->
+                        viewModel.update { updated }
+                    }
+                }
+            }
+            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+        }
     }
 }
 
@@ -225,22 +277,14 @@ fun AppearanceRoute(
         uri?.let { viewModel.importFont(it.toString()) }
     }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
-    val topAppBarState = rememberTopAppBarState()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
-
-    Scaffold(
-        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-        topBar = {
-            MediumTopAppBar(
-                title = { Text("外观", maxLines = 1) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") } },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            )
+    KixyuPageScaffold(
+        title = "外观",
+        largeTitle = false,
+        modifier = Modifier.fillMaxSize(),
+        navigationIcon = {
+            KixyuIconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { innerPadding ->
@@ -253,11 +297,24 @@ fun AppearanceRoute(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
             item {
-                KixyuSection(title = "主题") {
-                    KixyuReaderThemeControls(
-                        settings = state.settings,
-                        onSettingsChange = { updated -> viewModel.update { updated } },
+                KixyuSection(title = "界面") {
+                    KixyuDropdownRow(
+                        title = "界面风格",
+                        selected = state.settings.appUiStyle,
+                        options = AppUiStyle.entries,
+                        optionLabel = AppUiStyle::displayName,
+                        onSelected = { style -> viewModel.update { it.copy(appUiStyle = style) } },
                     )
+                    KixyuDivider()
+                    KixyuSettingsRow(
+                        title = "组件预览",
+                        supportingText = when (state.settings.appUiStyle) {
+                            AppUiStyle.MATERIAL -> "Material 3 标准组件与动态色"
+                            AppUiStyle.MIUIX -> "MIUIX 圆润列表、下拉框与开关"
+                        },
+                    ) {
+                        KixyuSwitch(checked = true, onCheckedChange = null)
+                    }
                     KixyuDivider()
                     KixyuAppColorControl(
                         settings = state.settings,
@@ -266,34 +323,23 @@ fun AppearanceRoute(
                 }
             }
             item {
+                KixyuSection(title = "阅读主题") {
+                    KixyuReaderThemeControls(
+                        settings = state.settings,
+                        onSettingsChange = { updated -> viewModel.update { updated } },
+                    )
+                }
+            }
+            item {
                 KixyuSection(title = "字体") {
-                    KixyuSettingsRow(
-                        title = "系统默认",
-                        supportingText = "Android 系统字体",
-                        icon = Icons.Outlined.FontDownload,
-                        onClick = { viewModel.update { it.copy(fontUuid = null) } },
-                    ) {
-                        RadioButton(selected = state.settings.fontUuid == null, onClick = null)
-                    }
-                    state.fonts.forEach { font ->
-                        KixyuDivider()
-                        KixyuSettingsRow(
-                            title = font.name,
-                            supportingText = "用户字体",
-                            onClick = { viewModel.update { it.copy(fontUuid = font.uuid) } },
-                        ) {
-                            RadioButton(selected = state.settings.fontUuid == font.uuid, onClick = null)
-                            IconButton(onClick = { viewModel.deleteFont(font) }) {
-                                Icon(Icons.Outlined.DeleteOutline, "删除字体", Modifier.size(KixyuSize.icon))
-                            }
-                        }
-                    }
-                    KixyuDivider()
-                    KixyuSettingsRow(
-                        title = "添加字体",
-                        supportingText = "支持 TTF 与 OTF",
-                        icon = Icons.Outlined.Add,
-                        onClick = { fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream")) },
+                    KixyuFontControls(
+                        fonts = state.fonts,
+                        selectedFontUuid = state.settings.fontUuid,
+                        onSelectFont = { uuid -> viewModel.update { it.copy(fontUuid = uuid) } },
+                        onAddFont = {
+                            fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
+                        },
+                        onDeleteFont = viewModel::deleteFont,
                     )
                 }
             }

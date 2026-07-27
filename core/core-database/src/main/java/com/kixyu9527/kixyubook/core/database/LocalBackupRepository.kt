@@ -62,6 +62,7 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("volumeKeyPageTurn", settings.volumeKeyPageTurn.toString())
                     setProperty("keepScreenOn", settings.keepScreenOn.toString())
                     setProperty("appColorTheme", settings.appColorTheme.name)
+                    setProperty("appUiStyle", settings.appUiStyle.name)
                     setProperty("showChapterTitle", settings.showChapterTitle.toString())
                     settings.fontUuid?.let { setProperty("fontUuid", it) }
                     setProperty("readingGoalMinutes", goal.toString())
@@ -207,6 +208,7 @@ class LocalBackupRepository @Inject constructor(
             volumeKeyPageTurn = properties.boolean("volumeKeyPageTurn", current.volumeKeyPageTurn),
             keepScreenOn = properties.boolean("keepScreenOn", current.keepScreenOn),
             appColorTheme = properties.enum("appColorTheme", current.appColorTheme),
+            appUiStyle = properties.enum("appUiStyle", current.appUiStyle),
             showChapterTitle = properties.boolean("showChapterTitle", current.showChapterTitle),
         ) }
         settingsRepository.setReadingGoalMinutes(properties.getProperty("readingGoalMinutes")?.toIntOrNull() ?: 30)

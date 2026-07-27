@@ -1,53 +1,49 @@
 # Kixyu Book
 
-Kixyu Book 是一款完全离线的 Android 本地小说阅读器，使用 Kotlin、Jetpack Compose 与 Material 3 构建。应用不提供书城、账号、推荐或云同步，书籍和阅读数据均由用户掌控。
+Kixyu Book 是一款完全离线的 Android 本地小说阅读器。应用不包含书城、账号、推荐或云同步，书籍和阅读数据始终由用户掌控。
 
-## 功能
+## 主要能力
 
-- 通过 Storage Access Framework 导入 TXT、EPUB，并检测重复文件
-- 支持分页、连续滚动、跨章节翻页、目录、书签与全文搜索
-- 自动识别常见 TXT 编码；TXT 可编辑，EPUB 保持只读
-- 支持阅读进度、阅读统计、字体导入、Material You 与自定义阅读配色
-- 支持完整备份和跨设备恢复，包括原始书籍、设置、字体与阅读数据
-- 支持 Edge-to-Edge、Material Motion 和 Android 14 Predictive Back
+- 通过 Storage Access Framework 导入 TXT、EPUB，并按文件哈希去重
+- TXT 多编码识别与原文编辑；EPUB 元数据、目录、XHTML 和图片读取
+- 精确分页、连续滚动、跨章节翻页、目录、书签和全文搜索
+- 阅读进度与统计、字体导入、完整备份和跨设备恢复
+- Material 3 / MIUIX 界面风格、Material You 动态取色和自定义阅读配色
+- Edge-to-Edge、高刷新率、手势导航与 Predictive Back
 
-## 架构
+## 工程结构
 
-项目采用 MVVM、Clean Architecture、Hilt、Coroutines、Room、DataStore 和 Navigation Compose。Feature 之间互不依赖，共享能力统一位于 Core。
+项目使用 Kotlin、Jetpack Compose、MVVM、Clean Architecture、Hilt、Coroutines、Room、DataStore 和 Navigation Compose。Feature 之间不直接依赖，公共能力由 Core 提供。
 
 ```text
 app
 core/
-  core-common · core-ui · core-designsystem · core-navigation
-  core-database · core-datastore · core-reader-engine
+  core-common  core-ui  core-designsystem  core-navigation
+  core-database  core-datastore  core-reader-engine
 feature/
-  feature-home · feature-library · feature-reader · feature-settings
+  feature-home  feature-library  feature-reader  feature-settings
 ```
 
-阅读界面不直接处理文件格式：
+阅读链路与文件格式解耦，并按章节加载：
 
 ```text
-File → TXT/EPUB Parser → Document Model → Layout/Pagination → Compose Renderer
+File → Parser → Document Model → Measured Layout/Pagination → Compose Renderer
 ```
 
-内容按章节读取并使用 Lazy Layout 渲染；`core-reader-engine` 为 Markdown、PDF 和漫画等后续格式预留扩展边界。
+## 构建与发布
 
-## 构建
-
-需要 Android Studio、JDK 17 和项目声明版本的 Android SDK。
+需要 JDK 17、Android SDK 37 和支持当前 Android Gradle Plugin 的 Android Studio。
 
 ```powershell
-.\gradlew.bat :app:assembleDebug
-.\gradlew.bat testDebugUnitTest
-.\gradlew.bat :app:lintDebug
+.\gradlew.bat :app:assembleDebug testDebugUnitTest :app:lintDebug
 ```
 
 调试 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
 
-Release 签名从仓库外的 `%USERPROFILE%/.kixyubook/signing.properties` 读取，也可通过 `KIXYU_SIGNING_PROPERTIES` 指定路径。生成发布产物：
+Release 签名信息保存在仓库外的 `%USERPROFILE%/.kixyubook/signing.properties`，也可通过 `KIXYU_SIGNING_PROPERTIES` 指定。文件包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。
 
 ```powershell
 .\gradlew.bat :app:assembleRelease :app:bundleRelease
 ```
 
-`branding/` 保存 App Icon 的 SVG 唯一源文件。除非用户主动导出备份，应用不会上传书籍、字体或阅读记录。
+`branding/` 是 App Icon 的 SVG 唯一源文件。当前开发版本不保留旧数据库迁移链，数据结构不兼容时会重建本地数据库；重要数据请先导出完整备份。

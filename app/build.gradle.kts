@@ -17,7 +17,6 @@ android {
         targetSdk = 37
         versionCode = 1016
         versionName = "1.0.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     val externalSigningFile = file(
@@ -39,7 +38,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             signingConfig = signingConfigs.findByName("release")
         }
     }
@@ -52,7 +51,6 @@ dependencies {
     implementation(project(":core:core-navigation"))
     implementation(project(":core:core-database"))
     implementation(project(":core:core-datastore"))
-    implementation(project(":core:core-reader-engine"))
     implementation(project(":feature:feature-home"))
     implementation(project(":feature:feature-library"))
     implementation(project(":feature:feature-reader"))
@@ -60,7 +58,6 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.room.runtime)
@@ -73,7 +70,4 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
 }

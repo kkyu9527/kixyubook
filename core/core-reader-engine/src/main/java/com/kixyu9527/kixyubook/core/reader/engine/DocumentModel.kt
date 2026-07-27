@@ -1,6 +1,5 @@
 package com.kixyu9527.kixyubook.core.reader.engine
 
-import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.Paragraph
 
 data class DocumentMetadata(
@@ -13,14 +12,6 @@ data class DocumentMetadata(
 )
 
 data class DocumentChapter(val title: String, val paragraphs: List<String>)
-
-data class ReaderDocument(
-    val bookUuid: String,
-    val format: BookFormat,
-    val chapters: List<DocumentChapterRef>,
-)
-
-data class DocumentChapterRef(val id: Long, val title: String, val index: Int)
 
 data class ReaderChapter(
     val id: Long,
@@ -64,8 +55,6 @@ private val CHAPTER_ORDINAL_PATTERN = Regex(
         "(?:(?i:chapter)\\s*[\\p{L}\\p{N}]+))" +
         "\\s*(?:[：:、.．\\-—]\\s*)?(.*)$",
 )
-
-data class ReaderPosition(val chapterIndex: Int, val paragraphIndex: Int, val characterOffset: Int = 0)
 
 data class ReaderLayoutSpec(
     val viewportWidthDp: Float,

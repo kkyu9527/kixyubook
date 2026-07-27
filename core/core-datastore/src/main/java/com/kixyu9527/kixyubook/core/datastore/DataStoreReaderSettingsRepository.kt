@@ -40,7 +40,9 @@ class DataStoreReaderSettingsRepository @Inject constructor(@param:ApplicationCo
             ),
             fontUuid = values[FONT_UUID],
             appColorTheme = values[APP_COLOR_THEME]?.let { runCatching { AppColorTheme.valueOf(it) }.getOrNull() }
-                ?: AppColorTheme.DYNAMIC,
+                ?: AppColorTheme.DEFAULT,
+            appUiStyle = values[APP_UI_STYLE]?.let { runCatching { AppUiStyle.valueOf(it) }.getOrNull() }
+                ?: AppUiStyle.MATERIAL,
             showStatusBar = values[SHOW_STATUS_BAR] ?: true,
             showPageNumber = values[SHOW_PAGE_NUMBER] ?: true,
             volumeKeyPageTurn = values[VOLUME_KEY_PAGE_TURN] ?: false,
@@ -67,6 +69,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(@param:ApplicationCo
             values[CUSTOM_NIGHT_ACCENT] = updated.customNightTheme.accentHex
             updated.fontUuid?.let { values[FONT_UUID] = it } ?: values.remove(FONT_UUID)
             values[APP_COLOR_THEME] = updated.appColorTheme.name
+            values[APP_UI_STYLE] = updated.appUiStyle.name
             values[SHOW_STATUS_BAR] = updated.showStatusBar
             values[SHOW_PAGE_NUMBER] = updated.showPageNumber
             values[VOLUME_KEY_PAGE_TURN] = updated.volumeKeyPageTurn
@@ -98,6 +101,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(@param:ApplicationCo
         val LEGACY_CUSTOM_ACCENT = stringPreferencesKey("custom_accent")
         val FONT_UUID = stringPreferencesKey("font_uuid"); val READING_GOAL = intPreferencesKey("reading_goal")
         val APP_COLOR_THEME = stringPreferencesKey("app_color_theme")
+        val APP_UI_STYLE = stringPreferencesKey("app_ui_style")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
         val SHOW_PAGE_NUMBER = booleanPreferencesKey("show_page_number")
         val VOLUME_KEY_PAGE_TURN = booleanPreferencesKey("volume_key_page_turn")

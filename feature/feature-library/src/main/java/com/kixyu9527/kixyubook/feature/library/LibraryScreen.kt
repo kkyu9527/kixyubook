@@ -74,6 +74,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuEdgeToEdgeDialogProperties
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
 
@@ -125,38 +130,28 @@ private fun LibraryScreen(
     var selectionMode by remember { mutableStateOf(false) }
     var selectedBookUuids by remember { mutableStateOf(emptySet<String>()) }
     var confirmingBatchDelete by remember { mutableStateOf(false) }
-    val topAppBarState = rememberTopAppBarState()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
     val visibleBookUuids = state.books.mapTo(linkedSetOf()) { it.book.uuid }
     LaunchedEffect(visibleBookUuids) {
         selectedBookUuids = selectedBookUuids.intersect(visibleBookUuids)
         if (visibleBookUuids.isEmpty()) selectionMode = false
     }
-    Scaffold(
-        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-        topBar = {
-            LargeTopAppBar(
-                title = {
-                    Text(
-                        if (selectionMode) "已选择 ${selectedBookUuids.size} 本" else "书库",
-                        maxLines = 1,
-                    )
-                },
-                actions = {
+    KixyuPageScaffold(
+        title = if (selectionMode) "已选择 ${selectedBookUuids.size} 本" else "书库",
+        modifier = Modifier.fillMaxSize(),
+        actions = {
                     if (selectionMode) {
-                        IconButton(
+                        KixyuIconButton(
                             onClick = {
                                 selectedBookUuids = if (selectedBookUuids.size == visibleBookUuids.size) {
                                     emptySet()
                                 } else visibleBookUuids
                             },
                         ) { Icon(Icons.Outlined.SelectAll, "全选") }
-                        IconButton(
+                        KixyuIconButton(
                             onClick = { confirmingBatchDelete = true },
                             enabled = selectedBookUuids.isNotEmpty(),
                         ) { Icon(Icons.Outlined.DeleteSweep, "删除所选书籍") }
-                        IconButton(
+                        KixyuIconButton(
                             onClick = {
                                 selectionMode = false
                                 selectedBookUuids = emptySet()
@@ -164,49 +159,35 @@ private fun LibraryScreen(
                         ) { Icon(Icons.Outlined.Close, "退出批量选择") }
                     } else {
                         Box {
-                            IconButton(onClick = { optionsExpanded = true }) {
+                            KixyuIconButton(onClick = { optionsExpanded = true }) {
                                 Icon(Icons.Outlined.MoreVert, "书库操作")
                             }
-                            DropdownMenu(
+                            KixyuPopupMenu(
                                 expanded = optionsExpanded,
                                 onDismissRequest = { optionsExpanded = false },
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text(if (state.importing) "正在导入" else "导入书籍", maxLines = 1) },
-                                    leadingIcon = {
-                                        if (state.importing) {
-                                            CircularProgressIndicator(
-                                                Modifier.size(KixyuSize.icon),
-                                                strokeWidth = KixyuSpacing.hairline,
-                                            )
-                                        } else Icon(Icons.Outlined.Add, null, Modifier.size(KixyuSize.icon))
-                                    },
-                                    enabled = !state.importing,
-                                    onClick = {
+                                alignEnd = true,
+                                items = listOf(
+                                    KixyuPopupMenuItem(
+                                        label = if (state.importing) "正在导入" else "导入书籍",
+                                        icon = Icons.Outlined.Add,
+                                        enabled = !state.importing,
+                                    ) {
                                         optionsExpanded = false
                                         onImport()
                                     },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("批量删除", maxLines = 1) },
-                                    leadingIcon = { Icon(Icons.Outlined.DeleteSweep, null, Modifier.size(KixyuSize.icon)) },
-                                    enabled = state.books.isNotEmpty(),
-                                    onClick = {
+                                    KixyuPopupMenuItem(
+                                        label = "批量删除",
+                                        icon = Icons.Outlined.DeleteSweep,
+                                        enabled = state.books.isNotEmpty(),
+                                    ) {
                                         optionsExpanded = false
                                         selectedBookUuids = emptySet()
                                         selectionMode = true
                                     },
-                                )
-                            }
+                                ),
+                            )
                         }
                     }
-                },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { innerPadding ->
@@ -289,6 +270,7 @@ private fun LibraryScreen(
     deleting?.let { item ->
         AlertDialog(
             onDismissRequest = { deleting = null },
+            properties = KixyuEdgeToEdgeDialogProperties,
             title = { Text("删除《${item.book.title}》？", maxLines = 1, overflow = TextOverflow.Ellipsis) },
             text = { Text("书籍文件、阅读进度和统计也会一并删除。") },
             confirmButton = { TextButton({ onDelete(item.book.uuid); deleting = null }) { Text("删除") } },
@@ -298,6 +280,7 @@ private fun LibraryScreen(
     reparsing?.let { item ->
         AlertDialog(
             onDismissRequest = { reparsing = null },
+            properties = KixyuEdgeToEdgeDialogProperties,
             title = { Text("重新解析正文？", maxLines = 1) },
             text = { Text("将按新的编码和章节规则重建目录。书籍信息、分类和可恢复的阅读位置会保留。") },
             confirmButton = {
@@ -309,6 +292,7 @@ private fun LibraryScreen(
     if (confirmingBatchDelete) {
         AlertDialog(
             onDismissRequest = { confirmingBatchDelete = false },
+            properties = KixyuEdgeToEdgeDialogProperties,
             title = { Text("删除选中的 ${selectedBookUuids.size} 本书？", maxLines = 1) },
             text = { Text("书籍文件、阅读进度和统计也会一并删除。") },
             confirmButton = {
@@ -411,6 +395,7 @@ private fun BookManagementDialog(
     var category by remember { mutableStateOf(item.book.category) }
     AlertDialog(
         onDismissRequest = dismiss,
+        properties = KixyuEdgeToEdgeDialogProperties,
         title = { Text(if (item.book.isEditable) "编辑书籍" else "管理 EPUB", maxLines = 1) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
