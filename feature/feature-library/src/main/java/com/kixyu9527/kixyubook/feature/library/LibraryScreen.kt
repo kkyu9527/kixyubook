@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,15 +28,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -93,6 +96,7 @@ fun LibraryRoute(
         onImport = { picker.launch(arrayOf("text/plain", "application/epub+zip", "application/zip", "application/octet-stream")) },
         onOpenBook = onOpenBook,
         onDelete = viewModel::delete,
+        onDeleteMany = viewModel::deleteBooks,
         onReparse = viewModel::reparseTxt,
         onUpdateMetadata = viewModel::updateMetadata,
         onSetCategory = viewModel::setCategory,
@@ -109,6 +113,7 @@ private fun LibraryScreen(
     onImport: () -> Unit,
     onOpenBook: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onDeleteMany: (Set<String>) -> Unit,
     onReparse: (String) -> Unit,
     onUpdateMetadata: (String, String, String, String) -> Unit,
     onSetCategory: (String, String) -> Unit,
@@ -116,14 +121,86 @@ private fun LibraryScreen(
     var managing by remember { mutableStateOf<LibraryBook?>(null) }
     var deleting by remember { mutableStateOf<LibraryBook?>(null) }
     var reparsing by remember { mutableStateOf<LibraryBook?>(null) }
+    var optionsExpanded by remember { mutableStateOf(false) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedBookUuids by remember { mutableStateOf(emptySet<String>()) }
+    var confirmingBatchDelete by remember { mutableStateOf(false) }
     val topAppBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
+    val visibleBookUuids = state.books.mapTo(linkedSetOf()) { it.book.uuid }
+    LaunchedEffect(visibleBookUuids) {
+        selectedBookUuids = selectedBookUuids.intersect(visibleBookUuids)
+        if (visibleBookUuids.isEmpty()) selectionMode = false
+    }
     Scaffold(
         modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
             LargeTopAppBar(
-                title = { Text("书库", maxLines = 1) },
+                title = {
+                    Text(
+                        if (selectionMode) "已选择 ${selectedBookUuids.size} 本" else "书库",
+                        maxLines = 1,
+                    )
+                },
+                actions = {
+                    if (selectionMode) {
+                        IconButton(
+                            onClick = {
+                                selectedBookUuids = if (selectedBookUuids.size == visibleBookUuids.size) {
+                                    emptySet()
+                                } else visibleBookUuids
+                            },
+                        ) { Icon(Icons.Outlined.SelectAll, "全选") }
+                        IconButton(
+                            onClick = { confirmingBatchDelete = true },
+                            enabled = selectedBookUuids.isNotEmpty(),
+                        ) { Icon(Icons.Outlined.DeleteSweep, "删除所选书籍") }
+                        IconButton(
+                            onClick = {
+                                selectionMode = false
+                                selectedBookUuids = emptySet()
+                            },
+                        ) { Icon(Icons.Outlined.Close, "退出批量选择") }
+                    } else {
+                        Box {
+                            IconButton(onClick = { optionsExpanded = true }) {
+                                Icon(Icons.Outlined.MoreVert, "书库操作")
+                            }
+                            DropdownMenu(
+                                expanded = optionsExpanded,
+                                onDismissRequest = { optionsExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (state.importing) "正在导入" else "导入书籍", maxLines = 1) },
+                                    leadingIcon = {
+                                        if (state.importing) {
+                                            CircularProgressIndicator(
+                                                Modifier.size(KixyuSize.icon),
+                                                strokeWidth = KixyuSpacing.hairline,
+                                            )
+                                        } else Icon(Icons.Outlined.Add, null, Modifier.size(KixyuSize.icon))
+                                    },
+                                    enabled = !state.importing,
+                                    onClick = {
+                                        optionsExpanded = false
+                                        onImport()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("批量删除", maxLines = 1) },
+                                    leadingIcon = { Icon(Icons.Outlined.DeleteSweep, null, Modifier.size(KixyuSize.icon)) },
+                                    enabled = state.books.isNotEmpty(),
+                                    onClick = {
+                                        optionsExpanded = false
+                                        selectedBookUuids = emptySet()
+                                        selectionMode = true
+                                    },
+                                )
+                            }
+                        }
+                    }
+                },
                 scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
@@ -132,16 +209,6 @@ private fun LibraryScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onImport,
-                icon = {
-                    if (state.importing) CircularProgressIndicator(Modifier.size(KixyuSize.icon), strokeWidth = KixyuSpacing.hairline)
-                    else Icon(Icons.Outlined.Add, null, Modifier.size(KixyuSize.icon))
-                },
-                text = { Text(if (state.importing) "正在导入" else "导入书籍", maxLines = 1) },
-            )
-        },
     ) { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
@@ -188,12 +255,21 @@ private fun LibraryScreen(
             items(state.books, key = { it.book.uuid }) { item ->
                 LibraryBookRow(
                     item = item,
-                    onOpen = { onOpenBook(item.book.uuid) },
+                    selected = item.book.uuid in selectedBookUuids,
+                    selectionMode = selectionMode,
+                    onOpen = {
+                        if (selectionMode) {
+                            selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
+                        } else onOpenBook(item.book.uuid)
+                    },
+                    onSelectionChange = {
+                        selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
+                    },
                     onManage = { managing = item },
                     onDelete = { deleting = item },
                 )
             }
-            item { Spacer(Modifier.height(KixyuSize.floatingActionClearance)) }
+            item { Spacer(Modifier.height(KixyuSize.bottomNavigationContentHeight)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }
@@ -214,7 +290,7 @@ private fun LibraryScreen(
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("删除《${item.book.title}》？", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            text = { Text("原始文件、编辑补丁、进度和统计也会一并删除。") },
+            text = { Text("书籍文件、阅读进度和统计也会一并删除。") },
             confirmButton = { TextButton({ onDelete(item.book.uuid); deleting = null }) { Text("删除") } },
             dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
         )
@@ -223,11 +299,29 @@ private fun LibraryScreen(
         AlertDialog(
             onDismissRequest = { reparsing = null },
             title = { Text("重新解析正文？", maxLines = 1) },
-            text = { Text("将按新的编码和章节规则重建目录，并清除旧阅读位置与正文编辑补丁。书籍信息和分类会保留。") },
+            text = { Text("将按新的编码和章节规则重建目录。书籍信息、分类和可恢复的阅读位置会保留。") },
             confirmButton = {
                 TextButton({ onReparse(item.book.uuid); reparsing = null }) { Text("重新解析") }
             },
             dismissButton = { TextButton({ reparsing = null }) { Text("取消") } },
+        )
+    }
+    if (confirmingBatchDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingBatchDelete = false },
+            title = { Text("删除选中的 ${selectedBookUuids.size} 本书？", maxLines = 1) },
+            text = { Text("书籍文件、阅读进度和统计也会一并删除。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteMany(selectedBookUuids)
+                        confirmingBatchDelete = false
+                        selectionMode = false
+                        selectedBookUuids = emptySet()
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = { TextButton({ confirmingBatchDelete = false }) { Text("取消") } },
         )
     }
 }
@@ -235,7 +329,10 @@ private fun LibraryScreen(
 @Composable
 private fun LibraryBookRow(
     item: LibraryBook,
+    selected: Boolean,
+    selectionMode: Boolean,
     onOpen: () -> Unit,
+    onSelectionChange: () -> Unit,
     onManage: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -243,7 +340,7 @@ private fun LibraryBookRow(
     Surface(
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
     ) {
         Row(
@@ -269,7 +366,9 @@ private fun LibraryBookRow(
                     )
                 }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            if (selectionMode) {
+                Checkbox(selected, onCheckedChange = { onSelectionChange() })
+            } else Column(horizontalAlignment = Alignment.End) {
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(Icons.Outlined.MoreVert, "更多操作", Modifier.size(KixyuSize.icon))
                 }
@@ -295,6 +394,9 @@ private fun LibraryBookRow(
         }
     }
 }
+
+private fun Set<String>.toggle(value: String): Set<String> =
+    if (value in this) this - value else this + value
 
 @Composable
 private fun BookManagementDialog(

@@ -97,6 +97,7 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
                     }
                 }
             }
+            item { Spacer(Modifier.height(KixyuSize.bottomNavigationContentHeight)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }
