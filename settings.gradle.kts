@@ -34,6 +34,8 @@ include(
     ":core:core-navigation",
     ":core:core-database",
     ":core:core-datastore",
+    ":core:core-reader-engine",
+    ":feature:feature-home",
     ":feature:feature-library",
     ":feature:feature-reader",
     ":feature:feature-settings",

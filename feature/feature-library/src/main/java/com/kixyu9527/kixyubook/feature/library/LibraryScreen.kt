@@ -1,0 +1,334 @@
+package com.kixyu9527.kixyubook.feature.library
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kixyu9527.kixyubook.core.common.model.LibraryBook
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.ui.BookCover
+import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
+
+@Composable
+fun LibraryRoute(
+    onOpenBook: (String) -> Unit,
+    viewModel: LibraryViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        viewModel.import(uris.map { it.toString() })
+    }
+    LaunchedEffect(Unit) { viewModel.messageEvents.collect { if (it.isNotBlank()) snackbar.showSnackbar(it) } }
+    LibraryScreen(
+        state = state,
+        snackbar = snackbar,
+        onSearch = viewModel::search,
+        onCategory = viewModel::selectCategory,
+        onImport = { picker.launch(arrayOf("text/plain", "application/epub+zip", "application/zip", "application/octet-stream")) },
+        onOpenBook = onOpenBook,
+        onDelete = viewModel::delete,
+        onReparse = viewModel::reparseTxt,
+        onUpdateMetadata = viewModel::updateMetadata,
+        onSetCategory = viewModel::setCategory,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LibraryScreen(
+    state: LibraryUiState,
+    snackbar: SnackbarHostState,
+    onSearch: (String) -> Unit,
+    onCategory: (String) -> Unit,
+    onImport: () -> Unit,
+    onOpenBook: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onReparse: (String) -> Unit,
+    onUpdateMetadata: (String, String, String, String) -> Unit,
+    onSetCategory: (String, String) -> Unit,
+) {
+    var managing by remember { mutableStateOf<LibraryBook?>(null) }
+    var deleting by remember { mutableStateOf<LibraryBook?>(null) }
+    var reparsing by remember { mutableStateOf<LibraryBook?>(null) }
+    val topAppBarState = rememberTopAppBarState()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
+    Scaffold(
+        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
+        topBar = {
+            LargeTopAppBar(
+                title = { Text("书库", maxLines = 1) },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onImport,
+                icon = {
+                    if (state.importing) CircularProgressIndicator(Modifier.size(KixyuSize.icon), strokeWidth = KixyuSpacing.hairline)
+                    else Icon(Icons.Outlined.Add, null, Modifier.size(KixyuSize.icon))
+                },
+                text = { Text(if (state.importing) "正在导入" else "导入书籍", maxLines = 1) },
+            )
+        },
+    ) { innerPadding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
+            contentPadding = PaddingValues(
+                horizontal = KixyuSpacing.screenHorizontal,
+                vertical = KixyuSpacing.screenVertical,
+            ),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+        ) {
+            item {
+                TextField(
+                    value = state.query,
+                    onValueChange = onSearch,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("搜索书名或作者", maxLines = 1) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(KixyuSize.icon)) },
+                    trailingIcon = {
+                        if (state.query.isNotEmpty()) IconButton({ onSearch("") }) {
+                            Icon(Icons.Outlined.Close, "清除", Modifier.size(KixyuSize.icon))
+                        }
+                    },
+                    shape = MaterialTheme.shapes.large,
+                    colors = TextFieldDefaults.colors(
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    ),
+                    textStyle = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                ) {
+                    state.categories.forEach { category ->
+                        FilterChip(state.category == category, { onCategory(category) }, { Text(category, maxLines = 1) })
+                    }
+                }
+            }
+            if (state.books.isEmpty()) {
+                item { LibraryEmptyState(Modifier.fillParentMaxSize().padding(KixyuSpacing.extraLarge)) }
+            }
+            items(state.books, key = { it.book.uuid }) { item ->
+                LibraryBookRow(
+                    item = item,
+                    onOpen = { onOpenBook(item.book.uuid) },
+                    onManage = { managing = item },
+                    onDelete = { deleting = item },
+                )
+            }
+            item { Spacer(Modifier.height(KixyuSize.floatingActionClearance)) }
+            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+        }
+    }
+
+    managing?.let { item ->
+        BookManagementDialog(
+            item = item,
+            dismiss = { managing = null },
+            reparse = { managing = null; reparsing = item },
+            save = { title, author, description, category ->
+                if (item.book.isEditable) onUpdateMetadata(item.book.uuid, title, author, description)
+                onSetCategory(item.book.uuid, category)
+                managing = null
+            },
+        )
+    }
+    deleting?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("删除《${item.book.title}》？", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            text = { Text("原始文件、编辑补丁、进度和统计也会一并删除。") },
+            confirmButton = { TextButton({ onDelete(item.book.uuid); deleting = null }) { Text("删除") } },
+            dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
+        )
+    }
+    reparsing?.let { item ->
+        AlertDialog(
+            onDismissRequest = { reparsing = null },
+            title = { Text("重新解析正文？", maxLines = 1) },
+            text = { Text("将按新的编码和章节规则重建目录，并清除旧阅读位置与正文编辑补丁。书籍信息和分类会保留。") },
+            confirmButton = {
+                TextButton({ onReparse(item.book.uuid); reparsing = null }) { Text("重新解析") }
+            },
+            dismissButton = { TextButton({ reparsing = null }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun LibraryBookRow(
+    item: LibraryBook,
+    onOpen: () -> Unit,
+    onManage: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Surface(
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(KixyuSpacing.medium),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+        ) {
+            BookCover(item.book.title, item.book.coverPath, Modifier.size(KixyuSize.libraryCoverWidth, KixyuSize.libraryCoverHeight))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                Text(item.book.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.book.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${item.book.format.name} · ${item.book.category}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                item.progress?.let {
+                    LinearProgressIndicator(
+                        progress = { it.fraction },
+                        modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Outlined.MoreVert, "更多操作", Modifier.size(KixyuSize.icon))
+                }
+                Text(
+                    "${((item.progress?.fraction ?: 0f) * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("管理", maxLines = 1) },
+                        leadingIcon = { Icon(Icons.Outlined.Edit, null, Modifier.size(KixyuSize.icon)) },
+                        onClick = { menuExpanded = false; onManage() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("删除", maxLines = 1) },
+                        leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(KixyuSize.icon)) },
+                        onClick = { menuExpanded = false; onDelete() },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookManagementDialog(
+    item: LibraryBook,
+    dismiss: () -> Unit,
+    reparse: () -> Unit,
+    save: (String, String, String, String) -> Unit,
+) {
+    var title by remember { mutableStateOf(item.book.title) }
+    var author by remember { mutableStateOf(item.book.author) }
+    var description by remember { mutableStateOf(item.book.description) }
+    var category by remember { mutableStateOf(item.book.category) }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text(if (item.book.isEditable) "编辑书籍" else "管理 EPUB", maxLines = 1) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+                OutlinedTextField(title, { title = it }, label = { Text("书名") }, enabled = item.book.isEditable, singleLine = true)
+                OutlinedTextField(author, { author = it }, label = { Text("作者") }, enabled = item.book.isEditable, singleLine = true)
+                OutlinedTextField(description, { description = it }, label = { Text("简介") }, enabled = item.book.isEditable, minLines = 2, maxLines = 4)
+                OutlinedTextField(category, { category = it }, label = { Text("分类") }, singleLine = true)
+                if (item.book.isEditable) {
+                    OutlinedButton(onClick = reparse, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.Refresh, null, Modifier.size(KixyuSize.iconSmall))
+                        Spacer(Modifier.size(KixyuSize.compactButtonIconGap))
+                        Text("重新解析正文", maxLines = 1)
+                    }
+                }
+                if (!item.book.isEditable) {
+                    Text("EPUB metadata 来自书内并保持只读。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+        confirmButton = { TextButton({ save(title, author, description, category) }) { Text("保存") } },
+        dismissButton = { TextButton(dismiss) { Text("取消") } },
+    )
+}

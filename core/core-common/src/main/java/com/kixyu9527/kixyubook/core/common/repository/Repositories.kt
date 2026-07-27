@@ -1,31 +1,56 @@
 package com.kixyu9527.kixyubook.core.common.repository
 
-import com.kixyu9527.kixyubook.core.common.model.Book
-import com.kixyu9527.kixyubook.core.common.model.Chapter
-import com.kixyu9527.kixyubook.core.common.model.ChapterContent
-import com.kixyu9527.kixyubook.core.common.model.ImportSummary
-import com.kixyu9527.kixyubook.core.common.model.LibraryBook
-import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
-import com.kixyu9527.kixyubook.core.common.model.ReadingProgress
+import com.kixyu9527.kixyubook.core.common.model.*
 import kotlinx.coroutines.flow.Flow
 
 interface BookRepository {
     fun observeLibrary(): Flow<List<LibraryBook>>
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
-    suspend fun deleteBook(bookId: Long)
-    suspend fun getBook(bookId: Long): Book?
-    suspend fun getChapters(bookId: Long): List<Chapter>
-    suspend fun getChapter(bookId: Long, chapterIndex: Int): ChapterContent?
-    fun observeProgress(bookId: Long): Flow<ReadingProgress?>
+    suspend fun deleteBook(bookUuid: String)
+    suspend fun getBook(bookUuid: String): Book?
+    suspend fun getChapters(bookUuid: String): List<Chapter>
+    suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent?
+    fun observeProgress(bookUuid: String): Flow<ReadingProgress?>
     suspend fun saveProgress(progress: ReadingProgress)
+    suspend fun updateTxtMetadata(bookUuid: String, title: String, author: String, description: String)
+    suspend fun reparseTxt(bookUuid: String): Result<Unit>
+    suspend fun saveTextPatch(bookUuid: String, chapterId: Long, paragraphIndex: Int, replacementText: String)
+    suspend fun undoLastTextPatch(bookUuid: String): Boolean
+    suspend fun setCategory(bookUuid: String, category: String)
 }
 
 interface ReaderSettingsRepository {
     val settings: Flow<ReaderSettings>
     suspend fun update(transform: (ReaderSettings) -> ReaderSettings)
+    val readingGoalMinutes: Flow<Int>
+    suspend fun setReadingGoalMinutes(minutes: Int)
 }
 
-/** Extension point for future backup targets. Original novel files are intentionally excluded. */
+interface ReadingStatsRepository {
+    fun observeStats(): Flow<ReadingStats>
+    suspend fun recordSession(bookUuid: String, durationMillis: Long, charactersRead: Long)
+}
+
+interface FontRepository {
+    fun observeFonts(): Flow<List<UserFont>>
+    suspend fun importFont(uriString: String): Result<UserFont>
+    suspend fun deleteFont(fontUuid: String)
+    suspend fun getFont(fontUuid: String): UserFont?
+}
+
+data class BackupResult(
+    val bookCount: Int,
+    val totalBytes: Long,
+    val requiresRestart: Boolean = false,
+)
+
+/** Streaming full backup suitable for SAF documents and cross-device restoration. */
+interface BackupRepository {
+    suspend fun exportTo(uriString: String): Result<BackupResult>
+    suspend fun restoreFrom(uriString: String): Result<BackupResult>
+}
+
+/** All contributors participate in full-device restoration, including original books and user assets. */
 interface BackupContributor {
     val key: String
     suspend fun export(): ByteArray
