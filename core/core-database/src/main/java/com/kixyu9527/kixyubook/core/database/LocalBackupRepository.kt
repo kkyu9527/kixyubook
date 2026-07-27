@@ -48,10 +48,15 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("margin", settings.margin.toString())
                     setProperty("theme", settings.theme.name)
                     setProperty("pageMode", settings.pageMode.name)
-                    setProperty("customBackground", settings.customTheme.backgroundHex)
-                    setProperty("customBody", settings.customTheme.bodyHex)
-                    setProperty("customTitle", settings.customTheme.titleHex)
-                    setProperty("customAccent", settings.customTheme.accentHex)
+                    setProperty("customThemeEnabled", settings.customThemeEnabled.toString())
+                    setProperty("customDayBackground", settings.customDayTheme.backgroundHex)
+                    setProperty("customDayBody", settings.customDayTheme.bodyHex)
+                    setProperty("customDayTitle", settings.customDayTheme.titleHex)
+                    setProperty("customDayAccent", settings.customDayTheme.accentHex)
+                    setProperty("customNightBackground", settings.customNightTheme.backgroundHex)
+                    setProperty("customNightBody", settings.customNightTheme.bodyHex)
+                    setProperty("customNightTitle", settings.customNightTheme.titleHex)
+                    setProperty("customNightAccent", settings.customNightTheme.accentHex)
                     settings.fontUuid?.let { setProperty("fontUuid", it) }
                     setProperty("readingGoalMinutes", goal.toString())
                 }
@@ -164,11 +169,31 @@ class LocalBackupRepository @Inject constructor(
             margin = properties.float("margin", current.margin),
             theme = properties.enum("theme", current.theme),
             pageMode = properties.enum("pageMode", current.pageMode),
-            customTheme = current.customTheme.copy(
-                backgroundHex = properties.getProperty("customBackground", current.customTheme.backgroundHex),
-                bodyHex = properties.getProperty("customBody", current.customTheme.bodyHex),
-                titleHex = properties.getProperty("customTitle", current.customTheme.titleHex),
-                accentHex = properties.getProperty("customAccent", current.customTheme.accentHex),
+            customThemeEnabled = properties.getProperty("customThemeEnabled")?.toBooleanStrictOrNull()
+                ?: ((properties.getProperty("theme") == "CUSTOM") || current.customThemeEnabled),
+            customDayTheme = current.customDayTheme.copy(
+                backgroundHex = properties.getProperty(
+                    "customDayBackground",
+                    properties.getProperty("customBackground", current.customDayTheme.backgroundHex),
+                ),
+                bodyHex = properties.getProperty(
+                    "customDayBody",
+                    properties.getProperty("customBody", current.customDayTheme.bodyHex),
+                ),
+                titleHex = properties.getProperty(
+                    "customDayTitle",
+                    properties.getProperty("customTitle", current.customDayTheme.titleHex),
+                ),
+                accentHex = properties.getProperty(
+                    "customDayAccent",
+                    properties.getProperty("customAccent", current.customDayTheme.accentHex),
+                ),
+            ),
+            customNightTheme = current.customNightTheme.copy(
+                backgroundHex = properties.getProperty("customNightBackground", current.customNightTheme.backgroundHex),
+                bodyHex = properties.getProperty("customNightBody", current.customNightTheme.bodyHex),
+                titleHex = properties.getProperty("customNightTitle", current.customNightTheme.titleHex),
+                accentHex = properties.getProperty("customNightAccent", current.customNightTheme.accentHex),
             ),
             fontUuid = properties.getProperty("fontUuid"),
         ) }
@@ -183,8 +208,8 @@ class LocalBackupRepository @Inject constructor(
 
     private companion object {
         const val DATABASE_NAME = "kixyu-books.db"
-        const val DATABASE_VERSION = 2
-        const val BACKUP_VERSION = 2
+        const val DATABASE_VERSION = 3
+        const val BACKUP_VERSION = 3
         const val MANIFEST_ENTRY = "manifest.properties"
         const val DATABASE_ENTRY = "database/kixyu-books.db"
         const val MAX_ENTRIES = 100_000

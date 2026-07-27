@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -126,7 +127,12 @@ fun SettingsRoute(
                 KixyuSection {
                     KixyuSettingsRow(
                         title = "外观",
-                        supportingText = "${state.settings.theme.displayName()} · ${state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体"}",
+                        supportingText = buildString {
+                            append(state.settings.theme.displayName())
+                            if (state.settings.customThemeEnabled) append(" · 自定义阅读配色")
+                            append(" · ")
+                            append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
+                        },
                         icon = Icons.Outlined.Palette,
                         onClick = onAppearance,
                     ) {
@@ -183,6 +189,7 @@ fun SettingsRoute(
                     }
                 }
             }
+            item { Spacer(Modifier.height(KixyuSize.bottomNavigationContentHeight)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }

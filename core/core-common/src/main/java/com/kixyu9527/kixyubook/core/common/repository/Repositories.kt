@@ -7,6 +7,7 @@ interface BookRepository {
     fun observeLibrary(): Flow<List<LibraryBook>>
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
     suspend fun deleteBook(bookUuid: String)
+    suspend fun deleteBooks(bookUuids: Set<String>)
     suspend fun getBook(bookUuid: String): Book?
     suspend fun getChapters(bookUuid: String): List<Chapter>
     suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent?
@@ -14,8 +15,7 @@ interface BookRepository {
     suspend fun saveProgress(progress: ReadingProgress)
     suspend fun updateTxtMetadata(bookUuid: String, title: String, author: String, description: String)
     suspend fun reparseTxt(bookUuid: String): Result<Unit>
-    suspend fun saveTextPatch(bookUuid: String, chapterId: Long, paragraphIndex: Int, replacementText: String)
-    suspend fun undoLastTextPatch(bookUuid: String): Boolean
+    suspend fun updateTxtParagraph(bookUuid: String, chapterIndex: Int, paragraphIndex: Int, replacementText: String): Result<Unit>
     suspend fun setCategory(bookUuid: String, category: String)
 }
 

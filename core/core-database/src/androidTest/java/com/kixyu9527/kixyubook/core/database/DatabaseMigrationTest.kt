@@ -29,18 +29,18 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    fun migration1To2PreservesContentAndUsesFinalForeignKeyNames() {
+    fun migration1To3PreservesContentAndRemovesLegacyPatches() {
         createV1Database().use { helper ->
             helper.writableDatabase.apply {
                 execSQL("INSERT INTO books VALUES(1, '旧书名', '旧作者', NULL, ?, 'TXT', 1234)", arrayOf(context.filesDir.resolve("legacy.txt").absolutePath))
-                execSQL("INSERT INTO chapters VALUES(10, 1, '第一章', 0)")
+                execSQL("INSERT INTO chapters VALUES(10, 1, '第一卷 · 第一章', 0)")
                 execSQL("INSERT INTO paragraphs VALUES(20, 10, 0, '旧版正文')")
                 execSQL("INSERT INTO reading_progress VALUES(1, 10, 0, 5678, 0.5)")
             }
         }
 
         val database = Room.databaseBuilder(context, KixyuDatabase::class.java, TEST_DATABASE)
-            .addMigrations(migration1To2(context))
+            .addMigrations(migration1To2(context), migration2To3)
             .allowMainThreadQueries()
             .build()
         val sqlite = database.openHelper.writableDatabase
@@ -66,6 +66,10 @@ class DatabaseMigrationTest {
         sqlite.query("PRAGMA foreign_key_list(`paragraphs`)").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals("chapters", cursor.getString(cursor.getColumnIndexOrThrow("table")))
+        }
+        sqlite.query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'text_edit_patches'").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
         }
         database.close()
     }

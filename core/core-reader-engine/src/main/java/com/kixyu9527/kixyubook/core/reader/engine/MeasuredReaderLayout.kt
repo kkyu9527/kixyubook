@@ -50,8 +50,9 @@ private class MeasuredReaderPaginator(
         var blocks = mutableListOf<DocumentBlock>()
         var usedHeightPx = 0f
         var opening = true
+        val openingHeading = splitReaderChapterHeading(chapter.title)
 
-        fun bodyHeightPx(): Float = availableBodyHeightPx(spec, opening)
+        fun bodyHeightPx(): Float = availableBodyHeightPx(spec, opening, openingHeading)
         fun flush() {
             if (blocks.isEmpty()) return
             pages += ReaderPage(pages.size, chapter.index, chapter.title, opening, blocks.toList())
@@ -112,18 +113,25 @@ private class MeasuredReaderPaginator(
         return pages.ifEmpty { listOf(ReaderPage(0, chapter.index, chapter.title, true, emptyList())) }
     }
 
-    private fun availableBodyHeightPx(spec: ReaderLayoutSpec, opening: Boolean): Float = with(density) {
+    private fun availableBodyHeightPx(
+        spec: ReaderLayoutSpec,
+        opening: Boolean,
+        heading: ReaderChapterHeading,
+    ): Float = with(density) {
+        val hasOrdinalAndName = heading.ordinal != null && heading.name.isNotEmpty()
         val viewport = spec.viewportHeightDp.dp.toPx()
         val fixedDp = if (opening) {
-            ReaderPageMetrics.verticalPaddingDp * 2 + ReaderPageMetrics.openingTopDp +
+            ReaderPageMetrics.topPaddingDp + ReaderPageMetrics.bottomPaddingDp +
+                ReaderPageMetrics.openingTopDp + (if (hasOrdinalAndName) ReaderPageMetrics.openingOrdinalGapDp else 0f) +
                 ReaderPageMetrics.openingGapDp + ReaderPageMetrics.footerGapDp +
                 ReaderPageMetrics.footerHeightDp + ReaderPageMetrics.safetyDp
         } else {
-            ReaderPageMetrics.verticalPaddingDp * 2 + ReaderPageMetrics.regularGapDp +
+            ReaderPageMetrics.topPaddingDp + ReaderPageMetrics.bottomPaddingDp + ReaderPageMetrics.regularGapDp +
                 ReaderPageMetrics.footerGapDp + ReaderPageMetrics.footerHeightDp + ReaderPageMetrics.safetyDp
         }
         val headerSp = if (opening) {
-            OPENING_TITLE_LINE_HEIGHT_SP * OPENING_TITLE_MAX_LINES
+            (if (heading.ordinal != null) OPENING_ORDINAL_LINE_HEIGHT_SP else 0f) +
+                (if (heading.name.isNotEmpty()) OPENING_TITLE_LINE_HEIGHT_SP else 0f)
         } else {
             REGULAR_TITLE_LINE_HEIGHT_SP
         }
@@ -135,6 +143,6 @@ private const val TEXT_MEASURE_CACHE_SIZE = 64
 private const val MIN_BODY_WIDTH_DP = 160f
 private const val MIN_BODY_HEIGHT_DP = 120f
 private const val PARAGRAPH_SPACING_EM = 0.9f
-private const val OPENING_TITLE_LINE_HEIGHT_SP = 44f
-private const val OPENING_TITLE_MAX_LINES = 2f
+private const val OPENING_ORDINAL_LINE_HEIGHT_SP = 22f
+private const val OPENING_TITLE_LINE_HEIGHT_SP = 36f
 private const val REGULAR_TITLE_LINE_HEIGHT_SP = 20f

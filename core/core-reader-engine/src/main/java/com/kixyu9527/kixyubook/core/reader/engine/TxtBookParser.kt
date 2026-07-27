@@ -7,6 +7,9 @@ import java.nio.CharBuffer
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 
 class TxtBookParser : BookParser {
     override val format = BookFormat.TXT
@@ -18,7 +21,6 @@ class TxtBookParser : BookParser {
         val frontMatter = inspectFrontMatter(file, file.name)
         file.bufferedReader(frontMatter.charset).use { reader ->
             var title = "正文"
-            var volumeTitle: String? = null
             var emitted = false
             var lineIndex = 0
             val paragraphs = mutableListOf<String>()
@@ -37,22 +39,78 @@ class TxtBookParser : BookParser {
                 when {
                     volumeTitleOrNull(line) != null -> {
                         flush()
-                        volumeTitle = volumeTitleOrNull(line)
-                        title = checkNotNull(volumeTitle)
+                        title = checkNotNull(volumeTitleOrNull(line))
                     }
                     chapterTitleOrNull(line) != null -> {
                         flush()
-                        val chapterTitle = checkNotNull(chapterTitleOrNull(line))
-                        // Keep the original chapter number. Repeated numbering is
-                        // scoped by its volume, while globally continuous numbering
-                        // remains untouched (e.g. 第二卷 · 第一章 vs 第二卷 · 第101章).
-                        title = volumeTitle?.let { "$it · $chapterTitle" } ?: chapterTitle
+                        // Volume boundaries still split content, but the volume name
+                        // is not repeated in every chapter title shown to the reader.
+                        title = checkNotNull(chapterTitleOrNull(line))
                     }
                     else -> paragraphs += line
                 }
             }
             flush()
             if (!emitted) emit(DocumentChapter("正文", listOf("这本书没有可显示的文本。")))
+        }
+    }
+
+    /** Rewrites the canonical TXT source instead of layering an edit patch. */
+    fun replaceParagraph(
+        file: File,
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        expectedText: String,
+        replacementText: String,
+    ): Result<Unit> = runCatching {
+        require(file.isFile) { "找不到原始 TXT 文件" }
+        val charset = detectCharset(file)
+        val frontMatter = inspectFrontMatter(file, file.name)
+        val lines = file.readText(charset).splitPreservingLineEndings()
+        val chapterParagraphLines = mutableListOf<List<Int>>()
+        var paragraphLines = mutableListOf<Int>()
+
+        fun flushChapter() {
+            if (paragraphLines.isEmpty()) return
+            chapterParagraphLines += paragraphLines.toList()
+            paragraphLines = mutableListOf()
+        }
+
+        lines.forEachIndexed { lineIndex, sourceLine ->
+            if (lineIndex in frontMatter.excludedLines) return@forEachIndexed
+            val line = sourceLine.content.trim().removePrefix("\uFEFF").trim()
+            if (line.isBlank()) return@forEachIndexed
+            if (headingTitleOrNull(line) != null) flushChapter() else paragraphLines += lineIndex
+        }
+        flushChapter()
+
+        val sourceLineIndex = chapterParagraphLines.getOrNull(chapterIndex)?.getOrNull(paragraphIndex)
+            ?: error("找不到要修改的原文段落")
+        val sourceLine = lines[sourceLineIndex]
+        val textOffset = sourceLine.content.indexOf(expectedText)
+        require(textOffset >= 0) { "原文已发生变化，请重新解析后再修改" }
+        val normalizedReplacement = replacementText.trim()
+        lines[sourceLineIndex] = sourceLine.copy(
+            content = sourceLine.content.replaceRange(
+                textOffset,
+                textOffset + expectedText.length,
+                normalizedReplacement,
+            ),
+        )
+
+        val temporary = File(file.parentFile, ".${file.name}.${UUID.randomUUID()}.editing")
+        try {
+            temporary.writeText(lines.joinToString("") { it.content + it.lineEnding }, charset)
+            runCatching {
+                Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }.getOrElse { temporary.copyTo(file, overwrite = true) }
+        } finally {
+            temporary.delete()
         }
     }
 
@@ -132,7 +190,7 @@ class TxtBookParser : BookParser {
     private fun chapterTitleOrNull(raw: String): String? {
         if (raw.length !in 2..MAX_CHAPTER_TITLE_LENGTH) return null
         val line = raw.trim().trim(*CHAPTER_DECORATIONS).trim()
-        if (line.length !in 2..MAX_CHAPTER_TITLE_LENGTH || SENTENCE_END.containsMatchIn(line)) return null
+        if (line.length !in 2..MAX_CHAPTER_TITLE_LENGTH) return null
         return line.takeIf {
             NUMBERED_CHAPTER.matches(it) || NAMED_CHAPTER.matches(it) || LATIN_CHAPTER.matches(it)
         }
@@ -247,11 +305,11 @@ class TxtBookParser : BookParser {
         val DESCRIPTION_PATTERN = Regex("^\\s*(?:内容简介|內容簡介|作品简介|作品簡介|小说简介|小說簡介|简介|簡介|文案)\\s*[：:]?\\s*(.*?)\\s*$", RegexOption.IGNORE_CASE)
         val DECORATED_TITLE_PATTERN = Regex("^\\s*[《〈]([^》〉]{1,80})[》〉]\\s*$")
         val CHINESE_NUMBER = "0-9０-９零〇一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟IVXLCDMivxlcdm"
-        val NUMBERED_CHAPTER = Regex("^(?:正文\\s+)?第\\s*[$CHINESE_NUMBER]+\\s*[章节回话集幕](?:(?:\\s+|\\s*[-—:：、.．]\\s*)[^。！？!?]{1,48})?$", RegexOption.IGNORE_CASE)
+        val NUMBERED_CHAPTER = Regex("^(?:正文\\s+)?第\\s*[$CHINESE_NUMBER]+\\s*[章节回话集幕](?:(?:\\s+|\\s*[-—:：、.．]\\s*).{1,48})?$", RegexOption.IGNORE_CASE)
         val NUMBERED_VOLUME = Regex("^第\\s*[$CHINESE_NUMBER]+\\s*[卷部篇](?:(?:\\s+|\\s*[-—:：、.．]\\s*)[^。！？!?]{1,48})?$", RegexOption.IGNORE_CASE)
         val REVERSED_VOLUME = Regex("^[卷部篇]\\s*[$CHINESE_NUMBER]+(?:(?:\\s+|\\s*[-—:：、.．]\\s*)[^。！？!?]{1,48})?$", RegexOption.IGNORE_CASE)
-        val NAMED_CHAPTER = Regex("^(?:序章|楔子|引子|前言|序言|后记|尾声|终章|大结局|番外(?:篇)?)(?:(?:\\s+|\\s*[-—:：、.．]\\s*)[^。！？!?]{1,48})?$", RegexOption.IGNORE_CASE)
-        val LATIN_CHAPTER = Regex("^chapter\\s+(?:[0-9]+|[ivxlcdm]+)(?:(?:\\s+|\\s*[-—:：.]\\s*)[^.!?]{1,48})?$", RegexOption.IGNORE_CASE)
+        val NAMED_CHAPTER = Regex("^(?:序章|楔子|引子|前言|序言|后记|尾声|终章|大结局|番外(?:篇)?)(?:(?:\\s+|\\s*[-—:：、.．]\\s*).{1,48})?$", RegexOption.IGNORE_CASE)
+        val LATIN_CHAPTER = Regex("^chapter\\s+(?:[0-9]+|[ivxlcdm]+)(?:(?:\\s+|\\s*[-—:：.]\\s*).{1,48})?$", RegexOption.IGNORE_CASE)
         val LATIN_VOLUME = Regex("^(?:part|volume|book)\\s+(?:[0-9]+|[ivxlcdm]+)(?:(?:\\s+|\\s*[-—:：.]\\s*)[^.!?]{1,48})?$", RegexOption.IGNORE_CASE)
         val SENTENCE_END = Regex("[。！？!?]$")
         val CHAPTER_DECORATIONS = charArrayOf('=', '-', '*', '#', '_', '~', '—', '－', '【', '】', '[', ']', '「', '」', '『', '』', '　')
@@ -291,4 +349,24 @@ private fun String.countOccurrences(needle: String): Int {
         start = match + needle.length
     }
     return count
+}
+
+private data class SourceLine(val content: String, val lineEnding: String)
+
+private fun String.splitPreservingLineEndings(): MutableList<SourceLine> {
+    val result = mutableListOf<SourceLine>()
+    var start = 0
+    var cursor = 0
+    while (cursor < length) {
+        if (this[cursor] != '\r' && this[cursor] != '\n') {
+            cursor++
+            continue
+        }
+        val endingEnd = if (this[cursor] == '\r' && getOrNull(cursor + 1) == '\n') cursor + 2 else cursor + 1
+        result += SourceLine(substring(start, cursor), substring(cursor, endingEnd))
+        start = endingEnd
+        cursor = endingEnd
+    }
+    if (start < length || result.isEmpty()) result += SourceLine(substring(start), "")
+    return result
 }

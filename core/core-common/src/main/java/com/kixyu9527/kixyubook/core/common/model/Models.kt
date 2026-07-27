@@ -25,8 +25,6 @@ data class Paragraph(
     val chapterId: Long,
     val index: Int,
     val text: String,
-    val originalText: String = text,
-    val edited: Boolean = false,
 )
 
 data class ReadingProgress(
@@ -40,7 +38,7 @@ data class ReadingProgress(
 
 data class LibraryBook(val book: Book, val progress: ReadingProgress?)
 
-enum class ReaderTheme { SYSTEM, DAY, NIGHT, CUSTOM }
+enum class ReaderTheme { SYSTEM, DAY, NIGHT }
 enum class PageMode { SCROLL, PAGED }
 enum class AppColorTheme { DYNAMIC, SAGE, OCEAN, VIOLET, AMBER }
 
@@ -58,7 +56,14 @@ data class ReaderSettings(
     val margin: Float = 24f,
     val theme: ReaderTheme = ReaderTheme.SYSTEM,
     val pageMode: PageMode = PageMode.SCROLL,
-    val customTheme: CustomReaderTheme = CustomReaderTheme(),
+    val customThemeEnabled: Boolean = false,
+    val customDayTheme: CustomReaderTheme = CustomReaderTheme(),
+    val customNightTheme: CustomReaderTheme = CustomReaderTheme(
+        backgroundHex = "#11120F",
+        bodyHex = "#D9D9D0",
+        titleHex = "#F0F0E7",
+        accentHex = "#B8CCBD",
+    ),
     val fontUuid: String? = null,
     val appColorTheme: AppColorTheme = AppColorTheme.DYNAMIC,
 )
@@ -69,17 +74,6 @@ data class ImportSummary(
     val importedCount: Int,
     val duplicateCount: Int = 0,
     val failures: List<String> = emptyList(),
-)
-
-data class TextEditPatch(
-    val uuid: String,
-    val bookUuid: String,
-    val chapterId: Long,
-    val paragraphIndex: Int,
-    val originalText: String,
-    val replacementText: String,
-    val createdTime: Long,
-    val undone: Boolean = false,
 )
 
 data class ReadingStats(

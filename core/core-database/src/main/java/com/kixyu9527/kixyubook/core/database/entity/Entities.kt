@@ -45,25 +45,6 @@ data class ReadingProgressEntity(
     val fraction: Float,
 )
 
-@Entity(
-    tableName = "text_edit_patches",
-    foreignKeys = [
-        ForeignKey(entity = BookEntity::class, parentColumns = ["uuid"], childColumns = ["bookUuid"], onDelete = ForeignKey.CASCADE),
-        ForeignKey(entity = ChapterEntity::class, parentColumns = ["id"], childColumns = ["chapterId"], onDelete = ForeignKey.CASCADE),
-    ],
-    indices = [Index("bookUuid"), Index("chapterId"), Index(value = ["chapterId", "paragraphIndex", "createdTime"])],
-)
-data class TextEditPatchEntity(
-    @PrimaryKey val uuid: String,
-    val bookUuid: String,
-    val chapterId: Long,
-    val paragraphIndex: Int,
-    val originalText: String,
-    val replacementText: String,
-    val createdTime: Long,
-    val undone: Boolean,
-)
-
 @Entity(tableName = "metadata_edits", indices = [Index("bookUuid")])
 data class MetadataEditEntity(
     @PrimaryKey val uuid: String,

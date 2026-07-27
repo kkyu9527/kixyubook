@@ -16,15 +16,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.CustomReaderTheme
@@ -72,11 +77,14 @@ object KixyuSize {
     val continueCoverHeight = 118.dp
     val recentCoverWidth = 46.dp
     val recentCoverHeight = 64.dp
-    val floatingActionClearance = 72.dp
     val bottomNavigationContentHeight = 80.dp
     val readerControlInset = 12.dp
+    val readerTopControlInset = 0.dp
     val readerControlButton = 48.dp
     val readerPageIndicatorWidth = 52.dp
+    val readerBookTitleMaxWidth = 200.dp
+    val stepperButton = 36.dp
+    val stepperValueWidth = 64.dp
     val readerMenuBottomOffset = 68.dp
     val readerSheetMaxContent = 620.dp
     val directoryFastScrollerWidth = 40.dp
@@ -155,6 +163,43 @@ fun KixyuDivider() {
 }
 
 @Composable
+fun KixyuStepperRow(
+    title: String,
+    valueLabel: String,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+    decreaseEnabled: Boolean = true,
+    increaseEnabled: Boolean = true,
+) {
+    KixyuSettingsRow(title = title) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FilledTonalIconButton(
+                onClick = onDecrease,
+                enabled = decreaseEnabled,
+                modifier = Modifier.size(KixyuSize.stepperButton),
+            ) {
+                Icon(Icons.Outlined.Remove, "减小$title", Modifier.size(KixyuSize.iconSmall))
+            }
+            Text(
+                valueLabel,
+                modifier = Modifier.width(KixyuSize.stepperValueWidth),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+            )
+            FilledTonalIconButton(
+                onClick = onIncrease,
+                enabled = increaseEnabled,
+                modifier = Modifier.size(KixyuSize.stepperButton),
+            ) {
+                Icon(Icons.Outlined.Add, "增大$title", Modifier.size(KixyuSize.iconSmall))
+            }
+        }
+    }
+}
+
+@Composable
 fun <T> KixyuDropdownRow(
     title: String,
     selected: T,
@@ -219,6 +264,7 @@ fun KixyuReaderThemeControls(
     onSettingsChange: (ReaderSettings) -> Unit,
     modeTitle: String = "显示模式",
 ) {
+    var editingTheme by remember { mutableStateOf(ReaderTheme.DAY) }
     KixyuDropdownRow(
         title = modeTitle,
         selected = settings.theme,
@@ -229,22 +275,47 @@ fun KixyuReaderThemeControls(
     KixyuDivider()
     KixyuSettingsRow(
         title = "自定义阅读配色",
-        supportingText = if (settings.theme == ReaderTheme.CUSTOM) "正在实时预览" else "背景、正文、标题与强调色",
-        onClick = { onSettingsChange(settings.copy(theme = ReaderTheme.CUSTOM)) },
+        supportingText = if (settings.customThemeEnabled) "已启用 · 分别应用日间与夜间色板" else "使用内置日间与夜间色板",
+        onClick = { onSettingsChange(settings.copy(customThemeEnabled = !settings.customThemeEnabled)) },
         trailing = {
-            Row(horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
-                with(settings.customTheme) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+            ) {
+                with(settings.customDayTheme) {
                     KixyuColorSwatch(backgroundHex)
-                    KixyuColorSwatch(bodyHex)
-                    KixyuColorSwatch(titleHex)
                     KixyuColorSwatch(accentHex)
                 }
+                with(settings.customNightTheme) {
+                    KixyuColorSwatch(backgroundHex)
+                    KixyuColorSwatch(accentHex)
+                }
+                Spacer(Modifier.width(KixyuSpacing.extraSmall))
+                Switch(
+                    checked = settings.customThemeEnabled,
+                    onCheckedChange = { onSettingsChange(settings.copy(customThemeEnabled = it)) },
+                )
             }
         },
     )
-    if (settings.theme == ReaderTheme.CUSTOM) {
-        CustomThemeEditor(settings.customTheme) { custom ->
-            onSettingsChange(settings.copy(customTheme = custom))
+    if (settings.customThemeEnabled) {
+        KixyuDivider()
+        KixyuDropdownRow(
+            title = "编辑色板",
+            selected = editingTheme,
+            options = listOf(ReaderTheme.DAY, ReaderTheme.NIGHT),
+            optionLabel = ReaderTheme::displayName,
+            onSelected = { editingTheme = it },
+        )
+        val editingColors = if (editingTheme == ReaderTheme.NIGHT) settings.customNightTheme else settings.customDayTheme
+        CustomThemeEditor(editingColors) { custom ->
+            onSettingsChange(
+                if (editingTheme == ReaderTheme.NIGHT) {
+                    settings.copy(customNightTheme = custom)
+                } else {
+                    settings.copy(customDayTheme = custom)
+                },
+            )
         }
     }
 }
@@ -328,7 +399,6 @@ fun ReaderTheme.displayName(): String = when (this) {
     ReaderTheme.SYSTEM -> "跟随系统"
     ReaderTheme.DAY -> "日间"
     ReaderTheme.NIGHT -> "夜间"
-    ReaderTheme.CUSTOM -> "自定义"
 }
 
 fun PageMode.displayName(): String = when (this) {

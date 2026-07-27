@@ -52,6 +52,25 @@ class ReaderEngineTest {
         assertEquals("这是第一话发生的事情。", chapters.first().paragraphs.single())
     }
 
+    @Test fun txtParserAcceptsPunctuationInsideNumberedChapterTitles() = runBlocking {
+        val source = """第三话 前情
+正文三。
+第四话 她太会了，太香了！
+正文四。
+第五话 后续
+正文五。"""
+        val file = folder.newFile("punctuated-chapters.txt").apply { writeText(source) }
+        val chapters = mutableListOf<DocumentChapter>()
+
+        TxtBookParser().readChapters(file, chapters::add)
+
+        assertEquals(
+            listOf("第三话 前情", "第四话 她太会了，太香了！", "第五话 后续"),
+            chapters.map { it.title },
+        )
+        assertEquals("正文四。", chapters[1].paragraphs.single())
+    }
+
     @Test fun txtParserKeepsUtf8WhenDetectionSampleEndsMidCharacter() = runBlocking {
         val header = "书名：超长 UTF8 小说\n作者：测试作者\n第一章 开始\n"
         val sampleSize = 128 * 1024
@@ -90,14 +109,36 @@ class ReaderEngineTest {
 
         assertEquals(
             listOf(
-                "第一卷 风起 · 第一章 初见",
-                "第一卷 风起 · 第二章 同行",
-                "第二卷 云涌 · 第一章 重逢",
-                "第二卷 云涌 · 第二章 再会",
-                "第三卷 星落 · 第五章 终途",
+                "第一章 初见",
+                "第二章 同行",
+                "第一章 重逢",
+                "第二章 再会",
+                "第五章 终途",
             ),
             chapters.map { it.title },
         )
+    }
+
+    @Test fun txtEditorRewritesTheSelectedSourceParagraphWithoutPatches() = runBlocking {
+        val file = folder.newFile("editable.txt").apply {
+            writeText("第一章 开始\r\n重复正文。\r\n第二章 继续\r\n重复正文。\r\n结尾。")
+        }
+        val parser = TxtBookParser()
+
+        parser.replaceParagraph(
+            file,
+            chapterIndex = 1,
+            paragraphIndex = 0,
+            expectedText = "重复正文。",
+            replacementText = "修改后的正文。",
+        )
+            .getOrThrow()
+
+        val chapters = mutableListOf<DocumentChapter>()
+        parser.readChapters(file, chapters::add)
+        assertEquals(listOf("重复正文。"), chapters[0].paragraphs)
+        assertEquals(listOf("修改后的正文。", "结尾。"), chapters[1].paragraphs)
+        assertTrue(file.readText().contains("修改后的正文。"))
     }
 
     @Test fun txtParserDetectsBig5AndTraditionalMetadata() = runBlocking {
@@ -139,6 +180,14 @@ class ReaderEngineTest {
         assertTrue(pages.first().blocks.any { it.paragraphIndex == long.index })
     }
 
+    @Test fun readingProgressReachesOneOnlyWhenTheLastChapterIsComplete() {
+        val positions = ReaderPositionManager()
+
+        assertTrue(positions.bookFraction(9, 10, 99, 100, chapterComplete = false) < 1f)
+        assertEquals(1f, positions.bookFraction(9, 10, 99, 100, chapterComplete = true), 0f)
+        assertEquals(.5f, positions.bookFraction(4, 10, 0, 1, chapterComplete = true), 0f)
+    }
+
     @Test fun duplicateOpeningHeadingIsNotRenderedAsBodyText() {
         val chapter = ReaderChapter(
             1,
@@ -170,6 +219,21 @@ class ReaderEngineTest {
         )
 
         assertEquals(listOf("正文。"), chapter.contentParagraphs().map { it.text })
+    }
+
+    @Test fun chapterHeadingSeparatesOrdinalFromNameAndDropsLegacyVolumePrefix() {
+        assertEquals(
+            ReaderChapterHeading("第一章", "初见"),
+            splitReaderChapterHeading("第二卷 云涌 · 第一章 初见"),
+        )
+        assertEquals(
+            ReaderChapterHeading("第二话", "重逢"),
+            splitReaderChapterHeading("第二话：重逢"),
+        )
+        assertEquals(
+            ReaderChapterHeading("第十二章", "重逢"),
+            splitReaderChapterHeading("正文 第 十二 章：重逢"),
+        )
     }
 
     @Test fun epubParserReadsMetadataAndSpineContent() = runBlocking {

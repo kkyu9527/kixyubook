@@ -11,15 +11,12 @@ interface BookDao {
     @Query("SELECT * FROM reading_progress WHERE bookUuid = :uuid") fun observeProgress(uuid: String): Flow<ReadingProgressEntity?>
     @Query("SELECT * FROM reading_progress WHERE bookUuid = :uuid") suspend fun getProgress(uuid: String): ReadingProgressEntity?
     @Query("SELECT * FROM books WHERE uuid = :uuid") suspend fun getBook(uuid: String): BookEntity?
+    @Query("SELECT * FROM books WHERE uuid IN (:uuids)") suspend fun getBooks(uuids: Set<String>): List<BookEntity>
     @Query("SELECT uuid FROM books WHERE contentHash = :hash LIMIT 1") suspend fun findUuidByHash(hash: String): String?
     @Query("SELECT EXISTS(SELECT 1 FROM books WHERE uuid = :uuid)") suspend fun bookExists(uuid: String): Boolean
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid ORDER BY chapterIndex") suspend fun getChapters(uuid: String): List<ChapterEntity>
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND chapterIndex = :index LIMIT 1") suspend fun getChapter(uuid: String, index: Int): ChapterEntity?
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId ORDER BY paragraphIndex") suspend fun getParagraphs(chapterId: Long): List<ParagraphEntity>
-    @Query("SELECT * FROM text_edit_patches WHERE chapterId = :chapterId AND undone = 0 ORDER BY createdTime") suspend fun getActivePatches(chapterId: Long): List<TextEditPatchEntity>
-    @Query("SELECT * FROM text_edit_patches WHERE bookUuid = :bookUuid ORDER BY createdTime") suspend fun getPatches(bookUuid: String): List<TextEditPatchEntity>
-    @Query("SELECT * FROM text_edit_patches WHERE bookUuid = :bookUuid AND undone = 0 ORDER BY createdTime DESC LIMIT 1") suspend fun getLastPatch(bookUuid: String): TextEditPatchEntity?
-    @Query("SELECT b.format FROM books b JOIN chapters c ON c.bookUuid = b.uuid WHERE c.id = :chapterId") suspend fun getFormatForChapter(chapterId: Long): String?
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId AND paragraphIndex = :index") suspend fun getParagraph(chapterId: Long, index: Int): ParagraphEntity?
     @Query("SELECT EXISTS(SELECT 1 FROM metadata_edits WHERE bookUuid = :uuid)") suspend fun hasMetadataEdits(uuid: String): Boolean
 
@@ -27,14 +24,14 @@ interface BookDao {
     @Insert suspend fun insertChapter(chapter: ChapterEntity): Long
     @Insert suspend fun insertParagraphs(paragraphs: List<ParagraphEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveProgress(progress: ReadingProgressEntity)
-    @Insert suspend fun insertPatch(patch: TextEditPatchEntity)
     @Insert suspend fun insertMetadataEdit(edit: MetadataEditEntity)
     @Insert suspend fun insertSession(session: ReadingSessionEntity)
 
-    @Query("UPDATE text_edit_patches SET undone = 1 WHERE uuid = :uuid") suspend fun markPatchUndone(uuid: String)
     @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid AND format = 'TXT'") suspend fun updateTxtMetadata(uuid: String, title: String, author: String, description: String): Int
+    @Query("UPDATE books SET contentHash = :contentHash WHERE uuid = :uuid") suspend fun updateContentHash(uuid: String, contentHash: String)
     @Query("UPDATE books SET category = :category WHERE uuid = :uuid") suspend fun setCategory(uuid: String, category: String)
     @Query("DELETE FROM books WHERE uuid = :uuid") suspend fun deleteBook(uuid: String)
+    @Query("DELETE FROM books WHERE uuid IN (:uuids)") suspend fun deleteBooks(uuids: Set<String>)
     @Query("DELETE FROM reading_progress WHERE bookUuid = :uuid") suspend fun deleteProgress(uuid: String)
     @Query("DELETE FROM chapters WHERE bookUuid = :uuid") suspend fun deleteChapters(uuid: String)
     @Query("SELECT * FROM reading_sessions ORDER BY startedTime") fun observeSessions(): Flow<List<ReadingSessionEntity>>

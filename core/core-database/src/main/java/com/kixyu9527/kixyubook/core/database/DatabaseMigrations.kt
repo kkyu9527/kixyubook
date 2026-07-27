@@ -88,6 +88,20 @@ fun migration1To2(context: Context) = object : Migration(1, 2) {
     }
 }
 
+val migration2To3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // V2 stored the volume name in every TXT chapter title. Keep volume
+        // boundaries in the parsed order while showing only the actual chapter.
+        db.execSQL(
+            """UPDATE `chapters`
+                SET `title` = TRIM(SUBSTR(`title`, INSTR(`title`, '·') + 1))
+                WHERE `bookUuid` IN (SELECT `uuid` FROM `books` WHERE `format` = 'TXT')
+                  AND INSTR(`title`, '·') > 0""".trimIndent(),
+        )
+        db.execSQL("DROP TABLE IF EXISTS `text_edit_patches`")
+    }
+}
+
 private fun SupportSQLiteDatabase.dropUserIndexes(table: String) {
     val names = buildList {
         query("PRAGMA index_list(`$table`)").use { cursor ->

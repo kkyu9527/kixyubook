@@ -8,8 +8,8 @@ import com.kixyu9527.kixyubook.core.database.entity.*
 
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, ParagraphEntity::class, ReadingProgressEntity::class,
-        TextEditPatchEntity::class, MetadataEditEntity::class, ReadingSessionEntity::class, UserFontEntity::class],
-    version = 2,
+        MetadataEditEntity::class, ReadingSessionEntity::class, UserFontEntity::class],
+    version = 3,
     exportSchema = true,
 )
 abstract class KixyuDatabase : RoomDatabase() {

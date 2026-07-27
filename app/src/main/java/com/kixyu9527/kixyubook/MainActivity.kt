@@ -11,9 +11,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.Icons
@@ -25,8 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -35,7 +30,6 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.navigation.Routes
 import com.kixyu9527.kixyubook.feature.home.HomeRoute
 import com.kixyu9527.kixyubook.feature.library.LibraryRoute
@@ -62,7 +56,7 @@ class MainActivity : ComponentActivity() {
             val darkTheme = when (settings.theme) {
                 ReaderTheme.DAY -> false
                 ReaderTheme.NIGHT -> true
-                ReaderTheme.SYSTEM, ReaderTheme.CUSTOM -> systemDark
+                ReaderTheme.SYSTEM -> systemDark
             }
             val view = LocalView.current
             SideEffect {
@@ -91,15 +85,10 @@ private fun KixyuNavHost() {
         TopDestination(Routes.LIBRARY, "书库", Icons.AutoMirrored.Outlined.LibraryBooks),
         TopDestination(Routes.SETTINGS, "设置", Icons.Outlined.Settings),
     )
-    // Keep the bar present for the initial composition, then let it leave with
-    // the same motion as the outgoing top-level destination. Removing it in a
-    // single frame made the still-visible page (and its FAB) jump down.
+    // The bar is an overlay outside NavHost. During predictive back the
+    // destination underneath can therefore occupy the full window; the bar is
+    // introduced only after the pop has committed to a top-level destination.
     val showBar = route == null || route in top.map { it.route }
-    val density = LocalDensity.current
-    val navigationInset = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
-    var bottomBarHeight by remember(navigationInset) {
-        mutableStateOf(KixyuSize.bottomNavigationContentHeight + navigationInset)
-    }
     Box(Modifier.fillMaxSize()) {
         NavHost(
             navController, Routes.HOME,
@@ -110,19 +99,13 @@ private fun KixyuNavHost() {
             popExitTransition = { fadeOut(tween(240)) + scaleOut(tween(320), targetScale = .92f) },
         ) {
             composable(Routes.HOME) {
-                TopDestinationContent(bottomBarHeight) {
-                    HomeRoute(onOpenBook = { navController.navigate(Routes.reader(it)) })
-                }
+                HomeRoute(onOpenBook = { navController.navigate(Routes.reader(it)) })
             }
             composable(Routes.LIBRARY) {
-                TopDestinationContent(bottomBarHeight) {
-                    LibraryRoute(onOpenBook = { navController.navigate(Routes.reader(it)) })
-                }
+                LibraryRoute(onOpenBook = { navController.navigate(Routes.reader(it)) })
             }
             composable(Routes.SETTINGS) {
-                TopDestinationContent(bottomBarHeight) {
-                    SettingsRoute(onAppearance = { navController.navigate(Routes.APPEARANCE) })
-                }
+                SettingsRoute(onAppearance = { navController.navigate(Routes.APPEARANCE) })
             }
             composable(Routes.APPEARANCE) {
                 com.kixyu9527.kixyubook.feature.settings.AppearanceRoute(onBack = { navController.popBackStack() })
@@ -137,11 +120,7 @@ private fun KixyuNavHost() {
             enter = fadeIn(tween(220)) + slideInVertically(tween(320)) { it },
             exit = fadeOut(tween(180)) + slideOutVertically(tween(280)) { it },
         ) {
-            NavigationBar(
-                Modifier.onSizeChanged { size ->
-                    bottomBarHeight = with(density) { size.height.toDp() }
-                },
-            ) {
+            NavigationBar {
                 top.forEach { destination ->
                     NavigationBarItem(
                         selected = route == destination.route,
@@ -159,9 +138,4 @@ private fun KixyuNavHost() {
             }
         }
     }
-}
-
-@Composable
-private fun TopDestinationContent(bottomBarHeight: androidx.compose.ui.unit.Dp, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().padding(bottom = bottomBarHeight)) { content() }
 }

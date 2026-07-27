@@ -15,8 +15,8 @@ android {
         applicationId = "com.kixyu9527.kixyubook"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1003
-        versionName = "0.1.4"
+        versionCode = 1010
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

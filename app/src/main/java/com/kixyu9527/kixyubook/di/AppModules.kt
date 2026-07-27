@@ -13,6 +13,7 @@ import com.kixyu9527.kixyubook.core.database.LocalBackupRepository
 import com.kixyu9527.kixyubook.core.database.LocalFontRepository
 import com.kixyu9527.kixyubook.core.database.LocalReadingStatsRepository
 import com.kixyu9527.kixyubook.core.database.migration1To2
+import com.kixyu9527.kixyubook.core.database.migration2To3
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.datastore.DataStoreReaderSettingsRepository
@@ -31,7 +32,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): KixyuDatabase =
         Room.databaseBuilder(context, KixyuDatabase::class.java, "kixyu-books.db")
-            .addMigrations(migration1To2(context))
+            .addMigrations(migration1To2(context), migration2To3)
             .build()
 
     @Provides

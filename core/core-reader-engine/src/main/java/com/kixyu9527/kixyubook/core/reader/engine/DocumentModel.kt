@@ -30,6 +30,24 @@ data class ReaderChapter(
     val paragraphs: List<Paragraph>,
 )
 
+data class ReaderChapterHeading(val ordinal: String?, val name: String)
+
+fun splitReaderChapterHeading(rawTitle: String): ReaderChapterHeading {
+    val title = rawTitle.substringAfterLast('·').trim()
+    val match = CHAPTER_ORDINAL_PATTERN.matchEntire(title)
+        ?: return ReaderChapterHeading(ordinal = null, name = title)
+    val rawOrdinal = match.groupValues[1].trim()
+    val ordinal = if (rawOrdinal.startsWith('第')) {
+        rawOrdinal.replace(Regex("\\s+"), "")
+    } else {
+        rawOrdinal.replace(Regex("^(?i:chapter)\\s*"), "Chapter ")
+    }
+    return ReaderChapterHeading(
+        ordinal = ordinal,
+        name = match.groupValues[2].trim(),
+    )
+}
+
 fun ReaderChapter.contentParagraphs(): List<Paragraph> {
     val fullTitle = title.normalizedReaderHeading()
     val chapterTitle = title.substringAfterLast('·').normalizedReaderHeading()
@@ -40,6 +58,12 @@ fun ReaderChapter.contentParagraphs(): List<Paragraph> {
 }
 
 private fun String.normalizedReaderHeading(): String = trim().replace(Regex("[\\s　]+"), "").trim('：', ':', '-', '—')
+
+private val CHAPTER_ORDINAL_PATTERN = Regex(
+    "^(?:正文\\s+)?((?:第\\s*[\\p{N}〇零一二三四五六七八九十百千万两]+\\s*[章节回话集幕])|" +
+        "(?:(?i:chapter)\\s*[\\p{L}\\p{N}]+))" +
+        "\\s*(?:[：:、.．\\-—]\\s*)?(.*)$",
+)
 
 data class ReaderPosition(val chapterIndex: Int, val paragraphIndex: Int, val characterOffset: Int = 0)
 

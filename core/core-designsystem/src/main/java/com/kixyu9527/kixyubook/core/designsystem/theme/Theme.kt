@@ -110,7 +110,7 @@ fun KixyuBookTheme(
     val darkTheme = when (themeMode) {
         ReaderTheme.DAY -> false
         ReaderTheme.NIGHT -> true
-        ReaderTheme.SYSTEM, ReaderTheme.CUSTOM -> systemDark
+        ReaderTheme.SYSTEM -> systemDark
     }
     val context = LocalContext.current
     val colors = if (colorTheme == AppColorTheme.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

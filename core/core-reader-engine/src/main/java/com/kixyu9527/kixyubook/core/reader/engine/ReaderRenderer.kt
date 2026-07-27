@@ -65,11 +65,11 @@ fun ReaderScrollRenderer(
             start = spec.horizontalMarginDp.dp,
             end = spec.horizontalMarginDp.dp,
             top = (topInsetDp + 20f).dp,
-            bottom = (bottomInsetDp + 20f).dp,
+            bottom = (bottomInsetDp + 8f).dp,
         ),
     ) {
         item {
-            Text(chapter.title, color = palette.title, style = MaterialTheme.typography.displaySmall, fontFamily = family)
+            ReaderChapterOpeningTitle(chapter.title, palette, family)
             Spacer(Modifier.height(24.dp))
         }
         itemsIndexed(contentParagraphs, key = { _, paragraph -> paragraph.id }) { _, paragraph ->
@@ -105,20 +105,15 @@ fun ReaderPageRenderer(
                 detectTapGestures { onTapFraction(it.x / size.width.coerceAtLeast(1)) }
             }
             .padding(
-                horizontal = spec.horizontalMarginDp.dp,
-                vertical = ReaderPageMetrics.verticalPaddingDp.dp,
+                start = spec.horizontalMarginDp.dp,
+                top = ReaderPageMetrics.topPaddingDp.dp,
+                end = spec.horizontalMarginDp.dp,
+                bottom = ReaderPageMetrics.bottomPaddingDp.dp,
             ),
     ) {
         if (page.isChapterOpening) {
             Spacer(Modifier.height(ReaderPageMetrics.openingTopDp.dp))
-            Text(
-                page.chapterTitle,
-                color = palette.title,
-                style = MaterialTheme.typography.displaySmall,
-                fontFamily = family,
-                maxLines = 2,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            )
+            ReaderChapterOpeningTitle(page.chapterTitle, palette, family)
             Spacer(Modifier.height(ReaderPageMetrics.openingGapDp.dp))
         } else {
             Text(page.chapterTitle, color = palette.secondary, style = MaterialTheme.typography.labelLarge, maxLines = 1)
@@ -139,6 +134,44 @@ fun ReaderPageRenderer(
         }
         Spacer(Modifier.weight(1f))
         Spacer(Modifier.height(ReaderPageMetrics.footerHeightDp.dp))
+    }
+}
+
+@Composable
+private fun ReaderChapterOpeningTitle(
+    title: String,
+    palette: ReaderRenderPalette,
+    family: FontFamily,
+) {
+    val heading = remember(title) { splitReaderChapterHeading(title) }
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        heading.ordinal?.let { ordinal ->
+            Text(
+                ordinal,
+                color = palette.secondary,
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = family,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+            )
+            if (heading.name.isNotEmpty()) {
+                Spacer(Modifier.height(ReaderPageMetrics.openingOrdinalGapDp.dp))
+            }
+        }
+        if (heading.name.isNotEmpty()) {
+            Text(
+                heading.name,
+                color = palette.title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontFamily = family,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

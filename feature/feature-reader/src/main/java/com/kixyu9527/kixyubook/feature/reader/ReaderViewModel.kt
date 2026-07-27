@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.*
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
+import com.kixyu9527.kixyubook.core.reader.engine.ReaderPositionManager
 import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,7 @@ class ReaderViewModel @Inject constructor(
     private val sessionFinished = AtomicBoolean(false)
     private var sessionCharacters = 0L
     private var lastPosition = 0
+    private val positions = ReaderPositionManager()
 
     init {
         viewModelScope.launch {
@@ -82,28 +84,42 @@ class ReaderViewModel @Inject constructor(
         savePosition(lastPosition)
     }
 
-    fun savePosition(position: Int) {
+    fun savePosition(position: Int, chapterComplete: Boolean = false) {
         val state = _uiState.value
         val chapter = state.chapter ?: return
         val content = chapter.contentParagraphs()
-        if (content.isEmpty()) return
         val currentOffset = content.indexOfLast { it.index <= position }.coerceAtLeast(0)
         val previousOffset = content.indexOfLast { it.index <= lastPosition }.coerceAtLeast(0)
-        val safePosition = content[currentOffset].index
-        if (currentOffset > previousOffset) {
+        val safePosition = content.getOrNull(currentOffset)?.index ?: 0
+        if (content.isNotEmpty() && currentOffset > previousOffset) {
             sessionCharacters += content.subList(previousOffset, currentOffset).sumOf { it.text.length }.toLong()
         }
         lastPosition = safePosition
-        val chapterFraction = currentOffset.toFloat() / content.size.coerceAtLeast(1)
-        val total = (state.chapterIndex + chapterFraction) / state.chapters.size.coerceAtLeast(1)
-        viewModelScope.launch { books.saveProgress(ReadingProgress(bookUuid, chapter.id, safePosition, updatedTime = System.currentTimeMillis(), fraction = total.coerceIn(0f, 1f))) }
+        val total = positions.bookFraction(
+            chapterIndex = state.chapterIndex,
+            chapterCount = state.chapters.size,
+            paragraphOffset = currentOffset,
+            paragraphCount = content.size,
+            chapterComplete = chapterComplete,
+        )
+        viewModelScope.launch { books.saveProgress(ReadingProgress(bookUuid, chapter.id, safePosition, updatedTime = System.currentTimeMillis(), fraction = total)) }
     }
 
     fun saveTextEdit(paragraphIndex: Int, replacement: String) = viewModelScope.launch {
-        val chapter = _uiState.value.chapter ?: return@launch
-        books.saveTextPatch(bookUuid, chapter.id, paragraphIndex, replacement)
-        val refreshed = books.getChapter(bookUuid, _uiState.value.chapterIndex) ?: return@launch
-        _uiState.update { it.copy(chapter = refreshed.toReaderChapter()) }
+        val chapterIndex = _uiState.value.chapterIndex
+        books.updateTxtParagraph(bookUuid, chapterIndex, paragraphIndex, replacement)
+            .onSuccess {
+                val chapters = books.getChapters(bookUuid)
+                val safeChapterIndex = chapterIndex.coerceIn(0, chapters.lastIndex)
+                val refreshed = books.getChapter(bookUuid, safeChapterIndex) ?: return@onSuccess
+                _uiState.update {
+                    it.copy(
+                        chapters = chapters,
+                        chapter = refreshed.toReaderChapter(),
+                        chapterIndex = safeChapterIndex,
+                    )
+                }
+            }
     }
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { settingsRepository.update(transform) } }
