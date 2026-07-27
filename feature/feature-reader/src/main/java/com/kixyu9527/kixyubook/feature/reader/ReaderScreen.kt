@@ -203,7 +203,7 @@ private fun ReaderScreen(
                 )
             }
             ReaderPageControls(
-                info = pageInfo.takeIf { state.settings.showPageNumber },
+                info = pageInfo.takeIf { state.settings.showPageNumber && state.searchResults.isEmpty() },
                 showChapterActions = controls,
                 palette = palette,
                 hasPreviousChapter = state.chapterIndex > 0,
@@ -226,10 +226,9 @@ private fun ReaderScreen(
                 onSheet = { sheet = it },
             )
             SearchNavigator(
-                modifier = Modifier.align(Alignment.TopCenter),
+                modifier = Modifier.align(Alignment.BottomCenter),
                 state = state,
                 visible = state.searchResults.isNotEmpty() && sheet == null,
-                progress = backProgress,
                 onMove = moveSearchResult,
                 onClose = clearSearch,
             )
@@ -269,51 +268,53 @@ private fun ReaderScreen(
     editing?.let { (index, original) -> EditParagraphDialog(original, { editing = null }, { saveEdit(index, it); editing = null }) }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchNavigator(
     modifier: Modifier = Modifier,
     state: ReaderUiState,
     visible: Boolean,
-    progress: Float,
     onMove: (Int) -> Unit,
     onClose: () -> Unit,
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        modifier = modifier.windowInsetsPadding(WindowInsets.statusBars)
-            .padding(top = KixyuSpacing.small),
-        enter = fadeIn() + slideInVertically { -it / 2 },
-        exit = fadeOut() + slideOutVertically { -it / 2 },
-    ) {
-        Surface(
-            modifier = Modifier.predictivePopupTransform(progress)
-                .height(KixyuSize.readerControlButton)
-                .widthIn(max = 280.dp),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = KixyuSpacing.extraSmall,
+    if (visible) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBarsIgnoringVisibility)
+                .padding(bottom = KixyuSpacing.small, start = KixyuSpacing.large, end = KixyuSpacing.large),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Row(
-                Modifier.padding(start = KixyuSpacing.medium),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                modifier = Modifier
+                    .height(KixyuSize.readerControlButton)
+                    .widthIn(max = 280.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = KixyuSpacing.extraSmall,
             ) {
-                Text(
-                    "${state.searchQuery}  ${state.selectedSearchIndex + 1}/${state.searchResults.size}",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-                IconButton(
-                    onClick = { onMove(-1) },
-                    enabled = state.selectedSearchIndex > 0,
-                ) { Icon(Icons.Outlined.KeyboardArrowUp, "上一个结果") }
-                IconButton(
-                    onClick = { onMove(1) },
-                    enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
-                ) { Icon(Icons.Outlined.KeyboardArrowDown, "下一个结果") }
-                IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "退出搜索") }
+                Row(
+                    Modifier.padding(start = KixyuSpacing.medium),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${state.searchQuery}  ${state.selectedSearchIndex + 1}/${state.searchResults.size}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    IconButton(
+                        onClick = { onMove(-1) },
+                        enabled = state.selectedSearchIndex > 0,
+                    ) { Icon(Icons.Outlined.KeyboardArrowUp, "上一个结果") }
+                    IconButton(
+                        onClick = { onMove(1) },
+                        enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
+                    ) { Icon(Icons.Outlined.KeyboardArrowDown, "下一个结果") }
+                    IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "退出搜索") }
+                }
             }
         }
     }

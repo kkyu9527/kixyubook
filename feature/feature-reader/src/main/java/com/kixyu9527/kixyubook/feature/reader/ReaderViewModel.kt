@@ -74,7 +74,7 @@ class ReaderViewModel @Inject constructor(
         require(chapters.isNotEmpty()) { "书籍没有可阅读章节" }
         val progress = books.observeProgress(bookUuid).first()
         val index = progress?.chapterId?.let { id -> chapters.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
-        val content = books.getChapter(bookUuid, index) ?: error("章节读取失败")
+        val content = books.getChapter(bookUuid, chapters[index].index) ?: error("章节读取失败")
         lastPosition = progress?.position ?: 0
         _uiState.update {
             it.copy(
@@ -97,8 +97,11 @@ class ReaderViewModel @Inject constructor(
 
     private suspend fun loadChapter(index: Int, position: Int) {
         if (index == _uiState.value.chapterIndex && _uiState.value.chapter != null) return
-        _uiState.update { it.copy(loading = true) }
-        val content = books.getChapter(bookUuid, index) ?: return
+        val target = _uiState.value.chapters.getOrNull(index) ?: return
+        // Keep the current chapter rendered while the target is read. Removing the
+        // reader from composition here left a blank screen when a search jump was slow
+        // or its chapter index was not contiguous.
+        val content = books.getChapter(bookUuid, target.index) ?: return
         val readerChapter = content.toReaderChapter()
         lastPosition = if (position == Int.MAX_VALUE) readerChapter.contentParagraphs().lastOrNull()?.index ?: 0 else position
         _uiState.update {
@@ -115,7 +118,10 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun jumpToPosition(chapterIndex: Int, position: Int) = viewModelScope.launch {
-        val safeChapter = chapterIndex.coerceIn(0, _uiState.value.chapters.lastIndex)
+        val state = _uiState.value
+        val safeChapter = state.chapters.indexOfFirst { it.index == chapterIndex }
+            .takeIf { it >= 0 }
+            ?: chapterIndex.coerceIn(0, state.chapters.lastIndex)
         if (safeChapter == _uiState.value.chapterIndex && _uiState.value.chapter != null) {
             lastPosition = position.coerceAtLeast(0)
             _uiState.update {

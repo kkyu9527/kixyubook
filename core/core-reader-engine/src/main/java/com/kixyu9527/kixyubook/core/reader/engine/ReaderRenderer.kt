@@ -212,21 +212,22 @@ private fun ReaderBodyText(
     )
 }
 
-private fun String.highlighted(query: String, color: Color) = buildAnnotatedString {
+internal fun String.highlighted(query: String, color: Color) = buildAnnotatedString {
+    val source = this@highlighted
     if (query.isBlank()) {
-        append(this@highlighted)
+        append(source)
         return@buildAnnotatedString
     }
     var cursor = 0
-    while (cursor < length) {
-        val match = indexOf(query, cursor, ignoreCase = true)
+    while (cursor < source.length) {
+        val match = source.indexOf(query, cursor, ignoreCase = true)
         if (match < 0) {
-            append(substring(cursor))
+            append(source.substring(cursor))
             break
         }
-        append(substring(cursor, match))
+        append(source.substring(cursor, match))
         withStyle(SpanStyle(background = color.copy(alpha = .28f))) {
-            append(substring(match, match + query.length))
+            append(source.substring(match, match + query.length))
         }
         cursor = match + query.length
     }
