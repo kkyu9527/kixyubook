@@ -2,8 +2,6 @@ package com.kixyu9527.kixyubook.core.reader.engine
 
 import android.graphics.BitmapFactory
 import android.util.LruCache
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -68,33 +66,32 @@ internal fun ReaderEpubImage(
             }
         }
     }
-    Crossfade(loaded.value, animationSpec = tween(160), label = "epub-image") { bitmap ->
-        val imageModifier = modifier
-            .size(targetWidth, targetHeight)
-            .clip(MaterialTheme.shapes.medium)
-            .background(placeholderColor.copy(alpha = .08f))
-            .pointerInput(Unit) {
-                detectTapGestures { onTapFraction(it.x / size.width.coerceAtLeast(1)) }
-            }
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap,
-                contentDescription = altText.ifBlank { "书内插图" },
-                modifier = imageModifier,
-                contentScale = ContentScale.Fit,
+    val imageModifier = modifier
+        .size(targetWidth, targetHeight)
+        .clip(MaterialTheme.shapes.medium)
+        .background(placeholderColor.copy(alpha = .08f))
+        .pointerInput(Unit) {
+            detectTapGestures { onTapFraction(it.x / size.width.coerceAtLeast(1)) }
+        }
+    val bitmap = loaded.value
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = altText.ifBlank { "书内插图" },
+            modifier = imageModifier,
+            contentScale = ContentScale.Fit,
+        )
+    } else {
+        Box(imageModifier, contentAlignment = Alignment.Center) {
+            Text(
+                text = altText.ifBlank { "插图" },
+                color = placeholderColor,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.background(Color.Transparent),
             )
-        } else {
-            Box(imageModifier, contentAlignment = Alignment.Center) {
-                Text(
-                    text = altText.ifBlank { "插图" },
-                    color = placeholderColor,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.background(Color.Transparent),
-                )
-            }
         }
     }
 }

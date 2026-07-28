@@ -37,7 +37,12 @@ class LocalBookRepository @Inject constructor(
     private val dao: BookDao,
 ) : BookRepository {
     private val parsers = BookParserRegistry()
-    private val epubChapterCache = EpubChapterCache(File(context.cacheDir, "epub-chapters"))
+    // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
+    // reclamation. A partially evicted cache made otherwise identical directory jumps vary from
+    // instant to a full ZIP/XHTML parse. noBackupFilesDir persists it without bloating backups.
+    private val epubChapterCache = EpubChapterCache(
+        File(context.noBackupFilesDir, "epub-chapters").apply(File::mkdirs),
+    )
     private val chapterCacheLock = Any()
     private val chapterLoadMutex = Mutex()
     private val chapterCache = object : LinkedHashMap<ChapterCacheKey, ChapterContent>(

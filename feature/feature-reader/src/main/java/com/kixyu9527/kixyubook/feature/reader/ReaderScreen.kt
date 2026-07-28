@@ -51,6 +51,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
@@ -139,6 +140,7 @@ fun ReaderRoute(
         readerContentReady = readerContentReady,
         onExit = onExit,
         moveChapter = viewModel::moveChapter,
+        moveChapterFromPage = viewModel::moveChapterFromPage,
         jumpChapter = viewModel::jumpToChapter,
         jumpPosition = viewModel::jumpToPosition,
         savePosition = viewModel::savePosition,
@@ -163,6 +165,7 @@ private fun ReaderScreen(
     readerContentReady: Boolean,
     onExit: () -> Unit,
     moveChapter: (Int, Boolean) -> Unit,
+    moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     jumpChapter: (Int) -> Unit,
     jumpPosition: (Int, Int) -> Unit,
     savePosition: (Int, Boolean) -> Unit,
@@ -328,7 +331,7 @@ private fun ReaderScreen(
                     state = state,
                     palette = palette,
                     savePosition = savePosition,
-                    moveChapter = moveChapter,
+                    moveChapterFromPage = moveChapterFromPage,
                     middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
                     dismissControls = { controls = false; menu = false; toolsMenu = false },
                     volumeTurns = volumeTurns,
@@ -411,20 +414,22 @@ private fun ReaderContent(
     state: ReaderUiState,
     palette: ReaderRenderPalette,
     savePosition: (Int, Boolean) -> Unit,
-    moveChapter: (Int, Boolean) -> Unit,
+    moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
     volumeTurns: SharedFlow<Int>,
 ) {
     val chapter = state.chapter ?: return
     val density = LocalDensity.current
+    val paginationCoordinator = rememberReaderPaginationCoordinator()
+    val paginationMeasurer = rememberTextMeasurer(cacheSize = READER_TEXT_MEASURE_CACHE_SIZE)
     val topInsetDp = with(density) { WindowInsets.safeDrawing.getTop(this).toDp().value }
     val bottomInsetDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp().value }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val safeViewportHeight = (maxHeight.value - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
         val spec = ReaderLayoutSpec(maxWidth.value, safeViewportHeight, state.settings.fontSize, state.settings.lineHeight, state.settings.letterSpacing, state.settings.margin)
-        key(chapter.id, state.settings.pageMode, spec, state.navigationVersion) {
-            if (state.settings.pageMode == PageMode.SCROLL) {
+        if (state.settings.pageMode == PageMode.SCROLL) {
+            key(chapter.id, spec, state.navigationVersion) {
                 val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
                 val restoredItem = contentParagraphs.indexOfFirst { it.index >= state.restorePosition }
                     .let { if (it < 0) contentParagraphs.lastIndex else it }
@@ -456,8 +461,8 @@ private fun ReaderContent(
                     volumeTurns.collect { direction ->
                         dismissControls()
                         when {
-                            direction < 0 && !listState.canScrollBackward -> moveChapter(-1, true)
-                            direction > 0 && !listState.canScrollForward -> moveChapter(1, false)
+                            direction < 0 && !listState.canScrollBackward -> moveChapterFromPage(state.chapterIndex, -1, true)
+                            direction > 0 && !listState.canScrollForward -> moveChapterFromPage(state.chapterIndex, 1, false)
                             else -> {
                                 val viewport = listState.layoutInfo.run { viewportEndOffset - viewportStartOffset }
                                 listState.animateScrollBy(viewport * direction.toFloat())
@@ -468,22 +473,23 @@ private fun ReaderContent(
                 ReaderScrollRenderer(
                     chapter, listState, spec, palette, state.fontPath,
                     { fraction -> if (fraction in .33f..67f) middleTap() else dismissControls() },
-                    { dismissControls(); moveChapter(-1, true) }, { dismissControls(); moveChapter(1, false) },
+                    { dismissControls(); moveChapterFromPage(state.chapterIndex, -1, true) },
+                    { dismissControls(); moveChapterFromPage(state.chapterIndex, 1, false) },
                     state.chapterIndex > 0, state.chapterIndex < state.chapters.lastIndex,
                     topInsetDp, bottomInsetDp,
                     epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
                     modifier = Modifier.fillMaxSize(),
                     highlightQuery = state.searchQuery,
                 )
-            } else {
-                Box(
-                    Modifier.fillMaxSize().padding(top = topInsetDp.dp, bottom = bottomInsetDp.dp),
-                ) {
-                    PagedReader(
-                        state, chapter, spec, palette, savePosition, moveChapter,
-                        middleTap, dismissControls, volumeTurns,
-                    )
-                }
+            }
+        } else {
+            Box(
+                Modifier.fillMaxSize().padding(top = topInsetDp.dp, bottom = bottomInsetDp.dp),
+            ) {
+                PagedReader(
+                    state, chapter, spec, palette, savePosition, moveChapterFromPage,
+                    middleTap, dismissControls, volumeTurns, paginationCoordinator, paginationMeasurer,
+                )
             }
         }
     }
@@ -496,37 +502,44 @@ private fun PagedReader(
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
     savePosition: (Int, Boolean) -> Unit,
-    moveChapter: (Int, Boolean) -> Unit,
+    moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
     volumeTurns: SharedFlow<Int>,
+    paginationCoordinator: ReaderPaginationCoordinator,
+    paginationMeasurer: androidx.compose.ui.text.TextMeasurer,
 ) {
-    val previousChapter = state.prefetchedChapters[state.chapterIndex - 1]
-    val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
-    val previousPages = previousChapter?.let {
-        rememberMeasuredReaderPages(
-            chapter = it,
-            spec = spec,
-            fontPath = state.fontPath,
-            showRegularChapterTitle = state.settings.showChapterTitle,
-        )
-    }.orEmpty()
-    val nextPages = nextChapter?.let {
-        rememberMeasuredReaderPages(
-            chapter = it,
-            spec = spec,
-            fontPath = state.fontPath,
-            showRegularChapterTitle = state.settings.showChapterTitle,
-        )
-    }.orEmpty()
+    var retainedPage by remember(
+        spec,
+        state.fontPath,
+        state.settings.showChapterTitle,
+    ) { mutableStateOf<RetainedReaderPage?>(null) }
+    // Always finish the requested chapter first. EPUB pagination includes rich spans and image
+    // blocks, so starting three layouts together made the visible chapter compete with prefetch.
     val pages = rememberMeasuredReaderPages(
         chapter = chapter,
         spec = spec,
         fontPath = state.fontPath,
         showRegularChapterTitle = state.settings.showChapterTitle,
+        coordinator = paginationCoordinator,
+        measurer = paginationMeasurer,
     )
     if (pages.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        retainedPage?.let { retained ->
+            ReaderPageRenderer(
+                page = retained.page,
+                spec = spec,
+                palette = palette,
+                fontPath = state.fontPath,
+                onTapFraction = { fraction ->
+                    if (fraction in .33f..67f) middleTap() else dismissControls()
+                },
+                epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
+                showRegularChapterTitle = state.settings.showChapterTitle,
+                highlightQuery = state.searchQuery,
+                pageNumber = retained.pageNumber,
+            )
+        } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 text = chapter.title.substringAfterLast('·').trim(),
                 color = palette.title,
@@ -538,78 +551,136 @@ private fun PagedReader(
         }
         return
     }
+    val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
+    val nextPages = nextChapter?.let {
+        rememberMeasuredReaderPages(
+            chapter = it,
+            spec = spec,
+            fontPath = state.fontPath,
+            showRegularChapterTitle = state.settings.showChapterTitle,
+            coordinator = paginationCoordinator,
+            measurer = paginationMeasurer,
+            prefetch = true,
+        )
+    }.orEmpty()
+    val previousChapter = state.prefetchedChapters[state.chapterIndex - 1]
+    val previousPages = previousChapter?.let {
+        rememberMeasuredReaderPages(
+            chapter = it,
+            spec = spec,
+            fontPath = state.fontPath,
+            showRegularChapterTitle = state.settings.showChapterTitle,
+            coordinator = paginationCoordinator,
+            measurer = paginationMeasurer,
+            prefetch = true,
+        )
+    }.orEmpty()
     val positions = remember { ReaderPositionManager() }
     val hasPrevious = state.chapterIndex > 0; val hasNext = state.chapterIndex < state.chapters.lastIndex
-    val leading = if (hasPrevious) 1 else 0
-    val virtualCount = pages.size + leading + if (hasNext) 1 else 0
+    // Freeze virtual cover availability for this chapter. Letting it change after the Pager
+    // was created shifted every real page by one and caused directory jumps to move backward.
+    val hasPreviousCover = remember(chapter.id) { hasPrevious && previousPages.isNotEmpty() }
+    val hasNextCover = remember(chapter.id) { hasNext && nextPages.isNotEmpty() }
+    val leading = if (hasPreviousCover) 1 else 0
+    val virtualCount = pages.size + leading + if (hasNextCover) 1 else 0
     val initial = positions.pageFor(pages, state.restorePosition) + leading
-    val pager = rememberPagerState(initialPage = initial.coerceIn(0, virtualCount - 1), pageCount = { virtualCount })
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(pager, chapter.id) {
-        snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { page ->
-            when {
-                hasPrevious && page == 0 -> moveChapter(-1, true)
-                hasNext && page == virtualCount - 1 -> moveChapter(1, false)
-                else -> {
-                    val actualPage = page - leading
-                    savePosition(
-                        pages[actualPage].startParagraph,
-                        actualPage == pages.lastIndex,
-                    )
+    key(chapter.id, state.navigationVersion) {
+        val pager = rememberPagerState(
+            initialPage = initial.coerceIn(0, virtualCount - 1),
+            pageCount = { virtualCount },
+        )
+        val scope = rememberCoroutineScope()
+        LaunchedEffect(pager, chapter.id) {
+            snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { page ->
+                when {
+                    hasPreviousCover && page == 0 -> moveChapterFromPage(state.chapterIndex, -1, true)
+                    hasNextCover && page == virtualCount - 1 -> moveChapterFromPage(state.chapterIndex, 1, false)
+                    else -> {
+                        val actualPage = page - leading
+                        pages.getOrNull(actualPage)?.let { settledPage ->
+                            retainedPage = RetainedReaderPage(
+                                page = settledPage,
+                                pageNumber = readerPageNumber(state, actualPage, pages.size),
+                            )
+                            savePosition(settledPage.startParagraph, actualPage == pages.lastIndex)
+                        }
+                    }
                 }
             }
         }
-    }
-    LaunchedEffect(pager) {
-        snapshotFlow { pager.isScrollInProgress }.distinctUntilChanged().collect { scrolling ->
-            if (scrolling) dismissControls()
+        LaunchedEffect(pager) {
+            snapshotFlow { pager.isScrollInProgress }.distinctUntilChanged().collect { scrolling ->
+                if (scrolling) dismissControls()
+            }
         }
-    }
-    LaunchedEffect(pager, volumeTurns) {
-        volumeTurns.collect { direction ->
-            dismissControls()
-            val target = (pager.currentPage + direction).coerceIn(0, virtualCount - 1)
-            if (target != pager.currentPage) pager.animateScrollToPage(target)
-        }
-    }
-    HorizontalPager(pager, Modifier.fillMaxSize()) { virtualPage ->
-        val actual = virtualPage - leading
-        val renderedPage = when {
-            actual in pages.indices -> pages[actual]
-            actual < 0 -> previousPages.lastOrNull()
-            else -> nextPages.firstOrNull()
-        }
-        if (renderedPage == null) {
-            Box(Modifier.fillMaxSize().background(palette.background))
-        } else ReaderPageRenderer(
-            renderedPage, spec, palette, state.fontPath,
-            { fraction -> scope.launch {
+        LaunchedEffect(pager, volumeTurns) {
+            volumeTurns.collect { direction ->
+                dismissControls()
+                val target = (pager.currentPage + direction).coerceIn(0, virtualCount - 1)
                 when {
-                    fraction < .33f && pager.currentPage > 0 -> {
-                        dismissControls(); pager.animateScrollToPage(pager.currentPage - 1)
-                    }
-                    fraction > .67f && pager.currentPage < virtualCount - 1 -> {
-                        dismissControls(); pager.animateScrollToPage(pager.currentPage + 1)
-                    }
-                    else -> middleTap()
+                    target != pager.currentPage -> pager.animateScrollToPage(target)
+                    direction < 0 && hasPrevious -> moveChapterFromPage(state.chapterIndex, -1, true)
+                    direction > 0 && hasNext -> moveChapterFromPage(state.chapterIndex, 1, false)
                 }
-            } },
-            epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
-            showRegularChapterTitle = state.settings.showChapterTitle,
-            highlightQuery = state.searchQuery,
-            pageNumber = if (state.settings.showPageNumber && state.searchResults.isEmpty()) {
-                when {
-                    actual in pages.indices -> "${actual + 1}/${pages.size}"
-                    actual < 0 && previousPages.isNotEmpty() -> "${previousPages.size}/${previousPages.size}"
-                    actual >= pages.size && nextPages.isNotEmpty() -> "1/${nextPages.size}"
-                    else -> null
-                }
-            } else {
-                null
-            },
-        )
+            }
+        }
+        val initialActual = (initial - leading).coerceIn(pages.indices)
+        LaunchedEffect(chapter.id, initialActual, pages) {
+            retainedPage = RetainedReaderPage(
+                page = pages[initialActual],
+                pageNumber = readerPageNumber(state, initialActual, pages.size),
+            )
+        }
+        HorizontalPager(pager, Modifier.fillMaxSize()) { virtualPage ->
+            val actual = virtualPage - leading
+            val renderedPage = when {
+                actual in pages.indices -> pages[actual]
+                actual < 0 -> previousPages.last()
+                else -> nextPages.first()
+            }
+            ReaderPageRenderer(
+                renderedPage, spec, palette, state.fontPath,
+                { fraction -> scope.launch {
+                    when {
+                        fraction < .33f && pager.currentPage > 0 -> {
+                            dismissControls(); pager.animateScrollToPage(pager.currentPage - 1)
+                        }
+                        fraction < .33f && hasPrevious -> {
+                            dismissControls(); moveChapterFromPage(state.chapterIndex, -1, true)
+                        }
+                        fraction > .67f && pager.currentPage < virtualCount - 1 -> {
+                            dismissControls(); pager.animateScrollToPage(pager.currentPage + 1)
+                        }
+                        fraction > .67f && hasNext -> {
+                            dismissControls(); moveChapterFromPage(state.chapterIndex, 1, false)
+                        }
+                        else -> middleTap()
+                    }
+                } },
+                epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
+                showRegularChapterTitle = state.settings.showChapterTitle,
+                highlightQuery = state.searchQuery,
+                pageNumber = when {
+                    actual in pages.indices -> readerPageNumber(state, actual, pages.size)
+                    actual < 0 -> readerPageNumber(state, previousPages.lastIndex, previousPages.size)
+                    else -> readerPageNumber(state, 0, nextPages.size)
+                },
+            )
+        }
     }
 }
+
+private data class RetainedReaderPage(
+    val page: ReaderPage,
+    val pageNumber: String?,
+)
+
+private fun readerPageNumber(state: ReaderUiState, pageIndex: Int, pageCount: Int): String? =
+    if (state.settings.showPageNumber && state.searchResults.isEmpty() && pageCount > 0) {
+        "${pageIndex + 1}/$pageCount"
+    } else {
+        null
+    }
 
 @Composable
 private fun ReaderControls(
@@ -1320,3 +1391,6 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 private const val READER_ENTRY_CONTENT_DELAY_MILLIS = 120L
+// Pagination inputs are almost always unique remainders. Caching their TextLayoutResult objects
+// retains large native buffers without producing useful hits, especially for malformed EPUB text.
+private const val READER_TEXT_MEASURE_CACHE_SIZE = 0

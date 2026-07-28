@@ -11,12 +11,22 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 class EpubBookParser : BookParser {
     override val format = BookFormat.EPUB
+    private val packageIndexCache = object : LinkedHashMap<PackageCacheKey, PackageDocument>(
+        PACKAGE_INDEX_CACHE_SIZE,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PackageCacheKey, PackageDocument>): Boolean =
+            size > PACKAGE_INDEX_CACHE_SIZE
+    }
 
     override fun readMetadata(file: File, fallbackTitle: String): DocumentMetadata = ZipFile(file).use { zip ->
-        val pkg = readPackage(zip)
+        val pkg = readPackage(file, zip)
         val coverItem = pkg.manifest.values.firstOrNull { "cover-image" in it.properties }
             ?: pkg.coverId?.let(pkg.manifest::get)
         val cover = coverItem?.let { item ->
@@ -35,20 +45,21 @@ class EpubBookParser : BookParser {
 
     override suspend fun readChapters(file: File, emit: suspend (DocumentChapter) -> Unit) {
         ZipFile(file).use { zip ->
-            val pkg = readPackage(zip)
+            val pkg = readPackage(file, zip)
             pkg.spine.indices.forEach { index ->
+                currentCoroutineContext().ensureActive()
                 readSpineChapter(zip, pkg, index)?.let { emit(it) }
             }
         }
     }
 
     /** Reads one spine item so large EPUBs remain chapter-lazy in the reader. */
-    fun readChapter(
+    suspend fun readChapter(
         file: File,
         chapterIndex: Int,
         expectedTitle: String? = null,
     ): DocumentChapter? = ZipFile(file).use { zip ->
-        val pkg = readPackage(zip)
+        val pkg = readPackage(file, zip)
         val nearby = buildList {
             add(chapterIndex)
             for (distance in 1..MAX_SPINE_LOOKAROUND) {
@@ -58,6 +69,7 @@ class EpubBookParser : BookParser {
         }.filter { it in pkg.spine.indices }.distinct()
         var fallback: DocumentChapter? = null
         for (spineIndex in nearby) {
+            currentCoroutineContext().ensureActive()
             val chapter = readSpineChapter(zip, pkg, spineIndex) ?: continue
             if (fallback == null) fallback = chapter
             if (expectedTitle.isNullOrBlank() ||
@@ -95,7 +107,23 @@ class EpubBookParser : BookParser {
         return DocumentChapter(title, paragraphs, images, styledParagraphs.map(StyledText::spans))
     }
 
-    private fun readPackage(zip: ZipFile): PackageDocument {
+    private fun readPackage(file: File, zip: ZipFile): PackageDocument {
+        val key = PackageCacheKey(
+            path = runCatching { file.canonicalPath }.getOrElse { file.absolutePath },
+            size = file.length(),
+            modifiedAt = file.lastModified(),
+        )
+        synchronized(packageIndexCache) {
+            packageIndexCache[key]?.let { return it }
+        }
+        val parsed = parsePackage(zip)
+        synchronized(packageIndexCache) {
+            packageIndexCache[key] = parsed
+        }
+        return parsed
+    }
+
+    private fun parsePackage(zip: ZipFile): PackageDocument {
         val container = parseXml(zip, "META-INF/container.xml")
         val root = container.getElementsByTagNameNS("*", "rootfile").item(0) as? Element
             ?: error("EPUB 缺少 container rootfile")
@@ -528,6 +556,12 @@ class EpubBookParser : BookParser {
         val spine: List<String>,
     )
 
+    private data class PackageCacheKey(
+        val path: String,
+        val size: Long,
+        val modifiedAt: Long,
+    )
+
     private data class ManifestItem(
         val path: String,
         val mediaType: String,
@@ -616,6 +650,7 @@ class EpubBookParser : BookParser {
     }
 
     private companion object {
+        const val PACKAGE_INDEX_CACHE_SIZE = 4
         const val MAX_COVER_BYTES = 8 * 1024 * 1024
         const val MAX_CSS_BYTES = 1024 * 1024
         const val MAX_CSS_IMPORT_DEPTH = 4

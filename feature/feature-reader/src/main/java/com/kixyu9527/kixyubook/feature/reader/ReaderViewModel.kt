@@ -12,6 +12,7 @@ import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
@@ -57,6 +58,8 @@ class ReaderViewModel @Inject constructor(
     private var lastPosition = 0
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, Deferred<ReaderChapter?>>()
+    private var chapterNavigationJob: Job? = null
+    private var pendingChapterIndex: Int? = null
 
     init {
         viewModelScope.launch {
@@ -103,11 +106,46 @@ class ReaderViewModel @Inject constructor(
         prefetchNearbyChapters(index, chapters)
     }.onFailure { error -> _uiState.update { it.copy(loading = false, error = error.message) } }
 
-    fun moveChapter(delta: Int, openAtEnd: Boolean = false) = viewModelScope.launch {
-        loadChapter((_uiState.value.chapterIndex + delta).coerceIn(0, _uiState.value.chapters.lastIndex), if (openAtEnd) Int.MAX_VALUE else 0)
+    fun moveChapter(delta: Int, openAtEnd: Boolean = false) {
+        val state = _uiState.value
+        val baseIndex = pendingChapterIndex ?: state.chapterIndex
+        navigateToChapter(
+            index = (baseIndex + delta).coerceIn(0, state.chapters.lastIndex),
+            position = if (openAtEnd) Int.MAX_VALUE else 0,
+        )
     }
 
-    fun jumpToChapter(index: Int) = viewModelScope.launch { loadChapter(index.coerceIn(0, _uiState.value.chapters.lastIndex), 0) }
+    /** Rejects callbacks emitted by a pager that is being replaced by a direct jump. */
+    fun moveChapterFromPage(sourceChapterIndex: Int, delta: Int, openAtEnd: Boolean = false) {
+        val state = _uiState.value
+        if (pendingChapterIndex != null || state.chapterIndex != sourceChapterIndex) return
+        moveChapter(delta, openAtEnd)
+    }
+
+    fun jumpToChapter(index: Int) {
+        navigateToChapter(
+            index = index.coerceIn(0, _uiState.value.chapters.lastIndex),
+            position = 0,
+        )
+    }
+
+    private fun navigateToChapter(index: Int, position: Int) {
+        val state = _uiState.value
+        if (index == state.chapterIndex && state.chapter != null) {
+            pendingChapterIndex = null
+            return
+        }
+        pendingChapterIndex = index
+        chapterNavigationJob?.cancel()
+        cancelPendingChapterLoadsExcept(index)
+        chapterNavigationJob = viewModelScope.launch {
+            try {
+                loadChapter(index, position)
+            } finally {
+                if (pendingChapterIndex == index) pendingChapterIndex = null
+            }
+        }
+    }
 
     private suspend fun loadChapter(index: Int, position: Int) {
         val currentState = _uiState.value
@@ -124,7 +162,7 @@ class ReaderViewModel @Inject constructor(
             it.copy(
                 chapter = readerChapter,
                 prefetchedChapters = (it.prefetchedChapters + (index to readerChapter))
-                    .filterKeys { chapterIndex -> abs(chapterIndex - index) <= 1 },
+                    .filterKeys { chapterIndex -> abs(chapterIndex - index) <= RENDER_PREFETCH_RADIUS },
                 chapterIndex = index,
                 restorePosition = lastPosition,
                 currentPosition = lastPosition,
@@ -145,23 +183,30 @@ class ReaderViewModel @Inject constructor(
         }
 
     private fun prefetchNearbyChapters(index: Int, chapters: List<Chapter>) {
-        chapterLoads.keys.removeAll { chapterIndex ->
-            abs(chapterIndex - index) > CHAPTER_PREFETCH_RADIUS
+        val loads = chapterLoads.iterator()
+        while (loads.hasNext()) {
+            val (chapterIndex, load) = loads.next()
+            if (abs(chapterIndex - index) > CHAPTER_PREFETCH_RADIUS) {
+                if (!load.isCompleted) load.cancel()
+                loads.remove()
+            }
         }
         (1..CHAPTER_PREFETCH_RADIUS)
-            .flatMap { distance -> listOf(index - distance, index + distance) }
+            // Most reading proceeds forward, so warm the next chapter before the previous one
+            // at every distance while still retaining a symmetric ten-chapter window.
+            .flatMap { distance -> listOf(index + distance, index - distance) }
             .filter { it in chapters.indices }
             .forEach { nearbyIndex ->
                 // Start every load immediately, ordered nearest-first. The
                 // repository serializes source reads and keeps the decoded
-                // chapters in its LRU; only the two render-adjacent chapters
-                // enter Compose state to avoid twenty unnecessary recomposes.
+                // chapters in its LRU; only the closest render window enters Compose state.
+                // Two chapters on either side let rapid EPUB turns reuse completed layout.
                 val load = chapterLoad(nearbyIndex, chapters)
-                if (abs(nearbyIndex - index) == 1) {
+                if (abs(nearbyIndex - index) <= RENDER_PREFETCH_RADIUS) {
                     viewModelScope.launch {
                         val chapter = load.await() ?: return@launch
                         _uiState.update { state ->
-                            if (abs(state.chapterIndex - nearbyIndex) > 1) state else state.copy(
+                            if (abs(state.chapterIndex - nearbyIndex) > RENDER_PREFETCH_RADIUS) state else state.copy(
                                 prefetchedChapters = state.prefetchedChapters + (nearbyIndex to chapter),
                             )
                         }
@@ -170,23 +215,43 @@ class ReaderViewModel @Inject constructor(
             }
     }
 
-    fun jumpToPosition(chapterIndex: Int, position: Int) = viewModelScope.launch {
+    /**
+     * Directory and search jumps are foreground work. Cancel queued speculative reads so a
+     * distant chapter never waits behind the previous chapter's twenty-item prefetch window.
+     * A load for the requested chapter is retained when it was already prefetched.
+     */
+    private fun cancelPendingChapterLoadsExcept(targetIndex: Int) {
+        val loads = chapterLoads.iterator()
+        while (loads.hasNext()) {
+            val (chapterIndex, load) = loads.next()
+            if (chapterIndex != targetIndex && !load.isCompleted) {
+                load.cancel()
+                loads.remove()
+            }
+        }
+    }
+
+    fun jumpToPosition(chapterIndex: Int, position: Int) {
         val state = _uiState.value
         val safeChapter = state.chapters.indexOfFirst { it.index == chapterIndex }
             .takeIf { it >= 0 }
             ?: chapterIndex.coerceIn(0, state.chapters.lastIndex)
-        if (safeChapter == _uiState.value.chapterIndex && _uiState.value.chapter != null) {
+        if (safeChapter != state.chapterIndex || state.chapter == null) {
+            navigateToChapter(safeChapter, position.coerceAtLeast(0))
+            return
+        }
+        chapterNavigationJob?.cancel()
+        pendingChapterIndex = null
+        chapterNavigationJob = viewModelScope.launch {
             lastPosition = position.coerceAtLeast(0)
-            _uiState.update {
-                it.copy(
+            _uiState.update { current ->
+                current.copy(
                     restorePosition = lastPosition,
                     currentPosition = lastPosition,
-                    navigationVersion = it.navigationVersion + 1,
+                    navigationVersion = current.navigationVersion + 1,
                 )
             }
             savePosition(lastPosition)
-        } else {
-            loadChapter(safeChapter, position.coerceAtLeast(0))
         }
     }
 
@@ -298,3 +363,4 @@ class ReaderViewModel @Inject constructor(
 private fun ChapterContent.toReaderChapter() = ReaderChapter(chapter.id, chapter.bookUuid, chapter.title, chapter.index, paragraphs)
 
 private const val CHAPTER_PREFETCH_RADIUS = 10
+private const val RENDER_PREFETCH_RADIUS = 2
