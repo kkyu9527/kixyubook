@@ -44,11 +44,47 @@ class EpubBookParser : BookParser {
     }
 
     override suspend fun readChapters(file: File, emit: suspend (DocumentChapter) -> Unit) {
+        readIndexedChapters(file) { _, chapter -> emit(chapter) }
+    }
+
+    /**
+     * Reads the publisher-provided navigation document without parsing every XHTML body.
+     * The returned source index remains stable and is used for subsequent lazy chapter reads.
+     */
+    fun readChapterOutlines(file: File): List<DocumentChapterOutline> = ZipFile(file).use { zip ->
+        val pkg = readPackage(file, zip)
+        val navigationTitles = readNavigationTitles(zip, pkg)
+        val candidates = pkg.spine.mapIndexedNotNull { sourceIndex, id ->
+            val item = pkg.manifest[id] ?: return@mapIndexedNotNull null
+            DocumentChapterOutline(
+                sourceIndex = sourceIndex,
+                title = navigationTitles[item.path.normalizedArchivePath()]
+                    ?: item.path.fallbackChapterTitle(sourceIndex),
+            )
+        }
+        val navigated = candidates.filter { outline ->
+            val item = pkg.manifest[pkg.spine[outline.sourceIndex]] ?: return@filter false
+            item.path.normalizedArchivePath() in navigationTitles
+        }
+        // Prefer the official TOC when it describes a meaningful part of the spine. This omits
+        // publisher-only cover/copyright containers while retaining a safe fallback for EPUBs
+        // with missing or incomplete navigation documents.
+        if (navigated.size >= 2 && navigated.size * 3 >= candidates.size) navigated else candidates
+    }
+
+    /** Parses selected spine entries in one ZipFile session for background search indexing. */
+    suspend fun readIndexedChapters(
+        file: File,
+        sourceIndices: Set<Int>? = null,
+        emit: suspend (Int, DocumentChapter) -> Unit,
+    ) {
         ZipFile(file).use { zip ->
             val pkg = readPackage(file, zip)
             pkg.spine.indices.forEach { index ->
                 currentCoroutineContext().ensureActive()
-                readSpineChapter(zip, pkg, index)?.let { emit(it) }
+                if (sourceIndices == null || index in sourceIndices) {
+                    readSpineChapter(zip, pkg, index)?.let { emit(index, it) }
+                }
             }
         }
     }
@@ -60,8 +96,11 @@ class EpubBookParser : BookParser {
         expectedTitle: String? = null,
     ): DocumentChapter? = ZipFile(file).use { zip ->
         val pkg = readPackage(file, zip)
+        // A chapter imported by the current indexer stores the source spine index directly.
+        // NAV labels and XHTML headings often use different wording, so title mismatch must not
+        // trigger twelve unnecessary XHTML parses when the requested spine entry is readable.
+        readSpineChapter(zip, pkg, chapterIndex)?.let { return@use it }
         val nearby = buildList {
-            add(chapterIndex)
             for (distance in 1..MAX_SPINE_LOOKAROUND) {
                 add(chapterIndex + distance)
                 add(chapterIndex - distance)
@@ -159,6 +198,46 @@ class EpubBookParser : BookParser {
             manifest,
             spine,
         )
+    }
+
+    private fun readNavigationTitles(zip: ZipFile, pkg: PackageDocument): Map<String, String> = buildMap {
+        val navigationItems = pkg.manifest.values.filter { item ->
+            "nav" in item.properties || item.mediaType.equals(NCX_MEDIA_TYPE, ignoreCase = true)
+        }
+        navigationItems.forEach { item ->
+            val document = runCatching { parseXml(zip, item.path) }.getOrNull() ?: return@forEach
+            if (item.mediaType.equals(NCX_MEDIA_TYPE, ignoreCase = true)) {
+                val points = document.getElementsByTagNameNS("*", "navPoint")
+                for (index in 0 until points.length) {
+                    val point = points.item(index) as? Element ?: continue
+                    val source = (point.getElementsByTagNameNS("*", "content").item(0) as? Element)
+                        ?.getAttribute("src").orEmpty()
+                    val title = point.getElementsByTagNameNS("*", "navLabel").item(0)
+                        ?.textContent?.normalizedNavigationTitle().orEmpty()
+                    putNavigationTitle(item.path, source, title)
+                }
+            } else {
+                val anchors = document.getElementsByTagNameNS("*", "a")
+                for (index in 0 until anchors.length) {
+                    val anchor = anchors.item(index) as? Element ?: continue
+                    putNavigationTitle(
+                        item.path,
+                        anchor.getAttribute("href"),
+                        anchor.textContent.normalizedNavigationTitle(),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun MutableMap<String, String>.putNavigationTitle(
+        navigationPath: String,
+        reference: String,
+        title: String,
+    ) {
+        if (reference.isBlank() || title.length !in 1..MAX_NAVIGATION_TITLE_LENGTH) return
+        val resolved = resolveArchivePath(navigationPath, reference).normalizedArchivePath()
+        putIfAbsent(resolved, title)
     }
 
     private fun parseXml(zip: ZipFile, path: String) = newDocumentBuilder().parse(
@@ -819,6 +898,8 @@ private val CSS_COLOR = Regex("color\\((?:srgb|display-p3)\\s+(.*)\\)", RegexOpt
 private val CSS_HUE_COLOR = Regex("(hsl|hsla|hwb|lch|oklch)\\((.*)\\)", RegexOption.IGNORE_CASE)
 
 private const val MAX_IMAGE_HEADER_BYTES = 512 * 1024
+private const val MAX_NAVIGATION_TITLE_LENGTH = 160
+private const val NCX_MEDIA_TYPE = "application/x-dtbncx+xml"
 private val JPEG_START_OF_FRAME = setOf(0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF)
 
 private fun resolveArchivePath(baseFile: String, rawReference: String): String {
@@ -839,6 +920,18 @@ private fun resolveArchivePath(baseFile: String, rawReference: String): String {
         }
     }
     return segments.joinToString("/")
+}
+
+private fun String.normalizedArchivePath(): String = substringBefore('#').substringBefore('?')
+    .replace('\\', '/')
+    .trimStart('/')
+    .lowercase()
+
+private fun String.normalizedNavigationTitle(): String = replace(Regex("[\\s　]+"), " ").trim()
+
+private fun String.fallbackChapterTitle(sourceIndex: Int): String {
+    val stem = substringAfterLast('/').substringBeforeLast('.').replace('_', ' ').replace('-', ' ').trim()
+    return stem.takeIf { it.length in 2..80 && it.any(Char::isLetter) } ?: "第 ${sourceIndex + 1} 章"
 }
 
 private fun ZipFile.findEntry(path: String): ZipEntry? = getEntry(path) ?: entries().asSequence()

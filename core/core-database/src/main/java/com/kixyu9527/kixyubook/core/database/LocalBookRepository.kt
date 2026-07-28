@@ -9,23 +9,35 @@ import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
+import com.kixyu9527.kixyubook.core.reader.engine.BookParser
 import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapter
+import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapterOutline
 import com.kixyu9527.kixyubook.core.reader.engine.EpubBookParser
 import com.kixyu9527.kixyubook.core.reader.engine.TxtBookParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.security.DigestInputStream
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -45,6 +57,11 @@ class LocalBookRepository @Inject constructor(
     )
     private val chapterCacheLock = Any()
     private val chapterLoadMutex = Mutex()
+    private val importRegistrationMutex = Mutex()
+    private val importIndexSemaphore = Semaphore(IMPORT_INDEX_CONCURRENCY)
+    private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val importIndexJobs = ConcurrentHashMap<String, Job>()
+    private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
     private val chapterCache = object : LinkedHashMap<ChapterCacheKey, ChapterContent>(
         CHAPTER_CACHE_SIZE,
         0.75f,
@@ -60,8 +77,23 @@ class LocalBookRepository @Inject constructor(
             .sortedWith(compareByDescending<LibraryBook> { it.progress?.updatedTime ?: 0L }.thenByDescending { it.book.createdTime })
     }
 
+    override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
+
     override suspend fun importDocuments(uriStrings: List<String>): ImportSummary = withContext(Dispatchers.IO) {
-        var imported = 0
+        val registration = importRegistrationMutex.withLock {
+            registerDocuments(uriStrings)
+        }
+        registration.imports.forEach(::enqueueBackgroundIndex)
+        ImportSummary(registration.imports.size, registration.duplicateCount, registration.failures)
+    }
+
+    /**
+     * Registers every selected file before any expensive body parsing starts. Room observers can
+     * therefore show the complete selection in the library immediately instead of waiting for the
+     * preceding book's full-text index.
+     */
+    private suspend fun registerDocuments(uriStrings: List<String>): ImportRegistration {
+        val imports = mutableListOf<RegisteredImport>()
         var duplicates = 0
         val failures = mutableListOf<String>()
         uriStrings.distinct().forEach { rawUri ->
@@ -79,7 +111,8 @@ class LocalBookRepository @Inject constructor(
                     digest.digest().joinToString("") { "%02x".format(it) }
                 } ?: error("无法读取文件")
                 if (dao.findUuidByHash(hash) != null) {
-                    duplicates++; temp.delete(); return@forEach
+                    duplicates++
+                    return@forEach
                 }
                 val format = detectFormat(displayName, temp)
                 val parser = parsers.parserFor(format)
@@ -87,41 +120,74 @@ class LocalBookRepository @Inject constructor(
                 val identity = metadata.identityHint?.let { runCatching { UUID.fromString(it).toString() }.getOrNull() }
                 val bookUuid = identity?.takeUnless { dao.bookExists(it) } ?: UUID.randomUUID().toString()
                 if (identity != null && dao.bookExists(identity)) {
-                    duplicates++; temp.delete(); return@forEach
+                    duplicates++
+                    return@forEach
                 }
                 val extension = if (format == BookFormat.EPUB) "epub" else "txt"
                 val stored = File(context.filesDir, "books/$bookUuid.$extension").also { it.parentFile?.mkdirs() }
                 temp.copyTo(stored, overwrite = true)
                 val coverPath = metadata.coverBytes?.let { bytes ->
-                    File(context.filesDir, "covers/$bookUuid.${metadata.coverExtension}").also { it.parentFile?.mkdirs(); it.writeBytes(bytes) }.absolutePath
+                    File(context.filesDir, "covers/$bookUuid.${metadata.coverExtension}").also {
+                        it.parentFile?.mkdirs()
+                        it.writeBytes(bytes)
+                    }.absolutePath
                 }
                 dao.insertBook(
                     BookEntity(bookUuid, metadata.title, metadata.author, metadata.description, coverPath, format.name, rawUri, stored.absolutePath, System.currentTimeMillis(), hash, "未分类"),
                 )
                 insertedUuid = bookUuid
-                var chapterIndex = 0
-                parser.readChapters(stored) { chapter ->
-                    val currentChapterIndex = chapterIndex++
-                    val chapterId = dao.insertChapter(
-                        ChapterEntity(bookUuid = bookUuid, title = chapter.title, chapterIndex = currentChapterIndex),
-                    )
-                    dao.insertParagraphsChunked(chapterId, chapter.paragraphs)
-                    if (format == BookFormat.EPUB) {
-                        epubChapterCache.write(bookUuid, hash, currentChapterIndex, chapter)
+                val outlines = if (format == BookFormat.EPUB) {
+                    registerEpubDirectory(bookUuid, stored, parser as EpubBookParser)
+                        .also { if (it.isEmpty()) error("未找到可阅读章节") }
+                } else {
+                    emptyList()
+                }
+                imports += RegisteredImport(bookUuid, displayName, hash, format, stored, parser, outlines)
+            } catch (error: CancellationException) {
+                insertedUuid?.let { removeIncompleteImport(it) }
+                throw error
+            } catch (error: Exception) {
+                insertedUuid?.let { removeIncompleteImport(it) }
+                failures += "$displayName：${error.message ?: "导入失败"}"
+            } finally {
+                temp.delete()
+            }
+        }
+        return ImportRegistration(imports, duplicates, failures)
+    }
+
+    private fun enqueueBackgroundIndex(book: RegisteredImport) {
+        val job = importScope.launch(start = CoroutineStart.LAZY) {
+            importIndexSemaphore.withPermit {
+                try {
+                    if (book.format == BookFormat.EPUB) {
+                        indexEpubChapters(
+                            bookUuid = book.bookUuid,
+                            contentHash = book.contentHash,
+                            source = book.source,
+                            parser = book.parser as EpubBookParser,
+                            outlines = book.outlines,
+                        )
+                    } else if (importStreamingChapters(book.bookUuid, book.source, book.parser) == 0) {
+                        error("未找到可阅读章节")
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (book.format == BookFormat.TXT) {
+                        removeIncompleteImport(book.bookUuid)
+                        importEvents.emit("${book.displayName}：${error.message ?: "导入失败"}")
+                    } else {
+                        // EPUB navigation and lazy chapter reading remain usable even if the
+                        // optional full-text search index fails midway.
+                        importEvents.emit("${book.displayName}：全文索引未完成，仍可正常阅读")
                     }
                 }
-                if (chapterIndex == 0) error("未找到可阅读章节")
-                imported++
-            } catch (error: Exception) {
-                insertedUuid?.let { uuid ->
-                    dao.getBook(uuid)?.storagePath?.let(::File)?.delete()
-                    epubChapterCache.clearBook(uuid)
-                    dao.deleteBook(uuid)
-                }
-                failures += "$displayName：${error.message ?: "导入失败"}"
-            } finally { temp.delete() }
+            }
         }
-        ImportSummary(imported, duplicates, failures)
+        importIndexJobs.put(book.bookUuid, job)?.cancel()
+        job.invokeOnCompletion { importIndexJobs.remove(book.bookUuid, job) }
+        job.start()
     }
 
     private fun detectFormat(name: String, file: File): BookFormat {
@@ -140,6 +206,7 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun deleteBooks(bookUuids: Set<String>): Unit = withContext(Dispatchers.IO) {
         if (bookUuids.isEmpty()) return@withContext
+        bookUuids.forEach { bookUuid -> importIndexJobs.remove(bookUuid)?.cancel() }
         val books = dao.getBooks(bookUuids)
         database.withTransaction { dao.deleteBooks(bookUuids) }
         synchronized(chapterCacheLock) {
@@ -154,6 +221,8 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun getBook(bookUuid: String) = withContext(Dispatchers.IO) { dao.getBook(bookUuid)?.toModel() }
     override suspend fun getChapters(bookUuid: String) = withContext(Dispatchers.IO) { dao.getChapters(bookUuid).map { it.toModel() } }
+    override fun observeChapters(bookUuid: String): Flow<List<Chapter>> =
+        dao.observeChapters(bookUuid).map { rows -> rows.map(ChapterEntity::toModel) }
 
     override suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent? = withContext(Dispatchers.IO) {
         val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
@@ -321,11 +390,130 @@ class LocalBookRepository @Inject constructor(
         val escaped = query.trim().replace("~", "~~").replace("%", "~%").replace("_", "~_")
         if (escaped.isBlank()) emptyList() else dao.searchBook(bookUuid, escaped).map { it.toModel() }
     }
+
+    private suspend fun importStreamingChapters(
+        bookUuid: String,
+        source: File,
+        parser: BookParser,
+    ): Int {
+        var chapterIndex = 0
+        val pending = ArrayList<DocumentChapter>(IMPORT_CHAPTER_BATCH_SIZE)
+
+        suspend fun flush() {
+            if (pending.isEmpty()) return
+            val batch = pending.toList()
+            pending.clear()
+            database.withTransaction {
+                val startIndex = chapterIndex
+                val chapterIds = dao.insertChapters(batch.mapIndexed { offset, chapter ->
+                    ChapterEntity(bookUuid = bookUuid, title = chapter.title, chapterIndex = startIndex + offset)
+                })
+                batch.zip(chapterIds).forEach { (chapter, chapterId) ->
+                    dao.insertParagraphsChunked(chapterId, chapter.paragraphs)
+                }
+                chapterIndex += batch.size
+            }
+        }
+
+        parser.readChapters(source) { chapter ->
+            pending += chapter
+            if (pending.size >= IMPORT_CHAPTER_BATCH_SIZE) flush()
+        }
+        flush()
+        return chapterIndex
+    }
+
+    private suspend fun removeIncompleteImport(bookUuid: String) {
+        dao.getBook(bookUuid)?.let { book ->
+            File(book.storagePath).delete()
+            book.coverPath?.let(::File)?.delete()
+        }
+        epubChapterCache.clearBook(bookUuid)
+        dao.deleteBook(bookUuid)
+    }
+
+    private suspend fun registerEpubDirectory(
+        bookUuid: String,
+        source: File,
+        parser: EpubBookParser,
+    ): List<DocumentChapterOutline> {
+        val outlines = parser.readChapterOutlines(source)
+        if (outlines.isEmpty()) return emptyList()
+        database.withTransaction {
+            dao.insertChapters(
+                outlines.map { outline ->
+                    ChapterEntity(
+                        bookUuid = bookUuid,
+                        title = outline.title,
+                        chapterIndex = outline.sourceIndex,
+                    )
+                },
+            )
+        }
+        return outlines
+    }
+
+    private suspend fun indexEpubChapters(
+        bookUuid: String,
+        contentHash: String,
+        source: File,
+        parser: EpubBookParser,
+        outlines: List<DocumentChapterOutline>,
+    ) {
+        val warmSourceIndices = outlines.take(EPUB_IMPORT_WARM_CHAPTERS)
+            .mapTo(hashSetOf(), DocumentChapterOutline::sourceIndex)
+        val indexedSourceIndices = outlines.mapTo(hashSetOf(), DocumentChapterOutline::sourceIndex)
+        val chapterIds = dao.getChapters(bookUuid).associate { it.chapterIndex to it.id }
+
+        val pending = ArrayList<IndexedImportedChapter>(IMPORT_CHAPTER_BATCH_SIZE)
+        suspend fun flush() {
+            if (pending.isEmpty()) return
+            val batch = pending.toList()
+            pending.clear()
+            database.withTransaction {
+                batch.forEach { indexed ->
+                    val chapterId = chapterIds[indexed.sourceIndex] ?: return@forEach
+                    dao.updateChapterTitle(chapterId, indexed.chapter.title)
+                    dao.insertParagraphsChunked(chapterId, indexed.chapter.paragraphs)
+                }
+            }
+            // Thousands of one-file cache writes made import dramatically slower. Only warm the
+            // opening chapters; every other rich chapter is cached when the reader actually needs it.
+            batch.filter { it.sourceIndex in warmSourceIndices }
+                .forEach { indexed ->
+                    epubChapterCache.write(bookUuid, contentHash, indexed.sourceIndex, indexed.chapter)
+                }
+        }
+
+        parser.readIndexedChapters(source, indexedSourceIndices) { sourceIndex, chapter ->
+            pending += IndexedImportedChapter(sourceIndex, chapter)
+            if (pending.size >= IMPORT_CHAPTER_BATCH_SIZE) flush()
+        }
+        flush()
+    }
 }
 
 private data class ChapterCacheKey(val bookUuid: String, val chapterIndex: Int)
+private data class IndexedImportedChapter(val sourceIndex: Int, val chapter: DocumentChapter)
+private data class ImportRegistration(
+    val imports: List<RegisteredImport>,
+    val duplicateCount: Int,
+    val failures: List<String>,
+)
+private data class RegisteredImport(
+    val bookUuid: String,
+    val displayName: String,
+    val contentHash: String,
+    val format: BookFormat,
+    val source: File,
+    val parser: BookParser,
+    val outlines: List<DocumentChapterOutline>,
+)
 
 private const val CHAPTER_CACHE_SIZE = 32
+private const val IMPORT_CHAPTER_BATCH_SIZE = 32
+private const val EPUB_IMPORT_WARM_CHAPTERS = 3
+private const val IMPORT_INDEX_CONCURRENCY = 2
 
 private fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category)
 private fun ChapterEntity.toModel() = Chapter(id, bookUuid, title, chapterIndex)

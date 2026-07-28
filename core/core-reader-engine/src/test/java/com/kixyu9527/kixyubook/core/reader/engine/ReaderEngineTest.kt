@@ -232,6 +232,30 @@ class ReaderEngineTest {
         assertEquals(listOf("正文第一段。", "正文第二段。"), chapters.single().paragraphs)
     }
 
+    @Test fun epubChapterOutlinesUseNavigationWithoutParsingBodies() {
+        val epub = folder.newFile("navigation.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>目录测试</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="text/opaque-1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="text/opaque-2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>""")
+            entry("OPS/nav.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><a href="text/opaque-1.xhtml#start">第一章 开始</a><a href="text/opaque-2.xhtml">第二章 继续</a></nav></body></html>""")
+            // Invalid bodies prove that creating the directory only touches OPF/NAV data.
+            entry("OPS/text/opaque-1.xhtml", "not xml")
+            entry("OPS/text/opaque-2.xhtml", "not xml")
+        }
+
+        assertEquals(
+            listOf(
+                DocumentChapterOutline(0, "第一章 开始"),
+                DocumentChapterOutline(1, "第二章 继续"),
+            ),
+            EpubBookParser().readChapterOutlines(epub),
+        )
+    }
+
     @Test fun epubParserNormalizesSemanticInlineStylesAndExternalCss() = runBlocking {
         val epub = folder.newFile("styled.epub")
         ZipOutputStream(epub.outputStream()).use { zip ->

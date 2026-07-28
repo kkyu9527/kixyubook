@@ -12,6 +12,7 @@ import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -38,6 +39,8 @@ data class ReaderUiState(
     val selectedSearchIndex: Int = -1,
     val navigationVersion: Int = 0,
     val loading: Boolean = true,
+    val chapterLoading: Boolean = false,
+    val pendingChapterTitle: String? = null,
     val error: String? = null,
 )
 
@@ -52,9 +55,9 @@ class ReaderViewModel @Inject constructor(
     private val bookUuid: String = checkNotNull(savedStateHandle["bookUuid"])
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState = _uiState.asStateFlow()
-    private val sessionStart = SystemClock.elapsedRealtime()
     private val sessionFinished = AtomicBoolean(false)
     private var sessionCharacters = 0L
+    private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, Deferred<ReaderChapter?>>()
@@ -71,6 +74,16 @@ class ReaderViewModel @Inject constructor(
         }
         viewModelScope.launch { loadInitial() }
         viewModelScope.launch {
+            books.observeChapters(bookUuid).collect { chapters ->
+                if (chapters.isEmpty()) return@collect
+                _uiState.update { current ->
+                    if (current.chapters == chapters) current else current.copy(chapters = chapters)
+                }
+                val current = _uiState.value
+                if (current.chapter != null) prefetchNearbyChapters(current.chapterIndex, chapters)
+            }
+        }
+        viewModelScope.launch {
             books.observeBookmarks(bookUuid).collect { bookmarks ->
                 _uiState.update { it.copy(bookmarks = bookmarks) }
             }
@@ -80,7 +93,7 @@ class ReaderViewModel @Inject constructor(
     private suspend fun loadInitial() = runCatching {
         val initialData = coroutineScope {
             val book = async { books.getBook(bookUuid) }
-            val chapters = async { books.getChapters(bookUuid) }
+            val chapters = async { books.observeChapters(bookUuid).first { it.isNotEmpty() } }
             val progress = async { books.observeProgress(bookUuid).first() }
             Triple(book.await(), chapters.await(), progress.await())
         }
@@ -132,17 +145,39 @@ class ReaderViewModel @Inject constructor(
     private fun navigateToChapter(index: Int, position: Int) {
         val state = _uiState.value
         if (index == state.chapterIndex && state.chapter != null) {
+            chapterNavigationJob?.cancel()
             pendingChapterIndex = null
+            _uiState.update { it.copy(chapterLoading = false, pendingChapterTitle = null) }
             return
         }
         pendingChapterIndex = index
+        _uiState.update {
+            it.copy(
+                chapterLoading = true,
+                pendingChapterTitle = state.chapters.getOrNull(index)?.title,
+                error = null,
+            )
+        }
         chapterNavigationJob?.cancel()
         cancelPendingChapterLoadsExcept(index)
         chapterNavigationJob = viewModelScope.launch {
+            var chapterLoaded = false
             try {
                 loadChapter(index, position)
+                chapterLoaded = true
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (pendingChapterIndex == index) {
+                    _uiState.update { it.copy(error = error.message ?: "章节读取失败") }
+                }
             } finally {
-                if (pendingChapterIndex == index) pendingChapterIndex = null
+                if (pendingChapterIndex == index) {
+                    pendingChapterIndex = null
+                    if (!chapterLoaded) {
+                        _uiState.update { it.copy(chapterLoading = false, pendingChapterTitle = null) }
+                    }
+                }
             }
         }
     }
@@ -353,9 +388,23 @@ class ReaderViewModel @Inject constructor(
         _uiState.update { it.copy(searchQuery = "", searchResults = emptyList(), selectedSearchIndex = -1) }
     }
 
+    /** Counts only time during which this reader destination is resumed with readable content. */
+    fun setReadingActive(active: Boolean) {
+        if (sessionFinished.get()) return
+        sessionTimer.setActive(active)
+    }
+
+    fun chapterRendered(navigationVersion: Int) {
+        _uiState.update { current ->
+            if (current.navigationVersion != navigationVersion || !current.chapterLoading) current else {
+                current.copy(chapterLoading = false, pendingChapterTitle = null)
+            }
+        }
+    }
+
     fun finishSession() {
         if (!sessionFinished.compareAndSet(false, true)) return
-        val duration = SystemClock.elapsedRealtime() - sessionStart
+        val duration = sessionTimer.finish()
         viewModelScope.launch(Dispatchers.IO) { stats.recordSession(bookUuid, duration, sessionCharacters) }
     }
 }

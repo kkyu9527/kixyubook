@@ -18,7 +18,6 @@ import javax.inject.Inject
 data class LibraryUiState(
     val books: List<LibraryBook> = emptyList(),
     val query: String = "",
-    val importing: Boolean = false,
     val category: String = "全部",
     val categories: List<String> = listOf("全部"),
 )
@@ -28,19 +27,23 @@ class LibraryViewModel @Inject constructor(
     private val repository: BookRepository,
 ) : ViewModel() {
     private val query = MutableStateFlow("")
-    private val importing = MutableStateFlow(false)
     private val category = MutableStateFlow("全部")
     private val messages = Channel<String>(Channel.BUFFERED)
     val messageEvents = messages.receiveAsFlow()
 
-    val uiState = combine(repository.observeLibrary(), query, importing, category) { books, search, isImporting, selectedCategory ->
+    init {
+        viewModelScope.launch {
+            repository.observeImportEvents().collect { message -> messages.send(message) }
+        }
+    }
+
+    val uiState = combine(repository.observeLibrary(), query, category) { books, search, selectedCategory ->
         LibraryUiState(
             books = books.filter {
                 (selectedCategory == "全部" || it.book.category == selectedCategory) &&
                     (search.isBlank() || it.book.title.contains(search, true) || it.book.author.contains(search, true))
             },
             query = search,
-            importing = isImporting,
             category = selectedCategory,
             categories = listOf("全部") + books.map { it.book.category }.distinct().sorted(),
         )
@@ -51,7 +54,6 @@ class LibraryViewModel @Inject constructor(
 
     fun import(uriStrings: List<String>) = viewModelScope.launch {
         if (uriStrings.isEmpty()) return@launch
-        importing.value = true
         val result = try {
             repository.importDocuments(uriStrings)
         } catch (error: CancellationException) {
@@ -59,8 +61,6 @@ class LibraryViewModel @Inject constructor(
         } catch (error: Exception) {
             messages.send(error.message ?: "导入失败，请重新选择文件")
             null
-        } finally {
-            importing.value = false
         }
         if (result == null) return@launch
         val success = buildString {

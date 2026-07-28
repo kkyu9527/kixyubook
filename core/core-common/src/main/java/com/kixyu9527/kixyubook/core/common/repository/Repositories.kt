@@ -5,11 +5,13 @@ import kotlinx.coroutines.flow.Flow
 
 interface BookRepository {
     fun observeLibrary(): Flow<List<LibraryBook>>
+    fun observeImportEvents(): Flow<String>
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
     suspend fun deleteBook(bookUuid: String)
     suspend fun deleteBooks(bookUuids: Set<String>)
     suspend fun getBook(bookUuid: String): Book?
     suspend fun getChapters(bookUuid: String): List<Chapter>
+    fun observeChapters(bookUuid: String): Flow<List<Chapter>>
     suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent?
     suspend fun prepareReader(bookUuid: String)
     fun observeProgress(bookUuid: String): Flow<ReadingProgress?>

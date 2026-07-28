@@ -168,9 +168,9 @@ private fun LibraryScreen(
                                 alignEnd = true,
                                 items = listOf(
                                     KixyuPopupMenuItem(
-                                        label = if (state.importing) "正在导入" else "导入书籍",
+                                        label = "导入书籍",
                                         icon = Icons.Outlined.Add,
-                                        enabled = !state.importing,
+                                        enabled = true,
                                     ) {
                                         optionsExpanded = false
                                         onImport()

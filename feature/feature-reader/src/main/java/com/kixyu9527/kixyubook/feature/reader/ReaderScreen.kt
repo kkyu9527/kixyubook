@@ -126,6 +126,10 @@ fun ReaderRoute(
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var readerResumed by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
     var readerContentReady by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(READER_ENTRY_CONTENT_DELAY_MILLIS)
@@ -134,7 +138,26 @@ fun ReaderRoute(
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.importFont(it.toString()) }
     }
-    DisposableEffect(viewModel) { onDispose(viewModel::finishSession) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> readerResumed = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> readerResumed = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(readerResumed, state.loading, state.chapter) {
+        viewModel.setReadingActive(readerResumed && !state.loading && state.chapter != null)
+    }
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.setReadingActive(false)
+            viewModel.finishSession()
+        }
+    }
     ReaderScreen(
         state = state,
         readerContentReady = readerContentReady,
@@ -151,6 +174,7 @@ fun ReaderRoute(
         selectSearchResult = viewModel::selectSearchResult,
         moveSearchResult = viewModel::moveSearchResult,
         clearSearch = viewModel::clearSearch,
+        chapterRendered = viewModel::chapterRendered,
         addFont = {
             fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
         },
@@ -176,6 +200,7 @@ private fun ReaderScreen(
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
     clearSearch: () -> Unit,
+    chapterRendered: (Int) -> Unit,
     addFont: () -> Unit,
     deleteFont: (UserFont) -> Unit,
 ) {
@@ -194,9 +219,18 @@ private fun ReaderScreen(
     val scope = rememberCoroutineScope()
     var exitRequested by remember { mutableStateOf(false) }
     var retainedSheet by remember { mutableStateOf<ReaderSheet?>(null) }
+    var showChapterLoading by remember { mutableStateOf(false) }
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val palette = readerPalette(state.settings, systemDark)
+    LaunchedEffect(state.chapterLoading) {
+        if (state.chapterLoading) {
+            delay(CHAPTER_LOADING_INDICATOR_DELAY_MILLIS)
+            showChapterLoading = true
+        } else {
+            showChapterLoading = false
+        }
+    }
     LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
     DisposableEffect(state.settings.showStatusBar, palette.background, view) {
         val window = context.findActivity()?.window
@@ -335,7 +369,32 @@ private fun ReaderScreen(
                     middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
                     dismissControls = { controls = false; menu = false; toolsMenu = false },
                     volumeTurns = volumeTurns,
+                    chapterRendered = chapterRendered,
                 )
+            }
+            ReaderControlVisibility(
+                visible = showChapterLoading,
+                modifier = Modifier.align(Alignment.Center),
+            ) {
+                KixyuPopupSurface(shadowElevation = KixyuSpacing.extraSmall) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.small),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = palette.accent,
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            text = state.pendingChapterTitle?.let { "正在加载 · $it" } ?: "正在加载章节",
+                            color = palette.body,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
             ReaderControls(
                 visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
@@ -418,6 +477,7 @@ private fun ReaderContent(
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
     volumeTurns: SharedFlow<Int>,
+    chapterRendered: (Int) -> Unit,
 ) {
     val chapter = state.chapter ?: return
     val density = LocalDensity.current
@@ -481,6 +541,10 @@ private fun ReaderContent(
                     modifier = Modifier.fillMaxSize(),
                     highlightQuery = state.searchQuery,
                 )
+                LaunchedEffect(chapter.id, state.navigationVersion) {
+                    withFrameNanos { }
+                    chapterRendered(state.navigationVersion)
+                }
             }
         } else {
             Box(
@@ -489,6 +553,7 @@ private fun ReaderContent(
                 PagedReader(
                     state, chapter, spec, palette, savePosition, moveChapterFromPage,
                     middleTap, dismissControls, volumeTurns, paginationCoordinator, paginationMeasurer,
+                    chapterRendered,
                 )
             }
         }
@@ -508,6 +573,7 @@ private fun PagedReader(
     volumeTurns: SharedFlow<Int>,
     paginationCoordinator: ReaderPaginationCoordinator,
     paginationMeasurer: androidx.compose.ui.text.TextMeasurer,
+    chapterRendered: (Int) -> Unit,
 ) {
     var retainedPage by remember(
         spec,
@@ -551,6 +617,10 @@ private fun PagedReader(
         }
         return
     }
+    LaunchedEffect(chapter.id, state.navigationVersion, pages) {
+        withFrameNanos { }
+        chapterRendered(state.navigationVersion)
+    }
     val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
     val nextPages = nextChapter?.let {
         rememberMeasuredReaderPages(
@@ -577,10 +647,12 @@ private fun PagedReader(
     }.orEmpty()
     val positions = remember { ReaderPositionManager() }
     val hasPrevious = state.chapterIndex > 0; val hasNext = state.chapterIndex < state.chapters.lastIndex
-    // Freeze virtual cover availability for this chapter. Letting it change after the Pager
-    // was created shifted every real page by one and caused directory jumps to move backward.
-    val hasPreviousCover = remember(chapter.id) { hasPrevious && previousPages.isNotEmpty() }
-    val hasNextCover = remember(chapter.id) { hasNext && nextPages.isNotEmpty() }
+    // Boundary pages must depend only on the chapter list. Neighbour pagination commonly finishes
+    // after this pager is composed; tying a boundary to that asynchronous result permanently
+    // disabled swipe-to-next/previous while tap navigation still worked. Keep the page count stable
+    // and temporarily render the current edge page until the prefetched neighbour is ready.
+    val hasPreviousCover = hasPrevious
+    val hasNextCover = hasNext
     val leading = if (hasPreviousCover) 1 else 0
     val virtualCount = pages.size + leading + if (hasNextCover) 1 else 0
     val initial = positions.pageFor(pages, state.restorePosition) + leading
@@ -635,8 +707,8 @@ private fun PagedReader(
             val actual = virtualPage - leading
             val renderedPage = when {
                 actual in pages.indices -> pages[actual]
-                actual < 0 -> previousPages.last()
-                else -> nextPages.first()
+                actual < 0 -> previousPages.lastOrNull() ?: pages.first()
+                else -> nextPages.firstOrNull() ?: pages.last()
             }
             ReaderPageRenderer(
                 renderedPage, spec, palette, state.fontPath,
@@ -662,8 +734,10 @@ private fun PagedReader(
                 highlightQuery = state.searchQuery,
                 pageNumber = when {
                     actual in pages.indices -> readerPageNumber(state, actual, pages.size)
-                    actual < 0 -> readerPageNumber(state, previousPages.lastIndex, previousPages.size)
-                    else -> readerPageNumber(state, 0, nextPages.size)
+                    actual < 0 && previousPages.isNotEmpty() -> readerPageNumber(state, previousPages.lastIndex, previousPages.size)
+                    actual >= pages.size && nextPages.isNotEmpty() -> readerPageNumber(state, 0, nextPages.size)
+                    actual < 0 -> readerPageNumber(state, 0, pages.size)
+                    else -> readerPageNumber(state, pages.lastIndex, pages.size)
                 },
             )
         }
@@ -1394,3 +1468,4 @@ private const val READER_ENTRY_CONTENT_DELAY_MILLIS = 120L
 // Pagination inputs are almost always unique remainders. Caching their TextLayoutResult objects
 // retains large native buffers without producing useful hits, especially for malformed EPUB text.
 private const val READER_TEXT_MEASURE_CACHE_SIZE = 0
+private const val CHAPTER_LOADING_INDICATOR_DELAY_MILLIS = 180L

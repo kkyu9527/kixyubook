@@ -30,6 +30,12 @@ data class DocumentChapter(
     val paragraphSpans: List<List<ReaderTextSpan>> = emptyList(),
 )
 
+/** Lightweight table-of-contents entry whose index points to the source document spine. */
+data class DocumentChapterOutline(
+    val sourceIndex: Int,
+    val title: String,
+)
+
 data class ReaderChapter(
     val id: Long,
     val bookUuid: String,
