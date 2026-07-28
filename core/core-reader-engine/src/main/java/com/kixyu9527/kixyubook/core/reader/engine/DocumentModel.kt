@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.reader.engine
 
 import com.kixyu9527.kixyubook.core.common.model.Paragraph
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
+import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 
 data class DocumentMetadata(
     val identityHint: String? = null,
@@ -26,6 +27,7 @@ data class DocumentChapter(
     val title: String,
     val paragraphs: List<String>,
     val images: List<DocumentImage> = emptyList(),
+    val paragraphSpans: List<List<ReaderTextSpan>> = emptyList(),
 )
 
 data class ReaderChapter(
@@ -144,6 +146,7 @@ data class DocumentBlock(
     val intrinsicHeight: Int = 0,
     val imageWidthDp: Float = 0f,
     val imageHeightDp: Float = 0f,
+    val spans: List<ReaderTextSpan> = emptyList(),
 )
 
 data class ReaderPage(

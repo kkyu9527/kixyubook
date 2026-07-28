@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook.feature.home
 
+import android.os.Looper
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -36,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +57,23 @@ import java.util.concurrent.TimeUnit
 @Composable
 fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val recentBookUuid = state.recent.firstOrNull()?.book?.uuid
+    DisposableEffect(recentBookUuid, viewModel) {
+        if (recentBookUuid == null) {
+            onDispose { }
+        } else {
+            // Queue only the lightweight dispatch after Compose, Room and the
+            // first page have drained the main queue. The actual read stays on
+            // a single background worker and cannot compete on the UI thread.
+            val queue = Looper.myQueue()
+            val idleHandler = android.os.MessageQueue.IdleHandler {
+                viewModel.prewarmReader(recentBookUuid)
+                false
+            }
+            queue.addIdleHandler(idleHandler)
+            onDispose { queue.removeIdleHandler(idleHandler) }
+        }
+    }
     KixyuPageScaffold(
         title = "今天读什么？",
         modifier = Modifier.fillMaxSize(),

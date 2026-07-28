@@ -18,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
@@ -35,6 +37,17 @@ class LocalBookRepository @Inject constructor(
     private val dao: BookDao,
 ) : BookRepository {
     private val parsers = BookParserRegistry()
+    private val epubChapterCache = EpubChapterCache(File(context.cacheDir, "epub-chapters"))
+    private val chapterCacheLock = Any()
+    private val chapterLoadMutex = Mutex()
+    private val chapterCache = object : LinkedHashMap<ChapterCacheKey, ChapterContent>(
+        CHAPTER_CACHE_SIZE,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ChapterCacheKey, ChapterContent>) =
+            size > CHAPTER_CACHE_SIZE
+    }
 
     override fun observeLibrary(): Flow<List<LibraryBook>> = combine(dao.observeBooks(), dao.observeAllProgress()) { books, progresses ->
         val byBook = progresses.associateBy { it.bookUuid }
@@ -83,13 +96,23 @@ class LocalBookRepository @Inject constructor(
                 insertedUuid = bookUuid
                 var chapterIndex = 0
                 parser.readChapters(stored) { chapter ->
-                    val chapterId = dao.insertChapter(ChapterEntity(bookUuid = bookUuid, title = chapter.title, chapterIndex = chapterIndex++))
+                    val currentChapterIndex = chapterIndex++
+                    val chapterId = dao.insertChapter(
+                        ChapterEntity(bookUuid = bookUuid, title = chapter.title, chapterIndex = currentChapterIndex),
+                    )
                     dao.insertParagraphsChunked(chapterId, chapter.paragraphs)
+                    if (format == BookFormat.EPUB) {
+                        epubChapterCache.write(bookUuid, hash, currentChapterIndex, chapter)
+                    }
                 }
                 if (chapterIndex == 0) error("未找到可阅读章节")
                 imported++
             } catch (error: Exception) {
-                insertedUuid?.let { uuid -> dao.getBook(uuid)?.storagePath?.let(::File)?.delete(); dao.deleteBook(uuid) }
+                insertedUuid?.let { uuid ->
+                    dao.getBook(uuid)?.storagePath?.let(::File)?.delete()
+                    epubChapterCache.clearBook(uuid)
+                    dao.deleteBook(uuid)
+                }
                 failures += "$displayName：${error.message ?: "导入失败"}"
             } finally { temp.delete() }
         }
@@ -114,7 +137,11 @@ class LocalBookRepository @Inject constructor(
         if (bookUuids.isEmpty()) return@withContext
         val books = dao.getBooks(bookUuids)
         database.withTransaction { dao.deleteBooks(bookUuids) }
+        synchronized(chapterCacheLock) {
+            chapterCache.keys.removeAll { it.bookUuid in bookUuids }
+        }
         books.forEach { book ->
+            epubChapterCache.clearBook(book.uuid)
             File(book.storagePath).delete()
             book.coverPath?.let(::File)?.delete()
         }
@@ -124,23 +151,44 @@ class LocalBookRepository @Inject constructor(
     override suspend fun getChapters(bookUuid: String) = withContext(Dispatchers.IO) { dao.getChapters(bookUuid).map { it.toModel() } }
 
     override suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent? = withContext(Dispatchers.IO) {
-        val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withContext null
-        val storedParagraphs = dao.getParagraphs(chapter.id)
-        val book = dao.getBook(bookUuid)
-        val paragraphs = if (book?.format == BookFormat.EPUB.name) {
-            val parsed = runCatching {
-                (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
-                    .readChapter(File(book.storagePath), chapterIndex, chapter.title)
-            }.getOrNull()
-            parsed?.toReaderParagraphs(chapter.id, storedParagraphs) ?: storedParagraphs.map { paragraph ->
-                Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+        val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
+        synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let { return@withContext it }
+        chapterLoadMutex.withLock {
+            synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let { return@withLock it }
+            val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
+            val storedParagraphs = dao.getParagraphs(chapter.id)
+            val book = dao.getBook(bookUuid)
+            val paragraphs = if (book?.format == BookFormat.EPUB.name) {
+                val parsed = epubChapterCache.read(bookUuid, book.contentHash, chapterIndex)
+                    ?: runCatching {
+                        (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
+                            .readChapter(File(book.storagePath), chapterIndex, chapter.title)
+                    }.getOrNull()?.also { parsedChapter ->
+                        epubChapterCache.write(bookUuid, book.contentHash, chapterIndex, parsedChapter)
+                    }
+                parsed?.toReaderParagraphs(chapter.id, storedParagraphs) ?: storedParagraphs.map { paragraph ->
+                    Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+                }
+            } else {
+                storedParagraphs.map { paragraph ->
+                    Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+                }
             }
-        } else {
-            storedParagraphs.map { paragraph ->
-                Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+            ChapterContent(chapter.toModel(), paragraphs).also { content ->
+                synchronized(chapterCacheLock) { chapterCache[cacheKey] = content }
             }
         }
-        ChapterContent(chapter.toModel(), paragraphs)
+    }
+
+    override suspend fun prepareReader(bookUuid: String) {
+        val chapterIndex = withContext(Dispatchers.IO) {
+            val progress = dao.getProgress(bookUuid)
+            val chapters = dao.getChapters(bookUuid)
+            progress?.chapterId?.let { chapterId ->
+                chapters.firstOrNull { it.id == chapterId }?.chapterIndex
+            } ?: chapters.firstOrNull()?.chapterIndex
+        } ?: return
+        getChapter(bookUuid, chapterIndex)
     }
 
     override fun observeProgress(bookUuid: String) = dao.observeProgress(bookUuid).map { it?.toModel() }
@@ -148,11 +196,10 @@ class LocalBookRepository @Inject constructor(
         dao.saveProgress(ReadingProgressEntity(progress.bookUuid, progress.chapterId, progress.position, progress.offset, progress.updatedTime, progress.fraction))
     }
 
-    override suspend fun updateTxtMetadata(bookUuid: String, title: String, author: String, description: String): Unit = withContext(Dispatchers.IO) {
+    override suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = withContext(Dispatchers.IO) {
         val book = dao.getBook(bookUuid) ?: error("书籍不存在")
-        require(book.format == BookFormat.TXT.name) { "EPUB metadata 为只读" }
         dao.insertMetadataEdit(MetadataEditEntity(UUID.randomUUID().toString(), bookUuid, book.title, book.author, book.description, title.trim(), author.trim(), description.trim(), System.currentTimeMillis()))
-        dao.updateTxtMetadata(bookUuid, title.trim().ifBlank { "未命名书籍" }, author.trim().ifBlank { "未知作者" }, description.trim())
+        dao.updateBookMetadata(bookUuid, title.trim().ifBlank { "未命名书籍" }, author.trim().ifBlank { "未知作者" }, description.trim())
     }
 
     override suspend fun reparseTxt(bookUuid: String): Result<Unit> = withContext(Dispatchers.IO) {
@@ -224,7 +271,7 @@ class LocalBookRepository @Inject constructor(
                     )
                 }
                 if (!dao.hasMetadataEdits(bookUuid)) {
-                    dao.updateTxtMetadata(
+                    dao.updateBookMetadata(
                         bookUuid,
                         metadata.title.trim().ifBlank { book.title },
                         metadata.author.trim().ifBlank { "未知作者" },
@@ -232,55 +279,14 @@ class LocalBookRepository @Inject constructor(
                     )
                 }
             }
-            Result.success(Unit)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            Result.failure(error)
-        }
-    }
-
-    override suspend fun updateTxtParagraph(
-        bookUuid: String,
-        chapterIndex: Int,
-        paragraphIndex: Int,
-        replacementText: String,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        val backup = File(context.cacheDir, "txt-edit-$bookUuid-${UUID.randomUUID()}.bak")
-        var source: File? = null
-        var sourceChanged = false
-        try {
-            val book = dao.getBook(bookUuid) ?: error("书籍不存在")
-            require(book.format == BookFormat.TXT.name) { "EPUB 正文为只读" }
-            val chapter = dao.getChapter(bookUuid, chapterIndex) ?: error("章节不存在")
-            val paragraph = dao.getParagraph(chapter.id, paragraphIndex) ?: error("段落不存在")
-            val sourceFile = File(book.storagePath)
-            source = sourceFile
-            require(sourceFile.isFile) { "找不到原始 TXT 文件" }
-            sourceFile.copyTo(backup, overwrite = true)
-
-            val parser = parsers.parserFor(BookFormat.TXT) as TxtBookParser
-            parser.replaceParagraph(sourceFile, chapterIndex, paragraphIndex, paragraph.text, replacementText).getOrThrow()
-            sourceChanged = true
-            reparseTxt(bookUuid).getOrThrow()
-
-            val hash = sourceFile.sha256()
-            val contentHash = dao.findUuidByHash(hash)?.takeUnless { it == bookUuid }
-                ?.let { "edited-$bookUuid-$hash" }
-                ?: hash
-            dao.updateContentHash(bookUuid, contentHash)
-            Result.success(Unit)
-        } catch (error: CancellationException) {
-            if (sourceChanged && backup.isFile) source?.let { backup.copyTo(it, overwrite = true) }
-            throw error
-        } catch (error: Exception) {
-            if (sourceChanged && backup.isFile) {
-                source?.let { backup.copyTo(it, overwrite = true) }
-                reparseTxt(bookUuid)
+            synchronized(chapterCacheLock) {
+                chapterCache.keys.removeAll { it.bookUuid == bookUuid }
             }
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
             Result.failure(error)
-        } finally {
-            backup.delete()
         }
     }
 
@@ -312,6 +318,10 @@ class LocalBookRepository @Inject constructor(
     }
 }
 
+private data class ChapterCacheKey(val bookUuid: String, val chapterIndex: Int)
+
+private const val CHAPTER_CACHE_SIZE = 32
+
 private fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category)
 private fun ChapterEntity.toModel() = Chapter(id, bookUuid, title, chapterIndex)
 private fun ReadingProgressEntity.toModel() = ReadingProgress(bookUuid, chapterId, position, offset, updatedTime, fraction)
@@ -329,7 +339,13 @@ private fun DocumentChapter.toReaderParagraphs(
 ): List<Paragraph> {
     if (images.isEmpty()) return paragraphs.mapIndexed { index, text ->
         val stored = persisted.getOrNull(index)
-        Paragraph(stored?.id ?: index.toLong(), chapterId, stored?.paragraphIndex ?: index, text)
+        Paragraph(
+            stored?.id ?: index.toLong(),
+            chapterId,
+            stored?.paragraphIndex ?: index,
+            text,
+            spans = paragraphSpans.getOrNull(index).orEmpty(),
+        )
     }
     val imagesByIndex = images.groupBy { it.contentIndex }
     val contentCount = paragraphs.size + images.size
@@ -359,13 +375,29 @@ private fun DocumentChapter.toReaderParagraphs(
             } else {
                 val text = paragraphs.getOrNull(textIndex) ?: return@repeat
                 val stored = persisted.getOrNull(textIndex)
-                add(Paragraph(stored?.id ?: textIndex.toLong(), chapterId, stored?.paragraphIndex ?: textIndex, text))
+                add(
+                    Paragraph(
+                        stored?.id ?: textIndex.toLong(),
+                        chapterId,
+                        stored?.paragraphIndex ?: textIndex,
+                        text,
+                        spans = paragraphSpans.getOrNull(textIndex).orEmpty(),
+                    ),
+                )
                 textIndex++
             }
         }
         while (textIndex < paragraphs.size) {
             val stored = persisted.getOrNull(textIndex)
-            add(Paragraph(stored?.id ?: textIndex.toLong(), chapterId, stored?.paragraphIndex ?: textIndex, paragraphs[textIndex]))
+            add(
+                Paragraph(
+                    stored?.id ?: textIndex.toLong(),
+                    chapterId,
+                    stored?.paragraphIndex ?: textIndex,
+                    paragraphs[textIndex],
+                    spans = paragraphSpans.getOrNull(textIndex).orEmpty(),
+                ),
+            )
             textIndex++
         }
     }

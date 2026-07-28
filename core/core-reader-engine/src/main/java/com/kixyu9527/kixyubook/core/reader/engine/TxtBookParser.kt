@@ -7,9 +7,6 @@ import java.nio.CharBuffer
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.util.UUID
 
 class TxtBookParser : BookParser {
     override val format = BookFormat.TXT
@@ -52,65 +49,6 @@ class TxtBookParser : BookParser {
             }
             flush()
             if (!emitted) emit(DocumentChapter("正文", listOf("这本书没有可显示的文本。")))
-        }
-    }
-
-    /** Rewrites the canonical TXT source instead of layering an edit patch. */
-    fun replaceParagraph(
-        file: File,
-        chapterIndex: Int,
-        paragraphIndex: Int,
-        expectedText: String,
-        replacementText: String,
-    ): Result<Unit> = runCatching {
-        require(file.isFile) { "找不到原始 TXT 文件" }
-        val charset = detectCharset(file)
-        val frontMatter = inspectFrontMatter(file, file.name)
-        val lines = file.readText(charset).splitPreservingLineEndings()
-        val chapterParagraphLines = mutableListOf<List<Int>>()
-        var paragraphLines = mutableListOf<Int>()
-
-        fun flushChapter() {
-            if (paragraphLines.isEmpty()) return
-            chapterParagraphLines += paragraphLines.toList()
-            paragraphLines = mutableListOf()
-        }
-
-        lines.forEachIndexed { lineIndex, sourceLine ->
-            if (lineIndex in frontMatter.excludedLines) return@forEachIndexed
-            val line = sourceLine.content.trim().removePrefix("\uFEFF").trim()
-            if (line.isBlank()) return@forEachIndexed
-            if (headingTitleOrNull(line) != null) flushChapter() else paragraphLines += lineIndex
-        }
-        flushChapter()
-
-        val sourceLineIndex = chapterParagraphLines.getOrNull(chapterIndex)?.getOrNull(paragraphIndex)
-            ?: error("找不到要修改的原文段落")
-        val sourceLine = lines[sourceLineIndex]
-        val textOffset = sourceLine.content.indexOf(expectedText)
-        require(textOffset >= 0) { "原文已发生变化，请重新解析后再修改" }
-        val normalizedReplacement = replacementText.trim()
-        lines[sourceLineIndex] = sourceLine.copy(
-            content = sourceLine.content.replaceRange(
-                textOffset,
-                textOffset + expectedText.length,
-                normalizedReplacement,
-            ),
-        )
-
-        val temporary = File(file.parentFile, ".${file.name}.${UUID.randomUUID()}.editing")
-        try {
-            temporary.writeText(lines.joinToString("") { it.content + it.lineEnding }, charset)
-            runCatching {
-                Files.move(
-                    temporary.toPath(),
-                    file.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            }.getOrElse { temporary.copyTo(file, overwrite = true) }
-        } finally {
-            temporary.delete()
         }
     }
 
@@ -349,24 +287,4 @@ private fun String.countOccurrences(needle: String): Int {
         start = match + needle.length
     }
     return count
-}
-
-private data class SourceLine(val content: String, val lineEnding: String)
-
-private fun String.splitPreservingLineEndings(): MutableList<SourceLine> {
-    val result = mutableListOf<SourceLine>()
-    var start = 0
-    var cursor = 0
-    while (cursor < length) {
-        if (this[cursor] != '\r' && this[cursor] != '\n') {
-            cursor++
-            continue
-        }
-        val endingEnd = if (this[cursor] == '\r' && getOrNull(cursor + 1) == '\n') cursor + 2 else cursor + 1
-        result += SourceLine(substring(start, cursor), substring(cursor, endingEnd))
-        start = endingEnd
-        cursor = endingEnd
-    }
-    if (start < length || result.isEmpty()) result += SourceLine(substring(start), "")
-    return result
 }

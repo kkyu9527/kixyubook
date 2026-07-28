@@ -14,13 +14,46 @@ data class Book(
     val createdTime: Long,
     val contentHash: String,
     val category: String = "未分类",
-) {
-    val isEditable: Boolean get() = format == BookFormat.TXT
-}
+)
 
 data class Chapter(val id: Long, val bookUuid: String, val title: String, val index: Int)
 
 enum class ParagraphKind { TEXT, IMAGE }
+
+enum class ReaderInlineStyle {
+    BOLD,
+    ITALIC,
+    ACCENT,
+    HIGHLIGHT,
+    UNDERLINE,
+    STRIKETHROUGH,
+    MONOSPACE,
+    SMALL_CAPS,
+    SUPERSCRIPT,
+    SUBSCRIPT,
+}
+
+/** Stable reader color roles. Publisher shades are classified into these roles before rendering. */
+enum class ReaderSemanticColor {
+    ACCENT,
+    RED,
+    ORANGE,
+    YELLOW,
+    GREEN,
+    CYAN,
+    BLUE,
+    PURPLE,
+    MAGENTA,
+    NEUTRAL,
+}
+
+data class ReaderTextSpan(
+    val start: Int,
+    val end: Int,
+    val styles: Set<ReaderInlineStyle>,
+    val foreground: ReaderSemanticColor? = null,
+    val background: ReaderSemanticColor? = null,
+)
 
 data class Paragraph(
     val id: Long,
@@ -33,6 +66,8 @@ data class Paragraph(
     val mediaType: String? = null,
     val intrinsicWidth: Int = 0,
     val intrinsicHeight: Int = 0,
+    /** EPUB inline semantics normalized independently from publisher colors and fonts. */
+    val spans: List<ReaderTextSpan> = emptyList(),
 )
 
 data class ReadingProgress(

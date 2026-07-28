@@ -261,7 +261,7 @@ private fun LibraryScreen(
             dismiss = { managing = null },
             reparse = { managing = null; reparsing = item },
             save = { title, author, description, category ->
-                if (item.book.isEditable) onUpdateMetadata(item.book.uuid, title, author, description)
+                onUpdateMetadata(item.book.uuid, title, author, description)
                 onSetCategory(item.book.uuid, category)
                 managing = null
             },
@@ -396,22 +396,19 @@ private fun BookManagementDialog(
     AlertDialog(
         onDismissRequest = dismiss,
         properties = KixyuEdgeToEdgeDialogProperties,
-        title = { Text(if (item.book.isEditable) "编辑书籍" else "管理 EPUB", maxLines = 1) },
+        title = { Text("编辑书籍", maxLines = 1) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-                OutlinedTextField(title, { title = it }, label = { Text("书名") }, enabled = item.book.isEditable, singleLine = true)
-                OutlinedTextField(author, { author = it }, label = { Text("作者") }, enabled = item.book.isEditable, singleLine = true)
-                OutlinedTextField(description, { description = it }, label = { Text("简介") }, enabled = item.book.isEditable, minLines = 2, maxLines = 4)
+                OutlinedTextField(title, { title = it }, label = { Text("书名") }, singleLine = true)
+                OutlinedTextField(author, { author = it }, label = { Text("作者") }, singleLine = true)
+                OutlinedTextField(description, { description = it }, label = { Text("简介") }, minLines = 2, maxLines = 4)
                 OutlinedTextField(category, { category = it }, label = { Text("分类") }, singleLine = true)
-                if (item.book.isEditable) {
+                if (item.book.format == com.kixyu9527.kixyubook.core.common.model.BookFormat.TXT) {
                     OutlinedButton(onClick = reparse, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Outlined.Refresh, null, Modifier.size(KixyuSize.iconSmall))
                         Spacer(Modifier.size(KixyuSize.compactButtonIconGap))
                         Text("重新解析正文", maxLines = 1)
                     }
-                }
-                if (!item.book.isEditable) {
-                    Text("EPUB metadata 来自书内并保持只读。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },

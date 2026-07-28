@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -63,62 +64,79 @@ class MainActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         setContent {
-            val navController = rememberNavController()
-            // The UI-style setting adds/removes a MIUIX theme provider. Keep
-            // the navigation subtree movable so switching that provider does
-            // not dispose and recreate the current screen or bottom bar.
-            val appContent = remember {
-                movableContentOf { KixyuNavHost(navController) }
-            }
             val settings by appViewModel.settings.collectAsState()
-            var renderedUiStyle by remember { mutableStateOf(settings.appUiStyle) }
-            val styleTransitionVeil = remember { Animatable(0f) }
-            LaunchedEffect(settings.appUiStyle) {
-                if (settings.appUiStyle == renderedUiStyle) return@LaunchedEffect
-                styleTransitionVeil.animateTo(1f, tween(110))
-                renderedUiStyle = settings.appUiStyle
-                // Let the new component tree settle behind an opaque frame,
-                // then reveal it as one surface instead of exposing a hitch.
-                withFrameNanos { }
-                styleTransitionVeil.animateTo(0f, tween(190))
-            }
-            val systemDark = isSystemInDarkTheme()
-            val darkTheme = when (settings.theme) {
-                ReaderTheme.DAY -> false
-                ReaderTheme.NIGHT -> true
-                ReaderTheme.SYSTEM -> systemDark
-            }
-            val view = LocalView.current
-            SideEffect {
-                // Edge-to-edge is a window invariant, not a page preference.
-                // Re-assert it after theme/style changes so no component can
-                // leave a contrast scrim behind the gesture navigation pill.
-                WindowCompat.setDecorFitsSystemWindows(window, false)
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    window.isNavigationBarContrastEnforced = false
+            val loadedSettings = settings
+            if (loadedSettings == null) {
+                // This surface normally exists for only a few milliseconds. It
+                // deliberately contains no Material/MIUIX components or motion,
+                // so the wrong component family can never flash on cold start.
+                val bootstrapBackground = if (isSystemInDarkTheme()) {
+                    Color(0xFF101113)
+                } else {
+                    Color(0xFFF7F7F9)
                 }
-                WindowCompat.getInsetsController(window, view).apply {
-                    isAppearanceLightStatusBars = !darkTheme
-                    isAppearanceLightNavigationBars = !darkTheme
-                }
-                requestHighestRefreshRate(view)
+                Box(Modifier.fillMaxSize().background(bootstrapBackground))
+            } else {
+                KixyuBookApp(loadedSettings)
             }
-            KixyuBookTheme(
-                themeMode = settings.theme,
-                colorTheme = settings.appColorTheme,
-                uiStyle = renderedUiStyle,
-            ) {
-                val appBackground = kixyuPageBackground()
-                Box(Modifier.fillMaxSize().background(appBackground)) {
-                    appContent()
-                    if (styleTransitionVeil.value > 0f) {
-                        Box(
-                            Modifier.fillMaxSize().background(
-                                MaterialTheme.colorScheme.background.copy(alpha = styleTransitionVeil.value),
-                            ),
-                        )
-                    }
+        }
+    }
+
+    @Composable
+    private fun KixyuBookApp(settings: com.kixyu9527.kixyubook.core.common.model.ReaderSettings) {
+        val navController = rememberNavController()
+        // The UI-style setting adds/removes a MIUIX theme provider. Keep the
+        // navigation subtree movable so a deliberate runtime style switch does
+        // not recreate the current screen or bottom bar.
+        val appContent = remember {
+            movableContentOf { KixyuNavHost(navController) }
+        }
+        var renderedUiStyle by remember { mutableStateOf(settings.appUiStyle) }
+        val styleTransitionVeil = remember { Animatable(0f) }
+        LaunchedEffect(settings.appUiStyle) {
+            if (settings.appUiStyle == renderedUiStyle) return@LaunchedEffect
+            styleTransitionVeil.animateTo(1f, tween(110))
+            renderedUiStyle = settings.appUiStyle
+            withFrameNanos { }
+            styleTransitionVeil.animateTo(0f, tween(190))
+        }
+        val systemDark = isSystemInDarkTheme()
+        val darkTheme = when (settings.theme) {
+            ReaderTheme.DAY -> false
+            ReaderTheme.NIGHT -> true
+            ReaderTheme.SYSTEM -> systemDark
+        }
+        val view = LocalView.current
+        DisposableEffect(view) {
+            requestHighestRefreshRate(view)
+            onDispose { }
+        }
+        SideEffect {
+            // Edge-to-edge is a window invariant, not a page preference.
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isNavigationBarContrastEnforced = false
+            }
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+        KixyuBookTheme(
+            themeMode = settings.theme,
+            colorTheme = settings.appColorTheme,
+            uiStyle = renderedUiStyle,
+        ) {
+            val appBackground = kixyuPageBackground()
+            Box(Modifier.fillMaxSize().background(appBackground)) {
+                appContent()
+                if (styleTransitionVeil.value > 0f) {
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            MaterialTheme.colorScheme.background.copy(alpha = styleTransitionVeil.value),
+                        ),
+                    )
                 }
             }
         }
@@ -146,7 +164,9 @@ class MainActivity : ComponentActivity() {
 private data class TopDestination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 @Composable
-private fun KixyuNavHost(navController: NavHostController) {
+private fun KixyuNavHost(
+    navController: NavHostController,
+) {
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val top = remember {
@@ -160,6 +180,12 @@ private fun KixyuNavHost(navController: NavHostController) {
     val scope = rememberCoroutineScope()
     var pageAnimation by remember { mutableStateOf<Job?>(null) }
     val topLevelActive = route == null || route == Routes.HOME
+
+    val openBook: (String) -> Unit = { bookUuid ->
+        if (navController.currentDestination?.route == Routes.HOME) {
+            navController.navigate(Routes.reader(bookUuid))
+        }
+    }
 
     // The bar is an overlay outside NavHost. During predictive back the
     // destination underneath can therefore occupy the full window; the bar is
@@ -183,28 +209,31 @@ private fun KixyuNavHost(navController: NavHostController) {
             navController, Routes.HOME,
             modifier = Modifier.fillMaxSize(),
             enterTransition = {
-                slideInHorizontally(tween(KixyuMotion.PageNavigationMillis)) { width -> width }
+                slideInHorizontally(tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing)) { width -> width }
             },
             exitTransition = {
-                slideOutHorizontally(tween(KixyuMotion.PageNavigationMillis)) { width -> -width }
+                slideOutHorizontally(tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing)) { width -> -width }
             },
             popEnterTransition = {
-                slideInHorizontally(tween(KixyuMotion.PageNavigationMillis)) { width -> -width }
+                slideInHorizontally(tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing)) { width -> -width }
             },
             popExitTransition = {
-                slideOutHorizontally(tween(KixyuMotion.PageNavigationMillis)) { width -> width }
+                slideOutHorizontally(tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing)) { width -> width }
             },
         ) {
             composable(Routes.HOME) {
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
+                    // The three top-level pages are small and fixed. Build all
+                    // of them immediately so the first horizontal switch never
+                    // pays a one-time composition cost.
                     beyondViewportPageCount = top.lastIndex,
                     key = { page -> top[page].route },
                 ) { page ->
                     when (top[page].route) {
-                        Routes.HOME -> HomeRoute(onOpenBook = { navController.navigate(Routes.reader(it)) })
-                        Routes.LIBRARY -> LibraryRoute(onOpenBook = { navController.navigate(Routes.reader(it)) })
+                        Routes.HOME -> HomeRoute(onOpenBook = openBook)
+                        Routes.LIBRARY -> LibraryRoute(onOpenBook = openBook)
                         Routes.SETTINGS -> SettingsRoute(
                             onAppearance = { navController.navigate(Routes.APPEARANCE) },
                             onReadingSettings = { navController.navigate(Routes.READING_SETTINGS) },
@@ -242,7 +271,10 @@ private fun KixyuNavHost(navController: NavHostController) {
                         pageAnimation = scope.launch {
                             pagerState.animateScrollToPage(
                                 page = targetPage,
-                                animationSpec = tween(KixyuMotion.PageNavigationMillis),
+                                animationSpec = tween(
+                                    durationMillis = KixyuMotion.PageNavigationMillis,
+                                    easing = FastOutSlowInEasing,
+                                ),
                             )
                         }
                     }

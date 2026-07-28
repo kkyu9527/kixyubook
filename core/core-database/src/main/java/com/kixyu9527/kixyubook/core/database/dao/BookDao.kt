@@ -41,7 +41,7 @@ interface BookDao {
     @Insert suspend fun insertSession(session: ReadingSessionEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertBookmark(bookmark: BookmarkEntity): Long
 
-    @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid AND format = 'TXT'") suspend fun updateTxtMetadata(uuid: String, title: String, author: String, description: String): Int
+    @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid") suspend fun updateBookMetadata(uuid: String, title: String, author: String, description: String): Int
     @Query("UPDATE books SET contentHash = :contentHash WHERE uuid = :uuid") suspend fun updateContentHash(uuid: String, contentHash: String)
     @Query("UPDATE books SET category = :category WHERE uuid = :uuid") suspend fun setCategory(uuid: String, category: String)
     @Query("DELETE FROM books WHERE uuid = :uuid") suspend fun deleteBook(uuid: String)

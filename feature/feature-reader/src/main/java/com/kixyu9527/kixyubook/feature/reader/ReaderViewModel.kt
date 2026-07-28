@@ -11,15 +11,20 @@ import com.kixyu9527.kixyubook.core.reader.engine.ReaderPositionManager
 import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
+import kotlin.math.abs
 
 data class ReaderUiState(
     val book: Book? = null,
     val chapters: List<Chapter> = emptyList(),
     val chapter: ReaderChapter? = null,
+    val prefetchedChapters: Map<Int, ReaderChapter> = emptyMap(),
     val chapterIndex: Int = 0,
     val restorePosition: Int = 0,
     val currentPosition: Int = 0,
@@ -51,6 +56,7 @@ class ReaderViewModel @Inject constructor(
     private var sessionCharacters = 0L
     private var lastPosition = 0
     private val positions = ReaderPositionManager()
+    private val chapterLoads = mutableMapOf<Int, Deferred<ReaderChapter?>>()
 
     init {
         viewModelScope.launch {
@@ -69,24 +75,32 @@ class ReaderViewModel @Inject constructor(
     }
 
     private suspend fun loadInitial() = runCatching {
-        val book = books.getBook(bookUuid) ?: error("书籍不存在")
-        val chapters = books.getChapters(bookUuid)
+        val initialData = coroutineScope {
+            val book = async { books.getBook(bookUuid) }
+            val chapters = async { books.getChapters(bookUuid) }
+            val progress = async { books.observeProgress(bookUuid).first() }
+            Triple(book.await(), chapters.await(), progress.await())
+        }
+        val book = initialData.first ?: error("书籍不存在")
+        val chapters = initialData.second
         require(chapters.isNotEmpty()) { "书籍没有可阅读章节" }
-        val progress = books.observeProgress(bookUuid).first()
+        val progress = initialData.third
         val index = progress?.chapterId?.let { id -> chapters.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
-        val content = books.getChapter(bookUuid, chapters[index].index) ?: error("章节读取失败")
+        val content = chapterLoad(index, chapters).await() ?: error("章节读取失败")
         lastPosition = progress?.position ?: 0
         _uiState.update {
             it.copy(
                 book = book,
                 chapters = chapters,
-                chapter = content.toReaderChapter(),
+                chapter = content,
+                prefetchedChapters = mapOf(index to content),
                 chapterIndex = index,
                 restorePosition = lastPosition,
                 currentPosition = lastPosition,
                 loading = false,
             )
         }
+        prefetchNearbyChapters(index, chapters)
     }.onFailure { error -> _uiState.update { it.copy(loading = false, error = error.message) } }
 
     fun moveChapter(delta: Int, openAtEnd: Boolean = false) = viewModelScope.launch {
@@ -96,17 +110,21 @@ class ReaderViewModel @Inject constructor(
     fun jumpToChapter(index: Int) = viewModelScope.launch { loadChapter(index.coerceIn(0, _uiState.value.chapters.lastIndex), 0) }
 
     private suspend fun loadChapter(index: Int, position: Int) {
-        if (index == _uiState.value.chapterIndex && _uiState.value.chapter != null) return
-        val target = _uiState.value.chapters.getOrNull(index) ?: return
+        val currentState = _uiState.value
+        if (index == currentState.chapterIndex && currentState.chapter != null) return
+        if (currentState.chapters.getOrNull(index) == null) return
         // Keep the current chapter rendered while the target is read. Removing the
         // reader from composition here left a blank screen when a search jump was slow
         // or its chapter index was not contiguous.
-        val content = books.getChapter(bookUuid, target.index) ?: return
-        val readerChapter = content.toReaderChapter()
+        val readerChapter = currentState.prefetchedChapters[index]
+            ?: chapterLoad(index, currentState.chapters).await()
+            ?: return
         lastPosition = if (position == Int.MAX_VALUE) readerChapter.contentParagraphs().lastOrNull()?.index ?: 0 else position
         _uiState.update {
             it.copy(
                 chapter = readerChapter,
+                prefetchedChapters = (it.prefetchedChapters + (index to readerChapter))
+                    .filterKeys { chapterIndex -> abs(chapterIndex - index) <= 1 },
                 chapterIndex = index,
                 restorePosition = lastPosition,
                 currentPosition = lastPosition,
@@ -114,7 +132,42 @@ class ReaderViewModel @Inject constructor(
                 loading = false,
             )
         }
+        prefetchNearbyChapters(index, currentState.chapters)
         savePosition(lastPosition)
+    }
+
+    private fun chapterLoad(index: Int, chapters: List<Chapter>): Deferred<ReaderChapter?> =
+        chapterLoads.getOrPut(index) {
+            viewModelScope.async {
+                val target = chapters.getOrNull(index) ?: return@async null
+                books.getChapter(bookUuid, target.index)?.toReaderChapter()
+            }
+        }
+
+    private fun prefetchNearbyChapters(index: Int, chapters: List<Chapter>) {
+        chapterLoads.keys.removeAll { chapterIndex ->
+            abs(chapterIndex - index) > CHAPTER_PREFETCH_RADIUS
+        }
+        (1..CHAPTER_PREFETCH_RADIUS)
+            .flatMap { distance -> listOf(index - distance, index + distance) }
+            .filter { it in chapters.indices }
+            .forEach { nearbyIndex ->
+                // Start every load immediately, ordered nearest-first. The
+                // repository serializes source reads and keeps the decoded
+                // chapters in its LRU; only the two render-adjacent chapters
+                // enter Compose state to avoid twenty unnecessary recomposes.
+                val load = chapterLoad(nearbyIndex, chapters)
+                if (abs(nearbyIndex - index) == 1) {
+                    viewModelScope.launch {
+                        val chapter = load.await() ?: return@launch
+                        _uiState.update { state ->
+                            if (abs(state.chapterIndex - nearbyIndex) > 1) state else state.copy(
+                                prefetchedChapters = state.prefetchedChapters + (nearbyIndex to chapter),
+                            )
+                        }
+                    }
+                }
+            }
     }
 
     fun jumpToPosition(chapterIndex: Int, position: Int) = viewModelScope.launch {
@@ -160,23 +213,6 @@ class ReaderViewModel @Inject constructor(
             chapterComplete = chapterComplete,
         )
         viewModelScope.launch { books.saveProgress(ReadingProgress(bookUuid, chapter.id, safePosition, updatedTime = System.currentTimeMillis(), fraction = total)) }
-    }
-
-    fun saveTextEdit(paragraphIndex: Int, replacement: String) = viewModelScope.launch {
-        val chapterIndex = _uiState.value.chapterIndex
-        books.updateTxtParagraph(bookUuid, chapterIndex, paragraphIndex, replacement)
-            .onSuccess {
-                val chapters = books.getChapters(bookUuid)
-                val safeChapterIndex = chapterIndex.coerceIn(0, chapters.lastIndex)
-                val refreshed = books.getChapter(bookUuid, safeChapterIndex) ?: return@onSuccess
-                _uiState.update {
-                    it.copy(
-                        chapters = chapters,
-                        chapter = refreshed.toReaderChapter(),
-                        chapterIndex = safeChapterIndex,
-                    )
-                }
-            }
     }
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { settingsRepository.update(transform) } }
@@ -260,3 +296,5 @@ class ReaderViewModel @Inject constructor(
 }
 
 private fun ChapterContent.toReaderChapter() = ReaderChapter(chapter.id, chapter.bookUuid, chapter.title, chapter.index, paragraphs)
+
+private const val CHAPTER_PREFETCH_RADIUS = 10

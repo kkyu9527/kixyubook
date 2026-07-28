@@ -48,15 +48,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 import kotlin.math.roundToInt
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
@@ -73,6 +74,9 @@ import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
+
+/** Material sheets use a low container, so grouped content needs the next tonal elevation. */
+internal val LocalKixyuSheetSection = staticCompositionLocalOf { false }
 
 object KixyuSpacing {
     val hairline = 1.dp
@@ -149,7 +153,11 @@ fun KixyuSection(
             )
         } else {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                color = if (LocalKixyuSheetSection.current) {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                },
                 shape = MaterialTheme.shapes.large,
                 content = { Column(content = content) },
             )
@@ -637,7 +645,7 @@ private fun ReaderStepper(
     onChanged: (Float) -> Unit,
 ) {
     val valueLabel = String.format(
-        Locale.getDefault(),
+        LocalLocale.current.platformLocale,
         "%.1f%s",
         value,
         if (suffix.isEmpty()) "" else " $suffix",

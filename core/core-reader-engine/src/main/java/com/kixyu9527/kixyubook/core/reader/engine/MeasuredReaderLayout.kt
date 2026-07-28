@@ -8,11 +8,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
@@ -39,36 +39,68 @@ fun rememberMeasuredReaderPages(
     val layoutDirection = LocalLayoutDirection.current
     val family = rememberReaderFont(fontPath)
     val paginationMutex = remember(measurer) { Mutex() }
-    var pages by remember(
-        chapter,
+    val cacheKey = remember(
+        chapter.id,
         spec,
         fontPath,
         showRegularChapterTitle,
-        family,
         density.density,
         density.fontScale,
         layoutDirection,
     ) {
-        mutableStateOf(emptyList<ReaderPage>())
+        PaginationCacheKey(
+            chapterId = chapter.id,
+            spec = spec,
+            fontPath = fontPath,
+            showRegularChapterTitle = showRegularChapterTitle,
+            density = density.density,
+            fontScale = density.fontScale,
+            layoutDirection = layoutDirection,
+        )
     }
-    LaunchedEffect(
-        chapter,
-        spec,
-        fontPath,
-        showRegularChapterTitle,
-        family,
-        density.density,
-        density.fontScale,
-        layoutDirection,
-    ) {
-        pages = withContext(Dispatchers.Default) {
+    var pages by remember(cacheKey) {
+        mutableStateOf(MeasuredReaderPageCache[cacheKey].orEmpty())
+    }
+    LaunchedEffect(cacheKey, chapter, family) {
+        if (pages.isNotEmpty()) return@LaunchedEffect
+        val measuredPages = withContext(Dispatchers.Default) {
             paginationMutex.withLock {
                 MeasuredReaderPaginator(measurer, density)
                     .paginate(chapter, spec, family, showRegularChapterTitle)
             }
         }
+        MeasuredReaderPageCache[cacheKey] = measuredPages
+        pages = measuredPages
     }
     return pages
+}
+
+private data class PaginationCacheKey(
+    val chapterId: Long,
+    val spec: ReaderLayoutSpec,
+    val fontPath: String?,
+    val showRegularChapterTitle: Boolean,
+    val density: Float,
+    val fontScale: Float,
+    val layoutDirection: LayoutDirection,
+)
+
+private object MeasuredReaderPageCache {
+    private val lock = Any()
+    private val pages = object : LinkedHashMap<PaginationCacheKey, List<ReaderPage>>(
+        PAGINATION_CACHE_SIZE,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PaginationCacheKey, List<ReaderPage>>) =
+            size > PAGINATION_CACHE_SIZE
+    }
+
+    operator fun get(key: PaginationCacheKey): List<ReaderPage>? = synchronized(lock) { pages[key] }
+
+    operator fun set(key: PaginationCacheKey, value: List<ReaderPage>) {
+        synchronized(lock) { pages[key] = value }
+    }
 }
 
 private class MeasuredReaderPaginator(
@@ -141,12 +173,17 @@ private class MeasuredReaderPaginator(
                 return@forEach
             }
             var remaining = paragraph.text
+            var remainingStart = 0
             var continuation = false
             while (remaining.isNotEmpty()) {
                 val availablePx = (bodyHeightPx() - usedHeightPx).coerceAtLeast(0f)
                 val style = readerBodyTextStyle(spec, family, indent = !continuation)
+                val remainingSpans = paragraph.spans.sliceForText(
+                    remainingStart,
+                    remainingStart + remaining.length,
+                )
                 val layout = measurer.measure(
-                    text = AnnotatedString(remaining),
+                    text = readerAnnotatedText(remaining, remainingSpans),
                     style = style,
                     overflow = TextOverflow.Clip,
                     softWrap = true,
@@ -155,7 +192,14 @@ private class MeasuredReaderPaginator(
                 )
                 val textHeightPx = layout.size.height.toFloat()
                 if (textHeightPx + spacingPx <= availablePx) {
-                    blocks += DocumentBlock(paragraph.index, paragraph.text, remaining, continuation, bottomSpacing = true)
+                    blocks += DocumentBlock(
+                        paragraph.index,
+                        paragraph.text,
+                        remaining,
+                        continuation,
+                        bottomSpacing = true,
+                        spans = remainingSpans,
+                    )
                     usedHeightPx += textHeightPx + spacingPx
                     remaining = ""
                     continue
@@ -163,7 +207,14 @@ private class MeasuredReaderPaginator(
                 if (textHeightPx <= availablePx) {
                     // At a page boundary paragraph spacing is unnecessary and would
                     // otherwise push the last baseline below the footer.
-                    blocks += DocumentBlock(paragraph.index, paragraph.text, remaining, continuation, bottomSpacing = false)
+                    blocks += DocumentBlock(
+                        paragraph.index,
+                        paragraph.text,
+                        remaining,
+                        continuation,
+                        bottomSpacing = false,
+                        spans = remainingSpans,
+                    )
                     remaining = ""
                     flush()
                     continue
@@ -180,9 +231,18 @@ private class MeasuredReaderPaginator(
                 fittingLine = fittingLine.coerceAtLeast(0)
                 val end = layout.getLineEnd(fittingLine, visibleEnd = true).coerceIn(1, remaining.length)
                 val visible = remaining.substring(0, end).trimEnd().ifEmpty { remaining.substring(0, end) }
-                blocks += DocumentBlock(paragraph.index, paragraph.text, visible, continuation, bottomSpacing = false)
+                blocks += DocumentBlock(
+                    paragraph.index,
+                    paragraph.text,
+                    visible,
+                    continuation,
+                    bottomSpacing = false,
+                    spans = paragraph.spans.sliceForText(remainingStart, remainingStart + visible.length),
+                )
                 usedHeightPx += ceil(layout.getLineBottom(fittingLine))
-                remaining = remaining.substring(end).trimStart()
+                val rawRemainder = remaining.substring(end)
+                remaining = rawRemainder.trimStart()
+                remainingStart += end + (rawRemainder.length - remaining.length)
                 continuation = true
                 flush()
             }
@@ -224,6 +284,7 @@ private class MeasuredReaderPaginator(
 }
 
 private const val TEXT_MEASURE_CACHE_SIZE = 64
+private const val PAGINATION_CACHE_SIZE = 8
 private const val MIN_BODY_WIDTH_DP = 160f
 private const val MIN_BODY_HEIGHT_DP = 120f
 private const val PARAGRAPH_SPACING_EM = 0.9f

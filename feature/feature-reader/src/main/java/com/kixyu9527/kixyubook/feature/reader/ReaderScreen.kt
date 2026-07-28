@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -88,17 +90,16 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 private enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, SETTINGS }
-private data class ReaderPageInfo(val current: Int, val total: Int)
 
 /** All floating reader controls share one enter/exit clock and transform. */
 @Composable
@@ -124,40 +125,23 @@ fun ReaderRoute(
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var readerContentReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(READER_ENTRY_CONTENT_DELAY_MILLIS)
+        readerContentReady = true
+    }
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.importFont(it.toString()) }
     }
     DisposableEffect(viewModel) { onDispose(viewModel::finishSession) }
-    var entryAnimationFinished by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(KixyuMotion.PageNavigationMillis.toLong())
-        // Do not install the text-heavy reader tree on the final navigation
-        // frame. One settled frame keeps the route transition uninterrupted.
-        withFrameNanos { }
-        entryAnimationFinished = true
-    }
-    if (!entryAnimationFinished) {
-        val palette = readerPalette(state.settings, androidx.compose.foundation.isSystemInDarkTheme())
-        Box(
-            modifier = Modifier.fillMaxSize().background(palette.background),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(KixyuSize.stepperButton),
-                color = palette.accent,
-                strokeWidth = 2.dp,
-            )
-        }
-        return
-    }
     ReaderScreen(
         state = state,
+        readerContentReady = readerContentReady,
         onExit = onExit,
         moveChapter = viewModel::moveChapter,
         jumpChapter = viewModel::jumpToChapter,
         jumpPosition = viewModel::jumpToPosition,
         savePosition = viewModel::savePosition,
-        saveEdit = viewModel::saveTextEdit,
         updateSettings = viewModel::updateSettings,
         addBookmark = viewModel::addBookmark,
         deleteBookmark = viewModel::deleteBookmark,
@@ -176,12 +160,12 @@ fun ReaderRoute(
 @Composable
 private fun ReaderScreen(
     state: ReaderUiState,
+    readerContentReady: Boolean,
     onExit: () -> Unit,
     moveChapter: (Int, Boolean) -> Unit,
     jumpChapter: (Int) -> Unit,
     jumpPosition: (Int, Int) -> Unit,
     savePosition: (Int, Boolean) -> Unit,
-    saveEdit: (Int, String) -> Unit,
     updateSettings: ((ReaderSettings) -> ReaderSettings) -> Unit,
     addBookmark: () -> Unit,
     deleteBookmark: (String) -> Unit,
@@ -196,9 +180,8 @@ private fun ReaderScreen(
     var menu by remember { mutableStateOf(false) }
     var toolsMenu by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
+    var bookInfoVisible by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
-    var editing by remember { mutableStateOf<Pair<Int, String>?>(null) }
-    var pageInfo by remember { mutableStateOf<ReaderPageInfo?>(null) }
     var backProgress by remember { mutableFloatStateOf(0f) }
     val volumeTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val focusRequester = remember { FocusRequester() }
@@ -208,12 +191,10 @@ private fun ReaderScreen(
     val scope = rememberCoroutineScope()
     var exitRequested by remember { mutableStateOf(false) }
     var retainedSheet by remember { mutableStateOf<ReaderSheet?>(null) }
-    var retainedEditing by remember { mutableStateOf<Pair<Int, String>?>(null) }
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val palette = readerPalette(state.settings, systemDark)
     LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
-    LaunchedEffect(editing) { editing?.let { retainedEditing = it } }
     DisposableEffect(state.settings.showStatusBar, palette.background, view) {
         val window = context.findActivity()?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, view) }
@@ -265,12 +246,8 @@ private fun ReaderScreen(
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    LaunchedEffect(state.settings.pageMode) {
-        if (state.settings.pageMode == PageMode.SCROLL) pageInfo = null
-    }
     PredictiveBackHandler(
-        enabled = sheet == null && editing == null &&
-            (searchVisible || menu || toolsMenu || state.searchResults.isNotEmpty()),
+        enabled = sheet == null && (searchVisible || menu || toolsMenu || state.searchResults.isNotEmpty()),
     ) { events ->
         try {
             events.collect { backProgress = it.progress }
@@ -338,24 +315,25 @@ private fun ReaderScreen(
                 .focusable(),
             ) {
             when {
+                !readerContentReady -> Unit
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = palette.accent)
                 state.error != null -> Text(state.error, color = palette.body, modifier = Modifier.align(Alignment.Center))
-                state.chapter != null -> ReaderContent(
+            }
+            AnimatedVisibility(
+                visible = readerContentReady && !state.loading && state.error == null && state.chapter != null,
+                enter = fadeIn(tween(KixyuMotion.ReaderPopupExitMillis)),
+                exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
+            ) {
+                ReaderContent(
                     state = state,
                     palette = palette,
                     savePosition = savePosition,
                     moveChapter = moveChapter,
                     middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
                     dismissControls = { controls = false; menu = false; toolsMenu = false },
-                    edit = { index, text -> editing = index to text },
-                    onPageInfo = { pageInfo = it },
                     volumeTurns = volumeTurns,
                 )
             }
-            ReaderPageNumber(
-                info = pageInfo.takeIf { state.settings.showPageNumber && state.searchResults.isEmpty() },
-                palette = palette,
-            )
             ReaderControls(
                 visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
@@ -365,6 +343,7 @@ private fun ReaderScreen(
                 onPreviousChapter = { moveChapter(-1, false) },
                 onNextChapter = { moveChapter(1, false) },
                 onExit = exitReader, onDirectory = { sheet = ReaderSheet.DIRECTORY },
+                onBookInfo = { bookInfoVisible = true },
                 onSettings = { menu = !menu; toolsMenu = false },
                 onTools = { toolsMenu = !toolsMenu; menu = false },
                 onToggleBookmark = {
@@ -418,16 +397,11 @@ private fun ReaderScreen(
                 null -> Unit
             }
         }
-        val activeEditing = editing ?: retainedEditing
-        if (activeEditing != null) {
-            val (index, original) = activeEditing
-            EditParagraphDialog(
-                show = editing != null,
-                original = original,
-                dismiss = { editing = null },
-                save = { saveEdit(index, it); editing = null },
-            )
-        }
+        BookInfoDialog(
+            show = bookInfoVisible,
+            book = state.book,
+            dismiss = { bookInfoVisible = false },
+        )
     }
 }
 
@@ -440,8 +414,6 @@ private fun ReaderContent(
     moveChapter: (Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
-    edit: (Int, String) -> Unit,
-    onPageInfo: (ReaderPageInfo?) -> Unit,
     volumeTurns: SharedFlow<Int>,
 ) {
     val chapter = state.chapter ?: return
@@ -453,7 +425,6 @@ private fun ReaderContent(
         val spec = ReaderLayoutSpec(maxWidth.value, safeViewportHeight, state.settings.fontSize, state.settings.lineHeight, state.settings.letterSpacing, state.settings.margin)
         key(chapter.id, state.settings.pageMode, spec, state.navigationVersion) {
             if (state.settings.pageMode == PageMode.SCROLL) {
-                LaunchedEffect(chapter.id) { onPageInfo(null) }
                 val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
                 val restoredItem = contentParagraphs.indexOfFirst { it.index >= state.restorePosition }
                     .let { if (it < 0) contentParagraphs.lastIndex else it }
@@ -495,7 +466,7 @@ private fun ReaderContent(
                     }
                 }
                 ReaderScrollRenderer(
-                    chapter, listState, spec, palette, state.fontPath, state.book?.isEditable == true, edit,
+                    chapter, listState, spec, palette, state.fontPath,
                     { fraction -> if (fraction in .33f..67f) middleTap() else dismissControls() },
                     { dismissControls(); moveChapter(-1, true) }, { dismissControls(); moveChapter(1, false) },
                     state.chapterIndex > 0, state.chapterIndex < state.chapters.lastIndex,
@@ -510,8 +481,7 @@ private fun ReaderContent(
                 ) {
                     PagedReader(
                         state, chapter, spec, palette, savePosition, moveChapter,
-                        middleTap, dismissControls, edit, onPageInfo,
-                        volumeTurns,
+                        middleTap, dismissControls, volumeTurns,
                     )
                 }
             }
@@ -529,10 +499,26 @@ private fun PagedReader(
     moveChapter: (Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
-    edit: (Int, String) -> Unit,
-    onPageInfo: (ReaderPageInfo?) -> Unit,
     volumeTurns: SharedFlow<Int>,
 ) {
+    val previousChapter = state.prefetchedChapters[state.chapterIndex - 1]
+    val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
+    val previousPages = previousChapter?.let {
+        rememberMeasuredReaderPages(
+            chapter = it,
+            spec = spec,
+            fontPath = state.fontPath,
+            showRegularChapterTitle = state.settings.showChapterTitle,
+        )
+    }.orEmpty()
+    val nextPages = nextChapter?.let {
+        rememberMeasuredReaderPages(
+            chapter = it,
+            spec = spec,
+            fontPath = state.fontPath,
+            showRegularChapterTitle = state.settings.showChapterTitle,
+        )
+    }.orEmpty()
     val pages = rememberMeasuredReaderPages(
         chapter = chapter,
         spec = spec,
@@ -540,12 +526,14 @@ private fun PagedReader(
         showRegularChapterTitle = state.settings.showChapterTitle,
     )
     if (pages.isEmpty()) {
-        LaunchedEffect(chapter.id) { onPageInfo(null) }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(KixyuSize.stepperButton),
-                color = palette.accent,
-                strokeWidth = 2.dp,
+            Text(
+                text = chapter.title.substringAfterLast('·').trim(),
+                color = palette.title,
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = state.settings.margin.dp),
             )
         }
         return
@@ -572,14 +560,6 @@ private fun PagedReader(
             }
         }
     }
-    LaunchedEffect(pager, chapter.id, pages.size, leading) {
-        snapshotFlow { pager.currentPage }
-            .distinctUntilChanged()
-            .collect { page ->
-                val actualPage = (page - leading).coerceIn(pages.indices)
-                onPageInfo(ReaderPageInfo(actualPage + 1, pages.size))
-            }
-    }
     LaunchedEffect(pager) {
         snapshotFlow { pager.isScrollInProgress }.distinctUntilChanged().collect { scrolling ->
             if (scrolling) dismissControls()
@@ -594,9 +574,15 @@ private fun PagedReader(
     }
     HorizontalPager(pager, Modifier.fillMaxSize()) { virtualPage ->
         val actual = virtualPage - leading
-        if (actual !in pages.indices) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(if (actual < 0) "上一章" else "下一章", color = palette.secondary) }
-        else ReaderPageRenderer(
-            pages[actual], spec, palette, state.fontPath, state.book?.isEditable == true, edit,
+        val renderedPage = when {
+            actual in pages.indices -> pages[actual]
+            actual < 0 -> previousPages.lastOrNull()
+            else -> nextPages.firstOrNull()
+        }
+        if (renderedPage == null) {
+            Box(Modifier.fillMaxSize().background(palette.background))
+        } else ReaderPageRenderer(
+            renderedPage, spec, palette, state.fontPath,
             { fraction -> scope.launch {
                 when {
                     fraction < .33f && pager.currentPage > 0 -> {
@@ -611,6 +597,16 @@ private fun PagedReader(
             epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
             showRegularChapterTitle = state.settings.showChapterTitle,
             highlightQuery = state.searchQuery,
+            pageNumber = if (state.settings.showPageNumber && state.searchResults.isEmpty()) {
+                when {
+                    actual in pages.indices -> "${actual + 1}/${pages.size}"
+                    actual < 0 && previousPages.isNotEmpty() -> "${previousPages.size}/${previousPages.size}"
+                    actual >= pages.size && nextPages.isNotEmpty() -> "1/${nextPages.size}"
+                    else -> null
+                }
+            } else {
+                null
+            },
         )
     }
 }
@@ -629,6 +625,7 @@ private fun ReaderControls(
     onNextChapter: () -> Unit,
     onExit: () -> Unit,
     onDirectory: () -> Unit,
+    onBookInfo: () -> Unit,
     onSettings: () -> Unit,
     onTools: () -> Unit,
     onToggleBookmark: () -> Unit,
@@ -648,6 +645,7 @@ private fun ReaderControls(
                         .padding(top = KixyuSize.readerTopControlInset)
                         .height(KixyuSize.readerBookTitleHeight)
                         .widthIn(max = KixyuSize.readerBookTitleMaxWidth)
+                        .clickable(onClick = onBookInfo)
                         .then(controlsBackModifier),
                 ) {
                     Box(
@@ -738,28 +736,6 @@ private fun ReaderControls(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ReaderPageNumber(
-    info: ReaderPageInfo?,
-    palette: ReaderRenderPalette,
-) {
-    if (info != null) {
-        Box(
-            Modifier.fillMaxSize()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(bottom = KixyuSpacing.hairline),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Text(
-                "${info.current}/${info.total}",
-                color = palette.secondary,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
         }
     }
 }
@@ -1266,33 +1242,51 @@ private fun ReaderSettingsSheet(
     }
 }
 
-@Composable private fun EditParagraphDialog(
+@Composable private fun BookInfoDialog(
     show: Boolean,
-    original: String,
+    book: Book?,
     dismiss: () -> Unit,
-    save: (String) -> Unit,
 ) {
-    var text by remember(original) { mutableStateOf(original) }
+    val current = book ?: return
     KixyuActionDialog(
         show = show,
         onDismissRequest = dismiss,
-        title = "编辑 TXT 正文",
-        confirmLabel = "保存修改",
-        onConfirm = { save(text) },
-        confirmEnabled = text != original && text.isNotBlank(),
+        title = "书籍信息",
+        confirmLabel = "关闭",
+        onConfirm = dismiss,
+        dismissLabel = null,
     ) {
-        Column {
-            Text(
-                "修改会直接写入已导入的 TXT 原始文件，并重新解析当前书籍。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                text,
-                { text = it },
-                Modifier.fillMaxWidth().padding(top = KixyuSpacing.medium),
-                minLines = 5,
-            )
+        SelectionContainer {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+            ) {
+                Text(current.title, style = MaterialTheme.typography.titleLarge)
+                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                    Text(
+                        "作者",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(current.author, style = MaterialTheme.typography.bodyLarge)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                    Text(
+                        "简介",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        current.description.ifBlank { "暂无简介" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (current.description.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -1324,3 +1318,5 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+private const val READER_ENTRY_CONTENT_DELAY_MILLIS = 120L

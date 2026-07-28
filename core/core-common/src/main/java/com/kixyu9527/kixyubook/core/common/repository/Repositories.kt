@@ -11,11 +11,11 @@ interface BookRepository {
     suspend fun getBook(bookUuid: String): Book?
     suspend fun getChapters(bookUuid: String): List<Chapter>
     suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent?
+    suspend fun prepareReader(bookUuid: String)
     fun observeProgress(bookUuid: String): Flow<ReadingProgress?>
     suspend fun saveProgress(progress: ReadingProgress)
-    suspend fun updateTxtMetadata(bookUuid: String, title: String, author: String, description: String)
+    suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String)
     suspend fun reparseTxt(bookUuid: String): Result<Unit>
-    suspend fun updateTxtParagraph(bookUuid: String, chapterIndex: Int, paragraphIndex: Int, replacementText: String): Result<Unit>
     suspend fun setCategory(bookUuid: String, category: String)
     fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>>
     suspend fun addBookmark(bookmark: Bookmark)

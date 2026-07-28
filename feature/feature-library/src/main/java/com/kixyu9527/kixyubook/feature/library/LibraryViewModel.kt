@@ -76,7 +76,7 @@ class LibraryViewModel @Inject constructor(
         if (bookUuids.isNotEmpty()) repository.deleteBooks(bookUuids)
     }
     fun updateMetadata(bookUuid: String, title: String, author: String, description: String) = viewModelScope.launch {
-        runCatching { repository.updateTxtMetadata(bookUuid, title, author, description) }
+        runCatching { repository.updateBookMetadata(bookUuid, title, author, description) }
             .onFailure { messages.send(it.message ?: "修改失败") }
     }
     fun reparseTxt(bookUuid: String) = viewModelScope.launch {

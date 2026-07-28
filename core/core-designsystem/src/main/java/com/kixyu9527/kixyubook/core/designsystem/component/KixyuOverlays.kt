@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,7 +54,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 object KixyuMotion {
-    const val PageNavigationMillis = 280
+    const val PageNavigationMillis = 320
     const val ReaderPopupEnterMillis = 200
     const val ReaderPopupExitMillis = 150
     const val ReaderSearchEnterMillis = 280
@@ -117,11 +118,14 @@ fun KixyuBottomSheet(
         ModalBottomSheet(
             onDismissRequest = onDismissRequest,
             sheetState = state,
+            containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             // Keep IME ownership at the sheet boundary, matching MIUIX's
             // BottomSheetContentLayout and avoiding per-sheet double insets.
-            Box(Modifier.fillMaxWidth().imePadding()) { content() }
+            CompositionLocalProvider(LocalKixyuSheetSection provides true) {
+                Box(Modifier.fillMaxWidth().imePadding()) { content() }
+            }
         }
     }
 }
@@ -277,7 +281,7 @@ fun KixyuActionDialog(
     confirmLabel: String,
     onConfirm: () -> Unit,
     confirmEnabled: Boolean = true,
-    dismissLabel: String = "取消",
+    dismissLabel: String? = "取消",
     content: @Composable () -> Unit,
 ) {
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
@@ -296,7 +300,7 @@ fun KixyuActionDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
                 ) {
-                    MiuixTextButton(text = dismissLabel, onClick = onDismissRequest)
+                    dismissLabel?.let { MiuixTextButton(text = it, onClick = onDismissRequest) }
                     MiuixButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel) }
                 }
             }
@@ -310,7 +314,9 @@ fun KixyuActionDialog(
             confirmButton = {
                 TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel) }
             },
-            dismissButton = { TextButton(onClick = onDismissRequest) { Text(dismissLabel) } },
+            dismissButton = {
+                dismissLabel?.let { TextButton(onClick = onDismissRequest) { Text(it) } }
+            },
         )
     }
 }

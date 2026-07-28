@@ -1,6 +1,8 @@
 package com.kixyu9527.kixyubook.core.reader.engine
 
 import com.kixyu9527.kixyubook.core.common.model.Paragraph
+import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
+import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -119,28 +121,6 @@ class ReaderEngineTest {
         )
     }
 
-    @Test fun txtEditorRewritesTheSelectedSourceParagraphWithoutPatches() = runBlocking {
-        val file = folder.newFile("editable.txt").apply {
-            writeText("第一章 开始\r\n重复正文。\r\n第二章 继续\r\n重复正文。\r\n结尾。")
-        }
-        val parser = TxtBookParser()
-
-        parser.replaceParagraph(
-            file,
-            chapterIndex = 1,
-            paragraphIndex = 0,
-            expectedText = "重复正文。",
-            replacementText = "修改后的正文。",
-        )
-            .getOrThrow()
-
-        val chapters = mutableListOf<DocumentChapter>()
-        parser.readChapters(file, chapters::add)
-        assertEquals(listOf("重复正文。"), chapters[0].paragraphs)
-        assertEquals(listOf("修改后的正文。", "结尾。"), chapters[1].paragraphs)
-        assertTrue(file.readText().contains("修改后的正文。"))
-    }
-
     @Test fun txtParserDetectsBig5AndTraditionalMetadata() = runBlocking {
         val source = """書名：安靜的書
 作者：測試作者
@@ -252,6 +232,63 @@ class ReaderEngineTest {
         assertEquals(listOf("正文第一段。", "正文第二段。"), chapters.single().paragraphs)
     }
 
+    @Test fun epubParserNormalizesSemanticInlineStylesAndExternalCss() = runBlocking {
+        val epub = folder.newFile("styled.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>样式书</dc:title></metadata><manifest><item id="c1" href="Text/c1.xhtml" media-type="application/xhtml+xml"/><item id="css" href="Styles/book.css" media-type="text/css"/></manifest><spine><itemref idref="c1"/></spine></package>""")
+            entry(
+                "OPS/Styles/book.css",
+                """
+                    @import "extra.css";
+                    :root { --warning: rgb(255 170 180); }
+                    .voice { color: #0055ee; font-weight: 700; }
+                    .sky { color: lightblue; }
+                    .ocean { color: hsl(220 90% 45%); }
+                    .warning { color: var(--warning); }
+                    .leaf { color: rgb(35, 160, 70); }
+                    .note { background-color: #ffe36e; }
+                    strong .regular { font-weight: normal; }
+                """.trimIndent(),
+            )
+            entry("OPS/Styles/extra.css", ".imported { color: rebeccapurple; } .gone { display: none; }")
+            entry(
+                "OPS/Text/c1.xhtml",
+                """<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="stylesheet" href="../Styles/book.css"/></head><body><h1>第一章</h1><p><span class="voice">深蓝粗体</span><span class="sky">浅蓝</span><span class="ocean">天空蓝</span><span class="warning">粉红</span><span class="leaf">绿色</span><span class="imported">紫色</span><span class="gone">隐藏</span><em>斜体</em><a href="#note">链接</a><span class="note">高亮</span><span style="text-decoration: line-through">删除</span><strong><span class="regular">常规</span></strong><br/>换行<ruby>字<rt>zi</rt><rp>(zi)</rp></ruby></p></body></html>""",
+            )
+        }
+
+        val chapter = EpubBookParser().readChapter(epub, 0)!!
+        val text = chapter.paragraphs.single()
+        val spans = chapter.paragraphSpans.single()
+        fun stylesFor(value: String) = text.indexOf(value).let { start ->
+            spans.filter { it.start < start + value.length && it.end > start }.flatMap { it.styles }.toSet()
+        }
+        fun spanFor(value: String) = text.indexOf(value).let { start ->
+            spans.first { it.start <= start && it.end >= start + value.length }
+        }
+
+        assertEquals("深蓝粗体浅蓝天空蓝粉红绿色紫色斜体链接高亮删除常规\n换行字zi", text)
+        assertTrue(ReaderInlineStyle.BOLD in stylesFor("深蓝粗体"))
+        assertEquals(ReaderSemanticColor.BLUE, spanFor("深蓝粗体").foreground)
+        assertEquals(ReaderSemanticColor.BLUE, spanFor("浅蓝").foreground)
+        assertEquals(ReaderSemanticColor.BLUE, spanFor("天空蓝").foreground)
+        assertEquals(ReaderSemanticColor.RED, spanFor("粉红").foreground)
+        assertEquals(ReaderSemanticColor.GREEN, spanFor("绿色").foreground)
+        assertEquals(ReaderSemanticColor.PURPLE, spanFor("紫色").foreground)
+        assertTrue(ReaderInlineStyle.ITALIC in stylesFor("斜体"))
+        assertEquals(ReaderSemanticColor.ACCENT, spanFor("链接").foreground)
+        assertTrue(ReaderInlineStyle.UNDERLINE in stylesFor("链接"))
+        assertEquals(ReaderSemanticColor.YELLOW, spanFor("高亮").background)
+        assertTrue(ReaderInlineStyle.STRIKETHROUGH in stylesFor("删除"))
+        assertTrue(ReaderInlineStyle.BOLD !in stylesFor("常规"))
+        assertTrue(ReaderInlineStyle.SUPERSCRIPT in stylesFor("zi"))
+    }
+
     @Test fun epubParserKeepsImagesInReadingOrderAndResolvesRelativePaths() = runBlocking {
         val epub = folder.newFile("images.epub")
         ZipOutputStream(epub.outputStream()).use { zip ->
@@ -278,6 +315,25 @@ class ReaderEngineTest {
         assertEquals("场景插画", chapter.images.single().altText)
         assertEquals(1200, chapter.images.single().intrinsicWidth)
         assertEquals(800, chapter.images.single().intrinsicHeight)
+    }
+
+    @Test fun epubParserNormalizesFallbackBlocksListsAndTables() = runBlocking {
+        val epub = folder.newFile("structural-elements.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>结构测试</dc:title></metadata><manifest><item id="c1" href="content.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>""")
+            entry(
+                "OPS/content.xhtml",
+                """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><div><span>区块正文</span></div><div style="display:none">隐藏内容</div><ul><li>第一项</li><li>第二项</li></ul><hr/><table><tr><td>甲</td><td>乙</td></tr></table></body></html>""",
+            )
+        }
+
+        val chapter = EpubBookParser().readChapter(epub, 0)!!
+        assertEquals(listOf("区块正文", "• 第一项", "• 第二项", "· · ·", "甲", "乙"), chapter.paragraphs)
     }
 
     @Test fun epubImageLayoutUsesStableSizeClassesAndKeepsAspectRatio() {

@@ -27,23 +27,56 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 private object BookCoverMemoryCache {
     private const val MAX_CACHE_BYTES = 16 * 1024 * 1024
+    private const val MAX_DECODE_DIMENSION_PX = 384
     private val bitmaps = object : LruCache<String, ImageBitmap>(MAX_CACHE_BYTES) {
         override fun sizeOf(key: String, value: ImageBitmap): Int =
             (value.width.toLong() * value.height.toLong() * 4L)
                 .coerceAtMost(Int.MAX_VALUE.toLong())
                 .toInt()
     }
+    private val decodeSlots = Semaphore(2)
+    private val pathLocks = ConcurrentHashMap<String, Mutex>()
 
     operator fun get(path: String): ImageBitmap? = bitmaps.get(path)
 
     suspend fun load(path: String): ImageBitmap? = withContext(Dispatchers.IO) {
-        bitmaps.get(path) ?: runCatching {
-            BitmapFactory.decodeFile(path)?.asImageBitmap()?.also { bitmaps.put(path, it) }
-        }.getOrNull()
+        bitmaps.get(path) ?: pathLocks.getOrPut(path, ::Mutex).withLock {
+            bitmaps.get(path) ?: decodeSlots.withPermit {
+                runCatching { decodeSampled(path) }
+                    .getOrNull()
+                    ?.asImageBitmap()
+                    ?.also { bitmaps.put(path, it) }
+            }
+        }
+    }
+
+    private fun decodeSampled(path: String): android.graphics.Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sampleSize = 1
+        while (
+            bounds.outWidth / sampleSize > MAX_DECODE_DIMENSION_PX ||
+            bounds.outHeight / sampleSize > MAX_DECODE_DIMENSION_PX
+        ) {
+            sampleSize *= 2
+        }
+        return BitmapFactory.decodeFile(
+            path,
+            BitmapFactory.Options().apply {
+                inSampleSize = sampleSize.coerceAtLeast(1)
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+            },
+        )
     }
 }
 
