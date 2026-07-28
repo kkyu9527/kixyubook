@@ -15,8 +15,8 @@ android {
         applicationId = "com.kixyu9527.kixyubook"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1016
-        versionName = "1.0.0"
+        versionCode = 1024
+        versionName = "1.0.6"
     }
 
     val externalSigningFile = file(

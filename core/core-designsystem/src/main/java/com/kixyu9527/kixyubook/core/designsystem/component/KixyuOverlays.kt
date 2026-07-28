@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -55,6 +56,8 @@ object KixyuMotion {
     const val PageNavigationMillis = 280
     const val ReaderPopupEnterMillis = 200
     const val ReaderPopupExitMillis = 150
+    const val ReaderSearchEnterMillis = 280
+    const val ReaderSearchExitMillis = 220
 }
 
 /** Every platform dialog participates in the app's edge-to-edge contract. */
@@ -98,6 +101,14 @@ fun KixyuBottomSheet(
             show = show,
             onDismissRequest = onDismissRequest,
             onDismissFinished = onDismissFinished,
+            // MIUIX's light default sheet background and Card container are
+            // both white. Its official surface token provides the intended
+            // gray page / bright card hierarchy (and the matching dark pair).
+            backgroundColor = MiuixTheme.colorScheme.surface,
+            // DialogLayout is already resized by the IME on Android. MIUIX's
+            // default adds imePadding after that resize, leaving a transparent
+            // keyboard-height gap below the visible sheet on real devices.
+            defaultWindowInsetsPadding = false,
             renderInRootScaffold = true,
             content = content,
         )
@@ -108,7 +119,9 @@ fun KixyuBottomSheet(
             sheetState = state,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
-            content()
+            // Keep IME ownership at the sheet boundary, matching MIUIX's
+            // BottomSheetContentLayout and avoiding per-sheet double insets.
+            Box(Modifier.fillMaxWidth().imePadding()) { content() }
         }
     }
 }

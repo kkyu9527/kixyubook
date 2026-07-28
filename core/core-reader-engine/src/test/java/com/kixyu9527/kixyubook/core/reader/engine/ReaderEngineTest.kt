@@ -251,4 +251,44 @@ class ReaderEngineTest {
 
         assertEquals(listOf("正文第一段。", "正文第二段。"), chapters.single().paragraphs)
     }
+
+    @Test fun epubParserKeepsImagesInReadingOrderAndResolvesRelativePaths() = runBlocking {
+        val epub = folder.newFile("images.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/book.opf"/></rootfiles></container>""")
+            entry("OEBPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>插图书</dc:title></metadata><manifest><item id="c1" href="Text/c1.xhtml" media-type="application/xhtml+xml"/><item id="art" href="Images/art.png" media-type="image/png"/></manifest><spine><itemref idref="c1"/></spine></package>""")
+            entry("OEBPS/Text/c1.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>插图之前。</p><img src="../Images/art.png" alt="场景插画"/><p>插图之后。</p></body></html>""")
+            val pngHeader = ByteArray(24).apply {
+                this[0] = 0x89.toByte(); this[1] = 0x50; this[2] = 0x4E; this[3] = 0x47
+                this[16] = 0; this[17] = 0; this[18] = 0x04; this[19] = 0xB0.toByte()
+                this[20] = 0; this[21] = 0; this[22] = 0x03; this[23] = 0x20
+            }
+            zip.putNextEntry(ZipEntry("OEBPS/Images/art.png")); zip.write(pngHeader); zip.closeEntry()
+        }
+
+        val chapter = EpubBookParser().readChapter(epub, 0)!!
+
+        assertEquals(listOf("插图之前。", "插图之后。"), chapter.paragraphs)
+        assertEquals(1, chapter.images.single().contentIndex)
+        assertEquals("OEBPS/Images/art.png", chapter.images.single().resourcePath)
+        assertEquals("场景插画", chapter.images.single().altText)
+        assertEquals(1200, chapter.images.single().intrinsicWidth)
+        assertEquals(800, chapter.images.single().intrinsicHeight)
+    }
+
+    @Test fun epubImageLayoutUsesStableSizeClassesAndKeepsAspectRatio() {
+        val wide = standardizedReaderImageLayout(320f, 1600, 800)
+        val portrait = standardizedReaderImageLayout(320f, 800, 1600)
+        val compact = standardizedReaderImageLayout(320f, 240, 180)
+
+        assertEquals(ReaderImageSizeClass.WIDE, wide.sizeClass)
+        assertEquals(2f, wide.widthDp / wide.heightDp, .01f)
+        assertEquals(ReaderImageSizeClass.PORTRAIT, portrait.sizeClass)
+        assertEquals(.5f, portrait.widthDp / portrait.heightDp, .01f)
+        assertEquals(ReaderImageSizeClass.COMPACT, compact.sizeClass)
+    }
 }

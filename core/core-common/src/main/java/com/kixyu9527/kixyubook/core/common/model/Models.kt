@@ -20,11 +20,19 @@ data class Book(
 
 data class Chapter(val id: Long, val bookUuid: String, val title: String, val index: Int)
 
+enum class ParagraphKind { TEXT, IMAGE }
+
 data class Paragraph(
     val id: Long,
     val chapterId: Long,
     val index: Int,
     val text: String,
+    val kind: ParagraphKind = ParagraphKind.TEXT,
+    /** Normalized entry path inside the source EPUB archive. */
+    val resourcePath: String? = null,
+    val mediaType: String? = null,
+    val intrinsicWidth: Int = 0,
+    val intrinsicHeight: Int = 0,
 )
 
 data class ReadingProgress(

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.pointerInput
+import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 
 data class ReaderRenderPalette(
     val background: Color,
@@ -55,6 +56,7 @@ fun ReaderScrollRenderer(
     hasNext: Boolean,
     topInsetDp: Float,
     bottomInsetDp: Float,
+    epubPath: String? = null,
     modifier: Modifier = Modifier,
     highlightQuery: String = "",
 ) {
@@ -77,7 +79,25 @@ fun ReaderScrollRenderer(
             Spacer(Modifier.height(24.dp))
         }
         itemsIndexed(contentParagraphs, key = { _, paragraph -> paragraph.id }) { _, paragraph ->
-            ReaderBodyText(paragraph.text, spec, palette.body, family, editable, { onEditParagraph(paragraph.index, paragraph.text) }, onTapFraction, highlightQuery = highlightQuery, highlightColor = palette.accent)
+            if (paragraph.kind == ParagraphKind.IMAGE) {
+                val layout = standardizedReaderImageLayout(
+                    availableWidthDp = spec.viewportWidthDp - spec.horizontalMarginDp * 2f,
+                    intrinsicWidth = paragraph.intrinsicWidth,
+                    intrinsicHeight = paragraph.intrinsicHeight,
+                )
+                Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ReaderEpubImage(
+                        epubPath = epubPath,
+                        resourcePath = paragraph.resourcePath,
+                        altText = paragraph.text,
+                        layout = layout,
+                        placeholderColor = palette.secondary,
+                        onTapFraction = onTapFraction,
+                    )
+                }
+            } else {
+                ReaderBodyText(paragraph.text, spec, palette.body, family, editable, { onEditParagraph(paragraph.index, paragraph.text) }, onTapFraction, highlightQuery = highlightQuery, highlightColor = palette.accent)
+            }
         }
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -100,6 +120,7 @@ fun ReaderPageRenderer(
     editable: Boolean,
     onEditParagraph: (Int, String) -> Unit,
     onTapFraction: (Float) -> Unit,
+    epubPath: String? = null,
     modifier: Modifier = Modifier,
     showRegularChapterTitle: Boolean = true,
     highlightQuery: String = "",
@@ -126,19 +147,40 @@ fun ReaderPageRenderer(
             Spacer(Modifier.height(ReaderPageMetrics.regularGapDp.dp))
         }
         page.blocks.forEach { block ->
-            ReaderBodyText(
-                block.visibleText,
-                spec,
-                palette.body,
-                family,
-                editable,
-                { onEditParagraph(block.paragraphIndex, block.fullText) },
-                onTapFraction,
-                indent = !block.continuation,
-                bottomSpacing = block.bottomSpacing,
-                highlightQuery = highlightQuery,
-                highlightColor = palette.accent,
-            )
+            if (block.kind == ParagraphKind.IMAGE) {
+                Column(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ReaderEpubImage(
+                        epubPath = epubPath,
+                        resourcePath = block.resourcePath,
+                        altText = block.fullText,
+                        layout = ReaderImageLayout(
+                            block.imageWidthDp,
+                            block.imageHeightDp,
+                            standardizedReaderImageLayout(
+                                spec.viewportWidthDp - spec.horizontalMarginDp * 2f,
+                                block.intrinsicWidth,
+                                block.intrinsicHeight,
+                            ).sizeClass,
+                        ),
+                        placeholderColor = palette.secondary,
+                        onTapFraction = onTapFraction,
+                    )
+                }
+            } else {
+                ReaderBodyText(
+                    block.visibleText,
+                    spec,
+                    palette.body,
+                    family,
+                    editable,
+                    { onEditParagraph(block.paragraphIndex, block.fullText) },
+                    onTapFraction,
+                    indent = !block.continuation,
+                    bottomSpacing = block.bottomSpacing,
+                    highlightQuery = highlightQuery,
+                    highlightColor = palette.accent,
+                )
+            }
         }
         Spacer(Modifier.weight(1f))
         Spacer(Modifier.height(ReaderPageMetrics.footerHeightDp.dp))

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Color.parseColor
+import android.view.WindowManager
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -53,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -96,7 +97,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
-private enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, SETTINGS, SEARCH }
+private enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, SETTINGS }
 private data class ReaderPageInfo(val current: Int, val total: Int)
 
 /** All floating reader controls share one enter/exit clock and transform. */
@@ -194,6 +195,7 @@ private fun ReaderScreen(
     var controls by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var toolsMenu by remember { mutableStateOf(false) }
+    var searchVisible by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
     var editing by remember { mutableStateOf<Pair<Int, String>?>(null) }
     var pageInfo by remember { mutableStateOf<ReaderPageInfo?>(null) }
@@ -248,17 +250,35 @@ private fun ReaderScreen(
         view.keepScreenOn = state.settings.keepScreenOn
         onDispose { view.keepScreenOn = previous }
     }
+    DisposableEffect(searchVisible, view) {
+        val window = context.findActivity()?.window
+        val previousSoftInputMode = window?.attributes?.softInputMode
+        if (searchVisible) {
+            // Keep the reader viewport stable while the IME is visible. The
+            // floating search panel alone follows WindowInsets.ime.
+            window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        }
+        onDispose {
+            if (searchVisible && previousSoftInputMode != null) {
+                window.setSoftInputMode(previousSoftInputMode)
+            }
+        }
+    }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     LaunchedEffect(state.settings.pageMode) {
         if (state.settings.pageMode == PageMode.SCROLL) pageInfo = null
     }
     PredictiveBackHandler(
         enabled = sheet == null && editing == null &&
-            (menu || toolsMenu || state.searchResults.isNotEmpty()),
+            (searchVisible || menu || toolsMenu || state.searchResults.isNotEmpty()),
     ) { events ->
         try {
             events.collect { backProgress = it.progress }
             when {
+                searchVisible -> {
+                    searchVisible = false
+                    clearSearch()
+                }
                 toolsMenu -> toolsMenu = false
                 menu -> menu = false
                 state.searchResults.isNotEmpty() -> clearSearch()
@@ -351,18 +371,34 @@ private fun ReaderScreen(
                     currentPageBookmark?.let { deleteBookmark(it.uuid) } ?: addBookmark()
                     toolsMenu = false
                 },
-                onSearch = { sheet = ReaderSheet.SEARCH; toolsMenu = false },
+                onSearch = {
+                    searchVisible = true
+                    controls = false
+                    menu = false
+                    toolsMenu = false
+                },
                 onSheet = { sheet = it },
-            )
-            SearchNavigator(
-                modifier = Modifier.align(Alignment.BottomCenter),
-                state = state,
-                visible = state.searchResults.isNotEmpty() && sheet == null,
-                onMove = moveSearchResult,
-                onClose = clearSearch,
             )
             }
         }
+
+        ReaderSearchOverlay(
+            visible = searchVisible,
+            progress = backProgress,
+            state = state,
+            onDismiss = {
+                searchVisible = false
+                clearSearch()
+            },
+            onSearch = search,
+            onMove = moveSearchResult,
+            onSelect = { index ->
+                selectSearchResult(index)
+                controls = false
+                menu = false
+                toolsMenu = false
+            },
+        )
 
         val activeSheet = sheet ?: retainedSheet
         KixyuBottomSheet(
@@ -379,17 +415,6 @@ private fun ReaderScreen(
                 ReaderSheet.THEME -> ThemeSheet(state.settings, updateSettings)
                 ReaderSheet.LAYOUT -> LayoutSheet(state, updateSettings, addFont, deleteFont)
                 ReaderSheet.SETTINGS -> ReaderSettingsSheet(state.settings, updateSettings)
-                ReaderSheet.SEARCH -> SearchSheet(
-                    state = state,
-                    onSearch = search,
-                    onSelect = { index ->
-                        selectSearchResult(index)
-                        controls = false
-                        menu = false
-                        toolsMenu = false
-                        sheet = null
-                    },
-                )
                 null -> Unit
             }
         }
@@ -402,55 +427,6 @@ private fun ReaderScreen(
                 dismiss = { editing = null },
                 save = { saveEdit(index, it); editing = null },
             )
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun SearchNavigator(
-    modifier: Modifier = Modifier,
-    state: ReaderUiState,
-    visible: Boolean,
-    onMove: (Int) -> Unit,
-    onClose: () -> Unit,
-) {
-    if (visible) {
-        Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBarsIgnoringVisibility)
-                .padding(bottom = KixyuSpacing.small, start = KixyuSpacing.large, end = KixyuSpacing.large),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            KixyuPopupSurface(
-                modifier = Modifier
-                    .height(KixyuSize.readerControlButton)
-                    .widthIn(max = 280.dp),
-            ) {
-                Row(
-                    Modifier.padding(start = KixyuSpacing.medium),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "${state.searchQuery}  ${state.selectedSearchIndex + 1}/${state.searchResults.size}",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                    KixyuIconButton(
-                        onClick = { onMove(-1) },
-                        enabled = state.selectedSearchIndex > 0,
-                    ) { Icon(Icons.Outlined.KeyboardArrowUp, "上一个结果") }
-                    KixyuIconButton(
-                        onClick = { onMove(1) },
-                        enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
-                    ) { Icon(Icons.Outlined.KeyboardArrowDown, "下一个结果") }
-                    KixyuIconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "退出搜索") }
-                }
-            }
         }
     }
 }
@@ -524,7 +500,8 @@ private fun ReaderContent(
                     { dismissControls(); moveChapter(-1, true) }, { dismissControls(); moveChapter(1, false) },
                     state.chapterIndex > 0, state.chapterIndex < state.chapters.lastIndex,
                     topInsetDp, bottomInsetDp,
-                    Modifier.fillMaxSize(),
+                    epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
+                    modifier = Modifier.fillMaxSize(),
                     highlightQuery = state.searchQuery,
                 )
             } else {
@@ -631,6 +608,7 @@ private fun PagedReader(
                     else -> middleTap()
                 }
             } },
+            epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
             showRegularChapterTitle = state.settings.showChapterTitle,
             highlightQuery = state.searchQuery,
         )
@@ -668,7 +646,7 @@ private fun ReaderControls(
                 KixyuPopupSurface(
                     modifier = Modifier.align(Alignment.TopCenter)
                         .padding(top = KixyuSize.readerTopControlInset)
-                        .height(KixyuSize.readerControlButton)
+                        .height(KixyuSize.readerBookTitleHeight)
                         .widthIn(max = KixyuSize.readerBookTitleMaxWidth)
                         .then(controlsBackModifier),
                 ) {
@@ -678,84 +656,28 @@ private fun ReaderControls(
                     ) {
                         Text(
                             bookTitle,
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
                     }
                 }
             }
-            KixyuTonalIconButton(
-                onClick = onExit,
-                modifier = Modifier.align(Alignment.TopEnd)
-                    .padding(top = KixyuSize.readerTopControlInset, end = KixyuSize.readerControlInset)
-                    .size(KixyuSize.readerControlButton)
-                    .then(controlsBackModifier),
-            ) { Icon(Icons.Outlined.Close, "退出") }
-            Box(
-                Modifier.align(Alignment.TopStart)
-                    .padding(top = KixyuSize.readerTopControlInset, start = KixyuSize.readerControlInset),
-            ) {
-                KixyuTonalIconButton(
-                    onClick = onTools,
-                    modifier = Modifier.size(KixyuSize.readerControlButton).then(controlsBackModifier),
-                ) { Icon(Icons.Outlined.MoreHoriz, "阅读工具") }
-                KixyuPopupMenu(
-                    expanded = toolsMenuVisible,
-                    onDismissRequest = { if (toolsMenuVisible) onTools() },
-                    offset = DpOffset(0.dp, KixyuSpacing.small),
-                    items = listOf(
-                        KixyuPopupMenuItem(
-                            label = if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
-                            icon = if (currentPageBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkAdd,
-                            onClick = onToggleBookmark,
-                        ),
-                        KixyuPopupMenuItem(
-                            label = "全文搜索",
-                            icon = Icons.Outlined.Search,
-                            onClick = onSearch,
-                        ),
-                    ),
-                )
-            }
-            KixyuTonalIconButton(
-                onClick = onDirectory,
-                modifier = Modifier.align(Alignment.BottomStart)
-                    .padding(KixyuSize.readerControlInset)
-                    .size(KixyuSize.readerControlButton)
-                    .then(controlsBackModifier),
-            ) { Icon(Icons.AutoMirrored.Outlined.Toc, "目录") }
-            Box(
-                Modifier.align(Alignment.BottomEnd)
-                    .padding(KixyuSize.readerControlInset),
-            ) {
-                KixyuTonalIconButton(
-                    onClick = onSettings,
-                    modifier = Modifier.size(KixyuSize.readerControlButton).then(controlsBackModifier),
-                ) { Icon(Icons.Outlined.Settings, "设置") }
-                KixyuPopupMenu(
-                    expanded = menuVisible,
-                    onDismissRequest = { if (menuVisible) onSettings() },
-                    alignEnd = true,
-                    items = listOf(
-                        KixyuPopupMenuItem("阅读主题", Icons.Outlined.Palette) {
-                            onSettings(); onSheet(ReaderSheet.THEME)
-                        },
-                        KixyuPopupMenuItem("页面外观", Icons.Outlined.ViewCarousel) {
-                            onSettings(); onSheet(ReaderSheet.LAYOUT)
-                        },
-                        KixyuPopupMenuItem("阅读设置", Icons.Outlined.Tune) {
-                            onSettings(); onSheet(ReaderSheet.SETTINGS)
-                        },
-                    ),
-                )
-            }
             Row(
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(bottom = KixyuSize.readerControlInset)
                     .then(controlsBackModifier),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(KixyuSize.readerChapterActionGap),
             ) {
+                KixyuTonalIconButton(
+                    onClick = onExit,
+                    modifier = Modifier.size(KixyuSize.readerControlButton),
+                ) { Icon(Icons.Outlined.Close, "退出") }
+                KixyuTonalIconButton(
+                    onClick = onDirectory,
+                    modifier = Modifier.size(KixyuSize.readerControlButton),
+                ) { Icon(Icons.AutoMirrored.Outlined.Toc, "目录") }
                 KixyuTonalIconButton(
                     onClick = onPreviousChapter,
                     enabled = hasPreviousChapter,
@@ -763,13 +685,57 @@ private fun ReaderControls(
                 ) {
                     Icon(Icons.Outlined.SkipPrevious, "上一章")
                 }
-                Spacer(Modifier.width(KixyuSize.readerChapterActionGap))
                 KixyuTonalIconButton(
                     onClick = onNextChapter,
                     enabled = hasNextChapter,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) {
                     Icon(Icons.Outlined.SkipNext, "下一章")
+                }
+                Box {
+                    KixyuTonalIconButton(
+                        onClick = onTools,
+                        modifier = Modifier.size(KixyuSize.readerControlButton),
+                    ) { Icon(Icons.Outlined.MoreHoriz, "阅读工具") }
+                    KixyuPopupMenu(
+                        expanded = toolsMenuVisible,
+                        onDismissRequest = { if (toolsMenuVisible) onTools() },
+                        alignEnd = true,
+                        items = listOf(
+                            KixyuPopupMenuItem(
+                                label = if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
+                                icon = if (currentPageBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkAdd,
+                                onClick = onToggleBookmark,
+                            ),
+                            KixyuPopupMenuItem(
+                                label = "全文搜索",
+                                icon = Icons.Outlined.Search,
+                                onClick = onSearch,
+                            ),
+                        ),
+                    )
+                }
+                Box {
+                    KixyuTonalIconButton(
+                        onClick = onSettings,
+                        modifier = Modifier.size(KixyuSize.readerControlButton),
+                    ) { Icon(Icons.Outlined.Settings, "设置") }
+                    KixyuPopupMenu(
+                        expanded = menuVisible,
+                        onDismissRequest = { if (menuVisible) onSettings() },
+                        alignEnd = true,
+                        items = listOf(
+                            KixyuPopupMenuItem("阅读主题", Icons.Outlined.Palette) {
+                                onSettings(); onSheet(ReaderSheet.THEME)
+                            },
+                            KixyuPopupMenuItem("页面外观", Icons.Outlined.ViewCarousel) {
+                                onSettings(); onSheet(ReaderSheet.LAYOUT)
+                            },
+                            KixyuPopupMenuItem("阅读设置", Icons.Outlined.Tune) {
+                                onSettings(); onSheet(ReaderSheet.SETTINGS)
+                            },
+                        ),
+                    )
                 }
             }
         }
@@ -1032,53 +998,144 @@ private fun DirectoryFastScroller(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SearchSheet(
+private fun ReaderSearchOverlay(
+    visible: Boolean,
+    progress: Float,
     state: ReaderUiState,
+    onDismiss: () -> Unit,
     onSearch: (String) -> Unit,
+    onMove: (Int) -> Unit,
     onSelect: (Int) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf(state.searchQuery) }
+    var expanded by rememberSaveable { mutableStateOf(true) }
     val focusManager = LocalFocusManager.current
-    fun submit() {
-        onSearch(query)
-        focusManager.clearFocus()
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(visible) {
+        if (visible) {
+            query = state.searchQuery
+            expanded = true
+            withFrameNanos { }
+            focusRequester.requestFocus()
+        } else {
+            focusManager.clearFocus()
+        }
     }
-    Column(
-        Modifier.fillMaxWidth().imePadding(),
-        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+    fun submit() {
+        onSearch(query.trim())
+        focusManager.clearFocus()
+        expanded = true
+    }
+    AnimatedVisibility(
+        visible = visible && expanded,
+        modifier = Modifier.fillMaxSize(),
+        enter = fadeIn(tween(KixyuMotion.ReaderSearchEnterMillis)),
+        exit = fadeOut(tween(KixyuMotion.ReaderSearchExitMillis)),
     ) {
-        Text(
-            "全文搜索",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = KixyuSpacing.large),
-            maxLines = 1,
+        Box(
+            Modifier.fillMaxSize()
+                .background(Color.Black.copy(alpha = .28f))
+                .pointerInput(Unit) { detectTapGestures { onDismiss() } },
         )
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = KixyuSpacing.large),
-            placeholder = { Text("搜索书中内容", maxLines = 1) },
-            leadingIcon = { Icon(Icons.Outlined.Search, null) },
-            trailingIcon = {
-                KixyuIconButton(onClick = ::submit, enabled = query.isNotBlank()) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowForward, "搜索")
-                }
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { submit() }),
-        )
-        when {
-            state.searchResults.isNotEmpty() -> {
+    }
+    AnimatedVisibility(
+        visible = visible,
+        modifier = Modifier.fillMaxSize(),
+        enter = fadeIn(tween(KixyuMotion.ReaderSearchEnterMillis)) +
+            slideInVertically(tween(KixyuMotion.ReaderSearchEnterMillis)) { it / 5 },
+        exit = fadeOut(tween(KixyuMotion.ReaderSearchExitMillis)) +
+            slideOutVertically(tween(KixyuMotion.ReaderSearchExitMillis)) { it / 5 },
+    ) {
+        Box(
+            Modifier.fillMaxSize()
+                .windowInsetsPadding(
+                    WindowInsets.ime.union(WindowInsets.navigationBarsIgnoringVisibility)
+                        .only(WindowInsetsSides.Bottom),
+                )
+                .padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.small),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            KixyuPopupSurface(
+                modifier = Modifier.fillMaxWidth()
+                    .widthIn(max = KixyuSize.readerSearchPanelMaxWidth)
+                    .heightIn(max = KixyuSize.readerSearchPanelMaxHeight)
+                    .animateContentSize(tween(KixyuMotion.ReaderSearchEnterMillis))
+                    .predictivePopupTransform(progress),
+                shadowElevation = 0.dp,
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(KixyuSpacing.large),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                ) {
+                    AnimatedVisibility(visible = expanded) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "全文搜索",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 1,
+                            )
+                            KixyuIconButton(onClick = onDismiss) {
+                                Icon(Icons.Outlined.Close, "关闭搜索")
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester)
+                            .onFocusChanged { if (it.isFocused) expanded = true },
+                        placeholder = { Text("搜索书中内容", maxLines = 1) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                        trailingIcon = {
+                            KixyuIconButton(onClick = ::submit, enabled = query.isNotBlank()) {
+                                Icon(Icons.AutoMirrored.Outlined.ArrowForward, "搜索")
+                            }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { submit() }),
+                    )
+                    if (state.searchResults.isNotEmpty() && query.trim() == state.searchQuery) {
+                if (!expanded) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${state.selectedSearchIndex + 1}/${state.searchResults.size}",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        KixyuIconButton(
+                            onClick = { onMove(-1) },
+                            enabled = state.selectedSearchIndex > 0,
+                        ) { Icon(Icons.Outlined.KeyboardArrowUp, "上一个结果") }
+                        KixyuIconButton(
+                            onClick = { onMove(1) },
+                            enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
+                        ) { Icon(Icons.Outlined.KeyboardArrowDown, "下一个结果") }
+                        KixyuIconButton(onClick = onDismiss) {
+                            Icon(Icons.Outlined.Close, "退出搜索")
+                        }
+                    }
+                } else {
                 Text(
                     "${state.searchResults.size} 个匹配结果",
-                    modifier = Modifier.padding(horizontal = KixyuSpacing.large),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 androidx.compose.foundation.lazy.LazyColumn(
-                    Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                    Modifier.fillMaxWidth().weight(1f, fill = false),
+                    contentPadding = PaddingValues(bottom = KixyuSpacing.small),
                 ) {
                     items(state.searchResults.size) { index ->
                         val result = state.searchResults[index]
@@ -1104,24 +1161,37 @@ private fun SearchSheet(
                                     MaterialTheme.colorScheme.secondaryContainer
                                 } else Color.Transparent,
                             ),
-                            modifier = Modifier.pointerInput(index) { detectTapGestures { onSelect(index) } },
+                            modifier = Modifier.pointerInput(index) {
+                                detectTapGestures {
+                                    onSelect(index)
+                                    focusManager.clearFocus()
+                                    expanded = false
+                                }
+                            },
                         )
                     }
                 }
-            }
-            state.searchQuery.isNotBlank() -> {
-                Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                }
+                    } else if (query.trim() == state.searchQuery && state.searchQuery.isNotBlank()) {
+                Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) {
                     Text("没有找到匹配内容", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                    } else if (query.isNotBlank()) {
+                Text(
+                    "修改后按搜索更新结果",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                    }
                 }
             }
         }
-        Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
     }
 }
 
 @Composable private fun ThemeSheet(settings: ReaderSettings, update: ((ReaderSettings) -> ReaderSettings) -> Unit) {
     androidx.compose.foundation.lazy.LazyColumn(
-        Modifier.fillMaxWidth().imePadding(),
+        Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {

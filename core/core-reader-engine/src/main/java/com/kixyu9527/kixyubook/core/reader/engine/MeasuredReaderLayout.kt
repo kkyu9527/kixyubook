@@ -15,6 +15,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import kotlin.math.ceil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -80,9 +81,9 @@ private class MeasuredReaderPaginator(
         family: androidx.compose.ui.text.font.FontFamily,
         showRegularChapterTitle: Boolean,
     ): List<ReaderPage> {
-        val widthPx = with(density) {
-            (spec.viewportWidthDp - spec.horizontalMarginDp * 2f).coerceAtLeast(MIN_BODY_WIDTH_DP).dp.roundToPx()
-        }
+        val contentWidthDp = (spec.viewportWidthDp - spec.horizontalMarginDp * 2f)
+            .coerceAtLeast(MIN_BODY_WIDTH_DP)
+        val widthPx = with(density) { contentWidthDp.dp.roundToPx() }
         val spacingPx = with(density) { (spec.fontSizeSp * PARAGRAPH_SPACING_EM).dp.toPx() }
         val pages = mutableListOf<ReaderPage>()
         var blocks = mutableListOf<DocumentBlock>()
@@ -100,6 +101,45 @@ private class MeasuredReaderPaginator(
         }
 
         chapter.contentParagraphs().forEach { paragraph ->
+            if (paragraph.kind == ParagraphKind.IMAGE && paragraph.resourcePath != null) {
+                var imageLayout = standardizedReaderImageLayout(
+                    contentWidthDp,
+                    paragraph.intrinsicWidth,
+                    paragraph.intrinsicHeight,
+                )
+                var imageHeightPx = with(density) { imageLayout.heightDp.dp.toPx() }
+                var availablePx = (bodyHeightPx() - usedHeightPx).coerceAtLeast(0f)
+                if (imageHeightPx + spacingPx > availablePx && blocks.isNotEmpty()) {
+                    flush()
+                    availablePx = bodyHeightPx()
+                }
+                if (imageHeightPx + spacingPx > availablePx) {
+                    val maxImageHeightPx = (availablePx - spacingPx).coerceAtLeast(availablePx * .75f)
+                    val scale = (maxImageHeightPx / imageHeightPx).coerceIn(.1f, 1f)
+                    imageLayout = imageLayout.copy(
+                        widthDp = imageLayout.widthDp * scale,
+                        heightDp = imageLayout.heightDp * scale,
+                    )
+                    imageHeightPx *= scale
+                }
+                blocks += DocumentBlock(
+                    paragraphIndex = paragraph.index,
+                    fullText = paragraph.text,
+                    visibleText = "",
+                    continuation = false,
+                    bottomSpacing = true,
+                    kind = ParagraphKind.IMAGE,
+                    resourcePath = paragraph.resourcePath,
+                    mediaType = paragraph.mediaType,
+                    intrinsicWidth = paragraph.intrinsicWidth,
+                    intrinsicHeight = paragraph.intrinsicHeight,
+                    imageWidthDp = imageLayout.widthDp,
+                    imageHeightDp = imageLayout.heightDp,
+                )
+                usedHeightPx += imageHeightPx + spacingPx
+                if (bodyHeightPx() - usedHeightPx < spacingPx) flush()
+                return@forEach
+            }
             var remaining = paragraph.text
             var continuation = false
             while (remaining.isNotEmpty()) {

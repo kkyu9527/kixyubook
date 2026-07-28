@@ -145,7 +145,10 @@ class ReaderViewModel @Inject constructor(
         val previousOffset = content.indexOfLast { it.index <= lastPosition }.coerceAtLeast(0)
         val safePosition = content.getOrNull(currentOffset)?.index ?: 0
         if (content.isNotEmpty() && currentOffset > previousOffset) {
-            sessionCharacters += content.subList(previousOffset, currentOffset).sumOf { it.text.length }.toLong()
+            sessionCharacters += content.subList(previousOffset, currentOffset)
+                .filter { it.kind == ParagraphKind.TEXT }
+                .sumOf { it.text.length }
+                .toLong()
         }
         lastPosition = safePosition
         _uiState.update { it.copy(currentPosition = safePosition) }
@@ -192,7 +195,7 @@ class ReaderViewModel @Inject constructor(
         val chapter = state.chapter ?: return@launch
         val position = lastPosition
         val preview = chapter.contentParagraphs()
-            .firstOrNull { it.index >= position }
+            .firstOrNull { it.index >= position && it.kind == ParagraphKind.TEXT }
             ?.text
             ?.replace(Regex("\\s+"), " ")
             ?.take(80)

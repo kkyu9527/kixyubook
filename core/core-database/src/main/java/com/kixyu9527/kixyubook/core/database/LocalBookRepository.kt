@@ -9,6 +9,8 @@ import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
+import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapter
+import com.kixyu9527.kixyubook.core.reader.engine.EpubBookParser
 import com.kixyu9527.kixyubook.core.reader.engine.TxtBookParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -123,9 +125,22 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent? = withContext(Dispatchers.IO) {
         val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withContext null
-        ChapterContent(chapter.toModel(), dao.getParagraphs(chapter.id).map { paragraph ->
-            Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
-        })
+        val storedParagraphs = dao.getParagraphs(chapter.id)
+        val book = dao.getBook(bookUuid)
+        val paragraphs = if (book?.format == BookFormat.EPUB.name) {
+            val parsed = runCatching {
+                (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
+                    .readChapter(File(book.storagePath), chapterIndex, chapter.title)
+            }.getOrNull()
+            parsed?.toReaderParagraphs(chapter.id, storedParagraphs) ?: storedParagraphs.map { paragraph ->
+                Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+            }
+        } else {
+            storedParagraphs.map { paragraph ->
+                Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+            }
+        }
+        ChapterContent(chapter.toModel(), paragraphs)
     }
 
     override fun observeProgress(bookUuid: String) = dao.observeProgress(bookUuid).map { it?.toModel() }
@@ -302,6 +317,59 @@ private fun ChapterEntity.toModel() = Chapter(id, bookUuid, title, chapterIndex)
 private fun ReadingProgressEntity.toModel() = ReadingProgress(bookUuid, chapterId, position, offset, updatedTime, fraction)
 private fun BookmarkRow.toModel() = Bookmark(uuid, bookUuid, chapterId, chapterTitle, chapterIndex, position, preview, createdTime)
 private fun BookSearchResultRow.toModel() = BookSearchResult(chapterId, chapterTitle, chapterIndex, paragraphIndex, text)
+
+/**
+ * EPUB image nodes are rehydrated from the immutable source archive when a
+ * chapter is opened. Text keeps its persisted indices, so existing progress,
+ * bookmarks and search results remain stable without duplicating image bytes.
+ */
+private fun DocumentChapter.toReaderParagraphs(
+    chapterId: Long,
+    persisted: List<ParagraphEntity>,
+): List<Paragraph> {
+    if (images.isEmpty()) return paragraphs.mapIndexed { index, text ->
+        val stored = persisted.getOrNull(index)
+        Paragraph(stored?.id ?: index.toLong(), chapterId, stored?.paragraphIndex ?: index, text)
+    }
+    val imagesByIndex = images.groupBy { it.contentIndex }
+    val contentCount = paragraphs.size + images.size
+    var textIndex = 0
+    return buildList {
+        repeat(contentCount) { contentIndex ->
+            val contentImages = imagesByIndex[contentIndex]
+            if (!contentImages.isNullOrEmpty()) {
+                contentImages.forEachIndexed { imageOffset, image ->
+                    val position = persisted.getOrNull((textIndex - 1).coerceAtLeast(0))?.paragraphIndex
+                        ?: persisted.getOrNull(textIndex)?.paragraphIndex
+                        ?: textIndex.coerceAtLeast(0)
+                    add(
+                        Paragraph(
+                            id = Long.MIN_VALUE + contentIndex * 16L + imageOffset,
+                            chapterId = chapterId,
+                            index = position,
+                            text = image.altText,
+                            kind = ParagraphKind.IMAGE,
+                            resourcePath = image.resourcePath,
+                            mediaType = image.mediaType,
+                            intrinsicWidth = image.intrinsicWidth,
+                            intrinsicHeight = image.intrinsicHeight,
+                        ),
+                    )
+                }
+            } else {
+                val text = paragraphs.getOrNull(textIndex) ?: return@repeat
+                val stored = persisted.getOrNull(textIndex)
+                add(Paragraph(stored?.id ?: textIndex.toLong(), chapterId, stored?.paragraphIndex ?: textIndex, text))
+                textIndex++
+            }
+        }
+        while (textIndex < paragraphs.size) {
+            val stored = persisted.getOrNull(textIndex)
+            add(Paragraph(stored?.id ?: textIndex.toLong(), chapterId, stored?.paragraphIndex ?: textIndex, paragraphs[textIndex]))
+            textIndex++
+        }
+    }
+}
 
 private fun File.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")

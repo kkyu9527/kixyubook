@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.reader.engine
 
 import com.kixyu9527.kixyubook.core.common.model.Paragraph
+import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 
 data class DocumentMetadata(
     val identityHint: String? = null,
@@ -11,7 +12,21 @@ data class DocumentMetadata(
     val coverExtension: String = "jpg",
 )
 
-data class DocumentChapter(val title: String, val paragraphs: List<String>)
+data class DocumentImage(
+    /** Position among text and image blocks in the XHTML reading order. */
+    val contentIndex: Int,
+    val resourcePath: String,
+    val mediaType: String,
+    val altText: String = "",
+    val intrinsicWidth: Int = 0,
+    val intrinsicHeight: Int = 0,
+)
+
+data class DocumentChapter(
+    val title: String,
+    val paragraphs: List<String>,
+    val images: List<DocumentImage> = emptyList(),
+)
 
 data class ReaderChapter(
     val id: Long,
@@ -42,9 +57,13 @@ fun splitReaderChapterHeading(rawTitle: String): ReaderChapterHeading {
 fun ReaderChapter.contentParagraphs(): List<Paragraph> {
     val fullTitle = title.normalizedReaderHeading()
     val chapterTitle = title.substringAfterLast('·').normalizedReaderHeading()
-    return paragraphs.dropWhile { paragraph ->
-        val candidate = paragraph.text.normalizedReaderHeading()
-        candidate == fullTitle || candidate == chapterTitle
+    val firstTextIndex = paragraphs.indexOfFirst { it.kind == ParagraphKind.TEXT }
+    if (firstTextIndex < 0) return paragraphs
+    val candidate = paragraphs[firstTextIndex].text.normalizedReaderHeading()
+    return if (candidate == fullTitle || candidate == chapterTitle) {
+        paragraphs.filterIndexed { index, _ -> index != firstTextIndex }
+    } else {
+        paragraphs
     }
 }
 
@@ -65,6 +84,52 @@ data class ReaderLayoutSpec(
     val horizontalMarginDp: Float,
 )
 
+enum class ReaderImageSizeClass { COMPACT, ILLUSTRATION, PORTRAIT, WIDE }
+
+data class ReaderImageLayout(
+    val widthDp: Float,
+    val heightDp: Float,
+    val sizeClass: ReaderImageSizeClass,
+)
+
+/**
+ * Normalizes publisher-defined image dimensions into four stable reading
+ * sizes while always retaining the original aspect ratio.
+ */
+fun standardizedReaderImageLayout(
+    availableWidthDp: Float,
+    intrinsicWidth: Int,
+    intrinsicHeight: Int,
+): ReaderImageLayout {
+    val safeWidth = availableWidthDp.coerceAtLeast(120f)
+    val aspect = if (intrinsicWidth > 0 && intrinsicHeight > 0) {
+        intrinsicWidth.toFloat() / intrinsicHeight
+    } else {
+        4f / 3f
+    }.coerceIn(0.35f, 3.2f)
+    val sizeClass = when {
+        intrinsicWidth in 1..360 && intrinsicHeight in 1..360 -> ReaderImageSizeClass.COMPACT
+        aspect >= 1.45f -> ReaderImageSizeClass.WIDE
+        aspect <= 0.82f -> ReaderImageSizeClass.PORTRAIT
+        else -> ReaderImageSizeClass.ILLUSTRATION
+    }
+    val widthFraction: Float
+    val maxHeight: Float
+    when (sizeClass) {
+        ReaderImageSizeClass.COMPACT -> { widthFraction = .48f; maxHeight = 180f }
+        ReaderImageSizeClass.WIDE -> { widthFraction = 1f; maxHeight = 260f }
+        ReaderImageSizeClass.PORTRAIT -> { widthFraction = .72f; maxHeight = 420f }
+        ReaderImageSizeClass.ILLUSTRATION -> { widthFraction = .84f; maxHeight = 340f }
+    }
+    var width = safeWidth * widthFraction
+    var height = width / aspect
+    if (height > maxHeight) {
+        height = maxHeight
+        width = height * aspect
+    }
+    return ReaderImageLayout(width.coerceAtMost(safeWidth), height, sizeClass)
+}
+
 data class DocumentBlock(
     val paragraphIndex: Int,
     val fullText: String,
@@ -72,6 +137,13 @@ data class DocumentBlock(
     val continuation: Boolean,
     /** Paragraph spacing is omitted when the block already ends at a page boundary. */
     val bottomSpacing: Boolean = true,
+    val kind: ParagraphKind = ParagraphKind.TEXT,
+    val resourcePath: String? = null,
+    val mediaType: String? = null,
+    val intrinsicWidth: Int = 0,
+    val intrinsicHeight: Int = 0,
+    val imageWidthDp: Float = 0f,
+    val imageHeightDp: Float = 0f,
 )
 
 data class ReaderPage(
