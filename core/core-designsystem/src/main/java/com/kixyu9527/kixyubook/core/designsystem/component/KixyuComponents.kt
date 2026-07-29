@@ -1,6 +1,12 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
 import android.graphics.Color.parseColor
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
@@ -44,6 +51,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -149,8 +158,15 @@ fun KixyuSection(
             MiuixCard(
                 modifier = Modifier.fillMaxWidth(),
                 insideMargin = PaddingValues(0.dp),
-                content = content,
-            )
+            ) {
+                // MIUIX owns its own content-color local. Material Text/Icon used by feature
+                // content must receive the bridged Material color explicitly in dark mode.
+                CompositionLocalProvider(
+                    LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+                ) {
+                    content()
+                }
+            }
         } else {
             Surface(
                 color = if (LocalKixyuSheetSection.current) {
@@ -411,7 +427,10 @@ fun KixyuReaderThemeControls(
     onSettingsChange: (ReaderSettings) -> Unit,
     modeTitle: String = "显示模式",
 ) {
-    var editingTheme by remember { mutableStateOf(ReaderTheme.DAY) }
+    var editingTheme by remember { mutableStateOf<ReaderTheme?>(null) }
+    LaunchedEffect(settings.customThemeEnabled) {
+        if (!settings.customThemeEnabled) editingTheme = null
+    }
     KixyuDropdownRow(
         title = modeTitle,
         selected = settings.theme,
@@ -422,46 +441,55 @@ fun KixyuReaderThemeControls(
     KixyuDivider()
     KixyuSettingsRow(
         title = "自定义配色",
-        onClick = { onSettingsChange(settings.copy(customThemeEnabled = !settings.customThemeEnabled)) },
+        onClick = {
+            val enabled = !settings.customThemeEnabled
+            if (!enabled) editingTheme = null
+            onSettingsChange(settings.copy(customThemeEnabled = enabled))
+        },
         trailing = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-            ) {
-                with(settings.customDayTheme) {
-                    KixyuColorSwatch(backgroundHex)
-                    KixyuColorSwatch(accentHex)
-                }
-                with(settings.customNightTheme) {
-                    KixyuColorSwatch(backgroundHex)
-                    KixyuColorSwatch(accentHex)
-                }
-                Spacer(Modifier.width(KixyuSpacing.extraSmall))
-                KixyuSwitch(
-                    checked = settings.customThemeEnabled,
-                    onCheckedChange = { onSettingsChange(settings.copy(customThemeEnabled = it)) },
-                )
-            }
+            KixyuSwitch(
+                checked = settings.customThemeEnabled,
+                onCheckedChange = { enabled ->
+                    if (!enabled) editingTheme = null
+                    onSettingsChange(settings.copy(customThemeEnabled = enabled))
+                },
+            )
         },
     )
     if (settings.customThemeEnabled) {
-        KixyuDivider()
-        KixyuDropdownRow(
-            title = "编辑色板",
-            selected = editingTheme,
-            options = listOf(ReaderTheme.DAY, ReaderTheme.NIGHT),
-            optionLabel = ReaderTheme::displayName,
-            onSelected = { editingTheme = it },
-        )
-        val editingColors = if (editingTheme == ReaderTheme.NIGHT) settings.customNightTheme else settings.customDayTheme
-        CustomThemeEditor(editingColors) { custom ->
-            onSettingsChange(
-                if (editingTheme == ReaderTheme.NIGHT) {
-                    settings.copy(customNightTheme = custom)
-                } else {
-                    settings.copy(customDayTheme = custom)
+        listOf(ReaderTheme.DAY, ReaderTheme.NIGHT).forEach { theme ->
+            KixyuDivider()
+            val expanded = editingTheme == theme
+            KixyuSettingsRow(
+                title = "${theme.displayName()}配色",
+                onClick = { editingTheme = theme.takeUnless { expanded } },
+                trailing = {
+                    Text(
+                        text = if (expanded) "收起" else "修改",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
                 },
             )
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(tween(KixyuMotion.ReaderPopupEnterMillis)) +
+                    fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
+                exit = shrinkVertically(tween(KixyuMotion.ReaderPopupExitMillis)) +
+                    fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
+            ) {
+                val editingColors = if (theme == ReaderTheme.NIGHT) settings.customNightTheme else settings.customDayTheme
+                CustomThemeEditor(editingColors) { custom ->
+                    onSettingsChange(
+                        if (theme == ReaderTheme.NIGHT) {
+                            settings.copy(customNightTheme = custom)
+                        } else {
+                            settings.copy(customDayTheme = custom)
+                        },
+                    )
+                }
+            }
         }
     }
 }

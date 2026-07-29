@@ -23,6 +23,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -210,20 +211,53 @@ fun KixyuTonalIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     minSize: Dp = KixyuSize.readerControlButton,
+    containerColor: Color = Color.Unspecified,
+    contentColor: Color = Color.Unspecified,
+    disabledContainerColor: Color = Color.Unspecified,
+    disabledContentColor: Color = Color.Unspecified,
     content: @Composable () -> Unit,
 ) {
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+    val materialColors = MaterialTheme.colorScheme
+    val useMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
+    val resolvedContainer = if (containerColor == Color.Unspecified) {
+        if (useMiuix) materialColors.surfaceContainerHigh else materialColors.secondaryContainer
+    } else containerColor
+    val resolvedContent = if (contentColor == Color.Unspecified) {
+        if (useMiuix) LocalContentColor.current else materialColors.onSecondaryContainer
+    } else contentColor
+    val resolvedDisabledContainer = if (disabledContainerColor == Color.Unspecified) {
+        if (useMiuix && containerColor == Color.Unspecified) resolvedContainer else resolvedContainer.copy(alpha = .38f)
+    } else disabledContainerColor
+    val resolvedDisabledContent = if (disabledContentColor == Color.Unspecified) {
+        if (useMiuix && contentColor == Color.Unspecified) resolvedContent else resolvedContent.copy(alpha = .38f)
+    } else disabledContentColor
+    if (useMiuix) {
         MiuixIconButton(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
-            backgroundColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh,
+            backgroundColor = if (enabled) resolvedContainer else resolvedDisabledContainer,
             minWidth = minSize,
             minHeight = minSize,
+        ) {
+            CompositionLocalProvider(
+                LocalContentColor provides if (enabled) resolvedContent else resolvedDisabledContent,
+                content = content,
+            )
+        }
+    } else {
+        FilledTonalIconButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = resolvedContainer,
+                contentColor = resolvedContent,
+                disabledContainerColor = resolvedDisabledContainer,
+                disabledContentColor = resolvedDisabledContent,
+            ),
             content = content,
         )
-    } else {
-        FilledTonalIconButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
     }
 }
 

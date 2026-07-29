@@ -39,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
@@ -399,6 +400,8 @@ private fun ReaderScreen(
             ReaderControls(
                 visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
+                accentColor = palette.accent,
+                backgroundColor = palette.background,
                 currentPageBookmarked = currentPageBookmark != null,
                 hasPreviousChapter = state.chapterIndex > 0,
                 hasNextChapter = state.chapterIndex < state.chapters.lastIndex,
@@ -763,6 +766,8 @@ private fun ReaderControls(
     toolsMenuVisible: Boolean,
     progress: Float,
     bookTitle: String,
+    accentColor: Color,
+    backgroundColor: Color,
     currentPageBookmarked: Boolean,
     hasPreviousChapter: Boolean,
     hasNextChapter: Boolean,
@@ -813,31 +818,41 @@ private fun ReaderControls(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(KixyuSize.readerChapterActionGap),
             ) {
-                KixyuTonalIconButton(
+                ReaderControlIconButton(
                     onClick = onExit,
+                    accentColor = accentColor,
+                    backgroundColor = backgroundColor,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) { Icon(Icons.Outlined.Close, "退出") }
-                KixyuTonalIconButton(
+                ReaderControlIconButton(
                     onClick = onDirectory,
+                    accentColor = accentColor,
+                    backgroundColor = backgroundColor,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) { Icon(Icons.AutoMirrored.Outlined.Toc, "目录") }
-                KixyuTonalIconButton(
+                ReaderControlIconButton(
                     onClick = onPreviousChapter,
+                    accentColor = accentColor,
+                    backgroundColor = backgroundColor,
                     enabled = hasPreviousChapter,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) {
                     Icon(Icons.Outlined.SkipPrevious, "上一章")
                 }
-                KixyuTonalIconButton(
+                ReaderControlIconButton(
                     onClick = onNextChapter,
+                    accentColor = accentColor,
+                    backgroundColor = backgroundColor,
                     enabled = hasNextChapter,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) {
                     Icon(Icons.Outlined.SkipNext, "下一章")
                 }
                 Box {
-                    KixyuTonalIconButton(
+                    ReaderControlIconButton(
                         onClick = onTools,
+                        accentColor = accentColor,
+                        backgroundColor = backgroundColor,
                         modifier = Modifier.size(KixyuSize.readerControlButton),
                     ) { Icon(Icons.Outlined.MoreHoriz, "阅读工具") }
                     KixyuPopupMenu(
@@ -859,8 +874,10 @@ private fun ReaderControls(
                     )
                 }
                 Box {
-                    KixyuTonalIconButton(
+                    ReaderControlIconButton(
                         onClick = onSettings,
+                        accentColor = accentColor,
+                        backgroundColor = backgroundColor,
                         modifier = Modifier.size(KixyuSize.readerControlButton),
                     ) { Icon(Icons.Outlined.Settings, "设置") }
                     KixyuPopupMenu(
@@ -883,6 +900,49 @@ private fun ReaderControls(
             }
         }
     }
+}
+
+@Composable
+private fun ReaderControlIconButton(
+    onClick: () -> Unit,
+    accentColor: Color,
+    backgroundColor: Color,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    val containerColor = lerp(backgroundColor, accentColor, READER_CONTROL_ACCENT_MIX)
+    val contentColor = if (accentColor.contrastRatio(containerColor) >= MIN_ICON_CONTRAST) {
+        accentColor
+    } else {
+        containerColor.highContrastContentColor()
+    }
+    KixyuTonalIconButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        containerColor = containerColor,
+        contentColor = contentColor,
+        disabledContainerColor = lerp(backgroundColor, accentColor, READER_CONTROL_DISABLED_ACCENT_MIX),
+        disabledContentColor = contentColor.copy(alpha = .5f),
+        content = content,
+    )
+}
+
+private fun Color.contrastRatio(other: Color): Float {
+    val first = luminance()
+    val second = other.luminance()
+    val lighter = maxOf(first, second)
+    val darker = minOf(first, second)
+    return (lighter + .05f) / (darker + .05f)
+}
+
+/** Chooses the WCAG contrast winner so arbitrary custom accent colors remain legible. */
+private fun Color.highContrastContentColor(): Color {
+    val relativeLuminance = luminance()
+    val blackContrast = (relativeLuminance + .05f) / .05f
+    val whiteContrast = 1.05f / (relativeLuminance + .05f)
+    return if (blackContrast >= whiteContrast) Color.Black else Color.White
 }
 
 private fun Modifier.predictivePopupTransform(progress: Float): Modifier = graphicsLayer {
@@ -1469,3 +1529,6 @@ private const val READER_ENTRY_CONTENT_DELAY_MILLIS = 120L
 // retains large native buffers without producing useful hits, especially for malformed EPUB text.
 private const val READER_TEXT_MEASURE_CACHE_SIZE = 0
 private const val CHAPTER_LOADING_INDICATOR_DELAY_MILLIS = 180L
+private const val READER_CONTROL_ACCENT_MIX = .18f
+private const val READER_CONTROL_DISABLED_ACCENT_MIX = .1f
+private const val MIN_ICON_CONTRAST = 3f
