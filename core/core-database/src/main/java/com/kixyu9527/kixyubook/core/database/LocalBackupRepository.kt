@@ -11,6 +11,8 @@ import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -29,9 +31,11 @@ class LocalBackupRepository @Inject constructor(
     private val database: KixyuDatabase,
     private val settingsRepository: ReaderSettingsRepository,
 ) : BackupRepository {
+    private val operationMutex = Mutex()
 
     override suspend fun exportTo(uriString: String): Result<BackupResult> = withContext(Dispatchers.IO) {
-        runCatching {
+        operationMutex.withLock { runCatching {
+            cleanupBackupWorkDirectories()
             val work = File(context.cacheDir, "backup-${UUID.randomUUID()}").apply { mkdirs() }
             try {
                 val snapshot = File(work, DATABASE_NAME)
@@ -68,20 +72,22 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("readingGoalMinutes", goal.toString())
                 }
                 val output = context.contentResolver.openOutputStream(uriString.toUri(), "w") ?: error("无法创建备份文件")
+                val assets = collectReferencedAssets(snapshot)
                 output.use { raw -> ZipOutputStream(BufferedOutputStream(raw)).use { zip ->
                     zip.putNextEntry(ZipEntry(MANIFEST_ENTRY)); properties.store(zip, "KixyuBook full backup") ; zip.closeEntry()
                     zip.putFile(snapshot, DATABASE_ENTRY)
-                    ASSET_DIRECTORIES.forEach { name -> File(context.filesDir, name).takeIf(File::exists)?.let { zip.putTree(it, "files/$name") } }
+                    assets.forEach { asset -> zip.putFile(asset.file, asset.entryName) }
                 } }
-                BackupResult(countBooks(snapshot), snapshot.length() + ASSET_DIRECTORIES.sumOf { File(context.filesDir, it).treeSize() })
+                BackupResult(countBooks(snapshot), snapshot.length() + assets.sumOf { it.file.length() })
             } finally {
                 work.deleteRecursively()
             }
-        }
+        } }
     }
 
     override suspend fun restoreFrom(uriString: String): Result<BackupResult> = withContext(Dispatchers.IO) {
-        runCatching {
+        operationMutex.withLock { runCatching {
+            cleanupBackupWorkDirectories()
             val work = File(context.cacheDir, "restore-${UUID.randomUUID()}").apply { mkdirs() }
             val extracted = File(work, "payload").apply { mkdirs() }
             try {
@@ -124,7 +130,7 @@ class LocalBackupRepository @Inject constructor(
             } finally {
                 work.deleteRecursively()
             }
-        }
+        } }
     }
 
     private fun validateAndRebase(snapshot: File, assets: File) {
@@ -158,14 +164,30 @@ class LocalBackupRepository @Inject constructor(
         database.close()
         val dbFile = context.getDatabasePath(DATABASE_NAME)
         val replacing = File(dbFile.parentFile, "$DATABASE_NAME.restoring")
-        snapshot.copyTo(replacing, overwrite = true)
-        listOf(dbFile, File("${dbFile.path}-wal"), File("${dbFile.path}-shm")).forEach { it.delete() }
-        check(replacing.renameTo(dbFile)) { "无法安装恢复数据库" }
-        ASSET_DIRECTORIES.forEach { name ->
-            val live = File(context.filesDir, name)
-            live.deleteRecursively()
-            File(assets, name).takeIf(File::exists)?.copyRecursively(live, overwrite = true)
+        try {
+            snapshot.copyTo(replacing, overwrite = true)
+            listOf(dbFile, File("${dbFile.path}-wal"), File("${dbFile.path}-shm")).forEach { it.delete() }
+            check(replacing.renameTo(dbFile)) { "无法安装恢复数据库" }
+            ASSET_DIRECTORIES.forEach { name ->
+                val live = File(context.filesDir, name)
+                live.deleteRecursively()
+                File(assets, name).takeIf(File::exists)?.copyRecursively(live, overwrite = true)
+            }
+            // Rich EPUB chapters are derived from the immutable source. Keeping cache entries from
+            // the replaced library wastes space and can retain obsolete books indefinitely.
+            File(context.noBackupFilesDir, EPUB_CACHE_DIRECTORY).deleteRecursively()
+        } finally {
+            replacing.delete()
         }
+    }
+
+    private fun cleanupBackupWorkDirectories() {
+        context.cacheDir.listFiles().orEmpty().forEach { file ->
+            if (file.name.startsWith(BACKUP_WORK_PREFIX) || file.name.startsWith(RESTORE_WORK_PREFIX)) {
+                file.deleteRecursively()
+            }
+        }
+        File(context.getDatabasePath(DATABASE_NAME).parentFile, "$DATABASE_NAME.restoring").delete()
     }
 
     private suspend fun restoreSettings(properties: Properties) {
@@ -218,6 +240,44 @@ class LocalBackupRepository @Inject constructor(
         db.rawQuery("SELECT COUNT(*) FROM books", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
     }
 
+    /**
+     * Builds the archive from live database references instead of copying whole directories.
+     * Failed imports or older versions may leave orphaned files behind; those files are neither
+     * required for a complete restore nor appropriate to silently retain in every future backup.
+     */
+    private fun collectReferencedAssets(snapshot: File): List<BackupAsset> {
+        val assets = LinkedHashMap<String, BackupAsset>()
+        SQLiteDatabase.openDatabase(snapshot.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery("SELECT uuid, format, coverPath FROM books", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val uuid = cursor.getString(0)
+                    val format = cursor.getString(1).lowercase()
+                    val book = File(context.filesDir, "books/$uuid.$format")
+                    require(book.isFile) { "书籍原文件不存在：$uuid" }
+                    assets["files/books/$uuid.$format"] = BackupAsset(book, "files/books/$uuid.$format")
+
+                    cursor.getString(2)?.let { coverPath ->
+                        val cover = File(context.filesDir, "covers/${File(coverPath).name}")
+                        if (cover.isFile) {
+                            val entryName = "files/covers/${cover.name}"
+                            assets[entryName] = BackupAsset(cover, entryName)
+                        }
+                    }
+                }
+            }
+            db.rawQuery("SELECT uuid, filePath FROM user_fonts", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val uuid = cursor.getString(0)
+                    val font = File(context.filesDir, "fonts/${File(cursor.getString(1)).name}")
+                    require(font.isFile && font.nameWithoutExtension == uuid) { "用户字体不存在：$uuid" }
+                    val entryName = "files/fonts/${font.name}"
+                    assets[entryName] = BackupAsset(font, entryName)
+                }
+            }
+        }
+        return assets.values.toList()
+    }
+
     private fun File.livePath(directory: String) = File(context.filesDir, "$directory/$name").absolutePath
 
     private companion object {
@@ -226,23 +286,20 @@ class LocalBackupRepository @Inject constructor(
         const val BACKUP_VERSION = 4
         const val MANIFEST_ENTRY = "manifest.properties"
         const val DATABASE_ENTRY = "database/kixyu-books.db"
+        const val EPUB_CACHE_DIRECTORY = "epub-chapters"
+        const val BACKUP_WORK_PREFIX = "backup-"
+        const val RESTORE_WORK_PREFIX = "restore-"
         const val MAX_ENTRIES = 100_000
         const val MAX_UNCOMPRESSED_BYTES = 16L * 1024 * 1024 * 1024
         val ASSET_DIRECTORIES = listOf("books", "covers", "fonts")
     }
 }
 
+private data class BackupAsset(val file: File, val entryName: String)
+
 private fun ZipOutputStream.putFile(file: File, entryName: String) {
     putNextEntry(ZipEntry(entryName)); file.inputStream().buffered().use { it.copyTo(this) }; closeEntry()
 }
-
-private fun ZipOutputStream.putTree(root: File, entryRoot: String) {
-    root.walkTopDown().filter(File::isFile).forEach { file ->
-        putFile(file, "$entryRoot/${file.relativeTo(root).invariantSeparatorsPath}")
-    }
-}
-
-private fun File.treeSize(): Long = takeIf(File::exists)?.walkTopDown()?.filter(File::isFile)?.sumOf(File::length) ?: 0L
 private fun Properties.float(key: String, fallback: Float) = getProperty(key)?.toFloatOrNull() ?: fallback
 private fun Properties.boolean(key: String, fallback: Boolean) = getProperty(key)?.toBooleanStrictOrNull() ?: fallback
 private inline fun <reified T : Enum<T>> Properties.enum(key: String, fallback: T): T = getProperty(key)?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -38,13 +39,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -75,6 +76,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorCo
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
@@ -109,7 +111,15 @@ fun SettingsRoute(
     KixyuPageScaffold(
         title = "设置",
         modifier = Modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = {
+            KixyuSnackbarHost(
+                hostState = snackbar,
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                    .padding(bottom = KixyuSize.bottomNavigationContentHeight + KixyuSpacing.small)
+                    .padding(horizontal = KixyuSpacing.screenHorizontal),
+            )
+        },
     ) { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
@@ -173,20 +183,32 @@ fun SettingsRoute(
                     ) {
                         Button(
                             onClick = { backupCreator.launch("KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup") },
-                            enabled = !state.backupBusy,
+                            enabled = state.backupOperation == null,
                             modifier = Modifier.weight(1f),
                         ) {
-                            Icon(Icons.Outlined.SaveAlt, null, Modifier.size(KixyuSize.iconSmall))
+                            if (state.backupOperation == BackupOperation.EXPORT) {
+                                CircularProgressIndicator(
+                                    Modifier.size(KixyuSize.iconSmall),
+                                    color = LocalContentColor.current,
+                                    strokeWidth = KixyuSpacing.hairline,
+                                )
+                            } else {
+                                Icon(Icons.Outlined.SaveAlt, null, Modifier.size(KixyuSize.iconSmall))
+                            }
                             Spacer(Modifier.width(KixyuSize.compactButtonIconGap))
                             Text("导出", maxLines = 1)
                         }
                         OutlinedButton(
                             onClick = { backupPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
-                            enabled = !state.backupBusy,
+                            enabled = state.backupOperation == null,
                             modifier = Modifier.weight(1f),
                         ) {
-                            if (state.backupBusy) {
-                                CircularProgressIndicator(Modifier.size(KixyuSize.iconSmall), strokeWidth = KixyuSpacing.hairline)
+                            if (state.backupOperation == BackupOperation.RESTORE) {
+                                CircularProgressIndicator(
+                                    Modifier.size(KixyuSize.iconSmall),
+                                    color = LocalContentColor.current,
+                                    strokeWidth = KixyuSpacing.hairline,
+                                )
                             } else {
                                 Icon(Icons.Outlined.Restore, null, Modifier.size(KixyuSize.iconSmall))
                             }
@@ -286,7 +308,12 @@ fun AppearanceRoute(
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
             }
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = {
+            KixyuSnackbarHost(
+                hostState = snackbar,
+                modifier = Modifier.padding(horizontal = KixyuSpacing.screenHorizontal),
+            )
+        },
     ) { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -25,6 +26,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -270,6 +273,46 @@ fun KixyuPopupSurface(
             shadowElevation = shadowElevation,
             content = content,
         )
+    }
+}
+
+/**
+ * Shared transient message surface. SnackbarHost retains Material's queue and motion behavior,
+ * while the visible container follows the selected Material/MIUIX component system.
+ */
+@Composable
+fun KixyuSnackbarHost(
+    hostState: SnackbarHostState,
+    modifier: Modifier = Modifier,
+) {
+    SnackbarHost(hostState = hostState, modifier = modifier) { data ->
+        KixyuPopupSurface(
+            modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+            shadowElevation = KixyuSpacing.extraSmall,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(
+                    horizontal = KixyuSpacing.large,
+                    vertical = KixyuSpacing.medium,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = data.visuals.message,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                data.visuals.actionLabel?.let { actionLabel ->
+                    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+                        MiuixTextButton(text = actionLabel, onClick = data::performAction)
+                    } else {
+                        TextButton(onClick = data::performAction) { Text(actionLabel) }
+                    }
+                }
+            }
+        }
     }
 }
 

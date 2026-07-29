@@ -16,8 +16,10 @@ data class SettingsUiState(
     val settings: ReaderSettings = ReaderSettings(),
     val fonts: List<UserFont> = emptyList(),
     val goalMinutes: Int = 30,
-    val backupBusy: Boolean = false,
+    val backupOperation: BackupOperation? = null,
 )
+
+enum class BackupOperation { EXPORT, RESTORE }
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -25,8 +27,8 @@ class SettingsViewModel @Inject constructor(
     private val fonts: FontRepository,
     private val backups: BackupRepository,
 ) : ViewModel() {
-    private val backupBusy = MutableStateFlow(false)
-    val uiState = combine(repository.settings, fonts.observeFonts(), repository.readingGoalMinutes, backupBusy) { settings, fontList, goal, busy -> SettingsUiState(settings, fontList, goal, busy) }
+    private val backupOperation = MutableStateFlow<BackupOperation?>(null)
+    val uiState = combine(repository.settings, fonts.observeFonts(), repository.readingGoalMinutes, backupOperation) { settings, fontList, goal, operation -> SettingsUiState(settings, fontList, goal, operation) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
     private val _messages = MutableSharedFlow<String>()
     val messages = _messages.asSharedFlow()
@@ -42,18 +44,24 @@ class SettingsViewModel @Inject constructor(
     } }
 
     fun exportBackup(uri: String) = viewModelScope.launch {
-        backupBusy.value = true
-        backups.exportTo(uri)
-            .onSuccess { _messages.emit("完整备份已保存：${it.bookCount} 本书") }
-            .onFailure { _messages.emit(it.message ?: "备份失败") }
-        backupBusy.value = false
+        backupOperation.value = BackupOperation.EXPORT
+        try {
+            backups.exportTo(uri)
+                .onSuccess { _messages.emit("完整备份已保存：${it.bookCount} 本书") }
+                .onFailure { _messages.emit(it.message ?: "备份失败") }
+        } finally {
+            backupOperation.value = null
+        }
     }
 
     fun restoreBackup(uri: String) = viewModelScope.launch {
-        backupBusy.value = true
-        backups.restoreFrom(uri)
-            .onSuccess { _restoreCompleted.emit(Unit) }
-            .onFailure { _messages.emit(it.message ?: "恢复失败") }
-        backupBusy.value = false
+        backupOperation.value = BackupOperation.RESTORE
+        try {
+            backups.restoreFrom(uri)
+                .onSuccess { _restoreCompleted.emit(Unit) }
+                .onFailure { _messages.emit(it.message ?: "恢复失败") }
+        } finally {
+            backupOperation.value = null
+        }
     }
 }

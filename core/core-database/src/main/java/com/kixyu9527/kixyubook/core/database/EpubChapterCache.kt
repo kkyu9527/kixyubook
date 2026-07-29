@@ -11,6 +11,14 @@ import java.io.File
 
 /** Regenerable binary cache for the EPUB data that Room's searchable text rows intentionally omit. */
 internal class EpubChapterCache(private val root: File) {
+    init {
+        // A process death can interrupt the atomic replacement below. Temporary files are never
+        // readable cache entries, so they are safe to remove when the cache is opened again.
+        root.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(TEMPORARY_SUFFIX) }
+            .forEach(File::delete)
+    }
+
     fun read(bookUuid: String, contentHash: String, chapterIndex: Int): DocumentChapter? {
         val file = cacheFile(bookUuid, contentHash, chapterIndex)
         if (!file.isFile) return null
@@ -56,7 +64,7 @@ internal class EpubChapterCache(private val root: File) {
 
     fun write(bookUuid: String, contentHash: String, chapterIndex: Int, chapter: DocumentChapter) {
         val target = cacheFile(bookUuid, contentHash, chapterIndex)
-        val temporary = File(target.parentFile, "${target.name}.tmp")
+        val temporary = File(target.parentFile, "${target.name}$TEMPORARY_SUFFIX")
         runCatching {
             target.parentFile?.mkdirs()
             DataOutputStream(temporary.outputStream().buffered()).use { output ->
@@ -98,6 +106,13 @@ internal class EpubChapterCache(private val root: File) {
         File(root, bookUuid.safePathSegment()).takeIf(File::exists)?.deleteRecursively()
     }
 
+    fun retainBooks(bookUuids: Set<String>) {
+        val retainedDirectories = bookUuids.mapTo(hashSetOf(), String::safePathSegment)
+        root.listFiles().orEmpty().forEach { entry ->
+            if (entry.name !in retainedDirectories) entry.deleteRecursively()
+        }
+    }
+
     private fun cacheFile(bookUuid: String, contentHash: String, chapterIndex: Int) = File(
         File(root, bookUuid.safePathSegment()),
         "${contentHash.safePathSegment().take(20)}-$chapterIndex.bin",
@@ -133,3 +148,4 @@ private const val MAX_PARAGRAPHS = 100_000
 private const val MAX_IMAGES = 10_000
 private const val MAX_SPANS_PER_PARAGRAPH = 100_000
 private const val MAX_STRING_BYTES = 16 * 1024 * 1024
+private const val TEMPORARY_SUFFIX = ".tmp"

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -49,7 +50,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -79,6 +79,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
 
@@ -189,7 +190,15 @@ private fun LibraryScreen(
                         }
                     }
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = {
+            KixyuSnackbarHost(
+                hostState = snackbar,
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                    .padding(bottom = KixyuSize.bottomNavigationContentHeight + KixyuSpacing.small)
+                    .padding(horizontal = KixyuSpacing.screenHorizontal),
+            )
+        },
     ) { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),

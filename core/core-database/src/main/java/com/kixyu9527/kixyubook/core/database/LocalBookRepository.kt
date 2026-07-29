@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -57,7 +58,7 @@ class LocalBookRepository @Inject constructor(
     )
     private val chapterCacheLock = Any()
     private val chapterLoadMutex = Mutex()
-    private val importRegistrationMutex = Mutex()
+    private val storageMutationMutex = Mutex()
     private val importIndexSemaphore = Semaphore(IMPORT_INDEX_CONCURRENCY)
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val importIndexJobs = ConcurrentHashMap<String, Job>()
@@ -80,7 +81,9 @@ class LocalBookRepository @Inject constructor(
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
 
     override suspend fun importDocuments(uriStrings: List<String>): ImportSummary = withContext(Dispatchers.IO) {
-        val registration = importRegistrationMutex.withLock {
+        val registration = storageMutationMutex.withLock {
+            cleanupImportArtifacts()
+            pruneUnreferencedBookFiles()
             registerDocuments(uriStrings)
         }
         registration.imports.forEach(::enqueueBackgroundIndex)
@@ -96,14 +99,16 @@ class LocalBookRepository @Inject constructor(
         val imports = mutableListOf<RegisteredImport>()
         var duplicates = 0
         val failures = mutableListOf<String>()
+        val importDir = File(context.cacheDir, "imports").apply { mkdirs() }
         uriStrings.distinct().forEach { rawUri ->
             val uri = rawUri.toUri()
             val displayName = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { if (it.moveToFirst()) it.getString(0) else null }
                 ?: uri.lastPathSegment.orEmpty().substringAfterLast('/').ifBlank { "未命名小说" }
-            val importDir = File(context.cacheDir, "imports").apply { mkdirs() }
             val temp = File(importDir, UUID.randomUUID().toString())
             var insertedUuid: String? = null
+            var storedFile: File? = null
+            var coverFile: File? = null
             try {
                 val hash = context.contentResolver.openInputStream(uri)?.use { input ->
                     val digest = MessageDigest.getInstance("SHA-256")
@@ -125,9 +130,11 @@ class LocalBookRepository @Inject constructor(
                 }
                 val extension = if (format == BookFormat.EPUB) "epub" else "txt"
                 val stored = File(context.filesDir, "books/$bookUuid.$extension").also { it.parentFile?.mkdirs() }
+                storedFile = stored
                 temp.copyTo(stored, overwrite = true)
                 val coverPath = metadata.coverBytes?.let { bytes ->
                     File(context.filesDir, "covers/$bookUuid.${metadata.coverExtension}").also {
+                        coverFile = it
                         it.parentFile?.mkdirs()
                         it.writeBytes(bytes)
                     }.absolutePath
@@ -145,14 +152,19 @@ class LocalBookRepository @Inject constructor(
                 imports += RegisteredImport(bookUuid, displayName, hash, format, stored, parser, outlines)
             } catch (error: CancellationException) {
                 insertedUuid?.let { removeIncompleteImport(it) }
+                storedFile?.delete()
+                coverFile?.delete()
                 throw error
             } catch (error: Exception) {
                 insertedUuid?.let { removeIncompleteImport(it) }
+                storedFile?.delete()
+                coverFile?.delete()
                 failures += "$displayName：${error.message ?: "导入失败"}"
             } finally {
                 temp.delete()
             }
         }
+        importDir.delete()
         return ImportRegistration(imports, duplicates, failures)
     }
 
@@ -206,16 +218,24 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun deleteBooks(bookUuids: Set<String>): Unit = withContext(Dispatchers.IO) {
         if (bookUuids.isEmpty()) return@withContext
-        bookUuids.forEach { bookUuid -> importIndexJobs.remove(bookUuid)?.cancel() }
-        val books = dao.getBooks(bookUuids)
-        database.withTransaction { dao.deleteBooks(bookUuids) }
-        synchronized(chapterCacheLock) {
-            chapterCache.keys.removeAll { it.bookUuid in bookUuids }
-        }
-        books.forEach { book ->
-            epubChapterCache.clearBook(book.uuid)
-            File(book.storagePath).delete()
-            book.coverPath?.let(::File)?.delete()
+        storageMutationMutex.withLock {
+            bookUuids.mapNotNull(importIndexJobs::remove).forEach { job ->
+                job.cancelAndJoin()
+            }
+            val books = dao.getBooks(bookUuids)
+            database.withTransaction {
+                dao.deleteMetadataEdits(bookUuids)
+                dao.deleteBooks(bookUuids)
+            }
+            synchronized(chapterCacheLock) {
+                chapterCache.keys.removeAll { it.bookUuid in bookUuids }
+            }
+            books.forEach { book ->
+                epubChapterCache.clearBook(book.uuid)
+                File(book.storagePath).delete()
+                book.coverPath?.let(::File)?.delete()
+            }
+            pruneUnreferencedBookFiles()
         }
     }
 
@@ -429,7 +449,21 @@ class LocalBookRepository @Inject constructor(
             book.coverPath?.let(::File)?.delete()
         }
         epubChapterCache.clearBook(bookUuid)
-        dao.deleteBook(bookUuid)
+        database.withTransaction {
+            dao.deleteMetadataEdits(setOf(bookUuid))
+            dao.deleteBook(bookUuid)
+        }
+    }
+
+    private fun cleanupImportArtifacts() {
+        File(context.cacheDir, "imports").deleteRecursively()
+    }
+
+    private suspend fun pruneUnreferencedBookFiles() {
+        val books = dao.getAllBooks()
+        File(context.filesDir, "books").pruneTo(books.mapTo(hashSetOf()) { File(it.storagePath).absolutePath })
+        File(context.filesDir, "covers").pruneTo(books.mapNotNullTo(hashSetOf()) { it.coverPath?.let(::File)?.absolutePath })
+        epubChapterCache.retainBooks(books.mapTo(hashSetOf(), BookEntity::uuid))
     }
 
     private suspend fun registerEpubDirectory(
@@ -596,11 +630,9 @@ private fun DocumentChapter.toReaderParagraphs(
     }
 }
 
-private fun File.sha256(): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    inputStream().use { input -> DigestInputStream(input, digest).use { stream ->
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        while (stream.read(buffer) != -1) { /* Consume the stream into the digest. */ }
-    } }
-    return digest.digest().joinToString("") { "%02x".format(it) }
+private fun File.pruneTo(retainedPaths: Set<String>) {
+    listFiles().orEmpty().forEach { entry ->
+        if (!entry.isFile || entry.absolutePath !in retainedPaths) entry.deleteRecursively()
+    }
+    delete()
 }
