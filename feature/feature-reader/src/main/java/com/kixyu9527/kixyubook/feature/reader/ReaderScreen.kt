@@ -494,9 +494,9 @@ private fun ReaderContent(
         if (state.settings.pageMode == PageMode.SCROLL) {
             key(chapter.id, spec, state.navigationVersion) {
                 val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
-                val restoredItem = contentParagraphs.indexOfFirst { it.index >= state.restorePosition }
-                    .let { if (it < 0) contentParagraphs.lastIndex else it }
-                    .coerceAtLeast(0)
+                val restoredItem = remember(contentParagraphs, state.restorePosition) {
+                    ReaderPositionManager().contentItemFor(contentParagraphs, state.restorePosition)
+                }
                 val listState = rememberLazyListState(restoredItem + 1)
                 LaunchedEffect(listState, chapter.id) {
                     snapshotFlow {
@@ -658,7 +658,12 @@ private fun PagedReader(
     val hasNextCover = hasNext
     val leading = if (hasPreviousCover) 1 else 0
     val virtualCount = pages.size + leading + if (hasNextCover) 1 else 0
-    val initial = positions.pageFor(pages, state.restorePosition) + leading
+    val selectedSearchResult = state.searchResults.getOrNull(state.selectedSearchIndex)
+    val targetSearchQuery = state.searchQuery.takeIf {
+        selectedSearchResult?.chapterId == chapter.id &&
+            selectedSearchResult.paragraphIndex == state.restorePosition
+    }
+    val initial = positions.pageFor(pages, state.restorePosition, targetSearchQuery) + leading
     key(chapter.id, state.navigationVersion) {
         val pager = rememberPagerState(
             initialPage = initial.coerceIn(0, virtualCount - 1),

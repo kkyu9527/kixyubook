@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.reader.engine
 
 import com.kixyu9527.kixyubook.core.common.model.Paragraph
+import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
 import kotlinx.coroutines.runBlocking
@@ -147,6 +148,66 @@ class ReaderEngineTest {
         assertTrue(positions.bookFraction(9, 10, 99, 100, chapterComplete = false) < 1f)
         assertEquals(1f, positions.bookFraction(9, 10, 99, 100, chapterComplete = true), 0f)
         assertEquals(.5f, positions.bookFraction(4, 10, 0, 1, chapterComplete = true), 0f)
+    }
+
+    @Test fun searchPositionUsesFirstPageContainingSplitParagraph() {
+        val positions = ReaderPositionManager()
+        val firstHalf = DocumentBlock(7, "命中内容很长", "命中内容", continuation = false)
+        val secondHalf = DocumentBlock(7, "命中内容很长", "很长", continuation = true)
+        val following = DocumentBlock(8, "下一段", "下一段", continuation = false)
+        val pages = listOf(
+            ReaderPage(0, 0, "章节", false, listOf(firstHalf)),
+            ReaderPage(1, 0, "章节", false, listOf(secondHalf)),
+            ReaderPage(2, 0, "章节", false, listOf(following)),
+        )
+
+        assertEquals(0, positions.pageFor(pages, 7))
+        assertEquals(2, positions.pageFor(pages, 8))
+    }
+
+    @Test fun searchPositionUsesSplitPageContainingQuery() {
+        val positions = ReaderPositionManager()
+        val pages = listOf(
+            ReaderPage(
+                0,
+                0,
+                "章节",
+                false,
+                listOf(DocumentBlock(7, "很长的段落包含目标词", "很长的段落", continuation = false, textStart = 0)),
+            ),
+            ReaderPage(
+                1,
+                0,
+                "章节",
+                false,
+                listOf(DocumentBlock(7, "很长的段落包含目标词", "包含目标词", continuation = true, textStart = 6)),
+            ),
+        )
+
+        assertEquals(1, positions.pageFor(pages, 7, "目标词"))
+    }
+
+    @Test fun searchPositionSkipsEpubImageSharingTextIndex() {
+        val positions = ReaderPositionManager()
+        val image = DocumentBlock(
+            paragraphIndex = 4,
+            fullText = "插图",
+            visibleText = "",
+            continuation = false,
+            kind = ParagraphKind.IMAGE,
+        )
+        val text = DocumentBlock(4, "真正命中的正文", "真正命中的正文", continuation = false)
+        val pages = listOf(
+            ReaderPage(0, 0, "章节", false, listOf(image)),
+            ReaderPage(1, 0, "章节", false, listOf(text)),
+        )
+        val paragraphs = listOf(
+            Paragraph(1, 1, 4, "插图", kind = ParagraphKind.IMAGE),
+            Paragraph(2, 1, 4, "真正命中的正文"),
+        )
+
+        assertEquals(1, positions.pageFor(pages, 4))
+        assertEquals(1, positions.contentItemFor(paragraphs, 4))
     }
 
     @Test fun duplicateOpeningHeadingIsNotRenderedAsBodyText() {

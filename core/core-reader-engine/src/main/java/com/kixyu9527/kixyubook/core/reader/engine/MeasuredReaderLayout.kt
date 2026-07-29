@@ -293,6 +293,7 @@ private class MeasuredReaderPaginator(
                         continuation,
                         bottomSpacing = true,
                         spans = measuredSpans,
+                        textStart = remainingStart,
                     )
                     usedHeightPx += textHeightPx + spacingPx
                     remaining = ""
@@ -308,6 +309,7 @@ private class MeasuredReaderPaginator(
                         continuation,
                         bottomSpacing = false,
                         spans = measuredSpans,
+                        textStart = remainingStart,
                     )
                     remaining = ""
                     flush()
@@ -332,6 +334,7 @@ private class MeasuredReaderPaginator(
                     continuation,
                     bottomSpacing = false,
                     spans = paragraph.spans.sliceForText(remainingStart, remainingStart + visible.length),
+                    textStart = remainingStart,
                 )
                 usedHeightPx += ceil(layout.getLineBottom(fittingLine))
                 val rawRemainder = remaining.substring(end)

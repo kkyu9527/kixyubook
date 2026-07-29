@@ -153,6 +153,8 @@ data class DocumentBlock(
     val imageWidthDp: Float = 0f,
     val imageHeightDp: Float = 0f,
     val spans: List<ReaderTextSpan> = emptyList(),
+    /** UTF-16 character offset of [visibleText] inside [fullText]. */
+    val textStart: Int = 0,
 )
 
 data class ReaderPage(
