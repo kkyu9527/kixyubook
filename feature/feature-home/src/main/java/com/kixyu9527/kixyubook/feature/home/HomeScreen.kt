@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +41,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -132,8 +133,7 @@ private fun StatsOverview(state: HomeUiState) {
                 progress = { (stats.todayMillis.toFloat() / goalMillis).coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatItem(Icons.Outlined.AutoStories, "${stats.todayCharacters}", "今日字数")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 StatItem(Icons.Outlined.Schedule, "${TimeUnit.MILLISECONDS.toHours(stats.totalMillis)}h", "总时长")
                 StatItem(Icons.Outlined.LocalFireDepartment, "${stats.streakDays} 天", "连续阅读")
             }
@@ -157,7 +157,9 @@ private fun ContinueReading(item: LibraryBook, open: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
         Text("继续阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1)
         Surface(
-            modifier = Modifier.fillMaxWidth().clickable { open(item.book.uuid) },
+            modifier = Modifier.fillMaxWidth()
+                .semantics { contentDescription = "打开书籍：${item.book.title}" }
+                .clickable { open(item.book.uuid) },
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = MaterialTheme.shapes.large,
         ) {
@@ -184,7 +186,9 @@ private fun ContinueReading(item: LibraryBook, open: (String) -> Unit) {
 @Composable
 private fun RecentRow(item: LibraryBook, open: (String) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable { open(item.book.uuid) }
+        Modifier.fillMaxWidth()
+            .semantics { contentDescription = "打开书籍：${item.book.title}" }
+            .clickable { open(item.book.uuid) }
             .padding(horizontal = KixyuSpacing.rowHorizontal, vertical = KixyuSpacing.rowVertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),

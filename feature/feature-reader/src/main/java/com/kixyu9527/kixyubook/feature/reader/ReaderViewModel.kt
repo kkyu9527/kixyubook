@@ -57,7 +57,6 @@ class ReaderViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState = _uiState.asStateFlow()
     private val sessionFinished = AtomicBoolean(false)
-    private var sessionCharacters = 0L
     private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
     private val positions = ReaderPositionManager()
@@ -163,11 +162,18 @@ class ReaderViewModel @Inject constructor(
         )
     }
 
-    /** Rejects callbacks emitted by a pager that is being replaced by a direct jump. */
+    /**
+     * Accept the latest settled pager target even while an earlier boundary chapter is loading.
+     * Rapid swipes can legitimately settle several chapters ahead; cancelling the stale load and
+     * promoting the newest target prevents the old pending chapter from pulling the pager back.
+     */
     fun moveChapterFromPage(sourceChapterIndex: Int, delta: Int, openAtEnd: Boolean = false) {
         val state = _uiState.value
-        if (pendingChapterIndex != null || state.chapterIndex != sourceChapterIndex) return
-        moveChapter(delta, openAtEnd)
+        if (state.chapterIndex != sourceChapterIndex) return
+        navigateToChapter(
+            index = (sourceChapterIndex + delta).coerceIn(0, state.chapters.lastIndex),
+            position = if (openAtEnd) Int.MAX_VALUE else 0,
+        )
     }
 
     fun jumpToChapter(index: Int) {
@@ -185,10 +191,25 @@ class ReaderViewModel @Inject constructor(
             _uiState.update { it.copy(chapterLoading = false, pendingChapterTitle = null) }
             return
         }
-        pendingChapterIndex = index
+        chapterNavigationJob?.cancel()
         chapterPrefetchJob?.cancel()
         criticalNeighborPublishJob?.cancel()
         prefetchedAroundChapterIndex = null
+        cancelPendingChapterLoadsExcept(index)
+
+        // A paged boundary already renders the decoded adjacent chapter. Publishing the same
+        // chapter through a new coroutine leaves a short interval in which the old Pager is at
+        // its terminal item but the replacement Pager does not exist yet. With one-page EPUB
+        // chapters a second fast gesture lands in that interval and visibly springs back.
+        // Commit an in-memory neighbour synchronously so the next gesture always reaches the
+        // newly active Pager.
+        state.prefetchedChapters[index]?.let { cached ->
+            pendingChapterIndex = null
+            activateChapter(index, position, cached)
+            return
+        }
+
+        pendingChapterIndex = index
         _uiState.update {
             it.copy(
                 chapterLoading = true,
@@ -196,13 +217,10 @@ class ReaderViewModel @Inject constructor(
                 error = null,
             )
         }
-        chapterNavigationJob?.cancel()
-        cancelPendingChapterLoadsExcept(index)
         chapterNavigationJob = viewModelScope.launch {
             var chapterLoaded = false
             try {
-                loadChapter(index, position)
-                chapterLoaded = true
+                chapterLoaded = loadChapter(index, position)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -220,16 +238,21 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadChapter(index: Int, position: Int) {
+    private suspend fun loadChapter(index: Int, position: Int): Boolean {
         val currentState = _uiState.value
-        if (index == currentState.chapterIndex && currentState.chapter != null) return
-        if (currentState.chapters.getOrNull(index) == null) return
+        if (index == currentState.chapterIndex && currentState.chapter != null) return true
+        if (currentState.chapters.getOrNull(index) == null) return false
         // Keep the current chapter rendered while the target is read. Removing the
         // reader from composition here left a blank screen when a search jump was slow
         // or its chapter index was not contiguous.
         val readerChapter = currentState.prefetchedChapters[index]
             ?: chapterLoad(index, currentState.chapters, ChapterLoadPriority.USER).await()
-            ?: return
+            ?: return false
+        activateChapter(index, position, readerChapter)
+        return true
+    }
+
+    private fun activateChapter(index: Int, position: Int, readerChapter: ReaderChapter) {
         lastPosition = if (position == Int.MAX_VALUE) readerChapter.contentParagraphs().lastOrNull()?.index ?: 0 else position
         _uiState.update {
             it.copy(
@@ -241,6 +264,9 @@ class ReaderViewModel @Inject constructor(
                 currentPosition = lastPosition,
                 navigationVersion = it.navigationVersion + 1,
                 loading = false,
+                chapterLoading = false,
+                pendingChapterTitle = null,
+                error = null,
             )
         }
         savePosition(lastPosition)
@@ -347,14 +373,7 @@ class ReaderViewModel @Inject constructor(
         val chapter = state.chapter ?: return
         val content = chapter.contentParagraphs()
         val currentOffset = content.indexOfLast { it.index <= position }.coerceAtLeast(0)
-        val previousOffset = content.indexOfLast { it.index <= lastPosition }.coerceAtLeast(0)
         val safePosition = content.getOrNull(currentOffset)?.index ?: 0
-        if (content.isNotEmpty() && currentOffset > previousOffset) {
-            sessionCharacters += content.subList(previousOffset, currentOffset)
-                .filter { it.kind == ParagraphKind.TEXT }
-                .sumOf { it.text.length }
-                .toLong()
-        }
         lastPosition = safePosition
         _uiState.update { it.copy(currentPosition = safePosition) }
         val total = positions.bookFraction(
@@ -459,7 +478,7 @@ class ReaderViewModel @Inject constructor(
         if (active) {
             chapterPrefetchJob?.cancel()
             chapterPrefetchJob = null
-            publishInFlightImmediateNeighbors()
+            publishInFlightNavigationWindow()
             prefetchedAroundChapterIndex = null
             return
         }
@@ -473,16 +492,18 @@ class ReaderViewModel @Inject constructor(
     }
 
     /**
-     * Stopping the ten-chapter queue must not discard the exact previous/next chapter already in
-     * flight. Keep awaiting only those two deferred values and publish them for the boundary pager;
-     * no new parsing work is started here.
+     * Stopping the ten-chapter queue must not discard the short navigation runway already in
+     * flight. Keep awaiting the two chapters on either side and publish them for the boundary
+     * pager; no new parsing work is started here.
      */
-    private fun publishInFlightImmediateNeighbors() {
+    private fun publishInFlightNavigationWindow() {
         criticalNeighborPublishJob?.cancel()
         val origin = _uiState.value.chapterIndex
-        val candidates = listOf(origin + 1, origin - 1).mapNotNull { index ->
-            chapterLoads[index]?.takeIf { !it.deferred.isCancelled }?.let { index to it.deferred }
-        }
+        val candidates = (1..RENDER_PREFETCH_RADIUS)
+            .flatMap { distance -> listOf(origin + distance, origin - distance) }
+            .mapNotNull { index ->
+                chapterLoads[index]?.takeIf { !it.deferred.isCancelled }?.let { index to it.deferred }
+            }
         if (candidates.isEmpty()) return
         criticalNeighborPublishJob = viewModelScope.launch {
             candidates.forEach { (index, deferred) ->
@@ -523,7 +544,7 @@ class ReaderViewModel @Inject constructor(
     fun finishSession() {
         if (!sessionFinished.compareAndSet(false, true)) return
         val duration = sessionTimer.finish()
-        viewModelScope.launch(Dispatchers.IO) { stats.recordSession(bookUuid, duration, sessionCharacters) }
+        viewModelScope.launch(Dispatchers.IO) { stats.recordSession(bookUuid, duration) }
     }
 
     override fun onCleared() {
@@ -554,6 +575,6 @@ private data class InitialReaderData(
 private fun ChapterContent.toReaderChapter() = ReaderChapter(chapter.id, chapter.bookUuid, chapter.title, chapter.index, paragraphs)
 
 private const val CHAPTER_PREFETCH_RADIUS = 10
-// The renderer consumes only the immediate previous/next chapter. Keeping a second pair in the
-// StateFlow caused two extra full reader recompositions without making any swipe path faster.
-private const val RENDER_PREFETCH_RADIUS = 1
+// The renderer composes only the immediate previous/next chapter, but retaining a second decoded
+// pair gives one-page EPUB chapters enough runway for rapid consecutive boundary gestures.
+private const val RENDER_PREFETCH_RADIUS = 2

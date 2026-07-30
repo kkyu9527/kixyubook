@@ -5,7 +5,7 @@ Kixyu Book 是一款完全离线的 Android 本地小说阅读器。应用不包
 ## 主要能力
 
 - 通过 Storage Access Framework 导入 TXT、EPUB，并按文件哈希去重
-- TXT 多编码识别与原文编辑；EPUB 元数据、目录、XHTML 和图片读取
+- TXT 多编码识别；EPUB 元数据、目录、XHTML 和图片读取
 - 精确分页、连续滚动、跨章节翻页、目录、书签和全文搜索
 - 阅读进度与统计、字体导入、完整备份和跨设备恢复
 - Material 3 / MIUIX 界面风格、Material You 动态取色和自定义阅读配色
@@ -39,6 +39,12 @@ File → Parser → Document Model → Measured Layout/Pagination → Compose Re
 ```
 
 调试 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
+
+应用级 Baseline Profile 覆盖冷启动、进入阅读器和左右翻页路径。生成配置文件时必须使用专用测试设备或 Emulator；连接设备任务会安装并卸载测试 APK，不要在保存有正式阅读数据的日常设备上执行。
+
+```powershell
+.\gradlew.bat :app:generateBaselineProfile
+```
 
 Release 签名信息保存在仓库外的 `%USERPROFILE%/.kixyubook/signing.properties`，也可通过 `KIXYU_SIGNING_PROPERTIES` 指定。文件包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。
 

@@ -161,8 +161,6 @@ data class ImportSummary(
 data class ReadingStats(
     val todayMillis: Long = 0,
     val totalMillis: Long = 0,
-    val todayCharacters: Long = 0,
-    val totalCharacters: Long = 0,
     val streakDays: Int = 0,
     val goalMinutes: Int = 30,
 )

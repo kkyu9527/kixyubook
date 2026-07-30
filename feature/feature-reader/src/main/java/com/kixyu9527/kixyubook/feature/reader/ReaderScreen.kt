@@ -14,7 +14,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
@@ -52,6 +55,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.layout.onSizeChanged
@@ -59,6 +63,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -93,6 +99,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.collectLatest
@@ -101,6 +109,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 
 private enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, SETTINGS }
@@ -452,6 +461,7 @@ private fun ReaderScreen(
             Box(
             Modifier.fillMaxSize()
                 .background(palette.background)
+                .semantics { contentDescription = "阅读正文" }
                 .focusRequester(focusRequester)
                 .onPreviewKeyEvent { event ->
                     val isVolumeKey = event.key == Key.VolumeUp || event.key == Key.VolumeDown
@@ -744,6 +754,7 @@ private fun PagedReader(
         state.fontPath,
         state.settings.showChapterTitle,
     ) { mutableStateOf<RetainedReaderPage?>(null) }
+    var textSelectionActive by remember { mutableStateOf(false) }
     // Always finish the requested chapter first. EPUB pagination includes rich spans and image
     // blocks, so starting three layouts together made the visible chapter compete with prefetch.
     val pages = rememberMeasuredReaderPages(
@@ -759,7 +770,10 @@ private fun PagedReader(
     LaunchedEffect(resourcePriorityActive) {
         if (resourcePriorityActive) paginationCoordinator.pauseInFlight()
     }
-    if (pages.isEmpty()) {
+    // The first chapter still needs a loading surface, but once a Pager has rendered it must stay
+    // in composition across chapter pagination. Removing it while the newly activated chapter is
+    // being measured cancels any immediately-following drag and produces a visible spring-back.
+    if (pages.isEmpty() && retainedPage == null) {
         retainedPage?.let { retained ->
             ReaderPageRenderer(
                 page = retained.page,
@@ -780,6 +794,7 @@ private fun PagedReader(
         return
     }
     LaunchedEffect(chapter.id, state.navigationVersion, pages) {
+        if (pages.isEmpty()) return@LaunchedEffect
         withFrameNanos { }
         chapterRendered(state.navigationVersion)
     }
@@ -813,142 +828,306 @@ private fun PagedReader(
     }.orEmpty()
     val positions = remember { ReaderPositionManager() }
     val hasPrevious = state.chapterIndex > 0; val hasNext = state.chapterIndex < state.chapters.lastIndex
-    // Boundary pages must depend only on the chapter list. Neighbour pagination commonly finishes
-    // after this pager is composed; tying a boundary to that asynchronous result permanently
-    // disabled swipe-to-next/previous while tap navigation still worked. Keep the page count stable
-    // and temporarily render the current edge page until the prefetched neighbour is ready.
-    val hasPreviousCover = hasPrevious
-    val hasNextCover = hasNext
-    val leading = if (hasPreviousCover) 1 else 0
-    val virtualCount = pages.size + leading + if (hasNextCover) 1 else 0
+    // Keep one physical Pager alive across chapter changes. Its stable page keys let Compose retain
+    // the page that crossed the boundary while the three-chapter window is recentered around it.
+    // Recreating PagerState per chapter cancels a second gesture that starts immediately after the
+    // first one settles, which is the root cause of rapid-swipe spring-back.
+    val pagerWindow = remember(
+        state.chapterIndex,
+        state.restorePosition,
+        state.chapters.size,
+        pages,
+        previousPages,
+        nextPages,
+        hasPrevious,
+        hasNext,
+    ) {
+        buildReaderPagerWindow(
+            currentChapterIndex = state.chapterIndex,
+            currentPages = pages,
+            previousPages = previousPages,
+            nextPages = nextPages,
+            hasPrevious = hasPrevious,
+            hasNext = hasNext,
+            currentPlaceholderPageIndex = if (state.restorePosition > 0) Int.MIN_VALUE else 0,
+            chapterCount = state.chapters.size,
+        )
+    }
+    val currentStart = if (hasPrevious) 1 else 0
     val selectedSearchResult = state.searchResults.getOrNull(state.selectedSearchIndex)
     val targetSearchQuery = state.searchQuery.takeIf {
         selectedSearchResult?.chapterId == chapter.id &&
             selectedSearchResult.paragraphIndex == state.restorePosition
     }
-    val initial = positions.pageFor(pages, state.restorePosition, targetSearchQuery) + leading
-    var adjacentPagesReady by remember(chapter.id, state.navigationVersion) {
-        mutableStateOf(false)
+    val initialActual = if (pages.isEmpty()) {
+        if (state.restorePosition > 0) Int.MIN_VALUE else 0
+    } else {
+        positions.pageFor(pages, state.restorePosition, targetSearchQuery).coerceIn(pages.indices)
     }
-    key(chapter.id, state.navigationVersion) {
-        val pager = rememberPagerState(
-            initialPage = initial.coerceIn(0, virtualCount - 1),
-            pageCount = { virtualCount },
-        )
-        val scope = rememberCoroutineScope()
-        LaunchedEffect(pager, pages, resourcePriorityActive) {
-            if (resourcePriorityActive) {
-                adjacentPagesReady = false
-                return@LaunchedEffect
+    val desiredItemIndex = pagerWindow.indexOfFirst {
+        it.chapterIndex == state.chapterIndex && it.pageIndex == initialActual
+    }.takeIf { it >= 0 } ?: currentStart.coerceIn(pagerWindow.indices)
+    val desiredItemKey = pagerWindow[desiredItemIndex].key
+    val pager = rememberPagerState(
+        initialPage = desiredItemIndex,
+        pageCount = { pagerWindow.size },
+    )
+    val turnRequests = remember { Channel<Int>(Channel.UNLIMITED) }
+    var settledItemKey by remember { mutableStateOf(desiredItemKey) }
+    val latestPagerWindow by rememberUpdatedState(pagerWindow)
+    val latestReaderState by rememberUpdatedState(state)
+
+    // Directory/search jumps intentionally select another logical page. Boundary navigation does
+    // not scroll here: the key recorded by the completed gesture is already the desired page and
+    // Compose keeps it anchored while the surrounding window changes.
+    // Overlay visibility changes the amount of neighbouring content retained for rendering. It
+    // must not replay a chapter-entry restore against the Pager: doing so sent an already-read
+    // page back to the chapter opening whenever the controls appeared. Only an explicit logical
+    // destination change may drive this positioning effect.
+    LaunchedEffect(state.navigationVersion, desiredItemKey) {
+        if (settledItemKey != desiredItemKey) {
+            val target = pagerWindow.indexOfFirst { it.key == desiredItemKey }
+            if (target >= 0) {
+                pager.scrollToPage(target)
+                settledItemKey = desiredItemKey
             }
-            // Readest opens only the primary section, then begins adjacent-section preloading
-            // after the renderer reports a stable first layout. Give Compose the same staged
-            // start: draw the current page first, then precompose neighbours on a later frame.
-            repeat(READER_ADJACENT_WARMUP_FRAMES) { withFrameNanos { } }
-            adjacentPagesReady = true
         }
-        LaunchedEffect(pager, chapter.id) {
-            snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { page ->
-                when {
-                    hasPreviousCover && page == 0 -> moveChapterFromPage(state.chapterIndex, -1, true)
-                    hasNextCover && page == virtualCount - 1 -> moveChapterFromPage(state.chapterIndex, 1, false)
-                    else -> {
-                        val actualPage = page - leading
-                        pages.getOrNull(actualPage)?.let { settledPage ->
-                            retainedPage = RetainedReaderPage(
-                                page = settledPage,
-                                pageNumber = readerPageNumber(state, actualPage, pages.size),
-                            )
-                            savePosition(settledPage.startParagraph, actualPage == pages.lastIndex)
+    }
+
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { pageIndex ->
+            val window = latestPagerWindow
+            val readerState = latestReaderState
+            val item = window.getOrNull(pageIndex) ?: return@collect
+            settledItemKey = item.key
+            when {
+                item.chapterIndex < readerState.chapterIndex -> {
+                    moveChapterFromPage(
+                        readerState.chapterIndex,
+                        item.chapterIndex - readerState.chapterIndex,
+                        true,
+                    )
+                }
+                item.chapterIndex > readerState.chapterIndex -> {
+                    moveChapterFromPage(
+                        readerState.chapterIndex,
+                        item.chapterIndex - readerState.chapterIndex,
+                        false,
+                    )
+                }
+                item.page != null -> {
+                    retainedPage = RetainedReaderPage(
+                        page = item.page,
+                        pageNumber = readerPageNumber(readerState, item.pageIndex, item.pageCount),
+                    )
+                    savePosition(item.page.startParagraph, item.pageIndex == item.pageCount - 1)
+                }
+            }
+        }
+    }
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.isScrollInProgress }.distinctUntilChanged().collectLatest { scrolling ->
+            if (scrolling) {
+                setPageInteractionActive(true)
+                dismissControls()
+            } else {
+                // Selection and the new page are attached first; background parsing resumes
+                // only after two clean frames, regardless of the display refresh rate.
+                withFrameNanos { }
+                withFrameNanos { }
+                setPageInteractionActive(false)
+            }
+        }
+    }
+    DisposableEffect(pager) {
+        onDispose { setPageInteractionActive(false) }
+    }
+    LaunchedEffect(pager, volumeTurns, turnRequests) {
+        launch {
+            volumeTurns.collect { direction -> turnRequests.send(direction) }
+        }
+        for (direction in turnRequests) {
+            dismissControls()
+            val window = latestPagerWindow
+            val readerState = latestReaderState
+            val target = (pager.settledPage + direction).coerceIn(0, window.lastIndex)
+            when {
+                target != pager.settledPage -> {
+                    var settled = false
+                    while (!settled) {
+                        try {
+                            pager.animateScrollToPage(target)
+                            settled = true
+                        } catch (cancellation: CancellationException) {
+                            if (!currentCoroutineContext().isActive) throw cancellation
+                            // Pointer input owns Pager's MutatorMutex until that gesture finishes.
+                            // Retry this accepted turn on the next frame instead of racing it with
+                            // scrollToPage (which can be cancelled a second time and kill the
+                            // consumer). Newer turns remain ordered in the channel behind it.
+                            withFrameNanos { }
+                            settled = pager.settledPage == target
                         }
                     }
                 }
-            }
-        }
-        LaunchedEffect(pager) {
-            snapshotFlow { pager.isScrollInProgress }.distinctUntilChanged().collectLatest { scrolling ->
-                if (scrolling) {
-                    setPageInteractionActive(true)
-                    dismissControls()
-                } else {
-                    // Selection and the new page are attached first; background parsing resumes
-                    // only after two clean frames, regardless of the display refresh rate.
-                    withFrameNanos { }
-                    withFrameNanos { }
-                    setPageInteractionActive(false)
+                direction < 0 && readerState.chapterIndex > 0 -> {
+                    moveChapterFromPage(readerState.chapterIndex, -1, true)
+                }
+                direction > 0 && readerState.chapterIndex < readerState.chapters.lastIndex -> {
+                    moveChapterFromPage(readerState.chapterIndex, 1, false)
                 }
             }
         }
-        DisposableEffect(pager) {
-            onDispose { setPageInteractionActive(false) }
+    }
+    LaunchedEffect(chapter.id, initialActual, pages) {
+        if (pages.isEmpty()) return@LaunchedEffect
+        retainedPage = RetainedReaderPage(
+            page = pages[initialActual],
+            pageNumber = readerPageNumber(state, initialActual, pages.size),
+        )
+    }
+    val pagerEdgeTap by rememberUpdatedState<(Float) -> Unit> { fraction ->
+        if (textSelectionActive) return@rememberUpdatedState
+        when {
+            fraction < .33f && hasPrevious -> turnRequests.trySend(-1)
+            fraction > .67f && hasNext -> turnRequests.trySend(1)
         }
-        LaunchedEffect(pager, volumeTurns) {
-            volumeTurns.collect { direction ->
-                dismissControls()
-                val target = (pager.currentPage + direction).coerceIn(0, virtualCount - 1)
-                when {
-                    target != pager.currentPage -> pager.animateScrollToPage(target)
-                    direction < 0 && hasPrevious -> moveChapterFromPage(state.chapterIndex, -1, true)
-                    direction > 0 && hasNext -> moveChapterFromPage(state.chapterIndex, 1, false)
-                }
-            }
-        }
-        val initialActual = (initial - leading).coerceIn(pages.indices)
-        LaunchedEffect(chapter.id, initialActual, pages) {
-            retainedPage = RetainedReaderPage(
-                page = pages[initialActual],
-                pageNumber = readerPageNumber(state, initialActual, pages.size),
+    }
+    HorizontalPager(
+        state = pager,
+        modifier = Modifier.fillMaxSize().observePagerEdgeTap(
+            onTapFraction = { fraction -> pagerEdgeTap(fraction) },
+        ),
+        // Only one already-measured neighbour is precomposed. This keeps the gesture surface
+        // continuous without laying out the entire retained chapter window.
+        beyondViewportPageCount = if (resourcePriorityActive) 0 else 1,
+        key = { virtualPage -> pagerWindow[virtualPage].key },
+    ) { virtualPage ->
+        val item = pagerWindow[virtualPage]
+        // A not-yet-paginated chapter is still a fully interactive lightweight page. Rendering a
+        // spinner-only Box here discarded every tap that arrived after the first rapid turn.
+        val renderedPage = item.page ?: state.chapters.getOrNull(item.chapterIndex)?.let { target ->
+            ReaderPage(
+                index = item.pageIndex,
+                chapterIndex = target.index,
+                chapterTitle = target.title,
+                isChapterOpening = true,
+                blocks = emptyList(),
             )
         }
-        HorizontalPager(
-            state = pager,
-            modifier = Modifier.fillMaxSize(),
-            // A reader page is substantially more expensive than a normal pager item because it
-            // contains rich text and a selection layer. Compose the immediate neighbours before
-            // the drag begins so a 120 Hz gesture only has to translate already-laid-out pages.
-            beyondViewportPageCount = if (adjacentPagesReady && !resourcePriorityActive) 1 else 0,
-            key = { virtualPage -> (chapter.id shl 20) xor virtualPage.toLong() },
-        ) { virtualPage ->
-            val actual = virtualPage - leading
-            val renderedPage = when {
-                actual in pages.indices -> pages[actual]
-                actual < 0 -> previousPages.lastOrNull() ?: pages.first()
-                else -> nextPages.firstOrNull() ?: pages.last()
-            }
+        if (renderedPage != null) {
             ReaderPageRenderer(
                 renderedPage, spec, palette, state.fontPath,
-                { fraction -> scope.launch {
-                    when {
-                        fraction < .33f && pager.currentPage > 0 -> {
-                            dismissControls(); pager.animateScrollToPage(pager.currentPage - 1)
-                        }
-                        fraction < .33f && hasPrevious -> {
-                            dismissControls(); moveChapterFromPage(state.chapterIndex, -1, true)
-                        }
-                        fraction > .67f && pager.currentPage < virtualCount - 1 -> {
-                            dismissControls(); pager.animateScrollToPage(pager.currentPage + 1)
-                        }
-                        fraction > .67f && hasNext -> {
-                            dismissControls(); moveChapterFromPage(state.chapterIndex, 1, false)
-                        }
-                        else -> middleTap()
-                    }
-                } },
+                { fraction ->
+                    if (fraction in .33f..67f) middleTap()
+                },
                 epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
                 showRegularChapterTitle = state.settings.showChapterTitle,
                 highlightQuery = state.searchQuery,
-                pageNumber = when {
-                    actual in pages.indices -> readerPageNumber(state, actual, pages.size)
-                    actual < 0 && previousPages.isNotEmpty() -> readerPageNumber(state, previousPages.lastIndex, previousPages.size)
-                    actual >= pages.size && nextPages.isNotEmpty() -> readerPageNumber(state, 0, nextPages.size)
-                    actual < 0 -> readerPageNumber(state, 0, pages.size)
-                    else -> readerPageNumber(state, pages.lastIndex, pages.size)
+                pageNumber = item.page?.let {
+                    readerPageNumber(state, item.pageIndex, item.pageCount)
                 },
                 // Only the settled page owns selection registrars and long-press handles. The
                 // incoming offscreen page stays visually identical but much cheaper to compose
                 // and lay out during a 120 Hz drag; selection is attached after it settles.
-                selectionEnabled = !pager.isScrollInProgress && virtualPage == pager.settledPage,
+                selectionEnabled = item.page != null &&
+                    !pager.isScrollInProgress && virtualPage == pager.settledPage,
+                onSelectionActiveChange = { active -> textSelectionActive = active },
             )
+        }
+    }
+}
+
+/**
+ * Edge turns belong to the stable Pager node instead of page-local content. The current page can
+ * be replaced by a lightweight chapter placeholder in the same frame that a rapid tap arrives;
+ * keeping this observer above those pages prevents that tap from being discarded.
+ */
+private fun Modifier.observePagerEdgeTap(
+    onTapFraction: (Float) -> Unit,
+): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val up = waitForUpOrCancellation(pass = PointerEventPass.Initial) ?: return@awaitEachGesture
+        val delta = up.position - down.position
+        val isShortTap = up.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+        val stayedInPlace = delta.x * delta.x + delta.y * delta.y <=
+            viewConfiguration.touchSlop * viewConfiguration.touchSlop
+        val fraction = up.position.x / size.width.coerceAtLeast(1)
+        if (isShortTap && stayedInPlace && (fraction < .33f || fraction > .67f)) {
+            // Initial pass reaches this stable parent before the translated page-local handler.
+            // Consume only the completed edge tap so the moving child cannot reinterpret the
+            // same screen coordinate as a center tap. Drags remain unconsumed for Pager.
+            up.consume()
+            onTapFraction(fraction)
+        }
+    }
+}
+
+private data class ReaderPagerItem(
+    val chapterIndex: Int,
+    val pageIndex: Int,
+    val pageCount: Int,
+    val page: ReaderPage?,
+) {
+    // Pager/LazyLayout keys participate in saveable state and therefore must be Bundle-compatible.
+    val key = "$chapterIndex:$pageIndex"
+}
+
+private fun buildReaderPagerWindow(
+    currentChapterIndex: Int,
+    currentPages: List<ReaderPage>,
+    previousPages: List<ReaderPage>,
+    nextPages: List<ReaderPage>,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    currentPlaceholderPageIndex: Int,
+    chapterCount: Int,
+): List<ReaderPagerItem> = buildList {
+    val firstChapter = (currentChapterIndex - PAGER_NAVIGATION_RADIUS).coerceAtLeast(0)
+    for (chapterIndex in firstChapter until currentChapterIndex - 1) {
+        add(ReaderPagerItem(chapterIndex, Int.MIN_VALUE, 0, null))
+    }
+    if (hasPrevious) {
+        val page = previousPages.lastOrNull()
+        add(
+            ReaderPagerItem(
+                chapterIndex = currentChapterIndex - 1,
+                pageIndex = page?.index ?: Int.MIN_VALUE,
+                pageCount = previousPages.size,
+                page = page,
+            ),
+        )
+    }
+    if (currentPages.isEmpty()) {
+        add(
+            ReaderPagerItem(
+                chapterIndex = currentChapterIndex,
+                pageIndex = currentPlaceholderPageIndex,
+                pageCount = 0,
+                page = null,
+            ),
+        )
+    } else {
+        currentPages.forEach { page ->
+            add(ReaderPagerItem(currentChapterIndex, page.index, currentPages.size, page))
+        }
+    }
+    if (hasNext) {
+        val page = nextPages.firstOrNull()
+        add(
+            ReaderPagerItem(
+                chapterIndex = currentChapterIndex + 1,
+                pageIndex = page?.index ?: 0,
+                pageCount = nextPages.size,
+                page = page,
+            ),
+        )
+    }
+    val lastChapter = (currentChapterIndex + PAGER_NAVIGATION_RADIUS)
+        .coerceAtMost(chapterCount - 1)
+    if (currentChapterIndex + 2 <= lastChapter) {
+        for (chapterIndex in currentChapterIndex + 2..lastChapter) {
+            add(ReaderPagerItem(chapterIndex, 0, 0, null))
         }
     }
 }
@@ -1848,8 +2027,8 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 // Pagination inputs are almost always unique remainders. Caching their TextLayoutResult objects
 // retains large native buffers without producing useful hits, especially for malformed EPUB text.
 private const val READER_TEXT_MEASURE_CACHE_SIZE = 0
+private const val PAGER_NAVIGATION_RADIUS = 10
 private const val CHAPTER_LOADING_INDICATOR_DELAY_MILLIS = 180L
-private const val READER_ADJACENT_WARMUP_FRAMES = 3
 private const val READER_OVERLAY_SETTLE_MILLIS = 320L
 private const val READER_CONTROL_ACCENT_MIX = .18f
 private const val READER_CONTROL_DISABLED_ACCENT_MIX = .1f

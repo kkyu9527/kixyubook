@@ -282,8 +282,8 @@ class LocalBackupRepository @Inject constructor(
 
     private companion object {
         const val DATABASE_NAME = "kixyu-books.db"
-        const val DATABASE_VERSION = 4
-        const val BACKUP_VERSION = 4
+        const val DATABASE_VERSION = 6
+        const val BACKUP_VERSION = 5
         const val MANIFEST_ENTRY = "manifest.properties"
         const val DATABASE_ENTRY = "database/kixyu-books.db"
         const val EPUB_CACHE_DIRECTORY = "epub-chapters"

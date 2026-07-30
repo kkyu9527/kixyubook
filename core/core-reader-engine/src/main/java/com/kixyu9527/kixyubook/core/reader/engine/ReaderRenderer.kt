@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -154,6 +155,7 @@ fun ReaderPageRenderer(
     highlightQuery: String = "",
     pageNumber: String? = null,
     selectionEnabled: Boolean = true,
+    onSelectionActiveChange: (Boolean) -> Unit = {},
 ) {
     val family = rememberReaderFont(fontPath)
     var selectionVersion by remember(page.chapterIndex, page.index) { mutableIntStateOf(0) }
@@ -164,10 +166,14 @@ fun ReaderPageRenderer(
             if (selectionEnabled && selectionActive) {
                 selectionActive = false
                 selectionVersion++
+                onSelectionActiveChange(false)
             } else {
                 latestTap(fraction)
             }
         }
+    }
+    LaunchedEffect(page.chapterIndex, page.index, selectionEnabled) {
+        if (selectionEnabled) onSelectionActiveChange(selectionActive)
     }
     val content: @Composable () -> Unit = {
         ReaderPageContent(
@@ -181,7 +187,12 @@ fun ReaderPageRenderer(
             highlightQuery = highlightQuery,
             pageNumber = pageNumber,
             handleTap = handleTap,
-            onLongPress = { if (selectionEnabled) selectionActive = true },
+            onLongPress = {
+                if (selectionEnabled) {
+                    selectionActive = true
+                    onSelectionActiveChange(true)
+                }
+            },
         )
     }
     if (selectionEnabled) {

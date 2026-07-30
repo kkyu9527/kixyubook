@@ -108,7 +108,6 @@ data class ReadingSessionEntity(
     val bookUuid: String,
     val startedTime: Long,
     val durationMillis: Long,
-    val charactersRead: Long,
     val epochDay: Long,
 )
 

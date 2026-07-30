@@ -39,4 +39,5 @@ include(
     ":feature:feature-library",
     ":feature:feature-reader",
     ":feature:feature-settings",
+    ":baselineprofile",
 )

@@ -26,15 +26,18 @@ class LocalReadingStatsRepository @Inject constructor(private val dao: BookDao) 
         ReadingStats(
             todayMillis = todaySessions.sumOf { it.durationMillis },
             totalMillis = sessions.sumOf { it.durationMillis },
-            todayCharacters = todaySessions.sumOf { it.charactersRead },
-            totalCharacters = sessions.sumOf { it.charactersRead },
             streakDays = streak,
         )
     }
 
-    override suspend fun recordSession(bookUuid: String, durationMillis: Long, charactersRead: Long) = withContext(Dispatchers.IO) {
+    override suspend fun recordSession(bookUuid: String, durationMillis: Long) = withContext(Dispatchers.IO) {
         if (durationMillis >= 1_000) dao.insertSession(
-            ReadingSessionEntity(bookUuid = bookUuid, startedTime = System.currentTimeMillis() - durationMillis, durationMillis = durationMillis, charactersRead = charactersRead.coerceAtLeast(0), epochDay = LocalDate.now().toEpochDay()),
+            ReadingSessionEntity(
+                bookUuid = bookUuid,
+                startedTime = System.currentTimeMillis() - durationMillis,
+                durationMillis = durationMillis,
+                epochDay = LocalDate.now().toEpochDay(),
+            ),
         )
     }
 }

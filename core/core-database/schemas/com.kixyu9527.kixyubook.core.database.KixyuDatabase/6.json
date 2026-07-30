@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 5,
-    "identityHash": "c4d1cefd681a0113294be6e54e7df1c1",
+    "version": 6,
+    "identityHash": "346ae2a2994ec4baad31742dd88d32f2",
     "entities": [
       {
         "tableName": "books",
@@ -400,7 +400,7 @@
       },
       {
         "tableName": "reading_sessions",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `bookUuid` TEXT NOT NULL, `startedTime` INTEGER NOT NULL, `durationMillis` INTEGER NOT NULL, `charactersRead` INTEGER NOT NULL, `epochDay` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `bookUuid` TEXT NOT NULL, `startedTime` INTEGER NOT NULL, `durationMillis` INTEGER NOT NULL, `epochDay` INTEGER NOT NULL)",
         "fields": [
           {
             "fieldPath": "id",
@@ -423,12 +423,6 @@
           {
             "fieldPath": "durationMillis",
             "columnName": "durationMillis",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "charactersRead",
-            "columnName": "charactersRead",
             "affinity": "INTEGER",
             "notNull": true
           },
@@ -608,7 +602,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c4d1cefd681a0113294be6e54e7df1c1')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '346ae2a2994ec4baad31742dd88d32f2')"
     ]
   }
 }

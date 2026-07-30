@@ -1,7 +1,0 @@
-HSPLcom/kixyu9527/kixyubook/MainActivity**->**(**)**
-HSPLcom/kixyu9527/kixyubook/AppViewModel**->**(**)**
-HSPLcom/kixyu9527/kixyubook/feature/home/**->**(**)**
-HSPLcom/kixyu9527/kixyubook/feature/library/**->**(**)**
-HSPLcom/kixyu9527/kixyubook/feature/settings/**->**(**)**
-HSPLcom/kixyu9527/kixyubook/core/designsystem/**->**(**)**
-HSPLcom/kixyu9527/kixyubook/core/ui/**->**(**)**

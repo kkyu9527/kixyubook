@@ -42,7 +42,7 @@ interface ReaderSettingsRepository {
 
 interface ReadingStatsRepository {
     fun observeStats(): Flow<ReadingStats>
-    suspend fun recordSession(bookUuid: String, durationMillis: Long, charactersRead: Long)
+    suspend fun recordSession(bookUuid: String, durationMillis: Long)
 }
 
 interface FontRepository {
