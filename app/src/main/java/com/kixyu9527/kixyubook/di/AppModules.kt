@@ -7,6 +7,7 @@ import com.kixyu9527.kixyubook.core.common.repository.BackupRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReadingStatsRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.common.repository.AppUpdateRepository
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
 import com.kixyu9527.kixyubook.core.database.LocalBookRepository
 import com.kixyu9527.kixyubook.core.database.LocalBackupRepository
@@ -15,6 +16,7 @@ import com.kixyu9527.kixyubook.core.database.LocalReadingStatsRepository
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.datastore.DataStoreReaderSettingsRepository
+import com.kixyu9527.kixyubook.update.GitHubUpdateRepository
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -47,4 +49,5 @@ abstract class RepositoryModule {
     @Binds abstract fun bindSettingsRepository(implementation: DataStoreReaderSettingsRepository): ReaderSettingsRepository
     @Binds abstract fun bindStatsRepository(implementation: LocalReadingStatsRepository): ReadingStatsRepository
     @Binds abstract fun bindFontRepository(implementation: LocalFontRepository): FontRepository
+    @Binds abstract fun bindAppUpdateRepository(implementation: GitHubUpdateRepository): AppUpdateRepository
 }

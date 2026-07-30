@@ -166,3 +166,18 @@ data class ReadingStats(
 )
 
 data class UserFont(val uuid: String, val name: String, val filePath: String, val createdTime: Long)
+
+data class AppUpdateInfo(
+    val versionName: String,
+    val releaseName: String,
+    val releaseNotes: String,
+    val releaseUrl: String,
+)
+
+sealed interface AppUpdateState {
+    data object Idle : AppUpdateState
+    data object Checking : AppUpdateState
+    data class Available(val update: AppUpdateInfo) : AppUpdateState
+    data class UpToDate(val currentVersion: String) : AppUpdateState
+    data class Failed(val message: String) : AppUpdateState
+}

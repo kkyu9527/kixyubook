@@ -8,6 +8,7 @@ Kixyu Book 是一款完全离线的 Android 本地小说阅读器。应用不包
 - TXT 多编码识别；EPUB 元数据、目录、XHTML 和图片读取
 - 精确分页、连续滚动、跨章节翻页、目录、书签和全文搜索
 - 阅读进度与统计、字体导入、完整备份和跨设备恢复
+- 启动时自动检查 GitHub Release，也可在设置页手动检查更新
 - Material 3 / MIUIX 界面风格、Material You 动态取色和自定义阅读配色
 - Edge-to-Edge、高刷新率、手势导航与 Predictive Back
 

@@ -17,7 +17,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1070
-        versionName = "1.6.0"
+        versionName = "1.7.0"
     }
 
     val externalSigningFile = file(
@@ -43,7 +43,10 @@ android {
             signingConfig = signingConfigs.findByName("release")
         }
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 dependencies {
@@ -65,6 +68,7 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.androidx.profileinstaller)
     ksp(libs.hilt.compiler)
+    testImplementation(libs.junit)
 
     baselineProfile(project(":baselineprofile"))
 

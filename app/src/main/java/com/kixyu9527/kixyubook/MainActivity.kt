@@ -13,6 +13,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -29,18 +31,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.view.WindowCompat
 import androidx.navigation.NavType
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBar
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
+import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.navigation.Routes
 import com.kixyu9527.kixyubook.feature.home.HomeRoute
 import com.kixyu9527.kixyubook.feature.library.LibraryRoute
@@ -70,6 +76,7 @@ class MainActivity : ComponentActivity() {
         requestHighestRefreshRate(window.decorView)
         setContent {
             val settings by appViewModel.settings.collectAsState()
+            val updateState by appViewModel.updateState.collectAsState()
             val loadedSettings = settings
             if (loadedSettings == null) {
                 // This surface normally exists for only a few milliseconds. It
@@ -82,23 +89,30 @@ class MainActivity : ComponentActivity() {
                 }
                 Box(Modifier.fillMaxSize().background(bootstrapBackground))
             } else {
-                KixyuBookApp(loadedSettings)
+                KixyuBookApp(loadedSettings, updateState)
             }
         }
     }
 
     @Composable
-    private fun KixyuBookApp(settings: com.kixyu9527.kixyubook.core.common.model.ReaderSettings) {
+    private fun KixyuBookApp(
+        settings: com.kixyu9527.kixyubook.core.common.model.ReaderSettings,
+        updateState: AppUpdateState,
+    ) {
         val navController = rememberNavController()
         // The UI-style setting adds/removes a MIUIX theme provider. Keep the
         // navigation subtree movable so a deliberate runtime style switch does
         // not recreate the current screen or bottom bar.
         val latestSettings = rememberUpdatedState(settings)
+        val latestUpdateState = rememberUpdatedState(updateState)
         val appContent = remember {
             movableContentOf {
                 KixyuNavHost(
                     navController = navController,
                     initialReaderSettings = latestSettings.value,
+                    updateState = latestUpdateState.value,
+                    onCheckForUpdates = appViewModel::checkForUpdates,
+                    onUpdateResultConsumed = appViewModel::clearUpdateResult,
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
                 )
             }
@@ -138,6 +152,8 @@ class MainActivity : ComponentActivity() {
             uiStyle = renderedUiStyle,
         ) {
             val appBackground = kixyuPageBackground()
+            val uriHandler = LocalUriHandler.current
+            val availableUpdate = updateState as? AppUpdateState.Available
             Box(Modifier.fillMaxSize().background(appBackground)) {
                 appContent()
                 if (styleTransitionVeil.value > 0f) {
@@ -146,6 +162,33 @@ class MainActivity : ComponentActivity() {
                             MaterialTheme.colorScheme.background.copy(alpha = styleTransitionVeil.value),
                         ),
                     )
+                }
+                KixyuActionDialog(
+                    show = availableUpdate != null,
+                    title = "发现新版本",
+                    onDismissRequest = appViewModel::clearUpdateResult,
+                    confirmLabel = "前往下载",
+                    onConfirm = {
+                        availableUpdate?.update?.releaseUrl?.let { releaseUrl ->
+                            appViewModel.clearUpdateResult()
+                            uriHandler.openUri(releaseUrl)
+                        }
+                    },
+                    dismissLabel = "稍后",
+                ) {
+                    val update = availableUpdate?.update
+                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+                        Text(
+                            text = "当前 ${BuildConfig.VERSION_NAME} · 最新 ${update?.versionName.orEmpty()}",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            text = update?.releaseNotes?.takeIf { it.isNotBlank() } ?: "新版本已经发布，可前往 GitHub 下载。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 8,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -176,6 +219,9 @@ private data class TopDestination(val route: String, val label: String, val icon
 private fun KixyuNavHost(
     navController: NavHostController,
     initialReaderSettings: ReaderSettings,
+    updateState: AppUpdateState,
+    onCheckForUpdates: () -> Unit,
+    onUpdateResultConsumed: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
 ) {
     val entry by navController.currentBackStackEntryAsState()
@@ -286,6 +332,10 @@ private fun KixyuNavHost(
                         Routes.HOME -> HomeRoute(onOpenBook = openBook)
                         Routes.LIBRARY -> LibraryRoute(onOpenBook = openBook)
                         Routes.SETTINGS -> SettingsRoute(
+                            updateState = updateState,
+                            currentVersion = BuildConfig.VERSION_NAME,
+                            onCheckForUpdates = onCheckForUpdates,
+                            onUpdateResultConsumed = onUpdateResultConsumed,
                             onAppearance = {
                                 prioritizeAnimation()
                                 navController.navigate(Routes.APPEARANCE)

@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.common.repository
 
 import com.kixyu9527.kixyubook.core.common.model.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 interface BookRepository {
     fun observeLibrary(): Flow<List<LibraryBook>>
@@ -69,4 +70,10 @@ interface BackupContributor {
     val key: String
     suspend fun export(): ByteArray
     suspend fun restore(payload: ByteArray)
+}
+
+interface AppUpdateRepository {
+    val state: StateFlow<AppUpdateState>
+    suspend fun checkForUpdates(manual: Boolean)
+    fun clearResult()
 }

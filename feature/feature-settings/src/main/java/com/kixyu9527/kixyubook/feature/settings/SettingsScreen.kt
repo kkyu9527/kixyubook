@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.SaveAlt
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
+import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
@@ -92,6 +94,10 @@ import kotlin.system.exitProcess
 fun SettingsRoute(
     onAppearance: () -> Unit,
     onReadingSettings: () -> Unit,
+    updateState: AppUpdateState,
+    currentVersion: String,
+    onCheckForUpdates: () -> Unit,
+    onUpdateResultConsumed: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -107,6 +113,19 @@ fun SettingsRoute(
     }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(Unit) { viewModel.restoreCompleted.collect { restored = true } }
+    LaunchedEffect(updateState) {
+        when (val result = updateState) {
+            is AppUpdateState.UpToDate -> {
+                snackbar.showSnackbar("当前已是最新版本 ${result.currentVersion}")
+                onUpdateResultConsumed()
+            }
+            is AppUpdateState.Failed -> {
+                snackbar.showSnackbar(result.message)
+                onUpdateResultConsumed()
+            }
+            else -> Unit
+        }
+    }
 
     KixyuPageScaffold(
         title = "设置",
@@ -214,6 +233,29 @@ fun SettingsRoute(
                             }
                             Spacer(Modifier.width(KixyuSize.compactButtonIconGap))
                             Text("恢复", maxLines = 1)
+                        }
+                    }
+                }
+            }
+            item {
+                KixyuSection(title = "关于") {
+                    KixyuSettingsRow(
+                        title = "检查更新",
+                        supportingText = when (val result = updateState) {
+                            AppUpdateState.Checking -> "正在连接 GitHub…"
+                            is AppUpdateState.Available -> "发现新版本 ${result.update.versionName}"
+                            else -> "当前版本 $currentVersion"
+                        },
+                        icon = Icons.Outlined.SystemUpdate,
+                        onClick = onCheckForUpdates.takeUnless { updateState == AppUpdateState.Checking },
+                    ) {
+                        if (updateState == AppUpdateState.Checking) {
+                            CircularProgressIndicator(
+                                Modifier.size(KixyuSize.iconSmall),
+                                strokeWidth = KixyuSpacing.hairline,
+                            )
+                        } else {
+                            Text("v$currentVersion", style = MaterialTheme.typography.labelLarge, maxLines = 1)
                         }
                     }
                 }
