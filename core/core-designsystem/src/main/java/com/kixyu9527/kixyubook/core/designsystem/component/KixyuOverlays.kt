@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -277,6 +278,51 @@ fun KixyuIconButton(
         )
     } else {
         IconButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+    }
+}
+
+@Composable
+fun KixyuButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        MiuixButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+        ) { Text(text, maxLines = 1) }
+    } else {
+        Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+        ) { Text(text, maxLines = 1) }
+    }
+}
+
+@Composable
+fun KixyuTextButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        MiuixTextButton(
+            text = text,
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    } else {
+        TextButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+        ) { Text(text, maxLines = 1) }
     }
 }
 

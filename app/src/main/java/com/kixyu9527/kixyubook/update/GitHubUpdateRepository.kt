@@ -111,6 +111,7 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
                         releaseName = "Kixyu Book $version",
                         releaseNotes = "新版本已经发布，可前往 GitHub 查看完整发版说明并下载。",
                         releaseUrl = releaseUrl,
+                        downloadUrl = fetchApkDownloadUrl(encodedTag),
                     )
                 }
                 HttpURLConnection.HTTP_NOT_FOUND -> null
@@ -127,13 +128,41 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         require(version.isNotBlank()) { "Release 缺少版本号" }
         val releaseUrl = json.getString("html_url")
         require(releaseUrl.startsWith(RELEASE_URL_PREFIX)) { "Release 地址无效" }
+        val assets = json.optJSONArray("assets")
+        val downloadUrl = (0 until (assets?.length() ?: 0))
+            .asSequence()
+            .mapNotNull { index -> assets?.optJSONObject(index) }
+            .firstOrNull { asset -> asset.optString("name").endsWith(".apk", ignoreCase = true) }
+            ?.optString("browser_download_url")
+            ?.takeIf(::isTrustedApkUrl)
         return AppUpdateInfo(
             versionName = version,
             releaseName = json.optString("name").takeIf { it.isNotBlank() } ?: "Kixyu Book $version",
             releaseNotes = json.optString("body").trim(),
             releaseUrl = releaseUrl,
+            downloadUrl = downloadUrl,
         )
     }
+
+    private fun fetchApkDownloadUrl(encodedTag: String): String? {
+        val connection = URL("$EXPANDED_ASSETS_URL_PREFIX$encodedTag").openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = NETWORK_TIMEOUT_MILLIS
+            connection.readTimeout = NETWORK_TIMEOUT_MILLIS
+            connection.setRequestProperty("User-Agent", "KixyuBook/${BuildConfig.VERSION_NAME}")
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
+            val html = connection.inputStream.bufferedReader().use { it.readText() }
+            APK_ASSET_REGEX.findAll(html)
+                .map { match -> "https://github.com${match.groupValues[1].replace("&amp;", "&")}" }
+                .firstOrNull(::isTrustedApkUrl)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun isTrustedApkUrl(url: String): Boolean =
+        url.startsWith(APK_DOWNLOAD_URL_PREFIX) && url.substringBefore('?').endsWith(".apk", ignoreCase = true)
 
     private fun Throwable.toUserMessage(): String = when (this) {
         is java.net.SocketTimeoutException -> "连接 GitHub 超时，请稍后重试"
@@ -146,7 +175,10 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         const val LATEST_RELEASE_PAGE = "https://github.com/kkyu9527/kixyubook/releases/latest"
         const val RELEASE_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/"
         const val RELEASE_TAG_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/tag/"
+        const val EXPANDED_ASSETS_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/expanded_assets/"
+        const val APK_DOWNLOAD_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/download/"
         const val NETWORK_TIMEOUT_MILLIS = 8_000
+        val APK_ASSET_REGEX = Regex("href=\\\"(/kkyu9527/kixyubook/releases/download/[^\\\"]+\\.apk(?:\\?[^\\\"]*)?)\\\"")
     }
 }
 

@@ -15,7 +15,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.pager.HorizontalPager
@@ -31,17 +35,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.view.WindowCompat
 import androidx.navigation.NavType
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBar
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -53,13 +59,21 @@ import com.kixyu9527.kixyubook.feature.library.LibraryRoute
 import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
+import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val appViewModel: AppViewModel by viewModels()
+    @Inject lateinit var updateDownloader: AppUpdateDownloader
+
+    override fun onResume() {
+        super.onResume()
+        updateDownloader.resumePendingInstallIfPermitted()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -136,7 +150,6 @@ class MainActivity : ComponentActivity() {
         DisposableEffect(view, darkTheme) {
             // Edge-to-edge is a window invariant, not a page preference.
             WindowCompat.setDecorFitsSystemWindows(window, false)
-            window.navigationBarColor = android.graphics.Color.TRANSPARENT
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 window.isNavigationBarContrastEnforced = false
             }
@@ -152,42 +165,73 @@ class MainActivity : ComponentActivity() {
             uiStyle = renderedUiStyle,
         ) {
             val appBackground = kixyuPageBackground()
-            val uriHandler = LocalUriHandler.current
             val availableUpdate = updateState as? AppUpdateState.Available
-            Box(Modifier.fillMaxSize().background(appBackground)) {
-                appContent()
-                if (styleTransitionVeil.value > 0f) {
-                    Box(
-                        Modifier.fillMaxSize().background(
-                            MaterialTheme.colorScheme.background.copy(alpha = styleTransitionVeil.value),
-                        ),
-                    )
+            KixyuOverlayHost(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize().background(appBackground)) {
+                    appContent()
+                    if (styleTransitionVeil.value > 0f) {
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                MaterialTheme.colorScheme.background.copy(alpha = styleTransitionVeil.value),
+                            ),
+                        )
+                    }
                 }
-                KixyuActionDialog(
+                KixyuBottomSheet(
                     show = availableUpdate != null,
-                    title = "发现新版本",
                     onDismissRequest = appViewModel::clearUpdateResult,
-                    confirmLabel = "前往下载",
-                    onConfirm = {
-                        availableUpdate?.update?.releaseUrl?.let { releaseUrl ->
-                            appViewModel.clearUpdateResult()
-                            uriHandler.openUri(releaseUrl)
-                        }
-                    },
-                    dismissLabel = "稍后",
                 ) {
                     val update = availableUpdate?.update
-                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(
+                                start = KixyuSpacing.large,
+                                end = KixyuSpacing.large,
+                                top = KixyuSpacing.medium,
+                                bottom = KixyuSpacing.large,
+                            ),
+                        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                    ) {
                         Text(
-                            text = "当前 ${BuildConfig.VERSION_NAME} · 最新 ${update?.versionName.orEmpty()}",
-                            style = MaterialTheme.typography.titleSmall,
+                            text = "发现新版本 ${update?.versionName.orEmpty()}",
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 1,
                         )
                         Text(
-                            text = update?.releaseNotes?.takeIf { it.isNotBlank() } ?: "新版本已经发布，可前往 GitHub 下载。",
+                            text = "当前版本 ${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = update?.releaseNotes?.takeIf { it.isNotBlank() }
+                                ?: "新版本已经发布，下载完成后将自动打开系统安装页面。",
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 8,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(
+                                KixyuSpacing.small,
+                                Alignment.End,
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            KixyuTextButton(
+                                text = "取消",
+                                onClick = appViewModel::clearUpdateResult,
+                            )
+                            KixyuButton(
+                                text = "下载",
+                                onClick = {
+                                    if (update != null && updateDownloader.download(update)) {
+                                        appViewModel.clearUpdateResult()
+                                    }
+                                },
+                                enabled = update?.downloadUrl != null,
+                            )
+                        }
                     }
                 }
             }

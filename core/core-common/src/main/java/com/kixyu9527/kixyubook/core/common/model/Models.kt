@@ -172,6 +172,7 @@ data class AppUpdateInfo(
     val releaseName: String,
     val releaseNotes: String,
     val releaseUrl: String,
+    val downloadUrl: String?,
 )
 
 sealed interface AppUpdateState {
