@@ -18,12 +18,21 @@ class TxtBookParser : BookParser {
         val frontMatter = inspectFrontMatter(file, file.name)
         file.bufferedReader(frontMatter.charset).use { reader ->
             var title = "正文"
+            var volumeTitle: String? = null
+            var volumeIndex = -1
             var emitted = false
             var lineIndex = 0
             val paragraphs = mutableListOf<String>()
             suspend fun flush() {
                 if (paragraphs.isEmpty()) return
-                emit(DocumentChapter(title, paragraphs.toList()))
+                emit(
+                    DocumentChapter(
+                        title = title,
+                        paragraphs = paragraphs.toList(),
+                        volumeTitle = volumeTitle,
+                        volumeIndex = volumeIndex.takeIf { it >= 0 },
+                    ),
+                )
                 paragraphs.clear()
                 emitted = true
             }
@@ -36,7 +45,9 @@ class TxtBookParser : BookParser {
                 when {
                     volumeTitleOrNull(line) != null -> {
                         flush()
-                        title = checkNotNull(volumeTitleOrNull(line))
+                        volumeTitle = checkNotNull(volumeTitleOrNull(line))
+                        volumeIndex++
+                        title = volumeTitle
                     }
                     chapterTitleOrNull(line) != null -> {
                         flush()

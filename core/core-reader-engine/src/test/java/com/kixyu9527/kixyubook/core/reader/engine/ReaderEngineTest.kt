@@ -4,6 +4,8 @@ import com.kixyu9527.kixyubook.core.common.model.Paragraph
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
+import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
+import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -20,6 +22,77 @@ class ReaderEngineTest {
         val chapters = mutableListOf<DocumentChapter>()
         TxtBookParser().readChapters(file, chapters::add)
         assertEquals(listOf("正文", "第一章 开始", "第二章 继续"), chapters.map { it.title })
+    }
+
+    @Test fun paginationDiskCacheRestoresPageBoundariesAndRichSpans() {
+        val noBackupRoot = folder.newFolder("no-backup")
+        val paragraph = Paragraph(
+            id = 1,
+            chapterId = 10,
+            index = 0,
+            text = "前缀缓存正文后缀",
+            spans = listOf(
+                ReaderTextSpan(2, 6, setOf(ReaderInlineStyle.BOLD), ReaderSemanticColor.BLUE),
+            ),
+        )
+        val image = Paragraph(
+            id = 2,
+            chapterId = 10,
+            index = 1,
+            text = "插画",
+            kind = ParagraphKind.IMAGE,
+            resourcePath = "OPS/image.png",
+            mediaType = "image/png",
+            intrinsicWidth = 800,
+            intrinsicHeight = 1200,
+        )
+        val chapter = ReaderChapter(10, "book-uuid", "第一章 缓存", 3, listOf(paragraph, image))
+        val textBlock = DocumentBlock(
+            paragraphIndex = 0,
+            fullText = paragraph.text,
+            visibleText = "缓存正文",
+            continuation = true,
+            bottomSpacing = false,
+            spans = paragraph.spans.sliceForText(2, 6),
+            textStart = 2,
+        )
+        val imageBlock = DocumentBlock(
+            paragraphIndex = 1,
+            fullText = image.text,
+            visibleText = "",
+            continuation = false,
+            kind = ParagraphKind.IMAGE,
+            resourcePath = image.resourcePath,
+            mediaType = image.mediaType,
+            intrinsicWidth = image.intrinsicWidth,
+            intrinsicHeight = image.intrinsicHeight,
+            imageWidthDp = 240f,
+            imageHeightDp = 360f,
+        )
+        val pages = listOf(
+            ReaderPage(0, chapter.index, chapter.title, true, listOf(textBlock)),
+            ReaderPage(1, chapter.index, chapter.title, false, listOf(imageBlock)),
+        )
+        val key = PaginationCacheKey(
+            bookUuid = chapter.bookUuid,
+            contentHash = "content-hash",
+            chapterId = chapter.id,
+            chapterTitle = chapter.title,
+            spec = ReaderLayoutSpec(400f, 760f, 18f, 1.6f, 0.1f, 16f),
+            fontIdentity = null,
+            showRegularChapterTitle = true,
+            density = 3f,
+            fontScale = 1f,
+            layoutDirection = LayoutDirection.Ltr,
+        )
+        val cache = ReaderPaginationDiskCache(readerPaginationCacheRoot(noBackupRoot))
+
+        cache.write(key, pages)
+
+        assertEquals(pages, cache.read(key, chapter))
+        assertNull(cache.read(key.copy(spec = key.spec.copy(fontSizeSp = 18.5f)), chapter))
+        ReaderPaginationCacheMaintenance.clearBook(noBackupRoot, chapter.bookUuid)
+        assertNull(cache.read(key, chapter))
     }
 
     @Test fun txtParserDetectsGb18030StripsMetadataAndRecognizesHua() = runBlocking {
@@ -253,6 +326,51 @@ class ReaderEngineTest {
             ReaderChapterHeading("第十二章", "重逢"),
             splitReaderChapterHeading("正文 第 十二 章：重逢"),
         )
+        assertEquals(
+            ReaderChapterHeading("第十三章", "换行标题"),
+            splitReaderChapterHeading("第十三章\n\u200B换行标题"),
+        )
+    }
+
+    @Test fun epubParserCollapsesBreaksInsideChapterHeading() = runBlocking {
+        val epub = folder.newFile("broken-heading.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>换行标题</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>""")
+            entry("OPS/c1.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第十四章<br/>完整章名</h1><p>正文。</p></body></html>""")
+        }
+
+        val chapter = EpubBookParser().readChapter(epub, 0)!!
+
+        assertEquals("第十四章 完整章名", chapter.title)
+        assertEquals(listOf("正文。"), chapter.paragraphs)
+    }
+
+    @Test fun epubEmptyBackCoverDoesNotReusePreviousChapter() = runBlocking {
+        val epub = folder.newFile("empty-back-cover.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>封底测试</dc:title></metadata><manifest><item id="c1" href="last.xhtml" media-type="application/xhtml+xml"/><item id="back" href="back.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="back"/></spine></package>""")
+            entry("OPS/last.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>倒数第二章</h1><p>不能复用的正文。</p></body></html>""")
+            entry("OPS/back.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body></body></html>""")
+        }
+
+        val parser = EpubBookParser()
+        val previous = parser.readChapter(epub, 0, "倒数第二章")!!
+        val backCover = parser.readChapter(epub, 1, "封底")!!
+
+        assertEquals(listOf("不能复用的正文。"), previous.paragraphs)
+        assertEquals("封底", backCover.title)
+        assertTrue(backCover.paragraphs.isEmpty())
+        assertTrue(backCover.images.isEmpty())
     }
 
     @Test fun epubParserReadsMetadataAndSpineContent() = runBlocking {
@@ -312,6 +430,31 @@ class ReaderEngineTest {
             listOf(
                 DocumentChapterOutline(0, "第一章 开始"),
                 DocumentChapterOutline(1, "第二章 继续"),
+            ),
+            EpubBookParser().readChapterOutlines(epub),
+        )
+    }
+
+    @Test fun epubChapterOutlinesPreserveNestedVolumes() {
+        val epub = folder.newFile("volume-navigation.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>分卷目录</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="v1" href="v1.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/><item id="v2" href="v2.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="v1"/><itemref idref="c1"/><itemref idref="v2"/><itemref idref="c2"/></spine></package>""")
+            entry("OPS/nav.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><a href="v1.xhtml">第一卷 风起</a><ol><li><a href="c1.xhtml">第一章</a></li></ol></li><li><a href="v2.xhtml">第二卷 云涌</a><ol><li><a href="c2.xhtml">第二章</a></li></ol></li></ol></nav></body></html>""")
+            entry("OPS/v1.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>第一卷 风起</h1></body></html>")
+            entry("OPS/c1.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>一</p></body></html>")
+            entry("OPS/v2.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>第二卷 云涌</h1></body></html>")
+            entry("OPS/c2.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>二</p></body></html>")
+        }
+
+        assertEquals(
+            listOf(
+                DocumentChapterOutline(1, "第一章", "第一卷 风起", 0),
+                DocumentChapterOutline(3, "第二章", "第二卷 云涌", 1),
             ),
             EpubBookParser().readChapterOutlines(epub),
         )
@@ -400,6 +543,25 @@ class ReaderEngineTest {
         assertEquals("场景插画", chapter.images.single().altText)
         assertEquals(1200, chapter.images.single().intrinsicWidth)
         assertEquals(800, chapter.images.single().intrinsicHeight)
+    }
+
+    @Test fun epubParserOmitsInlineImagesWithoutCreatingLogoTextOrImageBlocks() = runBlocking {
+        val epub = folder.newFile("inline-emoji.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>表情书</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/><item id="emoji" href="emoji_u1f60a.png" media-type="image/png"/></manifest><spine><itemref idref="c1"/></spine></package>""")
+            entry("OPS/c1.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><p>你好<img src="emoji_u1f60a.png" alt="😊"/>世界</p></body></html>""")
+            zip.putNextEntry(ZipEntry("OPS/emoji_u1f60a.png")); zip.write(ByteArray(24)); zip.closeEntry()
+        }
+
+        val chapter = EpubBookParser().readChapter(epub, 0)!!
+
+        assertEquals(listOf("你好世界"), chapter.paragraphs)
+        assertTrue(chapter.images.isEmpty())
     }
 
     @Test fun epubParserNormalizesFallbackBlocksListsAndTables() = runBlocking {

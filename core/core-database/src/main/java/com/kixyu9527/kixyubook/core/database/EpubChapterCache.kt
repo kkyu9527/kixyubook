@@ -62,6 +62,9 @@ internal class EpubChapterCache(private val root: File) {
         }
     }
 
+    fun contains(bookUuid: String, contentHash: String, chapterIndex: Int): Boolean =
+        cacheFile(bookUuid, contentHash, chapterIndex).isFile
+
     fun write(bookUuid: String, contentHash: String, chapterIndex: Int, chapter: DocumentChapter) {
         val target = cacheFile(bookUuid, contentHash, chapterIndex)
         val temporary = File(target.parentFile, "${target.name}$TEMPORARY_SUFFIX")
@@ -142,7 +145,7 @@ private inline fun <reified T : Enum<T>> DataInputStream.readEnumOrNull(): T? {
 private fun String.safePathSegment() = replace(Regex("[^a-zA-Z0-9._-]"), "_")
 
 private const val MAGIC = 0x4B584543
-private const val VERSION = 1
+private const val VERSION = 4
 private const val NO_ENUM = -1
 private const val MAX_PARAGRAPHS = 100_000
 private const val MAX_IMAGES = 10_000

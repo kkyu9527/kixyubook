@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
+import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -14,6 +15,7 @@ import javax.inject.Inject
 @HiltViewModel
 class AppViewModel @Inject constructor(
     settingsRepository: ReaderSettingsRepository,
+    private val books: BookRepository,
 ) : ViewModel() {
     /**
      * `null` means that the persisted app appearance has not been read yet.
@@ -27,4 +29,13 @@ class AppViewModel @Inject constructor(
             SharingStarted.Eagerly,
             null,
         )
+
+    fun setAnimationActive(active: Boolean) {
+        books.setAppAnimationActive(active)
+    }
+
+    override fun onCleared() {
+        books.setAppAnimationActive(false)
+        super.onCleared()
+    }
 }

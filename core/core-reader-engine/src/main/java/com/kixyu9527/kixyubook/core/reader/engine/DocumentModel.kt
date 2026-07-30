@@ -1,8 +1,10 @@
 package com.kixyu9527.kixyubook.core.reader.engine
 
+import androidx.compose.runtime.Immutable
 import com.kixyu9527.kixyubook.core.common.model.Paragraph
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
+import com.kixyu9527.kixyubook.core.common.model.singleLineBookHeading
 
 data class DocumentMetadata(
     val identityHint: String? = null,
@@ -28,14 +30,19 @@ data class DocumentChapter(
     val paragraphs: List<String>,
     val images: List<DocumentImage> = emptyList(),
     val paragraphSpans: List<List<ReaderTextSpan>> = emptyList(),
+    val volumeTitle: String? = null,
+    val volumeIndex: Int? = null,
 )
 
 /** Lightweight table-of-contents entry whose index points to the source document spine. */
 data class DocumentChapterOutline(
     val sourceIndex: Int,
     val title: String,
+    val volumeTitle: String? = null,
+    val volumeIndex: Int? = null,
 )
 
+@Immutable
 data class ReaderChapter(
     val id: Long,
     val bookUuid: String,
@@ -44,10 +51,11 @@ data class ReaderChapter(
     val paragraphs: List<Paragraph>,
 )
 
+@Immutable
 data class ReaderChapterHeading(val ordinal: String?, val name: String)
 
 fun splitReaderChapterHeading(rawTitle: String): ReaderChapterHeading {
-    val title = rawTitle.substringAfterLast('·').trim()
+    val title = rawTitle.substringAfterLast('·').singleLineBookHeading()
     val match = CHAPTER_ORDINAL_PATTERN.matchEntire(title)
         ?: return ReaderChapterHeading(ordinal = null, name = title)
     val rawOrdinal = match.groupValues[1].trim()
@@ -83,6 +91,7 @@ private val CHAPTER_ORDINAL_PATTERN = Regex(
         "\\s*(?:[：:、.．\\-—]\\s*)?(.*)$",
 )
 
+@Immutable
 data class ReaderLayoutSpec(
     val viewportWidthDp: Float,
     val viewportHeightDp: Float,
@@ -94,6 +103,7 @@ data class ReaderLayoutSpec(
 
 enum class ReaderImageSizeClass { COMPACT, ILLUSTRATION, PORTRAIT, WIDE }
 
+@Immutable
 data class ReaderImageLayout(
     val widthDp: Float,
     val heightDp: Float,
@@ -138,6 +148,7 @@ fun standardizedReaderImageLayout(
     return ReaderImageLayout(width.coerceAtMost(safeWidth), height, sizeClass)
 }
 
+@Immutable
 data class DocumentBlock(
     val paragraphIndex: Int,
     val fullText: String,
@@ -157,6 +168,7 @@ data class DocumentBlock(
     val textStart: Int = 0,
 )
 
+@Immutable
 data class ReaderPage(
     val index: Int,
     val chapterIndex: Int,

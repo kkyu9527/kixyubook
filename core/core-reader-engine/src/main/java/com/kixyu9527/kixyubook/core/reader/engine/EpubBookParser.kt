@@ -4,6 +4,7 @@ import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
+import com.kixyu9527.kixyubook.core.common.model.singleLineBookHeading
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import java.io.File
@@ -23,6 +24,14 @@ class EpubBookParser : BookParser {
     ) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PackageCacheKey, PackageDocument>): Boolean =
             size > PACKAGE_INDEX_CACHE_SIZE
+    }
+    private val cssSourceCache = object : LinkedHashMap<CssSourceCacheKey, ParsedCssSource>(
+        CSS_SOURCE_CACHE_SIZE,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CssSourceCacheKey, ParsedCssSource>): Boolean =
+            size > CSS_SOURCE_CACHE_SIZE
     }
 
     override fun readMetadata(file: File, fallbackTitle: String): DocumentMetadata = ZipFile(file).use { zip ->
@@ -53,18 +62,23 @@ class EpubBookParser : BookParser {
      */
     fun readChapterOutlines(file: File): List<DocumentChapterOutline> = ZipFile(file).use { zip ->
         val pkg = readPackage(file, zip)
-        val navigationTitles = readNavigationTitles(zip, pkg)
+        val navigationEntries = readNavigationEntries(zip, pkg)
         val candidates = pkg.spine.mapIndexedNotNull { sourceIndex, id ->
             val item = pkg.manifest[id] ?: return@mapIndexedNotNull null
+            val navigation = navigationEntries[item.path.normalizedArchivePath()]
             DocumentChapterOutline(
                 sourceIndex = sourceIndex,
-                title = navigationTitles[item.path.normalizedArchivePath()]
-                    ?: item.path.fallbackChapterTitle(sourceIndex),
+                title = navigation?.title ?: item.path.fallbackChapterTitle(sourceIndex),
+                volumeTitle = navigation?.volumeTitle,
+                volumeIndex = navigation?.volumeIndex,
             )
         }
+        val nestedVolumeTitles = navigationEntries.values
+            .mapNotNullTo(hashSetOf()) { it.volumeTitle?.normalizedNavigationTitle() }
         val navigated = candidates.filter { outline ->
             val item = pkg.manifest[pkg.spine[outline.sourceIndex]] ?: return@filter false
-            item.path.normalizedArchivePath() in navigationTitles
+            item.path.normalizedArchivePath() in navigationEntries &&
+                !(outline.volumeTitle == null && outline.title.normalizedNavigationTitle() in nestedVolumeTitles)
         }
         // Prefer the official TOC when it describes a meaningful part of the spine. This omits
         // publisher-only cover/copyright containers while retaining a safe fallback for EPUBs
@@ -96,28 +110,16 @@ class EpubBookParser : BookParser {
         expectedTitle: String? = null,
     ): DocumentChapter? = ZipFile(file).use { zip ->
         val pkg = readPackage(file, zip)
-        // A chapter imported by the current indexer stores the source spine index directly.
-        // NAV labels and XHTML headings often use different wording, so title mismatch must not
-        // trigger twelve unnecessary XHTML parses when the requested spine entry is readable.
-        readSpineChapter(zip, pkg, chapterIndex)?.let { return@use it }
-        val nearby = buildList {
-            for (distance in 1..MAX_SPINE_LOOKAROUND) {
-                add(chapterIndex + distance)
-                add(chapterIndex - distance)
-            }
-        }.filter { it in pkg.spine.indices }.distinct()
-        var fallback: DocumentChapter? = null
-        for (spineIndex in nearby) {
-            currentCoroutineContext().ensureActive()
-            val chapter = readSpineChapter(zip, pkg, spineIndex) ?: continue
-            if (fallback == null) fallback = chapter
-            if (expectedTitle.isNullOrBlank() ||
-                chapter.title.normalizedHeading() == expectedTitle.normalizedHeading()
-            ) {
-                return@use chapter
-            }
-        }
-        fallback
+        if (chapterIndex !in pkg.spine.indices) return@use null
+        // The directory stores the exact source spine index. An empty cover/back-cover page must
+        // remain empty; substituting a nearby readable spine item duplicates another chapter and
+        // breaks navigation identity.
+        readSpineChapter(zip, pkg, chapterIndex) ?: DocumentChapter(
+            title = expectedTitle?.singleLineBookHeading()?.takeIf(String::isNotBlank)
+                ?: pkg.manifest[pkg.spine[chapterIndex]]?.path?.fallbackChapterTitle(chapterIndex)
+                ?: "第 ${chapterIndex + 1} 章",
+            paragraphs = emptyList(),
+        )
     }
 
     private fun readSpineChapter(zip: ZipFile, pkg: PackageDocument, index: Int): DocumentChapter? {
@@ -128,7 +130,9 @@ class EpubBookParser : BookParser {
             readXhtml(input, zip, item.path, pkg.manifest.values)
         }
         if (content.blocks.isEmpty()) return null
-        val heading = content.heading?.takeIf { it.length in 2..80 }
+        // XHTML headings can contain <br>, line separators or zero-width formatting characters.
+        // Never let those leak back into the directory after lazy body indexing.
+        val heading = content.heading?.singleLineBookHeading()?.takeIf { it.length in 2..80 }
         val fallback = item.path.substringAfterLast('/').substringBeforeLast('.')
         val title = heading ?: fallback.ifBlank { "第 ${index + 1} 章" }
         var removedHeading = false
@@ -200,7 +204,11 @@ class EpubBookParser : BookParser {
         )
     }
 
-    private fun readNavigationTitles(zip: ZipFile, pkg: PackageDocument): Map<String, String> = buildMap {
+    private fun readNavigationEntries(zip: ZipFile, pkg: PackageDocument): Map<String, NavigationEntry> = buildMap {
+        val volumeIndices = linkedMapOf<String, Int>()
+        fun volumeIndex(title: String?): Int? = title?.takeIf(String::isNotBlank)?.let { value ->
+            volumeIndices.getOrPut(value) { volumeIndices.size }
+        }
         val navigationItems = pkg.manifest.values.filter { item ->
             "nav" in item.properties || item.mediaType.equals(NCX_MEDIA_TYPE, ignoreCase = true)
         }
@@ -214,30 +222,64 @@ class EpubBookParser : BookParser {
                         ?.getAttribute("src").orEmpty()
                     val title = point.getElementsByTagNameNS("*", "navLabel").item(0)
                         ?.textContent?.normalizedNavigationTitle().orEmpty()
-                    putNavigationTitle(item.path, source, title)
+                    val parentPoint = generateSequence(point.parentNode) { it.parentNode }
+                        .filterIsInstance<Element>()
+                        .firstOrNull { it.localName.orEmpty().equals("navPoint", true) }
+                    val volumeTitle = parentPoint?.directNavigationLabel()
+                    putNavigationEntry(
+                        item.path,
+                        source,
+                        NavigationEntry(title, volumeTitle, volumeIndex(volumeTitle)),
+                    )
                 }
             } else {
                 val anchors = document.getElementsByTagNameNS("*", "a")
                 for (index in 0 until anchors.length) {
                     val anchor = anchors.item(index) as? Element ?: continue
-                    putNavigationTitle(
+                    val ownListItem = generateSequence(anchor.parentNode) { it.parentNode }
+                        .filterIsInstance<Element>()
+                        .firstOrNull { it.localName.orEmpty().equals("li", true) }
+                    val volumeListItem = ownListItem?.let { own ->
+                        generateSequence(own.parentNode?.parentNode) { it.parentNode }
+                            .filterIsInstance<Element>()
+                            .firstOrNull { it.localName.orEmpty().equals("li", true) }
+                    }
+                    val volumeTitle = volumeListItem?.directNavigationLabel()
+                    putNavigationEntry(
                         item.path,
                         anchor.getAttribute("href"),
-                        anchor.textContent.normalizedNavigationTitle(),
+                        NavigationEntry(
+                            anchor.textContent.normalizedNavigationTitle(),
+                            volumeTitle,
+                            volumeIndex(volumeTitle),
+                        ),
                     )
                 }
             }
         }
     }
 
-    private fun MutableMap<String, String>.putNavigationTitle(
+    private fun MutableMap<String, NavigationEntry>.putNavigationEntry(
         navigationPath: String,
         reference: String,
-        title: String,
+        entry: NavigationEntry,
     ) {
-        if (reference.isBlank() || title.length !in 1..MAX_NAVIGATION_TITLE_LENGTH) return
+        if (reference.isBlank() || entry.title.length !in 1..MAX_NAVIGATION_TITLE_LENGTH) return
         val resolved = resolveArchivePath(navigationPath, reference).normalizedArchivePath()
-        putIfAbsent(resolved, title)
+        putIfAbsent(resolved, entry)
+    }
+
+    private fun Element.directNavigationLabel(): String? {
+        var child = firstChild
+        while (child != null) {
+            val element = child as? Element
+            val tag = element?.localName.orEmpty().lowercase()
+            if (tag in setOf("a", "span", "navlabel")) {
+                return element?.textContent?.normalizedNavigationTitle()?.takeIf(String::isNotBlank)
+            }
+            child = child.nextSibling
+        }
+        return null
     }
 
     private fun parseXml(zip: ZipFile, path: String) = newDocumentBuilder().parse(
@@ -263,7 +305,7 @@ class EpubBookParser : BookParser {
         manifest: Collection<ManifestItem>,
     ): XhtmlContent {
         val document = newDocumentBuilder().parse(input)
-        val cssRules = readCssRules(document, zip, xhtmlPath)
+        val stylesheet = readStylesheet(document, zip, xhtmlPath)
         val nodes = document.getElementsByTagNameNS("*", "*")
         var heading: String? = null
         val blocks = buildList {
@@ -273,12 +315,16 @@ class EpubBookParser : BookParser {
                 val readableBlock = tag in CONTENT_TAGS ||
                     (tag in FALLBACK_CONTENT_TAGS && !element.hasDescendantReadableBlock())
                 if (readableBlock && !element.hasContentAncestor()) {
-                    val text = element.toStyledText(cssRules).takeIf { it.text.isNotBlank() } ?: continue
+                    val text = element.toStyledText(stylesheet).takeIf { it.text.isNotBlank() } ?: continue
                     if (heading == null && tag in HEADING_TAGS) heading = text.text
                     add(XhtmlBlock.Text(text))
                     continue
                 }
                 val reference = element.imageReference(tag) ?: continue
+                // Images embedded inside a paragraph are represented by their semantic emoji/
+                // alternative text in that paragraph. Rendering them again as a block would
+                // create a duplicated, enlarged image on a separate line.
+                if (element.hasContentAncestor()) continue
                 val resourcePath = resolveArchivePath(xhtmlPath, reference)
                 val entry = zip.findEntry(resourcePath) ?: continue
                 val mediaType = manifest.firstOrNull { it.path.equals(resourcePath, true) }?.mediaType
@@ -303,39 +349,75 @@ class EpubBookParser : BookParser {
         return XhtmlContent(heading, blocks)
     }
 
-    private fun readCssRules(
+    private fun readStylesheet(
         document: org.w3c.dom.Document,
         zip: ZipFile,
         xhtmlPath: String,
-    ): List<CssRule> = buildList {
-        val visited = mutableSetOf<String>()
-        fun appendCss(source: String, basePath: String, depth: Int = 0) {
-            if (depth < MAX_CSS_IMPORT_DEPTH) {
-                CSS_IMPORT.findAll(source).forEach { match ->
-                    val path = resolveArchivePath(basePath, match.groupValues[1])
-                    if (!visited.add(path.lowercase())) return@forEach
-                    val entry = zip.findEntry(path)?.takeIf { it.size in 1..MAX_CSS_BYTES.toLong() } ?: return@forEach
-                    val imported = zip.getInputStream(entry).use { it.readBytes().toString(StandardCharsets.UTF_8) }
-                    appendCss(imported, path, depth + 1)
+    ): CssStylesheet {
+        val rules = buildList {
+            val visited = mutableSetOf<String>()
+            fun appendCss(source: String, basePath: String, depth: Int = 0) {
+                if (depth < MAX_CSS_IMPORT_DEPTH) {
+                    CSS_IMPORT.findAll(source).forEach { match ->
+                        val path = resolveArchivePath(basePath, match.groupValues[1])
+                        if (!visited.add(path.lowercase())) return@forEach
+                        val entry = zip.findEntry(path)?.takeIf {
+                            it.size in 1..MAX_CSS_BYTES.toLong()
+                        } ?: return@forEach
+                        val imported = zip.getInputStream(entry).use {
+                            it.readBytes().toString(StandardCharsets.UTF_8)
+                        }
+                        appendCss(imported, path, depth + 1)
+                    }
                 }
+                addAll(parseCss(source))
             }
-            addAll(parseCss(source))
-        }
-        val styles = document.getElementsByTagNameNS("*", "style")
-        for (index in 0 until styles.length) {
-            appendCss(styles.item(index)?.textContent.orEmpty(), xhtmlPath)
-        }
-        val links = document.getElementsByTagNameNS("*", "link")
-        for (index in 0 until links.length) {
-            val link = links.item(index) as? Element ?: continue
-            if ("stylesheet" !in link.getAttribute("rel").lowercase().split(Regex("\\s+"))) continue
-            val path = resolveArchivePath(xhtmlPath, link.getAttribute("href"))
-            val entry = zip.findEntry(path)?.takeIf { it.size in 1..MAX_CSS_BYTES.toLong() } ?: continue
-            val css = zip.getInputStream(entry).use { input -> input.readBytes().toString(StandardCharsets.UTF_8) }
-            visited += path.lowercase()
-            appendCss(css, path)
-        }
-    }.mapIndexed { index, rule -> rule.copy(order = index) }
+            fun appendCssEntry(rawPath: String, depth: Int = 0) {
+                val path = rawPath.lowercase()
+                if (!visited.add(path)) return
+                val entry = zip.findEntry(rawPath)?.takeIf {
+                    it.size in 1..MAX_CSS_BYTES.toLong()
+                } ?: return
+                val key = CssSourceCacheKey(zip.name, entry.name, entry.crc, entry.size)
+                val parsed = synchronized(cssSourceCache) { cssSourceCache[key] } ?: run {
+                    val source = zip.getInputStream(entry).use { input ->
+                        input.readBytes().toString(StandardCharsets.UTF_8)
+                    }
+                    ParsedCssSource(
+                        imports = CSS_IMPORT.findAll(source).map { it.groupValues[1] }.toList(),
+                        rules = parseCss(source),
+                    ).also { synchronized(cssSourceCache) { cssSourceCache[key] = it } }
+                }
+                if (depth < MAX_CSS_IMPORT_DEPTH) {
+                    parsed.imports.forEach { reference ->
+                        appendCssEntry(resolveArchivePath(entry.name, reference), depth + 1)
+                    }
+                }
+                addAll(parsed.rules)
+            }
+            val styles = document.getElementsByTagNameNS("*", "style")
+            for (index in 0 until styles.length) {
+                appendCss(styles.item(index)?.textContent.orEmpty(), xhtmlPath)
+            }
+            val links = document.getElementsByTagNameNS("*", "link")
+            for (index in 0 until links.length) {
+                val link = links.item(index) as? Element ?: continue
+                if ("stylesheet" !in link.getAttribute("rel").lowercase().split(Regex("\\s+"))) continue
+                val path = resolveArchivePath(xhtmlPath, link.getAttribute("href"))
+                appendCssEntry(path)
+            }
+        }.mapIndexed { index, rule -> rule.copy(order = index) }
+        // Readium applies publisher, reading-system and user layers separately. In the native
+        // document model we keep the same boundary: publisher CSS is reduced once to semantic
+        // declarations and root variables; layout, typography and user colors remain app-owned.
+        val rootVariables = linkedMapOf<String, String>()
+        rules.asSequence()
+            .filter { it.selector.contains(":root") || it.selector.trim() in setOf("html", "body") }
+            .flatMap { it.declarations.entries.asSequence() }
+            .filter { it.key.startsWith("--") }
+            .forEach { (name, value) -> rootVariables[name] = value }
+        return CssStylesheet(rules, rootVariables)
+    }
 
     private fun parseCss(source: String): List<CssRule> {
         val clean = source.replace(CSS_COMMENT, "").replace(CSS_IMPORT, "")
@@ -343,8 +425,10 @@ class EpubBookParser : BookParser {
             val declarations = match.groupValues[2].split(';').mapNotNull { declaration ->
                 val separator = declaration.indexOf(':')
                 if (separator <= 0) null else {
-                    declaration.substring(0, separator).trim().lowercase() to
-                        declaration.substring(separator + 1).substringBefore("!important").trim().lowercase()
+                    val property = declaration.substring(0, separator).trim().lowercase()
+                    if (property !in SUPPORTED_CSS_PROPERTIES && !property.startsWith("--")) null
+                    else property to declaration.substring(separator + 1)
+                        .substringBefore("!important").trim().lowercase()
                 }
             }.toMap()
             match.groupValues[1].split(',').asSequence()
@@ -354,7 +438,7 @@ class EpubBookParser : BookParser {
         }.toList()
     }
 
-    private fun Element.toStyledText(cssRules: List<CssRule>): StyledText {
+    private fun Element.toStyledText(stylesheet: CssStylesheet): StyledText {
         val builder = StyledTextBuilder()
         fun visit(node: Node, inherited: NormalizedInlineState) {
             when (node.nodeType) {
@@ -367,7 +451,12 @@ class EpubBookParser : BookParser {
                         builder.appendBreak(inherited)
                         return
                     }
-                    val styles = element.normalizedStyle(cssRules, inherited)
+                    // Inline raster images are intentionally omitted. Publisher EPUBs frequently
+                    // repeat decorative logos in every chapter and their dimensions cannot be
+                    // represented reliably by the text paginator. Independent illustrations are
+                    // still emitted as image blocks by readXhtml().
+                    if (element.imageReference(tag) != null) return
+                    val styles = element.normalizedStyle(stylesheet.rules, inherited)
                     if (styles.hidden) return
                     var child = element.firstChild
                     while (child != null) {
@@ -378,10 +467,12 @@ class EpubBookParser : BookParser {
             }
         }
         val ancestors = generateSequence(parentNode as? Element) { it.parentNode as? Element }.toList().asReversed()
-        val inherited = ancestors.fold(NormalizedInlineState()) { state, element ->
-            element.normalizedStyle(cssRules, state)
+        val inherited = ancestors.fold(
+            NormalizedInlineState(variables = stylesheet.rootVariables),
+        ) { state, element ->
+            element.normalizedStyle(stylesheet.rules, state)
         }
-        val rootStyle = normalizedStyle(cssRules, inherited)
+        val rootStyle = normalizedStyle(stylesheet.rules, inherited)
         if (rootStyle.hidden) return StyledText("", emptyList())
         if (localName.orEmpty().equals("hr", true)) return StyledText("· · ·", emptyList())
         listMarker()?.let { builder.append(it, rootStyle) }
@@ -425,11 +516,6 @@ class EpubBookParser : BookParser {
             "mark" -> background = ReaderSemanticColor.YELLOW
         }
         val declarations = linkedMapOf<String, String>()
-        cssRules.asSequence()
-            .filter { it.selector.contains(":root") || it.selector.trim() in setOf("html", "body") }
-            .flatMap { it.declarations.entries.asSequence() }
-            .filter { it.key.startsWith("--") }
-            .forEach { variables[it.key] = it.value }
         cssRules.asSequence()
             .filter { matchesCssSelector(it.selector) }
             .sortedWith(compareBy(CssRule::specificity, CssRule::order))
@@ -647,6 +733,12 @@ class EpubBookParser : BookParser {
         val properties: Set<String>,
     )
 
+    private data class NavigationEntry(
+        val title: String,
+        val volumeTitle: String?,
+        val volumeIndex: Int?,
+    )
+
     private sealed interface XhtmlBlock {
         data class Text(val value: StyledText) : XhtmlBlock
         data class Image(val image: DocumentImage) : XhtmlBlock
@@ -659,6 +751,20 @@ class EpubBookParser : BookParser {
         val declarations: Map<String, String>,
         val specificity: Int,
         val order: Int = 0,
+    )
+    private data class CssStylesheet(
+        val rules: List<CssRule>,
+        val rootVariables: Map<String, String>,
+    )
+    private data class CssSourceCacheKey(
+        val archivePath: String,
+        val entryPath: String,
+        val crc: Long,
+        val size: Long,
+    )
+    private data class ParsedCssSource(
+        val imports: List<String>,
+        val rules: List<CssRule>,
     )
 
     private data class NormalizedInlineState(
@@ -730,10 +836,10 @@ class EpubBookParser : BookParser {
 
     private companion object {
         const val PACKAGE_INDEX_CACHE_SIZE = 4
+        const val CSS_SOURCE_CACHE_SIZE = 48
         const val MAX_COVER_BYTES = 8 * 1024 * 1024
         const val MAX_CSS_BYTES = 1024 * 1024
         const val MAX_CSS_IMPORT_DEPTH = 4
-        const val MAX_SPINE_LOOKAROUND = 12
         val CONTENT_TAGS = setOf(
             "p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre", "dt", "dd", "figcaption",
             "caption", "td", "th", "hr",
@@ -744,6 +850,12 @@ class EpubBookParser : BookParser {
         val INLINE_COLOR_TAGS = setOf(
             "a", "span", "font", "em", "i", "strong", "b", "mark", "u", "ins", "s", "strike", "del", "code",
             "kbd", "samp", "tt", "sup", "sub", "ruby", "rt", "abbr", "cite", "dfn", "var", "small", "big", "label",
+        )
+        val SUPPORTED_CSS_PROPERTIES = setOf(
+            "font", "font-family", "font-style", "font-variant", "font-variant-caps", "font-weight",
+            "text-decoration", "text-decoration-line", "border-bottom", "border-bottom-style",
+            "white-space", "display", "visibility", "vertical-align", "color",
+            "-webkit-text-fill-color", "background", "background-color",
         )
         val CSS_COMMENT = Regex("/\\*.*?\\*/", setOf(RegexOption.DOT_MATCHES_ALL))
         val CSS_RULE = Regex("([^{}]+)\\{([^{}]*)\\}")
@@ -927,7 +1039,7 @@ private fun String.normalizedArchivePath(): String = substringBefore('#').substr
     .trimStart('/')
     .lowercase()
 
-private fun String.normalizedNavigationTitle(): String = replace(Regex("[\\s　]+"), " ").trim()
+private fun String.normalizedNavigationTitle(): String = singleLineBookHeading()
 
 private fun String.fallbackChapterTitle(sourceIndex: Int): String {
     val stem = substringAfterLast('/').substringBeforeLast('.').replace('_', ' ').replace('-', ' ').trim()

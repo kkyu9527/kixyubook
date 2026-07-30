@@ -18,6 +18,8 @@ interface BookDao {
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid ORDER BY chapterIndex") suspend fun getChapters(uuid: String): List<ChapterEntity>
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid ORDER BY chapterIndex") fun observeChapters(uuid: String): Flow<List<ChapterEntity>>
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND chapterIndex = :index LIMIT 1") suspend fun getChapter(uuid: String, index: Int): ChapterEntity?
+    @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND indexed = 0 ORDER BY chapterIndex") suspend fun getUnindexedChapters(uuid: String): List<ChapterEntity>
+    @Query("SELECT DISTINCT b.uuid FROM books b JOIN chapters c ON c.bookUuid = b.uuid WHERE b.format = 'EPUB' AND c.indexed = 0") suspend fun getBooksPendingEpubIndex(): List<String>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId ORDER BY paragraphIndex") suspend fun getParagraphs(chapterId: Long): List<ParagraphEntity>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId AND paragraphIndex = :index") suspend fun getParagraph(chapterId: Long, index: Int): ParagraphEntity?
     @Query("SELECT EXISTS(SELECT 1 FROM metadata_edits WHERE bookUuid = :uuid)") suspend fun hasMetadataEdits(uuid: String): Boolean
@@ -47,6 +49,10 @@ interface BookDao {
     @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid") suspend fun updateBookMetadata(uuid: String, title: String, author: String, description: String): Int
     @Query("UPDATE books SET category = :category WHERE uuid = :uuid") suspend fun setCategory(uuid: String, category: String)
     @Query("UPDATE chapters SET title = :title WHERE id = :chapterId") suspend fun updateChapterTitle(chapterId: Long, title: String)
+    @Query("UPDATE chapters SET title = :title, volumeTitle = :volumeTitle, volumeIndex = :volumeIndex WHERE id = :chapterId")
+    suspend fun updateChapterOutline(chapterId: Long, title: String, volumeTitle: String?, volumeIndex: Int?)
+    @Query("UPDATE chapters SET title = :title, indexed = 1 WHERE id = :chapterId") suspend fun markChapterIndexed(chapterId: Long, title: String)
+    @Query("DELETE FROM paragraphs WHERE chapterId = :chapterId") suspend fun deleteParagraphs(chapterId: Long)
     @Query("DELETE FROM books WHERE uuid = :uuid") suspend fun deleteBook(uuid: String)
     @Query("DELETE FROM books WHERE uuid IN (:uuids)") suspend fun deleteBooks(uuids: Set<String>)
     @Query("DELETE FROM metadata_edits WHERE bookUuid IN (:uuids)") suspend fun deleteMetadataEdits(uuids: Set<String>)
@@ -60,6 +66,13 @@ interface BookDao {
         values.chunked(250).forEachIndexed { chunkIndex, chunk ->
             insertParagraphs(chunk.mapIndexed { index, text -> ParagraphEntity(chapterId = chapterId, paragraphIndex = chunkIndex * 250 + index, text = text) })
         }
+    }
+
+    @Transaction
+    suspend fun replaceChapterIndex(chapterId: Long, title: String, values: List<String>) {
+        deleteParagraphs(chapterId)
+        insertParagraphsChunked(chapterId, values)
+        markChapterIndexed(chapterId, title)
     }
 }
 

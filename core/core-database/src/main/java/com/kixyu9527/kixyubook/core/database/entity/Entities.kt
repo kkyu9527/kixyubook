@@ -22,7 +22,15 @@ data class BookEntity(
     foreignKeys = [ForeignKey(entity = BookEntity::class, parentColumns = ["uuid"], childColumns = ["bookUuid"], onDelete = ForeignKey.CASCADE)],
     indices = [Index("bookUuid"), Index(value = ["bookUuid", "chapterIndex"], unique = true)],
 )
-data class ChapterEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val bookUuid: String, val title: String, val chapterIndex: Int)
+data class ChapterEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val bookUuid: String,
+    val title: String,
+    val chapterIndex: Int,
+    val volumeTitle: String? = null,
+    val volumeIndex: Int? = null,
+    @ColumnInfo(defaultValue = "1") val indexed: Boolean = true,
+)
 
 @Entity(
     tableName = "paragraphs",

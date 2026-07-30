@@ -19,10 +19,12 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +41,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 
+@Immutable
 data class ReaderRenderPalette(
     val background: Color,
     val body: Color,
@@ -150,88 +153,126 @@ fun ReaderPageRenderer(
     showRegularChapterTitle: Boolean = true,
     highlightQuery: String = "",
     pageNumber: String? = null,
+    selectionEnabled: Boolean = true,
 ) {
     val family = rememberReaderFont(fontPath)
-    var selectionVersion by remember(page) { mutableIntStateOf(0) }
-    var selectionActive by remember(page) { androidx.compose.runtime.mutableStateOf(false) }
-    val handleTap: (Float) -> Unit = { fraction ->
-        if (selectionActive) {
-            selectionActive = false
-            selectionVersion++
-        } else {
-            onTapFraction(fraction)
+    var selectionVersion by remember(page.chapterIndex, page.index) { mutableIntStateOf(0) }
+    var selectionActive by remember(page.chapterIndex, page.index) { androidx.compose.runtime.mutableStateOf(false) }
+    val latestTap by rememberUpdatedState(onTapFraction)
+    val handleTap: (Float) -> Unit = remember(selectionEnabled) {
+        { fraction ->
+            if (selectionEnabled && selectionActive) {
+                selectionActive = false
+                selectionVersion++
+            } else {
+                latestTap(fraction)
+            }
         }
     }
-    key(selectionVersion) {
-        SelectionContainer {
-            Column(
-                modifier.fillMaxSize()
-                    .readerTapInput(handleTap) { selectionActive = true }
-                    .padding(
-                        start = spec.horizontalMarginDp.dp,
-                        top = ReaderPageMetrics.topPaddingDp.dp,
-                        end = spec.horizontalMarginDp.dp,
-                        bottom = ReaderPageMetrics.bottomPaddingDp.dp,
-                    ),
-            ) {
-                if (page.isChapterOpening) {
-                    Spacer(Modifier.height(ReaderPageMetrics.openingTopDp.dp))
-                    ReaderChapterOpeningTitle(page.chapterTitle, palette, family)
-                    Spacer(Modifier.height(ReaderPageMetrics.openingGapDp.dp))
-                } else if (showRegularChapterTitle) {
-                    Text(page.chapterTitle, color = palette.secondary, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    Spacer(Modifier.height(ReaderPageMetrics.regularGapDp.dp))
+    val content: @Composable () -> Unit = {
+        ReaderPageContent(
+            page = page,
+            spec = spec,
+            palette = palette,
+            family = family,
+            epubPath = epubPath,
+            modifier = modifier,
+            showRegularChapterTitle = showRegularChapterTitle,
+            highlightQuery = highlightQuery,
+            pageNumber = pageNumber,
+            handleTap = handleTap,
+            onLongPress = { if (selectionEnabled) selectionActive = true },
+        )
+    }
+    if (selectionEnabled) {
+        key(selectionVersion) {
+            SelectionContainer { content() }
+        }
+    } else {
+        content()
+    }
+}
+
+@Composable
+private fun ReaderPageContent(
+    page: ReaderPage,
+    spec: ReaderLayoutSpec,
+    palette: ReaderRenderPalette,
+    family: FontFamily,
+    epubPath: String?,
+    modifier: Modifier,
+    showRegularChapterTitle: Boolean,
+    highlightQuery: String,
+    pageNumber: String?,
+    handleTap: (Float) -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Column(
+        modifier.fillMaxSize()
+            .readerTapInput(handleTap, onLongPress)
+            .padding(
+                start = spec.horizontalMarginDp.dp,
+                top = ReaderPageMetrics.topPaddingDp.dp,
+                end = spec.horizontalMarginDp.dp,
+                bottom = ReaderPageMetrics.bottomPaddingDp.dp,
+            ),
+    ) {
+        if (page.isChapterOpening) {
+            Spacer(Modifier.height(ReaderPageMetrics.openingTopDp.dp))
+            ReaderChapterOpeningTitle(page.chapterTitle, palette, family)
+            Spacer(Modifier.height(ReaderPageMetrics.openingGapDp.dp))
+        } else if (showRegularChapterTitle) {
+            Text(page.chapterTitle, color = palette.secondary, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Spacer(Modifier.height(ReaderPageMetrics.regularGapDp.dp))
+        }
+        page.blocks.forEach { block ->
+            if (block.kind == ParagraphKind.IMAGE) {
+                Column(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ReaderEpubImage(
+                        epubPath = epubPath,
+                        resourcePath = block.resourcePath,
+                        altText = block.fullText,
+                        layout = ReaderImageLayout(
+                            block.imageWidthDp,
+                            block.imageHeightDp,
+                            standardizedReaderImageLayout(
+                                spec.viewportWidthDp - spec.horizontalMarginDp * 2f,
+                                block.intrinsicWidth,
+                                block.intrinsicHeight,
+                            ).sizeClass,
+                        ),
+                        placeholderColor = palette.secondary,
+                        onTapFraction = handleTap,
+                    )
                 }
-                page.blocks.forEach { block ->
-                    if (block.kind == ParagraphKind.IMAGE) {
-                        Column(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            ReaderEpubImage(
-                                epubPath = epubPath,
-                                resourcePath = block.resourcePath,
-                                altText = block.fullText,
-                                layout = ReaderImageLayout(
-                                    block.imageWidthDp,
-                                    block.imageHeightDp,
-                                    standardizedReaderImageLayout(
-                                        spec.viewportWidthDp - spec.horizontalMarginDp * 2f,
-                                        block.intrinsicWidth,
-                                        block.intrinsicHeight,
-                                    ).sizeClass,
-                                ),
-                                placeholderColor = palette.secondary,
-                                onTapFraction = handleTap,
-                            )
-                        }
-                    } else {
-                        ReaderBodyText(
-                            block.visibleText,
-                            spec,
-                            palette.body,
-                            family,
-                            spans = block.spans,
-                            accentColor = palette.accent,
-                            backgroundColor = palette.background,
-                            indent = !block.continuation,
-                            bottomSpacing = block.bottomSpacing,
-                            highlightQuery = highlightQuery,
-                            highlightColor = palette.accent,
-                        )
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(ReaderPageMetrics.footerHeightDp.dp),
-                    contentAlignment = Alignment.BottomCenter,
-                ) {
-                    pageNumber?.let { value ->
-                        Text(
-                            text = value,
-                            color = palette.secondary,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                        )
-                    }
-                }
+            } else {
+                ReaderBodyText(
+                    block.visibleText,
+                    spec,
+                    palette.body,
+                    family,
+                    spans = block.spans,
+                    accentColor = palette.accent,
+                    backgroundColor = palette.background,
+                    indent = !block.continuation,
+                    bottomSpacing = block.bottomSpacing,
+                    highlightQuery = highlightQuery,
+                    highlightColor = palette.accent,
+                )
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Box(
+            modifier = Modifier.fillMaxWidth().height(ReaderPageMetrics.footerHeightDp.dp),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            pageNumber?.let { value ->
+                Text(
+                    text = value,
+                    color = palette.secondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
             }
         }
     }
@@ -288,20 +329,35 @@ private fun ReaderBodyText(
     bottomSpacing: Boolean = true,
     highlightQuery: String = "",
     highlightColor: Color = Color.Transparent,
-) = Text(
-    text = readerAnnotatedText(
-        text = text,
-        spans = spans,
-        accentColor = accentColor,
-        backgroundColor = backgroundColor,
-        highlightQuery = highlightQuery,
-        highlightColor = highlightColor,
-    ),
-    color = color,
-    style = readerBodyTextStyle(spec, family, indent),
-    modifier = Modifier.fillMaxWidth()
-        .padding(bottom = if (bottomSpacing) (spec.fontSizeSp * 0.9f).dp else 0.dp),
-)
+) {
+    // Building an AnnotatedString walks every rich-text span and every search match. Pager keeps
+    // neighbouring pages composed, so retain this immutable result instead of rebuilding it when
+    // page offset, progress or prefetched chapter state changes.
+    val annotatedText = remember(
+        text,
+        spans,
+        accentColor,
+        backgroundColor,
+        highlightQuery,
+        highlightColor,
+    ) {
+        readerAnnotatedText(
+            text = text,
+            spans = spans,
+            accentColor = accentColor,
+            backgroundColor = backgroundColor,
+            highlightQuery = highlightQuery,
+            highlightColor = highlightColor,
+        )
+    }
+    Text(
+        text = annotatedText,
+        color = color,
+        style = readerBodyTextStyle(spec, family, indent),
+        modifier = Modifier.fillMaxWidth()
+            .padding(bottom = if (bottomSpacing) (spec.fontSizeSp * 0.9f).dp else 0.dp),
+    )
+}
 
 /** Observes short taps without consuming long presses used by text selection. */
 private fun Modifier.readerTapInput(
@@ -328,7 +384,30 @@ internal fun String.highlighted(query: String, color: Color) =
 
 @Composable
 internal fun rememberReaderFont(path: String?): FontFamily = remember(path) {
-    path?.let { runCatching { FontFamily(Typeface.createFromFile(it)) }.getOrNull() } ?: FontFamily.Default
+    ReaderFontFamilyCache.get(path)
+}
+
+/**
+ * Pager composes the current and neighbouring pages in independent composition scopes. A plain
+ * `remember(path)` therefore opened the same font file once per page. Keep the immutable imported
+ * font at reader-engine level so pagination and every page reuse one Typeface instance.
+ */
+private object ReaderFontFamilyCache {
+    private const val MAX_FONTS = 6
+    private val lock = Any()
+    private val families = object : LinkedHashMap<String, FontFamily>(MAX_FONTS, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FontFamily>): Boolean =
+            size > MAX_FONTS
+    }
+
+    fun get(path: String?): FontFamily {
+        if (path.isNullOrBlank()) return FontFamily.Default
+        synchronized(lock) { families[path]?.let { return it } }
+        val loaded = runCatching { FontFamily(Typeface.createFromFile(path)) }
+            .getOrDefault(FontFamily.Default)
+        synchronized(lock) { families[path] = loaded }
+        return loaded
+    }
 }
 
 internal fun readerBodyTextStyle(spec: ReaderLayoutSpec, family: FontFamily, indent: Boolean) = TextStyle(

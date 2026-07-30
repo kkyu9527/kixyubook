@@ -12,8 +12,16 @@ interface BookRepository {
     suspend fun getBook(bookUuid: String): Book?
     suspend fun getChapters(bookUuid: String): List<Chapter>
     fun observeChapters(bookUuid: String): Flow<List<Chapter>>
-    suspend fun getChapter(bookUuid: String, chapterIndex: Int): ChapterContent?
+    suspend fun getChapter(
+        bookUuid: String,
+        chapterIndex: Int,
+        priority: ChapterLoadPriority = ChapterLoadPriority.USER,
+    ): ChapterContent?
     suspend fun prepareReader(bookUuid: String)
+    /** Temporarily yields background EPUB indexing to a visible reader gesture/animation. */
+    fun setReaderInteractionActive(active: Boolean) = Unit
+    /** Temporarily yields background EPUB indexing to an app-level navigation animation. */
+    fun setAppAnimationActive(active: Boolean) = Unit
     fun observeProgress(bookUuid: String): Flow<ReadingProgress?>
     suspend fun saveProgress(progress: ReadingProgress)
     suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String)

@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextLayoutResult
@@ -23,10 +24,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.Executors
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -37,29 +43,40 @@ import kotlin.coroutines.coroutineContext
 @Composable
 fun rememberMeasuredReaderPages(
     chapter: ReaderChapter,
+    contentHash: String,
     spec: ReaderLayoutSpec,
     fontPath: String?,
     showRegularChapterTitle: Boolean = true,
     coordinator: ReaderPaginationCoordinator,
     measurer: TextMeasurer,
     prefetch: Boolean = false,
+    paused: Boolean = false,
 ): List<ReaderPage> {
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val family = rememberReaderFont(fontPath)
+    // Imported fonts use immutable app-private paths. Avoid filesystem stat calls in the reader's
+    // first composition; the path itself is a stable cache identity.
+    val fontIdentity = fontPath
     val cacheKey = remember(
         chapter.id,
+        chapter.bookUuid,
+        chapter.title,
+        contentHash,
         spec,
-        fontPath,
+        fontIdentity,
         showRegularChapterTitle,
         density.density,
         density.fontScale,
         layoutDirection,
     ) {
         PaginationCacheKey(
+            bookUuid = chapter.bookUuid,
+            contentHash = contentHash,
             chapterId = chapter.id,
+            chapterTitle = chapter.title,
             spec = spec,
-            fontPath = fontPath,
+            fontIdentity = fontIdentity,
             showRegularChapterTitle = showRegularChapterTitle,
             density = density.density,
             fontScale = density.fontScale,
@@ -69,9 +86,10 @@ fun rememberMeasuredReaderPages(
     var pages by remember(cacheKey) {
         mutableStateOf(coordinator.cached(cacheKey).orEmpty())
     }
-    LaunchedEffect(cacheKey, chapter, family) {
+    LaunchedEffect(cacheKey, chapter, family, paused) {
         if (pages.isNotEmpty()) return@LaunchedEffect
-        pages = coordinator.getOrLoad(cacheKey, prefetch) {
+        if (paused) return@LaunchedEffect
+        pages = coordinator.getOrLoad(cacheKey, chapter, prefetch) {
             MeasuredReaderPaginator(measurer, density)
                 .paginate(chapter, spec, family, showRegularChapterTitle)
         }.await()
@@ -81,15 +99,23 @@ fun rememberMeasuredReaderPages(
 
 @Composable
 fun rememberReaderPaginationCoordinator(): ReaderPaginationCoordinator {
-    val coordinator = remember { ReaderPaginationCoordinator() }
+    val context = LocalContext.current.applicationContext
+    val coordinator = remember(context) {
+        ReaderPaginationCoordinator(
+            ReaderPaginationDiskCache(readerPaginationCacheRoot(context.noBackupFilesDir)),
+        )
+    }
     DisposableEffect(coordinator) { onDispose(coordinator::close) }
     return coordinator
 }
 
 internal data class PaginationCacheKey(
+    val bookUuid: String,
+    val contentHash: String,
     val chapterId: Long,
+    val chapterTitle: String,
     val spec: ReaderLayoutSpec,
-    val fontPath: String?,
+    val fontIdentity: String?,
     val showRegularChapterTitle: Boolean,
     val density: Float,
     val fontScale: Float,
@@ -97,10 +123,26 @@ internal data class PaginationCacheKey(
 )
 
 /** One bounded pagination owner per reader composition, never process-global. */
-class ReaderPaginationCoordinator internal constructor() {
+class ReaderPaginationCoordinator internal constructor(
+    private val diskCache: ReaderPaginationDiskCache? = null,
+) {
     private val lock = Any()
     private val sessionJob: Job = SupervisorJob()
-    private val paginationScope = CoroutineScope(sessionJob + Dispatchers.Default.limitedParallelism(1))
+    // Text layout is CPU-heavy and can overlap a 120 Hz page drag. A dedicated Android
+    // background-priority thread keeps speculative pagination from taking a main/render-thread
+    // time slice while still letting the current chapter complete independently from Room/IO.
+    private val paginationDispatcher: ExecutorCoroutineDispatcher =
+        Executors.newSingleThreadExecutor { task ->
+            Thread({
+                // Local JVM tests use android.jar stubs; devices apply the real scheduler hint.
+                runCatching {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                }
+                task.run()
+            }, "reader-pagination").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
+    private val paginationScope = CoroutineScope(sessionJob + paginationDispatcher)
+    private val cacheScope = CoroutineScope(sessionJob + Dispatchers.IO.limitedParallelism(1))
     private val inFlight = mutableMapOf<PaginationCacheKey, PaginationLoad>()
     private val pages = object : LinkedHashMap<PaginationCacheKey, List<ReaderPage>>(
         PAGINATION_CACHE_SIZE,
@@ -113,6 +155,14 @@ class ReaderPaginationCoordinator internal constructor() {
 
     internal fun cached(key: PaginationCacheKey): List<ReaderPage>? = synchronized(lock) { pages[key] }
 
+    /** Cancels disposable layout work so an overlay/navigation animation owns the CPU budget. */
+    fun pauseInFlight() {
+        synchronized(lock) {
+            inFlight.values.forEach { it.deferred.cancel() }
+            inFlight.clear()
+        }
+    }
+
     /**
      * Pagination is shared across the current and prefetched chapter compositions. A caller
      * leaving composition only cancels its await; the expensive EPUB layout continues and is
@@ -120,6 +170,7 @@ class ReaderPaginationCoordinator internal constructor() {
      */
     internal fun getOrLoad(
         key: PaginationCacheKey,
+        chapter: ReaderChapter,
         prefetch: Boolean,
         loader: suspend () -> List<ReaderPage>,
     ): Deferred<List<ReaderPage>> = synchronized(lock) {
@@ -141,14 +192,14 @@ class ReaderPaginationCoordinator internal constructor() {
         lateinit var deferred: Deferred<List<ReaderPage>>
         deferred = paginationScope.async(start = CoroutineStart.LAZY) {
             try {
+                withContext(Dispatchers.IO) { diskCache?.read(key, chapter) }?.let { restored ->
+                    synchronized(lock) { pages[key] = restored }
+                    return@async restored
+                }
                 val measured = loader()
                 coroutineContext.ensureActive()
                 synchronized(lock) { pages[key] = measured }
-                // TextLayoutResult owns native paragraph objects. A full chapter pagination drops
-                // all of those temporary wrappers at once, but ART otherwise waits until memory
-                // pressure is already close to the process limit. Compact at this explicit batch
-                // boundary so a directory jump cannot stack current/previous/next native layouts.
-                Runtime.getRuntime().gc()
+                diskCache?.let { cache -> cacheScope.launch { cache.write(key, measured) } }
                 measured
             } finally {
                 synchronized(lock) {
@@ -162,6 +213,7 @@ class ReaderPaginationCoordinator internal constructor() {
 
     internal fun close() {
         sessionJob.cancel()
+        paginationDispatcher.close()
         synchronized(lock) {
             inFlight.clear()
             pages.clear()
@@ -244,10 +296,10 @@ private class MeasuredReaderPaginator(
                 if (bodyHeightPx() - usedHeightPx < spacingPx) flush()
                 return@forEach
             }
-            var remaining = paragraph.text
+            val sourceText = paragraph.text
             var remainingStart = 0
             var continuation = false
-            while (remaining.isNotEmpty()) {
+            while (remainingStart < sourceText.length) {
                 coroutineContext.ensureActive()
                 val availablePx = (bodyHeightPx() - usedHeightPx).coerceAtLeast(0f)
                 val style = readerBodyTextStyle(spec, family, indent = !continuation)
@@ -259,7 +311,8 @@ private class MeasuredReaderPaginator(
                 // remainder once per page is O(n²) and can retain hundreds of MB of native text
                 // layout data. Start with a bounded window and only grow it when that window still
                 // cannot fill the available page.
-                var measuredLength = remaining.length.coerceAtMost(MEASUREMENT_WINDOW_CHARS)
+                val remainingLength = sourceText.length - remainingStart
+                var measuredLength = remainingLength.coerceAtMost(MEASUREMENT_WINDOW_CHARS)
                 var measuredSpans: List<ReaderTextSpan>
                 var layout: TextLayoutResult
                 while (true) {
@@ -269,7 +322,13 @@ private class MeasuredReaderPaginator(
                         remainingStart + measuredLength,
                     )
                     layout = measurer.measure(
-                        text = readerAnnotatedText(remaining.substring(0, measuredLength), measuredSpans),
+                        // Only allocate the bounded measurement window. Keeping a shrinking
+                        // `remaining` String copied the complete tail after every page and made a
+                        // one-paragraph chapter O(n²) in both allocations and copied characters.
+                        text = readerAnnotatedText(
+                            sourceText.substring(remainingStart, remainingStart + measuredLength),
+                            measuredSpans,
+                        ),
                         style = style,
                         overflow = TextOverflow.Clip,
                         softWrap = true,
@@ -277,26 +336,26 @@ private class MeasuredReaderPaginator(
                         constraints = Constraints(maxWidth = widthPx),
                     )
                     if (
-                        measuredLength == remaining.length ||
+                        measuredLength == remainingLength ||
                         layout.didOverflowHeight ||
                         layout.size.height > availablePx
                     ) break
-                    measuredLength = (measuredLength * 2).coerceAtMost(remaining.length)
+                    measuredLength = (measuredLength * 2).coerceAtMost(remainingLength)
                 }
                 val textHeightPx = layout.size.height.toFloat()
-                val measuredWholeRemainder = measuredLength == remaining.length && !layout.didOverflowHeight
+                val measuredWholeRemainder = measuredLength == remainingLength && !layout.didOverflowHeight
                 if (measuredWholeRemainder && textHeightPx + spacingPx <= availablePx) {
                     blocks += DocumentBlock(
                         paragraph.index,
                         paragraph.text,
-                        remaining,
+                        sourceText.substring(remainingStart),
                         continuation,
                         bottomSpacing = true,
                         spans = measuredSpans,
                         textStart = remainingStart,
                     )
                     usedHeightPx += textHeightPx + spacingPx
-                    remaining = ""
+                    remainingStart = sourceText.length
                     continue
                 }
                 if (measuredWholeRemainder && textHeightPx <= availablePx) {
@@ -305,13 +364,13 @@ private class MeasuredReaderPaginator(
                     blocks += DocumentBlock(
                         paragraph.index,
                         paragraph.text,
-                        remaining,
+                        sourceText.substring(remainingStart),
                         continuation,
                         bottomSpacing = false,
                         spans = measuredSpans,
                         textStart = remainingStart,
                     )
-                    remaining = ""
+                    remainingStart = sourceText.length
                     flush()
                     continue
                 }
@@ -326,7 +385,8 @@ private class MeasuredReaderPaginator(
                 }
                 fittingLine = fittingLine.coerceAtLeast(0)
                 val end = layout.getLineEnd(fittingLine, visibleEnd = true).coerceIn(1, measuredLength)
-                val visible = remaining.substring(0, end).trimEnd().ifEmpty { remaining.substring(0, end) }
+                val rawVisible = sourceText.substring(remainingStart, remainingStart + end)
+                val visible = rawVisible.trimEnd().ifEmpty { rawVisible }
                 blocks += DocumentBlock(
                     paragraph.index,
                     paragraph.text,
@@ -337,9 +397,10 @@ private class MeasuredReaderPaginator(
                     textStart = remainingStart,
                 )
                 usedHeightPx += ceil(layout.getLineBottom(fittingLine))
-                val rawRemainder = remaining.substring(end)
-                remaining = rawRemainder.trimStart()
-                remainingStart += end + (rawRemainder.length - remaining.length)
+                remainingStart += end
+                while (remainingStart < sourceText.length && sourceText[remainingStart].isWhitespace()) {
+                    remainingStart++
+                }
                 continuation = true
                 flush()
             }

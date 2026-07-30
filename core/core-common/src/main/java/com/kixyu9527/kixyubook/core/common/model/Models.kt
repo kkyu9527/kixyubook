@@ -1,5 +1,9 @@
 package com.kixyu9527.kixyubook.core.common.model
 
+/** Converts publisher-provided headings into a stable, single-line display title. */
+fun String.singleLineBookHeading(): String =
+    replace(Regex("[\\s\\p{Z}\u200B\u2060\uFEFF]+"), " ").trim()
+
 enum class BookFormat { TXT, EPUB, MARKDOWN, PDF, COMIC }
 
 data class Book(
@@ -16,7 +20,16 @@ data class Book(
     val category: String = "未分类",
 )
 
-data class Chapter(val id: Long, val bookUuid: String, val title: String, val index: Int)
+data class Chapter(
+    val id: Long,
+    val bookUuid: String,
+    val title: String,
+    val index: Int,
+    val volumeTitle: String? = null,
+    val volumeIndex: Int? = null,
+)
+
+enum class ChapterLoadPriority { USER, PREFETCH }
 
 enum class ParagraphKind { TEXT, IMAGE }
 
