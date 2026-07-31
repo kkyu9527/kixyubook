@@ -129,6 +129,7 @@ object KixyuSize {
     val stepperValueWidth = 64.dp
     val readerMenuBottomOffset = 68.dp
     val readerSheetMaxContent = 620.dp
+    val updateNotesMaxHeight = 420.dp
     val readerSearchPanelMaxWidth = 600.dp
     val readerSearchPanelMaxHeight = 560.dp
     val directoryFastScrollerWidth = 40.dp

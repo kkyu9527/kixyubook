@@ -60,7 +60,11 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
 
     private suspend fun fetchLatestRelease(): AppUpdateInfo? = withContext(Dispatchers.IO) {
         runCatching { fetchLatestReleaseFromApi() }
-            .getOrElse { fetchLatestReleaseFromRedirect() }
+            .getOrElse {
+                runCatching { fetchLatestReleaseFromFeed() }
+                    .getOrElse { fetchLatestReleaseFromRedirect() }
+                    ?: fetchLatestReleaseFromRedirect()
+            }
     }
 
     private fun fetchLatestReleaseFromApi(): AppUpdateInfo? {
@@ -122,6 +126,32 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         }
     }
 
+    /**
+     * GitHub's unauthenticated REST quota can be exhausted by users sharing the same public IP.
+     * The public Atom feed carries the same release body without consuming that API quota, so it
+     * is the preferred fallback before the metadata-only redirect endpoint.
+     */
+    private fun fetchLatestReleaseFromFeed(): AppUpdateInfo? {
+        val connection = URL(RELEASES_FEED).openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = NETWORK_TIMEOUT_MILLIS
+            connection.readTimeout = NETWORK_TIMEOUT_MILLIS
+            connection.setRequestProperty("Accept", "application/atom+xml")
+            connection.setRequestProperty("User-Agent", "KixyuBook/${BuildConfig.VERSION_NAME}")
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
+            parseLatestReleaseFeed(connection.inputStream.bufferedReader().use { it.readText() })
+                ?.let { release ->
+                    val encodedTag = release.releaseUrl
+                        .substringAfter(RELEASE_TAG_URL_PREFIX)
+                        .substringBefore('?')
+                    release.copy(downloadUrl = fetchApkDownloadUrl(encodedTag))
+                }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun parseRelease(payload: String): AppUpdateInfo {
         val json = JSONObject(payload)
         val version = json.getString("tag_name").trim().removePrefix("v").removePrefix("V")
@@ -173,6 +203,7 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
     private companion object {
         const val LATEST_RELEASE_API = "https://api.github.com/repos/kkyu9527/kixyubook/releases/latest"
         const val LATEST_RELEASE_PAGE = "https://github.com/kkyu9527/kixyubook/releases/latest"
+        const val RELEASES_FEED = "https://github.com/kkyu9527/kixyubook/releases.atom"
         const val RELEASE_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/"
         const val RELEASE_TAG_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/tag/"
         const val EXPANDED_ASSETS_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/expanded_assets/"
@@ -181,6 +212,105 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         val APK_ASSET_REGEX = Regex("href=\\\"(/kkyu9527/kixyubook/releases/download/[^\\\"]+\\.apk(?:\\?[^\\\"]*)?)\\\"")
     }
 }
+
+internal fun parseLatestReleaseFeed(payload: String): AppUpdateInfo? {
+    val entry = ATOM_ENTRY_REGEX.find(payload)?.groupValues?.get(1) ?: return null
+    val releaseUrl = ATOM_RELEASE_URL_REGEX.find(entry)?.groupValues?.get(1)
+        ?.decodeXmlEntities()
+        ?: return null
+    require(releaseUrl.startsWith(RELEASE_TAG_URL)) { "GitHub Release 地址无效" }
+    val encodedTag = releaseUrl.substringAfter(RELEASE_TAG_URL).substringBefore('?')
+    val version = URLDecoder.decode(encodedTag, StandardCharsets.UTF_8.name())
+        .removePrefix("v")
+        .removePrefix("V")
+    require(version.isNotBlank()) { "GitHub Release 缺少版本号" }
+    val releaseName = ATOM_TITLE_REGEX.find(entry)?.groupValues?.get(1)
+        ?.decodeXmlEntities()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: "Kixyu Book $version"
+    val releaseNotes = ATOM_CONTENT_REGEX.find(entry)?.groupValues?.get(1)
+        ?.let(::githubReleaseHtmlToMarkdown)
+        .orEmpty()
+    return AppUpdateInfo(
+        versionName = version,
+        releaseName = releaseName,
+        releaseNotes = releaseNotes,
+        releaseUrl = releaseUrl,
+        downloadUrl = null,
+    )
+}
+
+internal fun githubReleaseHtmlToMarkdown(encodedHtml: String): String {
+    var markdown = encodedHtml.decodeXmlEntities()
+    markdown = HTML_LINK_REGEX.replace(markdown) { match ->
+        val label = HTML_TAG_REGEX.replace(match.groupValues[2], "").decodeXmlEntities().trim()
+        val url = match.groupValues[1].decodeXmlEntities()
+        "[$label]($url)"
+    }
+    markdown = HTML_HEADING_OPEN_REGEX.replace(markdown) { match ->
+        "${"#".repeat(match.groupValues[1].toInt())} "
+    }
+    markdown = HTML_HEADING_CLOSE_REGEX.replace(markdown, "\n\n")
+    markdown = HTML_LIST_ITEM_OPEN_REGEX.replace(markdown, "- ")
+    markdown = HTML_LIST_ITEM_CLOSE_REGEX.replace(markdown, "\n")
+    markdown = HTML_PARAGRAPH_CLOSE_REGEX.replace(markdown, "\n\n")
+    markdown = HTML_BREAK_REGEX.replace(markdown, "\n")
+    markdown = HTML_STRONG_OPEN_REGEX.replace(markdown, "**")
+    markdown = HTML_STRONG_CLOSE_REGEX.replace(markdown, "**")
+    markdown = HTML_EMPHASIS_OPEN_REGEX.replace(markdown, "*")
+    markdown = HTML_EMPHASIS_CLOSE_REGEX.replace(markdown, "*")
+    markdown = HTML_CODE_OPEN_REGEX.replace(markdown, "`")
+    markdown = HTML_CODE_CLOSE_REGEX.replace(markdown, "`")
+    markdown = HTML_TAG_REGEX.replace(markdown, "")
+    return markdown.decodeXmlEntities()
+        .replace(NON_BREAKING_SPACE, ' ')
+        .replace(EXCESS_BLANK_LINES_REGEX, "\n\n")
+        .trim()
+}
+
+private fun String.decodeXmlEntities(): String {
+    val named = replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+    return NUMERIC_ENTITY_REGEX.replace(named) { match ->
+        val value = match.groupValues[1]
+        val codePoint = if (value.startsWith('x', ignoreCase = true)) {
+            value.drop(1).toIntOrNull(16)
+        } else {
+            value.toIntOrNull()
+        }
+        codePoint?.takeIf(Character::isValidCodePoint)
+            ?.let { String(Character.toChars(it)) }
+            ?: match.value
+    }
+}
+
+private const val RELEASE_TAG_URL = "https://github.com/kkyu9527/kixyubook/releases/tag/"
+private const val NON_BREAKING_SPACE = '\u00A0'
+private val ATOM_ENTRY_REGEX = Regex("<entry\\b[^>]*>(.*?)</entry>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val ATOM_RELEASE_URL_REGEX = Regex("href=\"(https://github\\.com/kkyu9527/kixyubook/releases/tag/[^\"]+)\"", RegexOption.IGNORE_CASE)
+private val ATOM_TITLE_REGEX = Regex("<title\\b[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val ATOM_CONTENT_REGEX = Regex("<content\\b[^>]*type=\"html\"[^>]*>(.*?)</content>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val HTML_LINK_REGEX = Regex("<a\\b[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val HTML_HEADING_OPEN_REGEX = Regex("<h([1-6])\\b[^>]*>", RegexOption.IGNORE_CASE)
+private val HTML_HEADING_CLOSE_REGEX = Regex("</h[1-6]>", RegexOption.IGNORE_CASE)
+private val HTML_LIST_ITEM_OPEN_REGEX = Regex("<li\\b[^>]*>", RegexOption.IGNORE_CASE)
+private val HTML_LIST_ITEM_CLOSE_REGEX = Regex("</li>", RegexOption.IGNORE_CASE)
+private val HTML_PARAGRAPH_CLOSE_REGEX = Regex("</p>", RegexOption.IGNORE_CASE)
+private val HTML_BREAK_REGEX = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
+private val HTML_STRONG_OPEN_REGEX = Regex("<(?:strong|b)\\b[^>]*>", RegexOption.IGNORE_CASE)
+private val HTML_STRONG_CLOSE_REGEX = Regex("</(?:strong|b)>", RegexOption.IGNORE_CASE)
+private val HTML_EMPHASIS_OPEN_REGEX = Regex("<(?:em|i)\\b[^>]*>", RegexOption.IGNORE_CASE)
+private val HTML_EMPHASIS_CLOSE_REGEX = Regex("</(?:em|i)>", RegexOption.IGNORE_CASE)
+private val HTML_CODE_OPEN_REGEX = Regex("<code\\b[^>]*>", RegexOption.IGNORE_CASE)
+private val HTML_CODE_CLOSE_REGEX = Regex("</code>", RegexOption.IGNORE_CASE)
+private val HTML_TAG_REGEX = Regex("<[^>]+>")
+private val NUMERIC_ENTITY_REGEX = Regex("&#(x[0-9a-fA-F]+|[0-9]+);")
+private val EXCESS_BLANK_LINES_REGEX = Regex("\\n[\\t ]*\\n(?:[\\t ]*\\n)+")
 
 internal fun isNewerVersion(remoteVersion: String, currentVersion: String): Boolean {
     val remote = remoteVersion.toVersionParts() ?: return false

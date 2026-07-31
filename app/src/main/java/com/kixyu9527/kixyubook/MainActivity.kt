@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -35,6 +36,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.core.view.WindowCompat
 import androidx.navigation.NavType
 import androidx.navigation.NavHostController
@@ -60,6 +63,7 @@ import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
+import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.Job
@@ -166,6 +170,7 @@ class MainActivity : ComponentActivity() {
         ) {
             val appBackground = kixyuPageBackground()
             val availableUpdate = updateState as? AppUpdateState.Available
+            val uriHandler = LocalUriHandler.current
             KixyuOverlayHost(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize().background(appBackground)) {
                     appContent()
@@ -203,13 +208,22 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(
-                            text = update?.releaseNotes?.takeIf { it.isNotBlank() }
+                        ReleaseNotesMarkdown(
+                            markdown = update?.releaseNotes?.takeIf { it.isNotBlank() }
                                 ?: "新版本已经发布，下载完成后将自动打开系统安装页面。",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 8,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
+                        update?.releaseUrl?.let { releaseUrl ->
+                            Text(
+                                text = "前往 GitHub 发布页",
+                                modifier = Modifier.clickable {
+                                    runCatching { uriHandler.openUri(releaseUrl) }
+                                },
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    textDecoration = TextDecoration.Underline,
+                                ),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(

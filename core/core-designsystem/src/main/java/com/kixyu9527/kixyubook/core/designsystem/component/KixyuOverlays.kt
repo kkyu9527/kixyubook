@@ -47,11 +47,13 @@ import androidx.compose.ui.window.DialogProperties
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import top.yukonga.miuix.kmp.basic.Button as MiuixButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.Surface as MiuixSurface
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -293,7 +295,8 @@ fun KixyuButton(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
-        ) { Text(text, maxLines = 1) }
+            colors = MiuixButtonDefaults.buttonColorsPrimary(),
+        ) { MiuixText(text, maxLines = 1) }
     } else {
         Button(
             onClick = onClick,
@@ -424,7 +427,9 @@ fun KixyuActionDialog(
                     horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
                 ) {
                     dismissLabel?.let { MiuixTextButton(text = it, onClick = onDismissRequest) }
-                    MiuixButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel) }
+                    MiuixButton(onClick = onConfirm, enabled = confirmEnabled) {
+                        MiuixText(confirmLabel, maxLines = 1)
+                    }
                 }
             }
         }
