@@ -82,6 +82,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
 
@@ -134,6 +136,7 @@ private fun LibraryScreen(
     var selectedBookUuids by remember { mutableStateOf(emptySet<String>()) }
     var confirmingBatchDelete by remember { mutableStateOf(false) }
     val visibleBookUuids = state.books.mapTo(linkedSetOf()) { it.book.uuid }
+    val navigationContentPadding = LocalKixyuNavigationContentPadding.current
     LaunchedEffect(visibleBookUuids) {
         selectedBookUuids = selectedBookUuids.intersect(visibleBookUuids)
         if (visibleBookUuids.isEmpty()) selectionMode = false
@@ -197,13 +200,15 @@ private fun LibraryScreen(
                 hostState = snackbar,
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(bottom = KixyuSize.bottomNavigationContentHeight + KixyuSpacing.small)
+                    .padding(bottom = navigationContentPadding + KixyuSpacing.small)
                     .padding(horizontal = KixyuSpacing.screenHorizontal),
             )
         },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
+            Modifier.kixyuPageContentWidth()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
                 horizontal = KixyuSpacing.screenHorizontal,
                 vertical = KixyuSpacing.screenVertical,
@@ -261,7 +266,7 @@ private fun LibraryScreen(
                     onDelete = { deleting = item },
                 )
             }
-            item { Spacer(Modifier.height(KixyuSize.bottomNavigationContentHeight)) }
+            item { Spacer(Modifier.height(navigationContentPadding)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }

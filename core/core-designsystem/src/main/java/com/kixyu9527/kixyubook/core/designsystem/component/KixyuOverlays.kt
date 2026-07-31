@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -118,7 +119,7 @@ fun KixyuBottomSheet(
             // keyboard-height gap below the visible sheet on real devices.
             defaultWindowInsetsPadding = false,
             renderInRootScaffold = true,
-            content = content,
+            content = { KixyuSheetContent(content) },
         )
     } else if (show) {
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -131,9 +132,21 @@ fun KixyuBottomSheet(
             // Keep IME ownership at the sheet boundary, matching MIUIX's
             // BottomSheetContentLayout and avoiding per-sheet double insets.
             CompositionLocalProvider(LocalKixyuSheetSection provides true) {
-                Box(Modifier.fillMaxWidth().imePadding()) { content() }
+                Box(Modifier.fillMaxWidth().imePadding()) { KixyuSheetContent(content) }
             }
         }
+    }
+}
+
+@Composable
+private fun KixyuSheetContent(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .wrapContentWidth(Alignment.CenterHorizontally)
+            .widthIn(max = KixyuSize.sheetContentMaxWidth),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        content()
     }
 }
 

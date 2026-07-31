@@ -38,19 +38,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.navigation.NavType
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBar
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationRail
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -291,6 +297,7 @@ private fun KixyuNavHost(
             TopDestination(Routes.SETTINGS, "设置", Icons.Outlined.Settings),
         )
     }
+    val useNavigationRail = kixyuWindowWidthClass() != KixyuWindowWidthClass.COMPACT
     val pagerState = rememberPagerState(pageCount = { top.size })
     val scope = rememberCoroutineScope()
     val view = LocalView.current
@@ -354,110 +361,135 @@ private fun KixyuNavHost(
             bottomBarPresented = false
         }
     }
-    val navBackground = kixyuPageBackground()
-    Box(Modifier.fillMaxSize().background(navBackground)) {
-        NavHost(
-            navController, Routes.HOME,
-            modifier = Modifier.fillMaxSize(),
-            enterTransition = {
-                slideInHorizontally(
-                    tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing),
-                ) { width -> width }
-            },
-            // Secondary destinations are a new surface above the current page. Keeping the
-            // source stationary avoids translating two complete Compose trees at once and
-            // preserves the visual hierarchy of a stacked detail page.
-            exitTransition = { ExitTransition.None },
-            popEnterTransition = { EnterTransition.None },
-            popExitTransition = {
-                slideOutHorizontally(
-                    tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing),
-                ) { width -> width }
-            },
-        ) {
-            composable(Routes.HOME) {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                    // Keep the adjacent library ready, but do not build all three complete page
-                    // trees in the launch frame. Compose's pager prefetches the next page while
-                    // retaining each page's saveable state, so the first frame no longer pays for
-                    // Home + Library + Settings simultaneously.
-                    beyondViewportPageCount = 1,
-                    key = { page -> top[page].route },
-                ) { page ->
-                    when (top[page].route) {
-                        Routes.HOME -> HomeRoute(onOpenBook = openBook)
-                        Routes.LIBRARY -> LibraryRoute(onOpenBook = openBook)
-                        Routes.SETTINGS -> SettingsRoute(
-                            updateState = updateState,
-                            currentVersion = BuildConfig.VERSION_NAME,
-                            onCheckForUpdates = onCheckForUpdates,
-                            onUpdateResultConsumed = onUpdateResultConsumed,
-                            onAppearance = {
-                                prioritizeAnimation()
-                                navController.navigate(Routes.APPEARANCE)
-                            },
-                            onReadingSettings = {
-                                prioritizeAnimation()
-                                navController.navigate(Routes.READING_SETTINGS)
-                            },
-                        )
-                    }
-                }
-            }
-            composable(Routes.APPEARANCE) {
-                com.kixyu9527.kixyubook.feature.settings.AppearanceRoute(onBack = {
-                    prioritizeAnimation()
-                    navController.popBackStack()
-                })
-            }
-            composable(Routes.READING_SETTINGS) {
-                ReadingSettingsRoute(onBack = {
-                    prioritizeAnimation()
-                    navController.popBackStack()
-                })
-            }
-            composable(
-                route = Routes.READER,
-                arguments = listOf(navArgument("bookUuid") { type = NavType.StringType }),
-            ) {
-                ReaderRoute(
-                    initialSettings = initialReaderSettings,
-                    onExit = {
-                        prioritizeAnimation()
-                        navController.popBackStack()
-                    },
+    val selectTopDestination: (KixyuNavigationItem) -> Unit = { destination ->
+        val targetPage = top.indexOfFirst { it.route == destination.route }
+        if (targetPage >= 0 && targetPage != pagerState.settledPage) {
+            pageAnimation?.cancel()
+            prioritizeAnimation()
+            pageAnimation = scope.launch {
+                pagerState.animateScrollToPage(
+                    page = targetPage,
+                    animationSpec = tween(
+                        durationMillis = KixyuMotion.PageNavigationMillis,
+                        easing = FastOutSlowInEasing,
+                    ),
                 )
             }
         }
-        AnimatedVisibility(
-            visible = bottomBarPresented,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(tween(140)) + slideInVertically(tween(140)) { height -> height / 8 },
-            exit = fadeOut(tween(100)) + slideOutVertically(tween(100)) { height -> height / 8 },
-        ) {
-            KixyuNavigationBar(
-                items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
-                selectedKey = top.getOrNull(pagerState.settledPage)?.route,
-                enabled = bottomBarPresented,
-                onSelected = { destination ->
-                    val targetPage = top.indexOfFirst { it.route == destination.route }
-                    if (targetPage >= 0 && targetPage != pagerState.settledPage) {
-                        pageAnimation?.cancel()
-                        prioritizeAnimation()
-                        pageAnimation = scope.launch {
-                            pagerState.animateScrollToPage(
-                                page = targetPage,
-                                animationSpec = tween(
-                                    durationMillis = KixyuMotion.PageNavigationMillis,
-                                    easing = FastOutSlowInEasing,
-                                ),
+    }
+    val navBackground = kixyuPageBackground()
+    CompositionLocalProvider(
+        LocalKixyuNavigationContentPadding provides if (useNavigationRail) {
+            0.dp
+        } else {
+            KixyuSize.bottomNavigationContentHeight
+        },
+    ) {
+        Box(Modifier.fillMaxSize().background(navBackground)) {
+            NavHost(
+                navController,
+                Routes.HOME,
+                modifier = Modifier.fillMaxSize(),
+                enterTransition = {
+                    slideInHorizontally(
+                        tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing),
+                    ) { width -> width }
+                },
+                // Secondary destinations are a new surface above the current page. Keeping the
+                // source stationary avoids translating two complete Compose trees at once and
+                // preserves the visual hierarchy of a stacked detail page.
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = {
+                    slideOutHorizontally(
+                        tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing),
+                    ) { width -> width }
+                },
+            ) {
+                composable(Routes.HOME) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize().padding(
+                            start = if (useNavigationRail) KixyuSize.navigationRailWidth else 0.dp,
+                        ),
+                        // Keep the adjacent library ready, but do not build all three complete page
+                        // trees in the launch frame. Compose's pager prefetches the next page while
+                        // retaining each page's saveable state, so the first frame no longer pays for
+                        // Home + Library + Settings simultaneously.
+                        beyondViewportPageCount = 1,
+                        key = { page -> top[page].route },
+                    ) { page ->
+                        when (top[page].route) {
+                            Routes.HOME -> HomeRoute(onOpenBook = openBook)
+                            Routes.LIBRARY -> LibraryRoute(onOpenBook = openBook)
+                            Routes.SETTINGS -> SettingsRoute(
+                                updateState = updateState,
+                                currentVersion = BuildConfig.VERSION_NAME,
+                                onCheckForUpdates = onCheckForUpdates,
+                                onUpdateResultConsumed = onUpdateResultConsumed,
+                                onAppearance = {
+                                    prioritizeAnimation()
+                                    navController.navigate(Routes.APPEARANCE)
+                                },
+                                onReadingSettings = {
+                                    prioritizeAnimation()
+                                    navController.navigate(Routes.READING_SETTINGS)
+                                },
                             )
                         }
                     }
-                },
-            )
+                }
+                composable(Routes.APPEARANCE) {
+                    com.kixyu9527.kixyubook.feature.settings.AppearanceRoute(onBack = {
+                        prioritizeAnimation()
+                        navController.popBackStack()
+                    })
+                }
+                composable(Routes.READING_SETTINGS) {
+                    ReadingSettingsRoute(onBack = {
+                        prioritizeAnimation()
+                        navController.popBackStack()
+                    })
+                }
+                composable(
+                    route = Routes.READER,
+                    arguments = listOf(navArgument("bookUuid") { type = NavType.StringType }),
+                ) {
+                    ReaderRoute(
+                        initialSettings = initialReaderSettings,
+                        onExit = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = bottomBarPresented && !useNavigationRail,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = fadeIn(tween(140)) + slideInVertically(tween(140)) { height -> height / 8 },
+                exit = fadeOut(tween(100)) + slideOutVertically(tween(100)) { height -> height / 8 },
+            ) {
+                KixyuNavigationBar(
+                    items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
+                    selectedKey = top.getOrNull(pagerState.settledPage)?.route,
+                    enabled = bottomBarPresented,
+                    onSelected = selectTopDestination,
+                )
+            }
+            AnimatedVisibility(
+                visible = bottomBarPresented && useNavigationRail,
+                modifier = Modifier.align(Alignment.CenterStart),
+                enter = fadeIn(tween(160)) + slideInHorizontally(tween(160)) { width -> -width / 8 },
+                exit = fadeOut(tween(100)) + slideOutHorizontally(tween(100)) { width -> -width / 8 },
+            ) {
+                KixyuNavigationRail(
+                    items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
+                    selectedKey = top.getOrNull(pagerState.settledPage)?.route,
+                    enabled = bottomBarPresented,
+                    onSelected = selectTopDestination,
+                )
+            }
         }
     }
 }

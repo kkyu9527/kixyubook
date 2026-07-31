@@ -49,8 +49,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import java.util.concurrent.TimeUnit
 
@@ -75,12 +77,15 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
             onDispose { queue.removeIdleHandler(idleHandler) }
         }
     }
+    val navigationContentPadding = LocalKixyuNavigationContentPadding.current
     KixyuPageScaffold(
         title = "今天读什么？",
         modifier = Modifier.fillMaxSize(),
     ) { innerPadding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
+            Modifier.kixyuPageContentWidth()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
                 horizontal = KixyuSpacing.screenHorizontal,
                 vertical = KixyuSpacing.screenVertical,
@@ -106,7 +111,7 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
                     }
                 }
             }
-            item { Spacer(Modifier.height(KixyuSize.bottomNavigationContentHeight)) }
+            item { Spacer(Modifier.height(navigationContentPadding)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }

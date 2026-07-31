@@ -83,6 +83,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.displayName
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -126,6 +128,7 @@ fun SettingsRoute(
             else -> Unit
         }
     }
+    val navigationContentPadding = LocalKixyuNavigationContentPadding.current
 
     KixyuPageScaffold(
         title = "设置",
@@ -135,13 +138,15 @@ fun SettingsRoute(
                 hostState = snackbar,
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(bottom = KixyuSize.bottomNavigationContentHeight + KixyuSpacing.small)
+                    .padding(bottom = navigationContentPadding + KixyuSpacing.small)
                     .padding(horizontal = KixyuSpacing.screenHorizontal),
             )
         },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
+            Modifier.kixyuPageContentWidth()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
                 horizontal = KixyuSpacing.screenHorizontal,
                 vertical = KixyuSpacing.screenVertical,
@@ -260,7 +265,7 @@ fun SettingsRoute(
                     }
                 }
             }
-            item { Spacer(Modifier.height(KixyuSize.bottomNavigationContentHeight)) }
+            item { Spacer(Modifier.height(navigationContentPadding)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }
@@ -303,7 +308,9 @@ fun ReadingSettingsRoute(
         },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
+            Modifier.kixyuPageContentWidth()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
                 horizontal = KixyuSpacing.screenHorizontal,
                 vertical = KixyuSpacing.screenVertical,
@@ -358,7 +365,9 @@ fun AppearanceRoute(
         },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding),
+            Modifier.kixyuPageContentWidth()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
                 horizontal = KixyuSpacing.screenHorizontal,
                 vertical = KixyuSpacing.screenVertical,
