@@ -17,10 +17,18 @@
         android:supportsRtl="true"
         tools:targetApi="33"
         android:theme="@style/Theme.Kixyubook">
-        <!-- Xiaomi/HyperOS large-screen capability marker. The app still bases every layout
-             decision on the actual window bounds, including multi-window and cross-device. -->
+        <!-- The app owns its responsive landscape layout instead of relying on Pad
+             compatibility scaling or parallel-window adaptation. -->
         <meta-data
-            android:name="embedded"
+            android:name="LandscapeForPad"
+            android:value="true" />
+        <!-- Declare that window-size changes preserve a continuous, usable experience on
+             Android large screens and Xiaomi/HyperOS devices. -->
+        <meta-data
+            android:name="android.supports_size_changes"
+            android:value="true" />
+        <meta-data
+            android:name="miui.supportAppContinuity"
             android:value="true" />
         <!-- HyperOS workstation / continuous freeform window. Mode 1 allows both axes to resize. -->
         <property
