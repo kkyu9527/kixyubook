@@ -13,9 +13,24 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:resizeableActivity="true"
         android:supportsRtl="true"
         tools:targetApi="33"
         android:theme="@style/Theme.Kixyubook">
+        <!-- Xiaomi/HyperOS large-screen capability marker. The app still bases every layout
+             decision on the actual window bounds, including multi-window and cross-device. -->
+        <meta-data
+            android:name="embedded"
+            android:value="true" />
+        <!-- HyperOS workstation / continuous freeform window. Mode 1 allows both axes to resize. -->
+        <property
+            android:name="miui.window.CVW_ENABLED"
+            android:value="true"
+            tools:targetApi="31" />
+        <property
+            android:name="miui.window.CVW_MODE"
+            android:value="1"
+            tools:targetApi="31" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
