@@ -30,6 +30,7 @@ data class ChapterEntity(
     val volumeTitle: String? = null,
     val volumeIndex: Int? = null,
     @ColumnInfo(defaultValue = "1") val indexed: Boolean = true,
+    @ColumnInfo(defaultValue = "''") val chapterKey: String = "",
 )
 
 @Entity(
@@ -51,6 +52,10 @@ data class ReadingProgressEntity(
     val offset: Int,
     val updatedTime: Long,
     val fraction: Float,
+    @ColumnInfo(defaultValue = "''") val chapterKey: String = "",
+    @ColumnInfo(defaultValue = "0") val paragraphIndex: Int = position,
+    @ColumnInfo(defaultValue = "0") val charOffset: Int = offset,
+    @ColumnInfo(defaultValue = "''") val quoteAnchor: String = "",
 )
 
 @Entity(
@@ -102,14 +107,48 @@ data class MetadataEditEntity(
     val createdTime: Long,
 )
 
-@Entity(tableName = "reading_sessions", indices = [Index("bookUuid"), Index("epochDay")])
+@Entity(tableName = "reading_sessions", indices = [Index("bookUuid"), Index("epochDay"), Index(value = ["syncUuid"], unique = true)])
 data class ReadingSessionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val bookUuid: String,
     val startedTime: Long,
     val durationMillis: Long,
     val epochDay: Long,
+    @ColumnInfo(defaultValue = "''") val syncUuid: String = "",
 )
 
 @Entity(tableName = "user_fonts")
 data class UserFontEntity(@PrimaryKey val uuid: String, val name: String, val filePath: String, val createdTime: Long)
+
+@Entity(
+    tableName = "sync_outbox",
+    indices = [Index(value = ["entityType", "entityId"], unique = true), Index("changedAt")],
+)
+data class SyncOutboxEntity(
+    @PrimaryKey val uuid: String,
+    val entityType: String,
+    val entityId: String,
+    val operation: String,
+    val changedAt: Long,
+    val logicalCounter: Long,
+    val deviceId: String,
+    val attemptCount: Int = 0,
+)
+
+@Entity(tableName = "sync_object_state")
+data class SyncObjectStateEntity(
+    @PrimaryKey val objectKey: String,
+    val driveFileId: String?,
+    val localHash: String?,
+    val localChangedAt: Long,
+    val remoteModifiedAt: Long,
+    val remoteVersion: Long,
+)
+
+@Entity(tableName = "sync_tombstones", indices = [Index("expiresAt")])
+data class SyncTombstoneEntity(
+    @PrimaryKey val objectKey: String,
+    val deletedAt: Long,
+    val deviceId: String,
+    val expiresAt: Long,
+)

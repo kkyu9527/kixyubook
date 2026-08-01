@@ -1,6 +1,8 @@
 package com.kixyu9527.kixyubook.feature.settings
 
 import android.app.Activity
+import android.content.Intent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +30,10 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
@@ -68,6 +74,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuEdgeToEdgeDialogProperties
@@ -90,10 +97,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.system.exitProcess
+import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsRoute(
+    onCloudSync: () -> Unit,
     onAppearance: () -> Unit,
     onReadingSettings: () -> Unit,
     updateState: AppUpdateState,
@@ -129,6 +138,7 @@ fun SettingsRoute(
         }
     }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
+    val syncAccount = state.cloudSync.account
 
     KixyuPageScaffold(
         title = "设置",
@@ -153,6 +163,23 @@ fun SettingsRoute(
             ),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
+            item {
+                KixyuSection {
+                    KixyuSettingsRow(
+                        title = "Google 同步",
+                        supportingText = when {
+                            syncAccount == null -> "登录后在设备间增量同步"
+                            state.cloudSync.phase == CloudSyncPhase.SYNCING -> "正在同步 · ${syncAccount.email}"
+                            state.cloudSync.pendingCount > 0 -> "${state.cloudSync.pendingCount} 项等待同步 · ${syncAccount.email}"
+                            else -> syncAccount.email
+                        },
+                        icon = if (syncAccount == null) Icons.Outlined.Cloud else Icons.Outlined.CloudDone,
+                        onClick = onCloudSync,
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
+                    }
+                }
+            }
             item {
                 KixyuSection {
                     KixyuSettingsRow(
@@ -289,6 +316,164 @@ fun SettingsRoute(
             confirmButton = { Button({ (context as? Activity)?.finishAffinity(); exitProcess(0) }) { Text("关闭应用") } },
         )
     }
+}
+
+@Composable
+fun CloudSyncRoute(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val snackbar = remember { SnackbarHostState() }
+    val syncAccount = state.cloudSync.account
+    var confirmDelete by remember { mutableStateOf(false) }
+    val authorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (activity != null) viewModel.finishGoogleAuthorization(activity, result.data)
+    }
+    LaunchedEffect(Unit) {
+        viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.authorizationRequests.collect { pendingIntent ->
+            authorizationLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
+        }
+    }
+    LaunchedEffect(activity, syncAccount) {
+        if (activity != null && syncAccount == null) viewModel.connectGoogle(activity)
+    }
+
+    KixyuPageScaffold(
+        title = "Google 同步",
+        largeTitle = false,
+        modifier = Modifier.fillMaxSize(),
+        navigationIcon = {
+            KixyuIconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
+        },
+        snackbarHost = {
+            KixyuSnackbarHost(
+                hostState = snackbar,
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                    .padding(bottom = KixyuSpacing.medium)
+                    .padding(horizontal = KixyuSpacing.screenHorizontal),
+            )
+        },
+    ) { innerPadding ->
+        LazyColumn(
+            Modifier.kixyuPageContentWidth().padding(innerPadding).consumeWindowInsets(innerPadding),
+            contentPadding = PaddingValues(horizontal = KixyuSpacing.screenHorizontal, vertical = KixyuSpacing.screenVertical),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+        ) {
+            item {
+                KixyuSection(title = "账号") {
+                    if (syncAccount == null) {
+                        KixyuSettingsRow(
+                            title = "使用 Google 账号登录",
+                            supportingText = "自动使用设备账号，也可点击选择或重新授权",
+                            icon = Icons.Outlined.Cloud,
+                            onClick = { activity?.let(viewModel::connectGoogle) },
+                        ) {
+                            Text("登录", color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                        }
+                    } else {
+                        KixyuSettingsRow(
+                            title = syncAccount.displayName,
+                            supportingText = syncAccount.email,
+                            icon = Icons.Outlined.CloudDone,
+                        ) {
+                            Text(
+                                when (state.cloudSync.phase) {
+                                    CloudSyncPhase.SYNCING -> "同步中"
+                                    CloudSyncPhase.AUTH_REQUIRED -> "需授权"
+                                    CloudSyncPhase.ERROR -> "有错误"
+                                    else -> "已连接"
+                                },
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                            )
+                        }
+                        KixyuDivider()
+                        KixyuSettingsRow(
+                            title = "自动同步",
+                            supportingText = "本地修改会进入队列，联网后自动同步",
+                            onClick = { viewModel.setCloudSyncEnabled(!state.cloudSync.enabled) },
+                        ) {
+                            KixyuSwitch(state.cloudSync.enabled, viewModel::setCloudSyncEnabled)
+                        }
+                        KixyuDivider()
+                        KixyuSettingsRow(
+                            title = "立即同步",
+                            supportingText = syncStatusText(state.cloudSync.lastSyncTime, state.cloudSync.pendingCount, state.cloudSync.errorMessage),
+                            icon = Icons.Outlined.CloudSync,
+                            onClick = viewModel::syncNow,
+                        )
+                    }
+                }
+            }
+            if (syncAccount != null) {
+                item {
+                    KixyuSection(title = "同步内容") {
+                        KixyuSettingsRow(
+                            title = "小说原始文件",
+                            supportingText = "TXT / EPUB，用于在另一台设备完整恢复",
+                            onClick = { viewModel.setSyncOriginalFiles(!state.cloudSync.syncOriginalFiles) },
+                        ) { KixyuSwitch(state.cloudSync.syncOriginalFiles, viewModel::setSyncOriginalFiles) }
+                        KixyuDivider()
+                        KixyuSettingsRow(
+                            title = "用户字体",
+                            supportingText = "同步已导入的 TTF / OTF",
+                            onClick = { viewModel.setSyncFonts(!state.cloudSync.syncFonts) },
+                        ) { KixyuSwitch(state.cloudSync.syncFonts, viewModel::setSyncFonts) }
+                        KixyuDivider()
+                        KixyuSettingsRow(
+                            title = "大文件仅使用 Wi-Fi",
+                            supportingText = "进度、书签和设置仍可使用移动网络同步",
+                            onClick = { viewModel.setWifiOnlyForLargeFiles(!state.cloudSync.wifiOnlyForLargeFiles) },
+                        ) { KixyuSwitch(state.cloudSync.wifiOnlyForLargeFiles, viewModel::setWifiOnlyForLargeFiles) }
+                    }
+                }
+                item {
+                    KixyuSection(title = "账号操作") {
+                        KixyuSettingsRow(
+                            title = "退出 Google 账号",
+                            supportingText = "停止同步，但保留本机书籍和数据",
+                            onClick = viewModel::disconnectGoogle,
+                        )
+                        KixyuDivider()
+                        KixyuSettingsRow(
+                            title = "删除云端同步数据",
+                            supportingText = "永久删除应用专属 Drive 空间中的数据",
+                            icon = Icons.Outlined.DeleteForever,
+                            onClick = { confirmDelete = true },
+                        )
+                    }
+                }
+            }
+            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+        }
+    }
+
+    KixyuActionDialog(
+        show = confirmDelete,
+        title = "删除云端同步数据？",
+        onDismissRequest = { confirmDelete = false },
+        confirmLabel = "永久删除",
+        onConfirm = {
+            confirmDelete = false
+            activity?.let(viewModel::deleteCloudData)
+        },
+    ) {
+        Text("此操作不会删除本机数据，但无法从 Google Drive 恢复。")
+    }
+}
+
+private fun syncStatusText(lastSyncTime: Long, pendingCount: Int, error: String?): String = when {
+    error != null -> error
+    pendingCount > 0 -> "$pendingCount 项等待同步"
+    lastSyncTime > 0 -> "上次同步：${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(lastSyncTime))}"
+    else -> "尚未完成首次同步"
 }
 
 @Composable

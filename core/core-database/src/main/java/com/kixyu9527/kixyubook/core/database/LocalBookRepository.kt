@@ -9,6 +9,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
+import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
+import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
@@ -53,6 +56,7 @@ class LocalBookRepository @Inject constructor(
     private val database: KixyuDatabase,
     private val dao: BookDao,
     private val epubParseCoordinator: EpubParseCoordinator,
+    private val syncMutations: SyncMutationRecorder,
 ) : BookRepository {
     private val parsers = BookParserRegistry()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
@@ -156,6 +160,7 @@ class LocalBookRepository @Inject constructor(
                     emptyList()
                 }
                 imports += RegisteredImport(bookUuid, displayName, format, stored, parser)
+                syncMutations.record(SyncEntityType.BOOK, bookUuid)
             } catch (error: CancellationException) {
                 insertedUuid?.let { removeIncompleteImport(it) }
                 storedFile?.delete()
@@ -222,6 +227,66 @@ class LocalBookRepository @Inject constructor(
         ZipFile(this).use { zip -> zip.getEntry("mimetype")?.let { zip.getInputStream(it).bufferedReader().readText().trim() } == "application/epub+zip" }
     }.getOrDefault(false)
 
+    override suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean =
+        withContext(Dispatchers.IO) {
+            storageMutationMutex.withLock {
+                if (dao.bookExists(book.uuid)) return@withLock true
+                if (dao.findUuidByHash(book.contentHash) != null) return@withLock false
+                val source = File(sourceFilePath)
+                require(source.isFile) { "云端书籍文件不存在" }
+                val actualHash = source.inputStream().use { input ->
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    DigestInputStream(input, digest).use { stream ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (stream.read(buffer) >= 0) {
+                            // DigestInputStream updates the digest as bytes are consumed.
+                        }
+                    }
+                    digest.digest().joinToString("") { "%02x".format(it) }
+                }
+                require(actualHash == book.contentHash) { "云端书籍校验失败" }
+                val extension = if (book.format == BookFormat.EPUB) "epub" else "txt"
+                val stored = File(context.filesDir, "books/${book.uuid}.$extension").also { it.parentFile?.mkdirs() }
+                source.copyTo(stored, overwrite = true)
+                try {
+                    val parser = parsers.parserFor(book.format)
+                    val parsedMetadata = parser.readMetadata(stored, book.title)
+                    val coverPath = parsedMetadata.coverBytes?.let { bytes ->
+                        File(context.filesDir, "covers/${book.uuid}.${parsedMetadata.coverExtension}").also {
+                            it.parentFile?.mkdirs()
+                            it.writeBytes(bytes)
+                        }.absolutePath
+                    }
+                    dao.insertBook(
+                        BookEntity(
+                            uuid = book.uuid,
+                            title = book.title,
+                            author = book.author,
+                            description = book.description,
+                            coverPath = coverPath,
+                            format = book.format.name,
+                            originalPath = "google-drive://${book.uuid}",
+                            storagePath = stored.absolutePath,
+                            createdTime = book.createdTime,
+                            contentHash = book.contentHash,
+                            category = book.category,
+                        ),
+                    )
+                    if (book.format == BookFormat.EPUB) {
+                        registerEpubDirectory(book.uuid, stored, parser as EpubBookParser)
+                        scheduleEpubIndex()
+                    } else {
+                        enqueueBackgroundIndex(RegisteredImport(book.uuid, book.title, book.format, stored, parser))
+                    }
+                    true
+                } catch (error: Throwable) {
+                    removeIncompleteImport(book.uuid)
+                    stored.delete()
+                    throw error
+                }
+            }
+        }
+
     override suspend fun deleteBook(bookUuid: String) = deleteBooks(setOf(bookUuid))
 
     override suspend fun deleteBooks(bookUuids: Set<String>): Unit = withContext(Dispatchers.IO) {
@@ -234,6 +299,9 @@ class LocalBookRepository @Inject constructor(
             database.withTransaction {
                 dao.deleteMetadataEdits(bookUuids)
                 dao.deleteBooks(bookUuids)
+                bookUuids.forEach { uuid ->
+                    syncMutations.record(SyncEntityType.BOOK, uuid, SyncMutationOperation.DELETE)
+                }
             }
             synchronized(chapterCacheLock) {
                 chapterCache.keys.removeAll { it.bookUuid in bookUuids }
@@ -321,13 +389,29 @@ class LocalBookRepository @Inject constructor(
 
     override fun observeProgress(bookUuid: String) = dao.observeProgress(bookUuid).map { it?.toModel() }
     override suspend fun saveProgress(progress: ReadingProgress) = withContext(Dispatchers.IO) {
-        dao.saveProgress(ReadingProgressEntity(progress.bookUuid, progress.chapterId, progress.position, progress.offset, progress.updatedTime, progress.fraction))
+        val chapter = dao.getChapters(progress.bookUuid).firstOrNull { it.id == progress.chapterId }
+        dao.saveProgress(
+            ReadingProgressEntity(
+                bookUuid = progress.bookUuid,
+                chapterId = progress.chapterId,
+                position = progress.position,
+                offset = progress.offset,
+                updatedTime = progress.updatedTime,
+                fraction = progress.fraction,
+                chapterKey = progress.chapterKey.ifBlank { chapter?.chapterKey.orEmpty() },
+                paragraphIndex = progress.paragraphIndex,
+                charOffset = progress.charOffset,
+                quoteAnchor = progress.quoteAnchor,
+            ),
+        )
+        syncMutations.record(SyncEntityType.PROGRESS, progress.bookUuid)
     }
 
     override suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = withContext(Dispatchers.IO) {
         val book = dao.getBook(bookUuid) ?: error("书籍不存在")
         dao.insertMetadataEdit(MetadataEditEntity(UUID.randomUUID().toString(), bookUuid, book.title, book.author, book.description, title.trim(), author.trim(), description.trim(), System.currentTimeMillis()))
         dao.updateBookMetadata(bookUuid, title.trim().ifBlank { "未命名书籍" }, author.trim().ifBlank { "未知作者" }, description.trim())
+        syncMutations.record(SyncEntityType.BOOK, bookUuid)
     }
 
     override suspend fun reparseTxt(bookUuid: String): Result<Unit> = withContext(Dispatchers.IO) {
@@ -358,6 +442,7 @@ class LocalBookRepository @Inject constructor(
                             chapterIndex = chapterIndex++,
                             volumeTitle = chapter.volumeTitle,
                             volumeIndex = chapter.volumeIndex,
+                            chapterKey = stableChapterKey(bookUuid, chapterIndex - 1, chapter.title),
                         ),
                     )
                     chapterIds += chapterId
@@ -424,7 +509,10 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
-    override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) { dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" }) }
+    override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) {
+        dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" })
+        syncMutations.record(SyncEntityType.BOOK, bookUuid)
+    }
 
     override fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>> =
         dao.observeBookmarks(bookUuid).map { rows -> rows.map { it.toModel() } }
@@ -440,10 +528,14 @@ class LocalBookRepository @Inject constructor(
                 createdTime = bookmark.createdTime,
             ),
         )
+        syncMutations.record(SyncEntityType.BOOKMARKS, bookmark.bookUuid)
     }
 
     override suspend fun deleteBookmark(bookmarkUuid: String) = withContext(Dispatchers.IO) {
+        val owner = dao.getAllBookmarkEntities().firstOrNull { it.uuid == bookmarkUuid }?.bookUuid
         dao.deleteBookmark(bookmarkUuid)
+        owner?.let { syncMutations.record(SyncEntityType.BOOKMARKS, it) }
+        Unit
     }
 
     override suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult> = withContext(Dispatchers.IO) {
@@ -472,6 +564,7 @@ class LocalBookRepository @Inject constructor(
                         chapterIndex = startIndex + offset,
                         volumeTitle = chapter.volumeTitle,
                         volumeIndex = chapter.volumeIndex,
+                        chapterKey = stableChapterKey(bookUuid, startIndex + offset, chapter.title),
                     )
                 })
                 batch.zip(chapterIds).forEach { (chapter, chapterId) ->
@@ -530,6 +623,7 @@ class LocalBookRepository @Inject constructor(
                         volumeTitle = outline.volumeTitle,
                         volumeIndex = outline.volumeIndex,
                         indexed = false,
+                        chapterKey = stableChapterKey(bookUuid, outline.sourceIndex, outline.title),
                     )
                 },
             )
@@ -594,8 +688,18 @@ private fun ChapterEntity.toModel() = Chapter(
     chapterIndex,
     volumeTitle?.singleLineBookHeading(),
     volumeIndex,
+    chapterKey,
 )
-private fun ReadingProgressEntity.toModel() = ReadingProgress(bookUuid, chapterId, position, offset, updatedTime, fraction)
+private fun ReadingProgressEntity.toModel() = ReadingProgress(
+    bookUuid, chapterId, position, offset, updatedTime, fraction,
+    chapterKey, paragraphIndex, charOffset, quoteAnchor,
+)
+
+private fun stableChapterKey(bookUuid: String, index: Int, title: String): String {
+    val input = "$bookUuid|$index|${title.singleLineBookHeading().lowercase()}"
+    return MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
+        .take(16).joinToString("") { "%02x".format(it) }
+}
 private fun BookmarkRow.toModel() = Bookmark(
     uuid,
     bookUuid,

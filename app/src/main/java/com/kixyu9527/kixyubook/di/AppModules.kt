@@ -15,6 +15,7 @@ import com.kixyu9527.kixyubook.core.database.LocalFontRepository
 import com.kixyu9527.kixyubook.core.database.LocalReadingStatsRepository
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
+import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.datastore.DataStoreReaderSettingsRepository
 import com.kixyu9527.kixyubook.update.GitHubUpdateRepository
 import dagger.Binds
@@ -39,6 +40,9 @@ object DatabaseModule {
     fun provideBookDao(database: KixyuDatabase): BookDao = database.bookDao()
 
     @Provides fun provideFontDao(database: KixyuDatabase): FontDao = database.fontDao()
+
+    @Provides fun provideSyncDao(database: KixyuDatabase): SyncDao = database.syncDao()
+
 }
 
 @Module

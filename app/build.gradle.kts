@@ -55,6 +55,7 @@ dependencies {
     implementation(project(":core:core-navigation"))
     implementation(project(":core:core-database"))
     implementation(project(":core:core-datastore"))
+    implementation(project(":core:core-sync"))
     implementation(project(":feature:feature-home"))
     implementation(project(":feature:feature-library"))
     implementation(project(":feature:feature-reader"))

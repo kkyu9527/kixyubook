@@ -6,6 +6,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val APPEARANCE = "appearance"
     const val READING_SETTINGS = "reading_settings"
+    const val CLOUD_SYNC = "cloud_sync"
     const val READER = "reader/{bookUuid}"
     fun reader(bookUuid: String) = "reader/$bookUuid"
 }

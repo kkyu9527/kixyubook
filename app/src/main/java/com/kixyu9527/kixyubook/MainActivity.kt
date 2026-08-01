@@ -68,6 +68,7 @@ import com.kixyu9527.kixyubook.feature.library.LibraryRoute
 import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
+import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
 import dagger.hilt.android.AndroidEntryPoint
@@ -431,6 +432,10 @@ private fun KixyuNavHost(
                                     prioritizeAnimation()
                                     navController.navigate(Routes.APPEARANCE)
                                 },
+                                onCloudSync = {
+                                    prioritizeAnimation()
+                                    navController.navigate(Routes.CLOUD_SYNC)
+                                },
                                 onReadingSettings = {
                                     prioritizeAnimation()
                                     navController.navigate(Routes.READING_SETTINGS)
@@ -447,6 +452,12 @@ private fun KixyuNavHost(
                 }
                 composable(Routes.READING_SETTINGS) {
                     ReadingSettingsRoute(onBack = {
+                        prioritizeAnimation()
+                        navController.popBackStack()
+                    })
+                }
+                composable(Routes.CLOUD_SYNC) {
+                    CloudSyncRoute(onBack = {
                         prioritizeAnimation()
                         navController.popBackStack()
                     })

@@ -35,6 +35,7 @@ include(
     ":core:core-database",
     ":core:core-datastore",
     ":core:core-reader-engine",
+    ":core:core-sync",
     ":feature:feature-home",
     ":feature:feature-library",
     ":feature:feature-reader",

@@ -27,6 +27,8 @@ data class Chapter(
     val index: Int,
     val volumeTitle: String? = null,
     val volumeIndex: Int? = null,
+    /** Stable across devices; unlike Room's auto-generated chapter id. */
+    val chapterKey: String = "",
 )
 
 enum class ChapterLoadPriority { USER, PREFETCH }
@@ -90,6 +92,21 @@ data class ReadingProgress(
     val offset: Int = 0,
     val updatedTime: Long,
     val fraction: Float = 0f,
+    val chapterKey: String = "",
+    val paragraphIndex: Int = position,
+    val charOffset: Int = offset,
+    val quoteAnchor: String = "",
+)
+
+data class SyncedBook(
+    val uuid: String,
+    val title: String,
+    val author: String,
+    val description: String,
+    val format: BookFormat,
+    val createdTime: Long,
+    val contentHash: String,
+    val category: String,
 )
 
 data class Bookmark(

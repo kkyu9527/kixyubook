@@ -6,6 +6,9 @@ import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
+import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
+import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.database.entity.UserFontEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,6 +26,7 @@ import javax.inject.Singleton
 class LocalFontRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val dao: FontDao,
+    private val syncMutations: SyncMutationRecorder,
 ) : FontRepository {
     private val mutationMutex = Mutex()
 
@@ -45,6 +49,7 @@ class LocalFontRepository @Inject constructor(
                 Typeface.createFromFile(fontFile)
                 val model = UserFont(uuid, name.substringBeforeLast('.'), fontFile.absolutePath, System.currentTimeMillis())
                 dao.insert(UserFontEntity(model.uuid, model.name, model.filePath, model.createdTime))
+                syncMutations.record(SyncEntityType.FONT, model.uuid)
                 model
             }.onFailure {
                 target?.delete()
@@ -57,6 +62,7 @@ class LocalFontRepository @Inject constructor(
         mutationMutex.withLock {
             val file = dao.getFont(fontUuid)?.filePath?.let(::File)
             dao.delete(fontUuid)
+            syncMutations.record(SyncEntityType.FONT, fontUuid, SyncMutationOperation.DELETE)
             file?.delete()
             pruneUnreferencedFonts()
         }

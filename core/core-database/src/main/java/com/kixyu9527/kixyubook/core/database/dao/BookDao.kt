@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 interface BookDao {
     @Query("SELECT * FROM books ORDER BY createdTime DESC") fun observeBooks(): Flow<List<BookEntity>>
     @Query("SELECT * FROM reading_progress") fun observeAllProgress(): Flow<List<ReadingProgressEntity>>
+    @Query("SELECT * FROM reading_progress") suspend fun getAllProgress(): List<ReadingProgressEntity>
     @Query("SELECT * FROM reading_progress WHERE bookUuid = :uuid") fun observeProgress(uuid: String): Flow<ReadingProgressEntity?>
     @Query("SELECT * FROM reading_progress WHERE bookUuid = :uuid") suspend fun getProgress(uuid: String): ReadingProgressEntity?
     @Query("SELECT * FROM books WHERE uuid = :uuid") suspend fun getBook(uuid: String): BookEntity?
@@ -18,6 +19,7 @@ interface BookDao {
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid ORDER BY chapterIndex") suspend fun getChapters(uuid: String): List<ChapterEntity>
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid ORDER BY chapterIndex") fun observeChapters(uuid: String): Flow<List<ChapterEntity>>
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND chapterIndex = :index LIMIT 1") suspend fun getChapter(uuid: String, index: Int): ChapterEntity?
+    @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND chapterKey = :chapterKey LIMIT 1") suspend fun getChapterByKey(uuid: String, chapterKey: String): ChapterEntity?
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND indexed = 0 ORDER BY chapterIndex") suspend fun getUnindexedChapters(uuid: String): List<ChapterEntity>
     @Query("SELECT DISTINCT b.uuid FROM books b JOIN chapters c ON c.bookUuid = b.uuid WHERE b.format = 'EPUB' AND c.indexed = 0") suspend fun getBooksPendingEpubIndex(): List<String>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId ORDER BY paragraphIndex") suspend fun getParagraphs(chapterId: Long): List<ParagraphEntity>
@@ -31,6 +33,7 @@ interface BookDao {
         FROM bookmarks b JOIN chapters c ON c.id = b.chapterId
         WHERE b.bookUuid = :uuid ORDER BY c.chapterIndex, b.position""")
     suspend fun getBookmarks(uuid: String): List<BookmarkRow>
+    @Query("SELECT * FROM bookmarks") suspend fun getAllBookmarkEntities(): List<BookmarkEntity>
     @Query("""SELECT c.id AS chapterId, c.title AS chapterTitle, c.chapterIndex,
         p.paragraphIndex, p.text FROM paragraphs p JOIN chapters c ON c.id = p.chapterId
         WHERE c.bookUuid = :uuid AND p.text LIKE '%' || :query || '%' ESCAPE '~'
@@ -43,7 +46,7 @@ interface BookDao {
     @Insert suspend fun insertParagraphs(paragraphs: List<ParagraphEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveProgress(progress: ReadingProgressEntity)
     @Insert suspend fun insertMetadataEdit(edit: MetadataEditEntity)
-    @Insert suspend fun insertSession(session: ReadingSessionEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSession(session: ReadingSessionEntity): Long
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertBookmark(bookmark: BookmarkEntity): Long
 
     @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid") suspend fun updateBookMetadata(uuid: String, title: String, author: String, description: String): Int
@@ -59,7 +62,11 @@ interface BookDao {
     @Query("DELETE FROM reading_progress WHERE bookUuid = :uuid") suspend fun deleteProgress(uuid: String)
     @Query("DELETE FROM chapters WHERE bookUuid = :uuid") suspend fun deleteChapters(uuid: String)
     @Query("SELECT * FROM reading_sessions ORDER BY startedTime") fun observeSessions(): Flow<List<ReadingSessionEntity>>
+    @Query("SELECT * FROM reading_sessions ORDER BY startedTime") suspend fun getAllSessions(): List<ReadingSessionEntity>
+    @Query("SELECT * FROM reading_sessions WHERE syncUuid = :uuid LIMIT 1") suspend fun getSessionBySyncUuid(uuid: String): ReadingSessionEntity?
+    @Query("SELECT MAX(createdTime) FROM metadata_edits WHERE bookUuid = :uuid") suspend fun lastMetadataEditTime(uuid: String): Long?
     @Query("DELETE FROM bookmarks WHERE uuid = :uuid") suspend fun deleteBookmark(uuid: String)
+    @Query("DELETE FROM bookmarks WHERE bookUuid = :bookUuid") suspend fun deleteBookmarksForBook(bookUuid: String)
 
     @Transaction
     suspend fun insertParagraphsChunked(chapterId: Long, values: List<String>) {
@@ -81,6 +88,6 @@ interface FontDao {
     @Query("SELECT * FROM user_fonts ORDER BY name") fun observeFonts(): Flow<List<UserFontEntity>>
     @Query("SELECT * FROM user_fonts") suspend fun getAllFonts(): List<UserFontEntity>
     @Query("SELECT * FROM user_fonts WHERE uuid = :uuid") suspend fun getFont(uuid: String): UserFontEntity?
-    @Insert suspend fun insert(font: UserFontEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(font: UserFontEntity): Long
     @Query("DELETE FROM user_fonts WHERE uuid = :uuid") suspend fun delete(uuid: String)
 }

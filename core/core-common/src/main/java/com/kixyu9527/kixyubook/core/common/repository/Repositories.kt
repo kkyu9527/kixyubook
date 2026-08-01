@@ -8,6 +8,8 @@ interface BookRepository {
     fun observeLibrary(): Flow<List<LibraryBook>>
     fun observeImportEvents(): Flow<String>
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
+    /** Restores an immutable source blob while preserving its permanent book UUID. */
+    suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean
     suspend fun deleteBook(bookUuid: String)
     suspend fun deleteBooks(bookUuids: Set<String>)
     suspend fun getBook(bookUuid: String): Book?
@@ -76,4 +78,16 @@ interface AppUpdateRepository {
     val state: StateFlow<AppUpdateState>
     suspend fun checkForUpdates(manual: Boolean)
     fun clearResult()
+}
+
+enum class SyncEntityType { BOOK, PROGRESS, BOOKMARKS, SETTINGS, SESSION, FONT }
+enum class SyncMutationOperation { UPSERT, DELETE }
+
+/** Records local mutations for object-level cloud sync. Implementations must be cheap and offline-safe. */
+interface SyncMutationRecorder {
+    suspend fun record(
+        type: SyncEntityType,
+        entityId: String,
+        operation: SyncMutationOperation = SyncMutationOperation.UPSERT,
+    )
 }

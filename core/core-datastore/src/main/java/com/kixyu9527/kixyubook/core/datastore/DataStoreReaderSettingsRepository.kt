@@ -5,6 +5,8 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -15,7 +17,10 @@ import javax.inject.Singleton
 private val Context.readerSettingsDataStore by preferencesDataStore(name = "reader_settings")
 
 @Singleton
-class DataStoreReaderSettingsRepository @Inject constructor(@param:ApplicationContext private val context: Context) : ReaderSettingsRepository {
+class DataStoreReaderSettingsRepository @Inject constructor(
+    @param:ApplicationContext private val context: Context,
+    private val syncMutations: SyncMutationRecorder,
+) : ReaderSettingsRepository {
     override val settings: Flow<ReaderSettings> = context.readerSettingsDataStore.data.map { values ->
         val storedTheme = values[THEME]
         ReaderSettings(
@@ -76,10 +81,12 @@ class DataStoreReaderSettingsRepository @Inject constructor(@param:ApplicationCo
             values[KEEP_SCREEN_ON] = updated.keepScreenOn
             values[SHOW_CHAPTER_TITLE] = updated.showChapterTitle
         }
+        syncMutations.record(SyncEntityType.SETTINGS, "global")
     }
 
     override suspend fun setReadingGoalMinutes(minutes: Int) {
         context.readerSettingsDataStore.edit { it[READING_GOAL] = minutes.coerceIn(5, 240) }
+        syncMutations.record(SyncEntityType.SETTINGS, "global")
     }
 
     private companion object {
