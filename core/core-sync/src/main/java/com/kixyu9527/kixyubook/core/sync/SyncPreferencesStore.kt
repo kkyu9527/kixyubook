@@ -27,6 +27,7 @@ data class PersistedSyncState(
     val phase: CloudSyncPhase = CloudSyncPhase.IDLE,
     val error: String? = null,
     val initialMergeComplete: Boolean = false,
+    val initialSyncApproved: Boolean = false,
 )
 
 @Singleton
@@ -54,17 +55,26 @@ class SyncPreferencesStore @Inject constructor(
                 ?: CloudSyncPhase.IDLE,
             error = values[ERROR],
             initialMergeComplete = values[INITIAL_MERGE] ?: false,
+            initialSyncApproved = values[INITIAL_SYNC_APPROVED]
+                ?: (values[INITIAL_MERGE] ?: false),
         )
     }
 
     suspend fun current() = state.first()
 
     suspend fun saveAccount(account: SyncAccount) = context.cloudSyncDataStore.edit {
+        val sameAccount = it[ACCOUNT_SUBJECT] == account.subject
         it[ACCOUNT_SUBJECT] = account.subject
         it[ACCOUNT_EMAIL] = account.email
         it[ACCOUNT_NAME] = account.displayName
         account.avatarUrl?.let { value -> it[ACCOUNT_AVATAR] = value } ?: it.remove(ACCOUNT_AVATAR)
-        it[ENABLED] = true
+        if (!sameAccount) {
+            it[ENABLED] = false
+            it[INITIAL_SYNC_APPROVED] = false
+            it[INITIAL_MERGE] = false
+            it.remove(PAGE_TOKEN)
+            it.remove(LAST_SYNC)
+        }
         it[PHASE] = CloudSyncPhase.IDLE.name
         it.remove(ERROR)
     }
@@ -72,6 +82,7 @@ class SyncPreferencesStore @Inject constructor(
     suspend fun clearAccount() = context.cloudSyncDataStore.edit {
         it.remove(ACCOUNT_SUBJECT); it.remove(ACCOUNT_EMAIL); it.remove(ACCOUNT_NAME); it.remove(ACCOUNT_AVATAR)
         it.remove(PAGE_TOKEN); it.remove(LAST_SYNC); it.remove(ERROR); it.remove(INITIAL_MERGE)
+        it.remove(INITIAL_SYNC_APPROVED)
         it[ENABLED] = false
         it[PHASE] = CloudSyncPhase.IDLE.name
     }
@@ -80,6 +91,13 @@ class SyncPreferencesStore @Inject constructor(
     suspend fun setSyncOriginals(value: Boolean) = setBoolean(SYNC_ORIGINALS, value)
     suspend fun setSyncFonts(value: Boolean) = setBoolean(SYNC_FONTS, value)
     suspend fun setWifiOnly(value: Boolean) = setBoolean(WIFI_ONLY, value)
+
+    suspend fun approveInitialSync() = context.cloudSyncDataStore.edit {
+        it[INITIAL_SYNC_APPROVED] = true
+        it[ENABLED] = true
+        it[PHASE] = CloudSyncPhase.IDLE.name
+        it.remove(ERROR)
+    }
 
     suspend fun markAuthorizing() = context.cloudSyncDataStore.edit {
         it[PHASE] = CloudSyncPhase.AUTHORIZING.name
@@ -96,6 +114,7 @@ class SyncPreferencesStore @Inject constructor(
         it[LAST_SYNC] = System.currentTimeMillis()
         pageToken?.let { value -> it[PAGE_TOKEN] = value }
         it[INITIAL_MERGE] = true
+        it[INITIAL_SYNC_APPROVED] = true
         it.remove(ERROR)
     }
 
@@ -132,6 +151,7 @@ class SyncPreferencesStore @Inject constructor(
         val PHASE = stringPreferencesKey("phase")
         val ERROR = stringPreferencesKey("error")
         val INITIAL_MERGE = booleanPreferencesKey("initial_merge_complete")
+        val INITIAL_SYNC_APPROVED = booleanPreferencesKey("initial_sync_approved")
         val DEVICE_ID = stringPreferencesKey("device_id")
     }
 }

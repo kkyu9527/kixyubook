@@ -14,6 +14,19 @@ data class SyncAccount(
 
 enum class CloudSyncPhase { IDLE, AUTHORIZING, SYNCING, SUCCESS, AUTH_REQUIRED, ERROR }
 
+data class InitialSyncDecision(
+    val localBookCount: Int,
+    val cloudBookCount: Int,
+)
+
+internal fun InitialSyncDecision.requiresUserDecision(): Boolean =
+    localBookCount == 0 && cloudBookCount > 0
+
+enum class InitialSyncChoice {
+    RESTORE_FROM_CLOUD,
+    USE_LOCAL_LIBRARY,
+}
+
 data class CloudSyncState(
     val account: SyncAccount? = null,
     val enabled: Boolean = false,
@@ -24,6 +37,8 @@ data class CloudSyncState(
     val lastSyncTime: Long = 0,
     val pendingCount: Int = 0,
     val errorMessage: String? = null,
+    val initialSyncDecision: InitialSyncDecision? = null,
+    val inspectingInitialSync: Boolean = false,
 )
 
 sealed interface GoogleConnectResult {
@@ -41,6 +56,7 @@ interface CloudSyncManager {
     suspend fun setSyncOriginalFiles(enabled: Boolean)
     suspend fun setSyncFonts(enabled: Boolean)
     suspend fun setWifiOnlyForLargeFiles(enabled: Boolean)
+    suspend fun resolveInitialSync(choice: InitialSyncChoice): Result<Unit>
     fun syncNow()
     suspend fun deleteCloudData(activity: Activity): Result<Unit>
 }

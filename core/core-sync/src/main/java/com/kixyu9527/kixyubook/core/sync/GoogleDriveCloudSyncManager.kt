@@ -6,9 +6,14 @@ import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,7 +26,14 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     private val scheduler: CloudSyncScheduler,
 ) : CloudSyncManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    override val state = combine(preferences.state, syncDao.observePendingCount()) { persisted, pending ->
+    private val initialSyncDecision = MutableStateFlow<InitialSyncDecision?>(null)
+    private val inspectingInitialSync = MutableStateFlow(false)
+    override val state = combine(
+        preferences.state,
+        syncDao.observePendingCount(),
+        initialSyncDecision,
+        inspectingInitialSync,
+    ) { persisted, pending, decision, inspecting ->
         CloudSyncState(
             account = persisted.account,
             enabled = persisted.enabled,
@@ -32,8 +44,21 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             lastSyncTime = persisted.lastSyncTime,
             pendingCount = pending,
             errorMessage = persisted.error,
+            initialSyncDecision = decision,
+            inspectingInitialSync = inspecting,
         )
     }.stateIn(scope, SharingStarted.Eagerly, CloudSyncState())
+
+    init {
+        scope.launch {
+            preferences.state
+                .map { Triple(it.account?.subject, it.initialSyncApproved, it.enabled) }
+                .distinctUntilChanged()
+                .collectLatest { (accountSubject, approved, _) ->
+                    if (accountSubject != null && !approved) prepareInitialSync()
+                }
+        }
+    }
 
     override suspend fun connect(activity: Activity): GoogleConnectResult {
         preferences.markAuthorizing()
@@ -47,10 +72,16 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override suspend fun disconnect() {
         scheduler.cancel()
+        initialSyncDecision.value = null
+        inspectingInitialSync.value = false
         accounts.disconnect()
     }
 
     override suspend fun setEnabled(enabled: Boolean) {
+        if (enabled && !preferences.current().initialSyncApproved) {
+            prepareInitialSync()
+            return
+        }
         preferences.setEnabled(enabled)
         if (enabled) { scheduler.ensurePeriodic(); scheduler.requestImmediate() } else scheduler.cancel()
     }
@@ -72,6 +103,23 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         scheduler.requestDebounced()
     }
 
+    override suspend fun resolveInitialSync(choice: InitialSyncChoice): Result<Unit> = runCatching {
+        inspectingInitialSync.value = true
+        if (choice == InitialSyncChoice.USE_LOCAL_LIBRARY) {
+            engine.replaceCloudWithLocalLibrary()
+        } else {
+            engine.prepareCloudRestore()
+        }
+        preferences.approveInitialSync()
+        initialSyncDecision.value = null
+        scheduler.ensurePeriodic()
+        scheduler.requestImmediate()
+    }.onFailure { error ->
+        preferences.markError(error.message ?: "首次同步准备失败")
+    }.also {
+        inspectingInitialSync.value = false
+    }
+
     override fun syncNow() = scheduler.requestImmediate()
 
     override suspend fun deleteCloudData(activity: Activity): Result<Unit> = runCatching {
@@ -85,9 +133,34 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     private suspend fun handleAuthorizationResult(result: GoogleConnectResult) {
         when (result) {
-            GoogleConnectResult.Connected -> scheduler.requestImmediate()
+            GoogleConnectResult.Connected -> {
+                if (preferences.current().initialSyncApproved) {
+                    scheduler.ensurePeriodic()
+                    scheduler.requestImmediate()
+                } else {
+                    prepareInitialSync()
+                }
+            }
             is GoogleConnectResult.NeedsAuthorization -> Unit
             is GoogleConnectResult.Failed -> preferences.markAuthRequired(result.message)
         }
+    }
+
+    private suspend fun prepareInitialSync() {
+        if (inspectingInitialSync.value || preferences.current().account == null) return
+        inspectingInitialSync.value = true
+        runCatching { engine.inspectInitialSync() }
+            .onSuccess { snapshot ->
+                if (snapshot.requiresUserDecision()) {
+                    initialSyncDecision.value = snapshot
+                } else {
+                    preferences.approveInitialSync()
+                    initialSyncDecision.value = null
+                    scheduler.ensurePeriodic()
+                    scheduler.requestImmediate()
+                }
+            }
+            .onFailure { error -> preferences.markError(error.message ?: "无法检查云端书库") }
+        inspectingInitialSync.value = false
     }
 }

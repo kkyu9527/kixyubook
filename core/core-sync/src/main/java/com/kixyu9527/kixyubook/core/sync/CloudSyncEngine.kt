@@ -50,14 +50,45 @@ class CloudSyncEngine @Inject constructor(
     private val drive: DriveAppDataClient,
     private val accountClient: GoogleAccountClient,
 ) {
+    suspend fun inspectInitialSync(): InitialSyncDecision = withContext(Dispatchers.IO) {
+        val token = accountClient.accessToken()
+            ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+        val remote = drive.listAll(token).associateBy(DriveObject::objectKey)
+        val restorableBooks = remote.keys.asSequence()
+            .filter { it.startsWith("books/") && it.endsWith("/metadata") }
+            .mapNotNull { it.split('/').getOrNull(1) }
+            .filter { "books/$it/source" in remote }
+            .distinct()
+            .count()
+        InitialSyncDecision(
+            localBookCount = books.getAllBooks().size,
+            cloudBookCount = restorableBooks,
+        )
+    }
+
+    suspend fun replaceCloudWithLocalLibrary() = withContext(Dispatchers.IO) {
+        val token = accountClient.accessToken()
+            ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+        deleteAllCloudData(token)
+        seedInitialOutbox()
+    }
+
+    suspend fun prepareCloudRestore() = withContext(Dispatchers.IO) {
+        // A disconnected device may still contain queued deletions. Once the user explicitly
+        // chooses cloud restore, those local mutations must not hide or delete remote books.
+        syncDao.clearOutbox()
+        syncDao.clearObjectStates()
+    }
+
     suspend fun synchronize(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val persisted = preferences.current()
-            if (!persisted.enabled || persisted.account == null) return@runCatching
+            if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
+                return@runCatching
+            }
             preferences.markRunning()
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
-            syncDao.pruneTombstones(System.currentTimeMillis())
             var remote = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
 
             // A durable page token is maintained for incremental wake-ups. A full appData listing
@@ -126,6 +157,7 @@ class CloudSyncEngine @Inject constructor(
         drive.listAll(token).forEach { drive.delete(token, it.id) }
         syncDao.clearObjectStates()
         syncDao.clearOutbox()
+        syncDao.clearTombstones()
     }
 
     suspend fun enqueueAllCurrentState() = withContext(Dispatchers.IO) { seedInitialOutbox() }
@@ -216,7 +248,7 @@ class CloudSyncEngine @Inject constructor(
             syncDao.removeObjectState(key)
         }
         val now = System.currentTimeMillis()
-        val expiresAt = now + TOMBSTONE_LIFETIME_MILLIS
+        val expiresAt = PERMANENT_TOMBSTONE_EXPIRY
         val tombstoneKey = "tombstones/${mutation.entityType.lowercase()}/${mutation.entityId}"
         val tombstone = jsonObject(
             tombstoneKey,
@@ -244,11 +276,24 @@ class CloudSyncEngine @Inject constructor(
             try {
                 drive.download(token, objectInfo.id, temp)
                 val json = JSONObject(temp.readText())
-                val expiresAt = json.optLong("expiresAt")
-                if (expiresAt <= System.currentTimeMillis()) {
-                    drive.delete(token, objectInfo.id)
-                    remote.remove(key)
-                    return@forEach
+                // Keep the field for compatibility with already released clients, but use the
+                // largest Long value so old versions never garbage-collect a permanent deletion.
+                // Legacy 30-day tombstones are upgraded as soon as a current client sees them.
+                if (json.optLong("expiresAt") != PERMANENT_TOMBSTONE_EXPIRY) {
+                    json.put("expiresAt", PERMANENT_TOMBSTONE_EXPIRY)
+                    val normalized = jsonObject(key, json)
+                    try {
+                        remote[key] = drive.upload(
+                            token = token,
+                            name = normalized.name,
+                            objectKey = normalized.key,
+                            mimeType = normalized.mimeType,
+                            source = normalized.file,
+                            existingFileId = objectInfo.id,
+                        )
+                    } finally {
+                        normalized.file.delete()
+                    }
                 }
                 val type = runCatching { SyncEntityType.valueOf(json.getString("type")) }.getOrNull() ?: return@forEach
                 val id = json.getString("entityId")
@@ -260,7 +305,14 @@ class CloudSyncEngine @Inject constructor(
                     }
                 }
                 syncDao.removeOutbox(type.name, id)
-                syncDao.upsertTombstone(SyncTombstoneEntity(key, json.optLong("deletedAt"), json.optString("deviceId"), expiresAt))
+                syncDao.upsertTombstone(
+                    SyncTombstoneEntity(
+                        objectKey = key,
+                        deletedAt = json.optLong("deletedAt"),
+                        deviceId = json.optString("deviceId"),
+                        expiresAt = PERMANENT_TOMBSTONE_EXPIRY,
+                    ),
+                )
             } finally {
                 temp.delete()
             }
@@ -561,6 +613,6 @@ class CloudSyncEngine @Inject constructor(
     private class AuthorizationRequiredException(message: String) : Exception(message)
 
     private companion object {
-        const val TOMBSTONE_LIFETIME_MILLIS = 30L * 24 * 60 * 60 * 1000
+        const val PERMANENT_TOMBSTONE_EXPIRY = Long.MAX_VALUE
     }
 }

@@ -10,6 +10,7 @@ import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.sync.CloudSyncManager
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import com.kixyu9527.kixyubook.core.sync.GoogleConnectResult
+import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
@@ -86,6 +87,10 @@ class SettingsViewModel @Inject constructor(
     fun setSyncOriginalFiles(enabled: Boolean) = viewModelScope.launch { cloudSync.setSyncOriginalFiles(enabled) }
     fun setSyncFonts(enabled: Boolean) = viewModelScope.launch { cloudSync.setSyncFonts(enabled) }
     fun setWifiOnlyForLargeFiles(enabled: Boolean) = viewModelScope.launch { cloudSync.setWifiOnlyForLargeFiles(enabled) }
+    fun resolveInitialSync(choice: InitialSyncChoice) = viewModelScope.launch {
+        cloudSync.resolveInitialSync(choice)
+            .onFailure { _messages.emit(it.message ?: "首次同步准备失败") }
+    }
     fun syncNow() = cloudSync.syncNow()
     fun disconnectGoogle() = viewModelScope.launch { cloudSync.disconnect() }
     fun deleteCloudData(activity: Activity) = viewModelScope.launch {
@@ -96,7 +101,7 @@ class SettingsViewModel @Inject constructor(
 
     private suspend fun handleConnectResult(result: GoogleConnectResult) {
         when (result) {
-            GoogleConnectResult.Connected -> _messages.emit("Google 同步已启用")
+            GoogleConnectResult.Connected -> _messages.emit("Google 账号已连接，正在检查同步数据")
             is GoogleConnectResult.NeedsAuthorization -> _authorizationRequests.send(result.pendingIntent)
             is GoogleConnectResult.Failed -> _messages.emit(result.message)
         }

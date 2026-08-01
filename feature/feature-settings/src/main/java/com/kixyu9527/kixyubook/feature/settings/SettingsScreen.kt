@@ -85,6 +85,7 @@ import java.util.Locale
 import kotlin.system.exitProcess
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
+import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -221,6 +222,8 @@ fun CloudSyncRoute(
     val snackbar = remember { SnackbarHostState() }
     val syncAccount = state.cloudSync.account
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmUseLocalLibrary by remember { mutableStateOf(false) }
+    var initialDecisionDeferred by remember { mutableStateOf(false) }
     var autoAuthorizationAttempted by remember { mutableStateOf(false) }
     val authorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (activity != null) viewModel.finishGoogleAuthorization(activity, result.data)
@@ -242,6 +245,9 @@ fun CloudSyncRoute(
             autoAuthorizationAttempted = true
             viewModel.connectGoogle(activity)
         }
+    }
+    LaunchedEffect(state.cloudSync.initialSyncDecision) {
+        if (state.cloudSync.initialSyncDecision != null) initialDecisionDeferred = false
     }
 
     KixyuPageScaffold(
@@ -290,7 +296,12 @@ fun CloudSyncRoute(
                             icon = Icons.Outlined.CloudDone,
                         ) {
                             Text(
-                                if (state.cloudSync.enabled) "已连接" else "已暂停",
+                                when {
+                                    state.cloudSync.initialSyncDecision != null -> "待确认"
+                                    state.cloudSync.inspectingInitialSync -> "检查中"
+                                    state.cloudSync.enabled -> "已连接"
+                                    else -> "已暂停"
+                                },
                                 color = MaterialTheme.colorScheme.primary,
                                 maxLines = 1,
                             )
@@ -299,9 +310,20 @@ fun CloudSyncRoute(
                         KixyuSettingsRow(
                             title = "自动同步",
                             supportingText = "书库发生变化后在后台增量同步",
-                            onClick = { viewModel.setCloudSyncEnabled(!state.cloudSync.enabled) },
+                            onClick = {
+                                if (state.cloudSync.initialSyncDecision != null) {
+                                    initialDecisionDeferred = false
+                                } else {
+                                    viewModel.setCloudSyncEnabled(!state.cloudSync.enabled)
+                                }
+                            },
                         ) {
-                            KixyuSwitch(state.cloudSync.enabled, viewModel::setCloudSyncEnabled)
+                            KixyuSwitch(
+                                checked = state.cloudSync.enabled,
+                                onCheckedChange = viewModel::setCloudSyncEnabled,
+                                enabled = state.cloudSync.initialSyncDecision == null &&
+                                    !state.cloudSync.inspectingInitialSync,
+                            )
                         }
                     }
                 }
@@ -319,6 +341,8 @@ fun CloudSyncRoute(
                         Row(Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal)) {
                             KixyuButton(
                                 text = when {
+                                    state.cloudSync.initialSyncDecision != null -> "选择同步方式"
+                                    state.cloudSync.inspectingInitialSync -> "正在检查云端…"
                                     state.cloudSync.phase == CloudSyncPhase.AUTHORIZING -> "正在授权…"
                                     state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED -> "重新授权"
                                     state.cloudSync.phase == CloudSyncPhase.SYNCING -> "正在同步…"
@@ -326,19 +350,23 @@ fun CloudSyncRoute(
                                     else -> "立即同步"
                                 },
                                 onClick = {
-                                    if (state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED) {
+                                    if (state.cloudSync.initialSyncDecision != null) {
+                                        initialDecisionDeferred = false
+                                    } else if (state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED) {
                                         activity?.let(viewModel::connectGoogle)
                                     } else {
                                         viewModel.syncNow()
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = state.cloudSync.phase !in setOf(
+                                enabled = !state.cloudSync.inspectingInitialSync &&
+                                    state.cloudSync.phase !in setOf(
                                     CloudSyncPhase.AUTHORIZING,
                                     CloudSyncPhase.SYNCING,
                                 ) && (
                                     state.cloudSync.enabled ||
-                                        state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED
+                                        state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED ||
+                                        state.cloudSync.initialSyncDecision != null
                                     ),
                             )
                         }
@@ -432,6 +460,51 @@ fun CloudSyncRoute(
     ) {
         Text("此操作不会删除本机数据，但无法从 Google Drive 恢复。")
     }
+
+    val initialDecision = state.cloudSync.initialSyncDecision
+    KixyuActionDialog(
+        show = initialDecision != null && !initialDecisionDeferred && !confirmUseLocalLibrary,
+        title = "发现云端书库",
+        onDismissRequest = { initialDecisionDeferred = true },
+        confirmLabel = "从云端恢复",
+        onConfirm = {
+            viewModel.resolveInitialSync(InitialSyncChoice.RESTORE_FROM_CLOUD)
+        },
+        confirmEnabled = !state.cloudSync.inspectingInitialSync,
+        dismissLabel = "稍后决定",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+            Text("本机书库为空，Google Drive 中有 ${initialDecision?.cloudBookCount ?: 0} 本可恢复书籍。")
+            Text(
+                "无法仅凭空书库判断这是新设备，还是你主动删除了本机书籍。选择前不会上传、下载或删除任何数据。",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "本次选择只决定首次同步方向；完成后继续使用双向增量同步。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            KixyuTextButton(
+                text = "使用本机空书库覆盖云端",
+                onClick = { confirmUseLocalLibrary = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+
+    KixyuActionDialog(
+        show = confirmUseLocalLibrary,
+        title = "清空云端书库？",
+        onDismissRequest = { confirmUseLocalLibrary = false },
+        confirmLabel = "覆盖云端",
+        onConfirm = {
+            confirmUseLocalLibrary = false
+            viewModel.resolveInitialSync(InitialSyncChoice.USE_LOCAL_LIBRARY)
+        },
+        confirmEnabled = !state.cloudSync.inspectingInitialSync,
+    ) {
+        Text("这会永久删除 Google Drive 中的同步书籍和阅读数据，并以当前空书库作为新的同步起点。此操作无法撤销。")
+    }
 }
 
 private data class CloudSyncStatusUi(
@@ -451,10 +524,21 @@ private fun LargeFileNetwork.label(): String = when (this) {
 }
 
 private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
+    val initialDecision = state.initialSyncDecision
     val lastSync = state.lastSyncTime.takeIf { it > 0 }?.let {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(it))
     }
     return when {
+        initialDecision != null -> CloudSyncStatusUi(
+            title = "等待确认首次同步方式",
+            detail = "本机为空，云端有 ${initialDecision.cloudBookCount} 本可恢复书籍",
+            icon = Icons.Outlined.CloudSync,
+        )
+        state.inspectingInitialSync -> CloudSyncStatusUi(
+            title = "正在检查云端书库",
+            detail = "确认两端数据后再开始首次同步",
+            icon = Icons.Outlined.CloudSync,
+        )
         !state.enabled -> CloudSyncStatusUi(
             title = "同步已暂停",
             detail = lastSync?.let { "上次同步于 $it" } ?: "开启自动同步后开始上传数据",

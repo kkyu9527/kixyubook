@@ -44,15 +44,12 @@ interface SyncDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTombstone(value: SyncTombstoneEntity)
 
-    @Query("SELECT * FROM sync_tombstones WHERE expiresAt > :now")
-    suspend fun activeTombstones(now: Long): List<SyncTombstoneEntity>
-
-    @Query("DELETE FROM sync_tombstones WHERE expiresAt <= :now")
-    suspend fun pruneTombstones(now: Long)
-
     @Query("DELETE FROM sync_outbox")
     suspend fun clearOutbox()
 
     @Query("DELETE FROM sync_object_state")
     suspend fun clearObjectStates()
+
+    @Query("DELETE FROM sync_tombstones")
+    suspend fun clearTombstones()
 }
