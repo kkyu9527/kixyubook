@@ -216,6 +216,7 @@ fun CloudSyncRoute(
     val snackbar = remember { SnackbarHostState() }
     val syncAccount = state.cloudSync.account
     var confirmDelete by remember { mutableStateOf(false) }
+    var autoAuthorizationAttempted by remember { mutableStateOf(false) }
     val authorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (activity != null) viewModel.finishGoogleAuthorization(activity, result.data)
     }
@@ -227,8 +228,15 @@ fun CloudSyncRoute(
             authorizationLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
         }
     }
-    LaunchedEffect(activity, syncAccount) {
-        if (activity != null && syncAccount == null) viewModel.connectGoogle(activity)
+    LaunchedEffect(activity, syncAccount, state.cloudSync.phase) {
+        if (
+            activity != null &&
+            !autoAuthorizationAttempted &&
+            (syncAccount == null || state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED)
+        ) {
+            autoAuthorizationAttempted = true
+            viewModel.connectGoogle(activity)
+        }
     }
 
     KixyuPageScaffold(
@@ -278,6 +286,7 @@ fun CloudSyncRoute(
                         ) {
                             Text(
                                 when (state.cloudSync.phase) {
+                                    CloudSyncPhase.AUTHORIZING -> "授权中"
                                     CloudSyncPhase.SYNCING -> "同步中"
                                     CloudSyncPhase.AUTH_REQUIRED -> "需授权"
                                     CloudSyncPhase.ERROR -> "有错误"
@@ -304,10 +313,24 @@ fun CloudSyncRoute(
                         KixyuDivider()
                         Row(Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal)) {
                             KixyuButton(
-                                text = if (state.cloudSync.phase == CloudSyncPhase.SYNCING) "正在同步…" else "立即同步",
-                                onClick = viewModel::syncNow,
+                                text = when (state.cloudSync.phase) {
+                                    CloudSyncPhase.AUTHORIZING -> "正在授权…"
+                                    CloudSyncPhase.AUTH_REQUIRED -> "重新授权"
+                                    CloudSyncPhase.SYNCING -> "正在同步…"
+                                    else -> "立即同步"
+                                },
+                                onClick = {
+                                    if (state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED) {
+                                        activity?.let(viewModel::connectGoogle)
+                                    } else {
+                                        viewModel.syncNow()
+                                    }
+                                },
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = state.cloudSync.phase != CloudSyncPhase.SYNCING,
+                                enabled = state.cloudSync.phase !in setOf(
+                                    CloudSyncPhase.AUTHORIZING,
+                                    CloudSyncPhase.SYNCING,
+                                ),
                             )
                         }
                     }

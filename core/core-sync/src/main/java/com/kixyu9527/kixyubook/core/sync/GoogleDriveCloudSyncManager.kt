@@ -35,12 +35,15 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         )
     }.stateIn(scope, SharingStarted.Eagerly, CloudSyncState())
 
-    override suspend fun connect(activity: Activity): GoogleConnectResult =
-        accounts.connect(activity).also { if (it is GoogleConnectResult.Connected) scheduler.requestImmediate() }
+    override suspend fun connect(activity: Activity): GoogleConnectResult {
+        preferences.markAuthorizing()
+        return accounts.connect(activity).also { handleAuthorizationResult(it) }
+    }
 
-    override suspend fun finishAuthorization(activity: Activity, resultData: Intent?): GoogleConnectResult =
-        accounts.finishAuthorization(activity, resultData)
-            .also { if (it is GoogleConnectResult.Connected) scheduler.requestImmediate() }
+    override suspend fun finishAuthorization(activity: Activity, resultData: Intent?): GoogleConnectResult {
+        preferences.markAuthorizing()
+        return accounts.finishAuthorization(activity, resultData).also { handleAuthorizationResult(it) }
+    }
 
     override suspend fun disconnect() {
         scheduler.cancel()
@@ -78,5 +81,13 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         engine.deleteAllCloudData(token)
         preferences.setEnabled(false)
         scheduler.cancel()
+    }
+
+    private suspend fun handleAuthorizationResult(result: GoogleConnectResult) {
+        when (result) {
+            GoogleConnectResult.Connected -> scheduler.requestImmediate()
+            is GoogleConnectResult.NeedsAuthorization -> Unit
+            is GoogleConnectResult.Failed -> preferences.markAuthRequired(result.message)
+        }
     }
 }

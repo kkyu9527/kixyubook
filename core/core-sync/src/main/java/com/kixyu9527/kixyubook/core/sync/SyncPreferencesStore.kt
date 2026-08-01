@@ -81,6 +81,11 @@ class SyncPreferencesStore @Inject constructor(
     suspend fun setSyncFonts(value: Boolean) = setBoolean(SYNC_FONTS, value)
     suspend fun setWifiOnly(value: Boolean) = setBoolean(WIFI_ONLY, value)
 
+    suspend fun markAuthorizing() = context.cloudSyncDataStore.edit {
+        it[PHASE] = CloudSyncPhase.AUTHORIZING.name
+        it.remove(ERROR)
+    }
+
     suspend fun markRunning() = context.cloudSyncDataStore.edit {
         it[PHASE] = CloudSyncPhase.SYNCING.name
         it.remove(ERROR)
