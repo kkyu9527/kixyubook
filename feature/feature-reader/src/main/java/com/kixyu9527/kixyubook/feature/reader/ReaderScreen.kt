@@ -1406,13 +1406,13 @@ private fun ReaderControls(
                         onDismissRequest = { if (menuVisible) onSettings() },
                         alignEnd = true,
                         items = listOf(
-                            KixyuPopupMenuItem("阅读主题", Icons.Outlined.Palette) {
+                            KixyuPopupMenuItem("阅读配色", Icons.Outlined.Palette) {
                                 onSettings(); onSheet(ReaderSheet.THEME)
                             },
-                            KixyuPopupMenuItem("页面外观", Icons.Outlined.ViewCarousel) {
+                            KixyuPopupMenuItem("排版与翻页", Icons.Outlined.ViewCarousel) {
                                 onSettings(); onSheet(ReaderSheet.LAYOUT)
                             },
-                            KixyuPopupMenuItem("阅读设置", Icons.Outlined.Tune) {
+                            KixyuPopupMenuItem("阅读行为", Icons.Outlined.Tune) {
                                 onSettings(); onSheet(ReaderSheet.SETTINGS)
                             },
                         ),
@@ -2012,7 +2012,7 @@ private fun ReaderSearchOverlay(
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("阅读主题", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("阅读配色", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
             KixyuSection(title = "应用界面") {
                 KixyuAppUiStyleControl(settings) { updated -> update { updated } }
@@ -2042,9 +2042,9 @@ private fun LayoutSheet(
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("页面外观", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("排版与翻页", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
-            KixyuSection(title = "字体") {
+            KixyuSection(title = "排版与翻页") {
                 KixyuFontControls(
                     fonts = state.availableFonts,
                     selectedFontUuid = settings.fontUuid,
@@ -2052,10 +2052,7 @@ private fun LayoutSheet(
                     onAddFont = addFont,
                     onDeleteFont = deleteFont,
                 )
-            }
-        }
-        item {
-            KixyuSection(title = "排版") {
+                KixyuDivider()
                 KixyuReaderLayoutControls(settings) { updated -> update { updated } }
             }
         }
@@ -2073,9 +2070,9 @@ private fun ReaderSettingsSheet(
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("阅读设置", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("阅读行为", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
-            KixyuSection {
+            KixyuSection(title = "阅读行为") {
                 KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
             }
         }

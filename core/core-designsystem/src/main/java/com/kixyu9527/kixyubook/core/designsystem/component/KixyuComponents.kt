@@ -440,13 +440,7 @@ fun KixyuReaderThemeControls(
     LaunchedEffect(settings.customThemeEnabled) {
         if (!settings.customThemeEnabled) editingTheme = null
     }
-    KixyuDropdownRow(
-        title = modeTitle,
-        selected = settings.theme,
-        options = listOf(ReaderTheme.SYSTEM, ReaderTheme.DAY, ReaderTheme.NIGHT),
-        optionLabel = ReaderTheme::displayName,
-        onSelected = { onSettingsChange(settings.copy(theme = it)) },
-    )
+    KixyuThemeModeControl(settings, onSettingsChange, modeTitle)
     KixyuDivider()
     KixyuSettingsRow(
         title = "自定义配色",
@@ -501,6 +495,22 @@ fun KixyuReaderThemeControls(
             }
         }
     }
+}
+
+/** Global light/dark mode selector shared by app appearance and the reader shortcut. */
+@Composable
+fun KixyuThemeModeControl(
+    settings: ReaderSettings,
+    onSettingsChange: (ReaderSettings) -> Unit,
+    title: String = "显示模式",
+) {
+    KixyuDropdownRow(
+        title = title,
+        selected = settings.theme,
+        options = listOf(ReaderTheme.SYSTEM, ReaderTheme.DAY, ReaderTheme.NIGHT),
+        optionLabel = ReaderTheme::displayName,
+        onSelected = { onSettingsChange(settings.copy(theme = it)) },
+    )
 }
 
 @Composable

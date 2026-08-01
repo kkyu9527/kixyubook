@@ -69,6 +69,8 @@ import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
+import com.kixyu9527.kixyubook.feature.settings.DataAndBackupRoute
+import com.kixyu9527.kixyubook.feature.settings.AboutRoute
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
 import dagger.hilt.android.AndroidEntryPoint
@@ -426,10 +428,7 @@ private fun KixyuNavHost(
                             Routes.HOME -> HomeRoute(onOpenBook = openBook)
                             Routes.LIBRARY -> LibraryRoute(onOpenBook = openBook)
                             Routes.SETTINGS -> SettingsRoute(
-                                updateState = updateState,
                                 currentVersion = BuildConfig.VERSION_NAME,
-                                onCheckForUpdates = onCheckForUpdates,
-                                onUpdateResultConsumed = onUpdateResultConsumed,
                                 onAppearance = {
                                     prioritizeAnimation()
                                     navController.navigate(Routes.APPEARANCE)
@@ -441,6 +440,14 @@ private fun KixyuNavHost(
                                 onReadingSettings = {
                                     prioritizeAnimation()
                                     navController.navigate(Routes.READING_SETTINGS)
+                                },
+                                onDataAndBackup = {
+                                    prioritizeAnimation()
+                                    navController.navigate(Routes.DATA_AND_BACKUP)
+                                },
+                                onAbout = {
+                                    prioritizeAnimation()
+                                    navController.navigate(Routes.ABOUT)
                                 },
                             )
                         }
@@ -463,6 +470,24 @@ private fun KixyuNavHost(
                         prioritizeAnimation()
                         navController.popBackStack()
                     })
+                }
+                composable(Routes.DATA_AND_BACKUP) {
+                    DataAndBackupRoute(onBack = {
+                        prioritizeAnimation()
+                        navController.popBackStack()
+                    })
+                }
+                composable(Routes.ABOUT) {
+                    AboutRoute(
+                        updateState = updateState,
+                        currentVersion = BuildConfig.VERSION_NAME,
+                        onCheckForUpdates = onCheckForUpdates,
+                        onUpdateResultConsumed = onUpdateResultConsumed,
+                        onBack = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                    )
                 }
                 composable(
                     route = Routes.READER,
