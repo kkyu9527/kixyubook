@@ -34,6 +34,15 @@ class EpubBookParser : BookParser {
             size > CSS_SOURCE_CACHE_SIZE
     }
 
+    /**
+     * Drops only derived in-memory parsing state. The normalized binary chapter cache is owned by
+     * the repository and remains on disk, so reopening a book does not require rebuilding content.
+     */
+    fun clearMemoryCaches() {
+        synchronized(packageIndexCache) { packageIndexCache.clear() }
+        synchronized(cssSourceCache) { cssSourceCache.clear() }
+    }
+
     override fun readMetadata(file: File, fallbackTitle: String): DocumentMetadata = ZipFile(file).use { zip ->
         val pkg = readPackage(file, zip)
         val coverItem = pkg.manifest.values.firstOrNull { "cover-image" in it.properties }

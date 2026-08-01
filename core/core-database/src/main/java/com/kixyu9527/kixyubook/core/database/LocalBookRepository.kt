@@ -73,6 +73,9 @@ class LocalBookRepository @Inject constructor(
     private val importIndexJobs = ConcurrentHashMap<String, Job>()
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
     private val workManager by lazy(LazyThreadSafetyMode.NONE) { WorkManager.getInstance(context) }
+    // Keep only the decoded chapters needed by the active pager. EPUB chapters outside this
+    // window remain in the binary disk cache and are cheap to hydrate without retaining a whole
+    // reading session in the process heap.
     private val chapterCache = object : LinkedHashMap<ChapterCacheKey, ChapterContent>(
         CHAPTER_CACHE_SIZE,
         0.75f,
@@ -383,6 +386,13 @@ class LocalBookRepository @Inject constructor(
         epubParseCoordinator.setReaderInteractionActive(active)
     }
 
+    override fun releaseReaderMemory(bookUuid: String) {
+        synchronized(chapterCacheLock) {
+            chapterCache.keys.removeAll { it.bookUuid == bookUuid }
+        }
+        (parsers.parserFor(BookFormat.EPUB) as EpubBookParser).clearMemoryCaches()
+    }
+
     override fun setAppAnimationActive(active: Boolean) {
         epubParseCoordinator.setAppAnimationActive(active)
     }
@@ -676,7 +686,7 @@ private data class RegisteredImport(
     val parser: BookParser,
 )
 
-private const val CHAPTER_CACHE_SIZE = 32
+private const val CHAPTER_CACHE_SIZE = 6
 private const val IMPORT_CHAPTER_BATCH_SIZE = 32
 private const val IMPORT_INDEX_CONCURRENCY = 2
 

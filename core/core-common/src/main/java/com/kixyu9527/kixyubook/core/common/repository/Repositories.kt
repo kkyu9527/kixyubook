@@ -21,6 +21,8 @@ interface BookRepository {
         priority: ChapterLoadPriority = ChapterLoadPriority.USER,
     ): ChapterContent?
     suspend fun prepareReader(bookUuid: String)
+    /** Releases decoded reader data; persistent EPUB and pagination caches remain available. */
+    fun releaseReaderMemory(bookUuid: String) = Unit
     /** Temporarily yields background EPUB indexing to a visible reader gesture/animation. */
     fun setReaderInteractionActive(active: Boolean) = Unit
     /** Temporarily yields background EPUB indexing to an app-level navigation animation. */

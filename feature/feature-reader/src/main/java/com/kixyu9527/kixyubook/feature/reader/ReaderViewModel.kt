@@ -306,11 +306,12 @@ class ReaderViewModel @Inject constructor(
             }
         }
         val nearbyIndices = (1..CHAPTER_PREFETCH_RADIUS)
-            // Most reading proceeds forward, so warm the next chapter before the previous one
-            // at every distance while still retaining a symmetric ten-chapter window.
+            // Most reading proceeds forward, so decode the next chapter before the previous one.
+            // The repository's persistent binary cache and background index own the wider window;
+            // retaining it here duplicated full paragraph graphs and text-layout work in memory.
             .flatMap { distance -> listOf(index + distance, index - distance) }
             .filter { it in chapters.indices }
-        // One sequential job avoids creating twenty competing EPUB parses at reader entry. The
+        // One sequential job avoids competing EPUB parses at reader entry. The
         // visible chapter has already rendered when this starts, and a user jump cancels the job.
         chapterPrefetchJob = viewModelScope.launch {
             nearbyIndices.forEach { nearbyIndex ->
@@ -548,8 +549,14 @@ class ReaderViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        chapterPrefetchJob?.cancel()
+        chapterLoads.values.forEach { request ->
+            if (!request.deferred.isCompleted) request.deferred.cancel()
+        }
+        chapterLoads.clear()
         criticalNeighborPublishJob?.cancel()
         books.setReaderInteractionActive(false)
+        books.releaseReaderMemory(bookUuid)
         super.onCleared()
     }
 }
@@ -574,7 +581,9 @@ private data class InitialReaderData(
 
 private fun ChapterContent.toReaderChapter() = ReaderChapter(chapter.id, chapter.bookUuid, chapter.title, chapter.index, paragraphs)
 
-private const val CHAPTER_PREFETCH_RADIUS = 10
+// Decode only what the pager can immediately reach. The wider ±10 chapter window is persisted by
+// the EPUB binary cache/background index instead of being retained as live paragraph objects.
+private const val CHAPTER_PREFETCH_RADIUS = 2
 // The renderer composes only the immediate previous/next chapter, but retaining a second decoded
 // pair gives one-page EPUB chapters enough runway for rapid consecutive boundary gestures.
 private const val RENDER_PREFETCH_RADIUS = 2
