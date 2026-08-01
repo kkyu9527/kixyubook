@@ -82,8 +82,10 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
 
@@ -137,6 +139,7 @@ private fun LibraryScreen(
     var confirmingBatchDelete by remember { mutableStateOf(false) }
     val visibleBookUuids = state.books.mapTo(linkedSetOf()) { it.book.uuid }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
+    val expanded = kixyuWindowWidthClass() == KixyuWindowWidthClass.EXPANDED
     LaunchedEffect(visibleBookUuids) {
         selectedBookUuids = selectedBookUuids.intersect(visibleBookUuids)
         if (visibleBookUuids.isEmpty()) selectionMode = false
@@ -206,7 +209,9 @@ private fun LibraryScreen(
         },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.kixyuPageContentWidth()
+            Modifier.kixyuPageContentWidth(
+                if (expanded) KixyuSize.expandedPageContentMaxWidth else KixyuSize.pageContentMaxWidth,
+            )
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
@@ -249,22 +254,46 @@ private fun LibraryScreen(
             if (state.books.isEmpty()) {
                 item { LibraryEmptyState(Modifier.fillParentMaxSize().padding(KixyuSpacing.extraLarge)) }
             }
-            items(state.books, key = { it.book.uuid }) { item ->
-                LibraryBookRow(
-                    item = item,
-                    selected = item.book.uuid in selectedBookUuids,
-                    selectionMode = selectionMode,
-                    onOpen = {
-                        if (selectionMode) {
-                            selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
-                        } else onOpenBook(item.book.uuid)
-                    },
-                    onSelectionChange = {
-                        selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
-                    },
-                    onManage = { managing = item },
-                    onDelete = { deleting = item },
-                )
+            if (expanded) {
+                items(state.books.chunked(2), key = { books -> books.first().book.uuid }) { books ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        books.forEach { item ->
+                            LibraryBookRow(
+                                item = item,
+                                selected = item.book.uuid in selectedBookUuids,
+                                selectionMode = selectionMode,
+                                onOpen = {
+                                    if (selectionMode) selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
+                                    else onOpenBook(item.book.uuid)
+                                },
+                                onSelectionChange = { selectedBookUuids = selectedBookUuids.toggle(item.book.uuid) },
+                                onManage = { managing = item },
+                                onDelete = { deleting = item },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (books.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            } else {
+                items(state.books, key = { it.book.uuid }) { item ->
+                    LibraryBookRow(
+                        item = item,
+                        selected = item.book.uuid in selectedBookUuids,
+                        selectionMode = selectionMode,
+                        onOpen = {
+                            if (selectionMode) selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
+                            else onOpenBook(item.book.uuid)
+                        },
+                        onSelectionChange = { selectedBookUuids = selectedBookUuids.toggle(item.book.uuid) },
+                        onManage = { managing = item },
+                        onDelete = { deleting = item },
+                    )
+                }
             }
             item { Spacer(Modifier.height(navigationContentPadding)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
@@ -335,11 +364,12 @@ private fun LibraryBookRow(
     onSelectionChange: () -> Unit,
     onManage: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Surface(
         onClick = onOpen,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
             .semantics { contentDescription = "打开书籍：${item.book.title}" },
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,

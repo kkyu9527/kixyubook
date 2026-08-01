@@ -90,8 +90,10 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.displayName
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -139,6 +141,123 @@ fun SettingsRoute(
     }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
     val syncAccount = state.cloudSync.account
+    val expanded = kixyuWindowWidthClass() == KixyuWindowWidthClass.EXPANDED
+
+    val syncSection: @Composable () -> Unit = {
+        KixyuSection {
+            KixyuSettingsRow(
+                title = "Google 同步",
+                supportingText = when {
+                    syncAccount == null -> "登录后在设备间增量同步"
+                    state.cloudSync.phase == CloudSyncPhase.SYNCING -> "正在同步 · ${syncAccount.email}"
+                    state.cloudSync.pendingCount > 0 -> "${state.cloudSync.pendingCount} 项等待同步 · ${syncAccount.email}"
+                    else -> syncAccount.email
+                },
+                icon = if (syncAccount == null) Icons.Outlined.Cloud else Icons.Outlined.CloudDone,
+                onClick = onCloudSync,
+            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+        }
+    }
+    val appearanceSection: @Composable () -> Unit = {
+        KixyuSection {
+            KixyuSettingsRow(
+                title = "外观",
+                supportingText = buildString {
+                    append(state.settings.theme.displayName())
+                    append(" · ")
+                    append(state.settings.appUiStyle.displayName())
+                    if (state.settings.customThemeEnabled) append(" · 自定义配色")
+                    append(" · ")
+                    append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
+                },
+                icon = Icons.Outlined.Palette,
+                onClick = onAppearance,
+            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+        }
+    }
+    val readingSection: @Composable () -> Unit = {
+        KixyuSection(title = "阅读") {
+            KixyuSettingsRow(
+                title = "每日目标",
+                supportingText = "用于首页阅读进度统计",
+                icon = Icons.Outlined.Flag,
+            ) { Text("${state.goalMinutes} 分钟", style = MaterialTheme.typography.labelLarge, maxLines = 1) }
+            Slider(
+                value = state.goalMinutes.toFloat(),
+                onValueChange = { viewModel.setGoal(it.toInt()) },
+                valueRange = 5f..120f,
+                steps = 22,
+                modifier = Modifier.padding(horizontal = KixyuSpacing.rowHorizontal),
+            )
+            KixyuDivider()
+            KixyuSettingsRow(
+                title = "阅读设置",
+                supportingText = "页面外观、翻页与阅读行为",
+                icon = Icons.Outlined.Tune,
+                onClick = onReadingSettings,
+            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+        }
+    }
+    val backupSection: @Composable () -> Unit = {
+        KixyuSection(title = "备份") {
+            Row(
+                Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal),
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+            ) {
+                Button(
+                    onClick = { backupCreator.launch("KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup") },
+                    enabled = state.backupOperation == null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    if (state.backupOperation == BackupOperation.EXPORT) {
+                        CircularProgressIndicator(
+                            Modifier.size(KixyuSize.iconSmall),
+                            color = LocalContentColor.current,
+                            strokeWidth = KixyuSpacing.hairline,
+                        )
+                    } else Icon(Icons.Outlined.SaveAlt, null, Modifier.size(KixyuSize.iconSmall))
+                    Spacer(Modifier.width(KixyuSize.compactButtonIconGap))
+                    Text("导出", maxLines = 1)
+                }
+                OutlinedButton(
+                    onClick = { backupPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    enabled = state.backupOperation == null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    if (state.backupOperation == BackupOperation.RESTORE) {
+                        CircularProgressIndicator(
+                            Modifier.size(KixyuSize.iconSmall),
+                            color = LocalContentColor.current,
+                            strokeWidth = KixyuSpacing.hairline,
+                        )
+                    } else Icon(Icons.Outlined.Restore, null, Modifier.size(KixyuSize.iconSmall))
+                    Spacer(Modifier.width(KixyuSize.compactButtonIconGap))
+                    Text("恢复", maxLines = 1)
+                }
+            }
+        }
+    }
+    val aboutSection: @Composable () -> Unit = {
+        KixyuSection(title = "关于") {
+            KixyuSettingsRow(
+                title = "检查更新",
+                supportingText = when (val result = updateState) {
+                    AppUpdateState.Checking -> "正在连接 GitHub…"
+                    is AppUpdateState.Available -> "发现新版本 ${result.update.versionName}"
+                    else -> "当前版本 $currentVersion"
+                },
+                icon = Icons.Outlined.SystemUpdate,
+                onClick = onCheckForUpdates.takeUnless { updateState == AppUpdateState.Checking },
+            ) {
+                if (updateState == AppUpdateState.Checking) {
+                    CircularProgressIndicator(
+                        Modifier.size(KixyuSize.iconSmall),
+                        strokeWidth = KixyuSpacing.hairline,
+                    )
+                } else Text("v$currentVersion", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            }
+        }
+    }
 
     KixyuPageScaffold(
         title = "设置",
@@ -154,7 +273,9 @@ fun SettingsRoute(
         },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.kixyuPageContentWidth()
+            Modifier.kixyuPageContentWidth(
+                if (expanded) KixyuSize.expandedPageContentMaxWidth else KixyuSize.pageContentMaxWidth,
+            )
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
@@ -163,134 +284,36 @@ fun SettingsRoute(
             ),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
-            item {
-                KixyuSection {
-                    KixyuSettingsRow(
-                        title = "Google 同步",
-                        supportingText = when {
-                            syncAccount == null -> "登录后在设备间增量同步"
-                            state.cloudSync.phase == CloudSyncPhase.SYNCING -> "正在同步 · ${syncAccount.email}"
-                            state.cloudSync.pendingCount > 0 -> "${state.cloudSync.pendingCount} 项等待同步 · ${syncAccount.email}"
-                            else -> syncAccount.email
-                        },
-                        icon = if (syncAccount == null) Icons.Outlined.Cloud else Icons.Outlined.CloudDone,
-                        onClick = onCloudSync,
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
-                    }
-                }
-            }
-            item {
-                KixyuSection {
-                    KixyuSettingsRow(
-                        title = "外观",
-                        supportingText = buildString {
-                            append(state.settings.theme.displayName())
-                            append(" · ")
-                            append(state.settings.appUiStyle.displayName())
-                            if (state.settings.customThemeEnabled) append(" · 自定义配色")
-                            append(" · ")
-                            append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
-                        },
-                        icon = Icons.Outlined.Palette,
-                        onClick = onAppearance,
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
-                    }
-                }
-            }
-            item {
-                KixyuSection(title = "阅读") {
-                    KixyuSettingsRow(
-                        title = "每日目标",
-                        supportingText = "用于首页阅读进度统计",
-                        icon = Icons.Outlined.Flag,
-                    ) {
-                        Text("${state.goalMinutes} 分钟", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    }
-                    Slider(
-                        value = state.goalMinutes.toFloat(),
-                        onValueChange = { viewModel.setGoal(it.toInt()) },
-                        valueRange = 5f..120f,
-                        steps = 22,
-                        modifier = Modifier.padding(horizontal = KixyuSpacing.rowHorizontal),
-                    )
-                    KixyuDivider()
-                    KixyuSettingsRow(
-                        title = "阅读设置",
-                        supportingText = "页面外观、翻页与阅读行为",
-                        icon = Icons.Outlined.Tune,
-                        onClick = onReadingSettings,
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
-                    }
-                }
-            }
-            item {
-                KixyuSection(title = "备份") {
+            if (expanded) {
+                item {
                     Row(
-                        Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal),
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        Button(
-                            onClick = { backupCreator.launch("KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup") },
-                            enabled = state.backupOperation == null,
+                        Column(
                             modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
                         ) {
-                            if (state.backupOperation == BackupOperation.EXPORT) {
-                                CircularProgressIndicator(
-                                    Modifier.size(KixyuSize.iconSmall),
-                                    color = LocalContentColor.current,
-                                    strokeWidth = KixyuSpacing.hairline,
-                                )
-                            } else {
-                                Icon(Icons.Outlined.SaveAlt, null, Modifier.size(KixyuSize.iconSmall))
-                            }
-                            Spacer(Modifier.width(KixyuSize.compactButtonIconGap))
-                            Text("导出", maxLines = 1)
+                            syncSection()
+                            appearanceSection()
+                            readingSection()
                         }
-                        OutlinedButton(
-                            onClick = { backupPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
-                            enabled = state.backupOperation == null,
+                        Column(
                             modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
                         ) {
-                            if (state.backupOperation == BackupOperation.RESTORE) {
-                                CircularProgressIndicator(
-                                    Modifier.size(KixyuSize.iconSmall),
-                                    color = LocalContentColor.current,
-                                    strokeWidth = KixyuSpacing.hairline,
-                                )
-                            } else {
-                                Icon(Icons.Outlined.Restore, null, Modifier.size(KixyuSize.iconSmall))
-                            }
-                            Spacer(Modifier.width(KixyuSize.compactButtonIconGap))
-                            Text("恢复", maxLines = 1)
+                            backupSection()
+                            aboutSection()
                         }
                     }
                 }
-            }
-            item {
-                KixyuSection(title = "关于") {
-                    KixyuSettingsRow(
-                        title = "检查更新",
-                        supportingText = when (val result = updateState) {
-                            AppUpdateState.Checking -> "正在连接 GitHub…"
-                            is AppUpdateState.Available -> "发现新版本 ${result.update.versionName}"
-                            else -> "当前版本 $currentVersion"
-                        },
-                        icon = Icons.Outlined.SystemUpdate,
-                        onClick = onCheckForUpdates.takeUnless { updateState == AppUpdateState.Checking },
-                    ) {
-                        if (updateState == AppUpdateState.Checking) {
-                            CircularProgressIndicator(
-                                Modifier.size(KixyuSize.iconSmall),
-                                strokeWidth = KixyuSpacing.hairline,
-                            )
-                        } else {
-                            Text("v$currentVersion", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        }
-                    }
-                }
+            } else {
+                item { syncSection() }
+                item { appearanceSection() }
+                item { readingSection() }
+                item { backupSection() }
+                item { aboutSection() }
             }
             item { Spacer(Modifier.height(navigationContentPadding)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }

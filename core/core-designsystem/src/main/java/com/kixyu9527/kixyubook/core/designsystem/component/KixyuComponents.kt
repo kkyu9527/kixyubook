@@ -121,9 +121,12 @@ object KixyuSize {
     val bottomNavigationContentHeight = 76.dp
     val navigationRailWidth = 88.dp
     val pageContentMaxWidth = 840.dp
+    val expandedPageContentMaxWidth = 1200.dp
     val readerTextMaxWidth = 760.dp
     val readerSpreadGutter = 20.dp
     val sheetContentMaxWidth = 720.dp
+    val adaptiveDialogMaxWidth = 680.dp
+    val adaptiveDialogMaxHeight = 640.dp
     val readerControlInset = 12.dp
     val readerTopControlInset = 0.dp
     val readerControlButton = 48.dp

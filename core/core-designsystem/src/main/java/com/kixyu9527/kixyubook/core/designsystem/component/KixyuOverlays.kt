@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,9 +13,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import top.yukonga.miuix.kmp.basic.Button as MiuixButton
@@ -72,6 +76,11 @@ object KixyuMotion {
 /** Every platform dialog participates in the app's edge-to-edge contract. */
 val KixyuEdgeToEdgeDialogProperties = DialogProperties(
     decorFitsSystemWindows = false,
+)
+
+private val KixyuAdaptiveDialogProperties = DialogProperties(
+    decorFitsSystemWindows = false,
+    usePlatformDefaultWidth = false,
 )
 
 data class KixyuPopupMenuItem(
@@ -133,6 +142,41 @@ fun KixyuBottomSheet(
             // BottomSheetContentLayout and avoiding per-sheet double insets.
             CompositionLocalProvider(LocalKixyuSheetSection provides true) {
                 Box(Modifier.fillMaxWidth().imePadding()) { KixyuSheetContent(content) }
+            }
+        }
+    }
+}
+
+/**
+ * Uses a bottom sheet only on phones. Medium and expanded windows receive a centered, bounded
+ * modal surface so long content never becomes a phone sheet stretched across a tablet.
+ */
+@Composable
+fun KixyuAdaptiveModal(
+    show: Boolean,
+    onDismissRequest: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (kixyuWindowWidthClass() == KixyuWindowWidthClass.COMPACT) {
+        KixyuBottomSheet(show = show, onDismissRequest = onDismissRequest, content = content)
+    } else if (show) {
+        Dialog(
+            onDismissRequest = onDismissRequest,
+            properties = KixyuAdaptiveDialogProperties,
+        ) {
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(KixyuSpacing.extraLarge),
+                contentAlignment = Alignment.Center,
+            ) {
+                val surfaceWidth = minOf(maxWidth, KixyuSize.adaptiveDialogMaxWidth)
+                val surfaceHeight = minOf(maxHeight, KixyuSize.adaptiveDialogMaxHeight)
+                KixyuPopupSurface(
+                    modifier = Modifier.width(surfaceWidth).heightIn(max = surfaceHeight),
+                    shadowElevation = KixyuSpacing.small,
+                    content = content,
+                )
             }
         }
     }

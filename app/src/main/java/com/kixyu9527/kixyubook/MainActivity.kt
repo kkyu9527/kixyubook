@@ -46,7 +46,7 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBar
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationRail
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAdaptiveModal
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
@@ -178,6 +178,7 @@ class MainActivity : ComponentActivity() {
             val appBackground = kixyuPageBackground()
             val availableUpdate = updateState as? AppUpdateState.Available
             val uriHandler = LocalUriHandler.current
+            val updateUsesBottomSheet = kixyuWindowWidthClass() == KixyuWindowWidthClass.COMPACT
             KixyuOverlayHost(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize().background(appBackground)) {
                     appContent()
@@ -189,14 +190,14 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
-                KixyuBottomSheet(
+                KixyuAdaptiveModal(
                     show = availableUpdate != null,
                     onDismissRequest = appViewModel::clearUpdateResult,
                 ) {
                     val update = availableUpdate?.update
                     Column(
                         modifier = Modifier.fillMaxWidth()
-                            .navigationBarsPadding()
+                            .then(if (updateUsesBottomSheet) Modifier.navigationBarsPadding() else Modifier)
                             .padding(
                                 start = KixyuSpacing.large,
                                 end = KixyuSpacing.large,
@@ -218,6 +219,7 @@ class MainActivity : ComponentActivity() {
                         ReleaseNotesMarkdown(
                             markdown = update?.releaseNotes?.takeIf { it.isNotBlank() }
                                 ?: "新版本已经发布，下载完成后将自动打开系统安装页面。",
+                            modifier = Modifier.weight(1f, fill = false),
                         )
                         update?.releaseUrl?.let { releaseUrl ->
                             Text(

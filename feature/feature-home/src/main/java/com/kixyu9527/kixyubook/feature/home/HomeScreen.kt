@@ -52,7 +52,9 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import java.util.concurrent.TimeUnit
 
@@ -78,12 +80,16 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
         }
     }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
+    val widthClass = kixyuWindowWidthClass()
+    val expanded = widthClass == KixyuWindowWidthClass.EXPANDED
     KixyuPageScaffold(
         title = "今天读什么？",
         modifier = Modifier.fillMaxSize(),
     ) { innerPadding ->
         LazyColumn(
-            Modifier.kixyuPageContentWidth()
+            Modifier.kixyuPageContentWidth(
+                if (expanded) KixyuSize.expandedPageContentMaxWidth else KixyuSize.pageContentMaxWidth,
+            )
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
@@ -92,20 +98,46 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
             ),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
-            item { StatsOverview(state) }
-            state.recent.firstOrNull()?.let { current ->
-                item { ContinueReading(current, onOpenBook) }
+            if (expanded && state.recent.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        ContinueReading(state.recent.first(), onOpenBook, Modifier.weight(1.15f))
+                        StatsOverview(state, Modifier.weight(1f))
+                    }
+                }
+            } else {
+                item { StatsOverview(state) }
+                state.recent.firstOrNull()?.let { current ->
+                    item { ContinueReading(current, onOpenBook) }
+                }
             }
             if (state.recent.size > 1) {
                 item {
                     KixyuSection(title = "最近阅读") {
-                        state.recent.drop(1).forEachIndexed { index, item ->
-                            RecentRow(item, onOpenBook)
-                            if (index < state.recent.lastIndex - 1) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(start = KixyuSpacing.rowHorizontal + KixyuSize.recentCoverWidth + KixyuSpacing.medium),
-                                    color = MaterialTheme.colorScheme.outlineVariant,
-                                )
+                        if (expanded) {
+                            state.recent.drop(1).chunked(2).forEach { books ->
+                                Row(Modifier.fillMaxWidth()) {
+                                    RecentRow(books[0], onOpenBook, Modifier.weight(1f))
+                                    if (books.size > 1) {
+                                        RecentRow(books[1], onOpenBook, Modifier.weight(1f))
+                                    } else {
+                                        Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        } else {
+                            state.recent.drop(1).forEachIndexed { index, item ->
+                                RecentRow(item, onOpenBook)
+                                if (index < state.recent.lastIndex - 1) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = KixyuSpacing.rowHorizontal + KixyuSize.recentCoverWidth + KixyuSpacing.medium),
+                                        color = MaterialTheme.colorScheme.outlineVariant,
+                                    )
+                                }
                             }
                         }
                     }
@@ -118,11 +150,11 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
 }
 
 @Composable
-private fun StatsOverview(state: HomeUiState) {
+private fun StatsOverview(state: HomeUiState, modifier: Modifier = Modifier) {
     val stats = state.stats
     val goalMillis = TimeUnit.MINUTES.toMillis(stats.goalMinutes.toLong()).coerceAtLeast(1)
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
     ) {
@@ -158,8 +190,8 @@ private fun StatItem(icon: androidx.compose.ui.graphics.vector.ImageVector, valu
 }
 
 @Composable
-private fun ContinueReading(item: LibraryBook, open: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+private fun ContinueReading(item: LibraryBook, open: (String) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
         Text("继续阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1)
         Surface(
             modifier = Modifier.fillMaxWidth()
@@ -189,9 +221,9 @@ private fun ContinueReading(item: LibraryBook, open: (String) -> Unit) {
 }
 
 @Composable
-private fun RecentRow(item: LibraryBook, open: (String) -> Unit) {
+private fun RecentRow(item: LibraryBook, open: (String) -> Unit, modifier: Modifier = Modifier) {
     Row(
-        Modifier.fillMaxWidth()
+        modifier.fillMaxWidth()
             .semantics { contentDescription = "打开书籍：${item.book.title}" }
             .clickable { open(item.book.uuid) }
             .padding(horizontal = KixyuSpacing.rowHorizontal, vertical = KixyuSpacing.rowVertical),
