@@ -16,7 +16,7 @@ android {
         applicationId = "com.kixyu9527.kixyubook"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1089
+        versionCode = 2001
         versionName = "2.1.0"
     }
 
