@@ -637,9 +637,15 @@ fun KixyuReaderBehaviorControls(
 ) {
     ReaderSwitch(
         title = "显示状态栏",
-        supportingText = "阅读时显示时间和系统状态",
+        supportingText = "关闭后仅随阅读控制层临时显示",
         checked = settings.showStatusBar,
     ) { onSettingsChange(settings.copy(showStatusBar = it)) }
+    KixyuDivider()
+    ReaderSwitch(
+        title = "隐藏小白条",
+        supportingText = "开启后仅随阅读控制层临时显示",
+        checked = settings.hideNavigationBar,
+    ) { onSettingsChange(settings.copy(hideNavigationBar = it)) }
     KixyuDivider()
     ReaderSwitch(
         title = "显示页码",

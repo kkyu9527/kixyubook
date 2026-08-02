@@ -49,6 +49,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             appUiStyle = values[APP_UI_STYLE]?.let { runCatching { AppUiStyle.valueOf(it) }.getOrNull() }
                 ?: AppUiStyle.MATERIAL,
             showStatusBar = values[SHOW_STATUS_BAR] ?: true,
+            hideNavigationBar = values[HIDE_NAVIGATION_BAR] ?: true,
             showPageNumber = values[SHOW_PAGE_NUMBER] ?: true,
             volumeKeyPageTurn = values[VOLUME_KEY_PAGE_TURN] ?: false,
             keepScreenOn = values[KEEP_SCREEN_ON] ?: true,
@@ -76,6 +77,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[APP_COLOR_THEME] = updated.appColorTheme.name
             values[APP_UI_STYLE] = updated.appUiStyle.name
             values[SHOW_STATUS_BAR] = updated.showStatusBar
+            values[HIDE_NAVIGATION_BAR] = updated.hideNavigationBar
             values[SHOW_PAGE_NUMBER] = updated.showPageNumber
             values[VOLUME_KEY_PAGE_TURN] = updated.volumeKeyPageTurn
             values[KEEP_SCREEN_ON] = updated.keepScreenOn
@@ -110,6 +112,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val APP_COLOR_THEME = stringPreferencesKey("app_color_theme")
         val APP_UI_STYLE = stringPreferencesKey("app_ui_style")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
+        val HIDE_NAVIGATION_BAR = booleanPreferencesKey("hide_navigation_bar")
         val SHOW_PAGE_NUMBER = booleanPreferencesKey("show_page_number")
         val VOLUME_KEY_PAGE_TURN = booleanPreferencesKey("volume_key_page_turn")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")

@@ -511,7 +511,8 @@ class CloudSyncEngine @Inject constructor(
         .put("customThemeEnabled", value.customThemeEnabled).put("customDayTheme", customThemeJson(value.customDayTheme))
         .put("customNightTheme", customThemeJson(value.customNightTheme)).put("fontUuid", value.fontUuid)
         .put("appColorTheme", value.appColorTheme.name).put("appUiStyle", value.appUiStyle.name)
-        .put("showStatusBar", value.showStatusBar).put("showPageNumber", value.showPageNumber)
+        .put("showStatusBar", value.showStatusBar).put("hideNavigationBar", value.hideNavigationBar)
+        .put("showPageNumber", value.showPageNumber)
         .put("volumeKeyPageTurn", value.volumeKeyPageTurn).put("keepScreenOn", value.keepScreenOn)
         .put("showChapterTitle", value.showChapterTitle)
 
@@ -529,6 +530,7 @@ class CloudSyncEngine @Inject constructor(
         appColorTheme = enumValue(value, "appColorTheme", AppColorTheme.DEFAULT),
         appUiStyle = enumValue(value, "appUiStyle", AppUiStyle.MATERIAL),
         showStatusBar = value.optBoolean("showStatusBar", true),
+        hideNavigationBar = value.optBoolean("hideNavigationBar", true),
         showPageNumber = value.optBoolean("showPageNumber", true),
         volumeKeyPageTurn = value.optBoolean("volumeKeyPageTurn"),
         keepScreenOn = value.optBoolean("keepScreenOn", true),

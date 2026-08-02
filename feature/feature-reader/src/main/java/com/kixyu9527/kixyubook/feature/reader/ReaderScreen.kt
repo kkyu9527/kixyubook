@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -74,6 +75,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.ViewCompat
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
@@ -270,7 +272,7 @@ private fun ReaderLoadingIndicator(palette: ReaderRenderPalette) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderScreen(
     state: ReaderUiState,
@@ -317,6 +319,14 @@ private fun ReaderScreen(
     val palette = readerPalette(state.settings, systemDark)
     val overlayVisible = controls || menu || toolsMenu || searchVisible ||
         bookInfoVisible || sheet != null
+    val statusBarVisible = state.settings.showStatusBar || overlayVisible
+    val navigationBarVisible = !state.settings.hideNavigationBar || overlayVisible
+    val systemBarDensity = LocalDensity.current
+    val actualStatusBarVisible = WindowInsets.statusBars.getTop(systemBarDensity) > 0
+    val actualNavigationBarVisible = WindowInsets.navigationBars.run {
+        getBottom(systemBarDensity) > 0 || getLeft(systemBarDensity, LayoutDirection.Ltr) > 0 ||
+            getRight(systemBarDensity, LayoutDirection.Ltr) > 0
+    }
     val overlayMotionKey = listOf(
         controls,
         menu,
@@ -356,36 +366,67 @@ private fun ReaderScreen(
         }
     }
     LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
-    DisposableEffect(state.settings.showStatusBar, palette.background, view) {
-        val window = context.findActivity()?.window
-        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+    val systemBarsController = remember(context, view) {
+        context.findActivity()?.window?.let { WindowCompat.getInsetsController(it, view) }
+    }
+    val applyReaderSystemBars by rememberUpdatedState(newValue = {
         val useDarkSystemIcons = palette.background.luminance() > .5f
-        controller?.isAppearanceLightNavigationBars = useDarkSystemIcons
-        controller?.isAppearanceLightStatusBars = useDarkSystemIcons
-        if (state.settings.showStatusBar) {
-            controller?.show(WindowInsetsCompat.Type.statusBars())
+        // Default behavior keeps edge-to-edge bars fully transparent. Transient-bars behavior
+        // adds a system-owned contrast scrim on several Android/HyperOS versions.
+        systemBarsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+        systemBarsController?.isAppearanceLightNavigationBars = useDarkSystemIcons
+        systemBarsController?.isAppearanceLightStatusBars = useDarkSystemIcons
+        if (statusBarVisible) {
+            systemBarsController?.show(WindowInsetsCompat.Type.statusBars())
         } else {
-            controller?.hide(WindowInsetsCompat.Type.statusBars())
+            systemBarsController?.hide(WindowInsetsCompat.Type.statusBars())
         }
-        onDispose { controller?.show(WindowInsetsCompat.Type.statusBars()) }
+        if (navigationBarVisible) {
+            systemBarsController?.show(WindowInsetsCompat.Type.navigationBars())
+        } else {
+            systemBarsController?.hide(WindowInsetsCompat.Type.navigationBars())
+        }
+    })
+    val restoreSystemBars by rememberUpdatedState(newValue = {
+        systemBarsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+        systemBarsController?.show(WindowInsetsCompat.Type.systemBars())
+    })
+    DisposableEffect(statusBarVisible, navigationBarVisible, palette.background, systemBarsController) {
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            applyReaderSystemBars()
+        }
+        onDispose { }
+    }
+    // With the transparent default behavior, a system gesture reveals bars persistently. Mirror
+    // the short auto-dismiss used by reader apps without adopting the system's transient scrim.
+    LaunchedEffect(statusBarVisible, actualStatusBarVisible) {
+        if (!statusBarVisible && actualStatusBarVisible) {
+            delay(SYSTEM_BAR_GESTURE_HIDE_MILLIS)
+            systemBarsController?.hide(WindowInsetsCompat.Type.statusBars())
+        }
+    }
+    LaunchedEffect(navigationBarVisible, actualNavigationBarVisible) {
+        if (!navigationBarVisible && actualNavigationBarVisible) {
+            delay(SYSTEM_BAR_GESTURE_HIDE_MILLIS)
+            systemBarsController?.hide(WindowInsetsCompat.Type.navigationBars())
+        }
     }
     // Navigation starts its pop transition before this composition is disposed.
-    // Restore the status-bar inset at ON_PAUSE as well, so the destination
-    // underneath is never laid out once against the reader's fullscreen inset.
-    DisposableEffect(lifecycleOwner, state.settings.showStatusBar, view) {
-        val window = context.findActivity()?.window
-        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+    // Restore both bars at ON_PAUSE, so the destination underneath is never laid out
+    // once against the reader's immersive insets. ON_RESUME reapplies reader policy.
+    DisposableEffect(lifecycleOwner, systemBarsController) {
         val observer = LifecycleEventObserver { _, event ->
-            if (!state.settings.showStatusBar) {
-                when (event) {
-                    Lifecycle.Event.ON_PAUSE -> controller?.show(WindowInsetsCompat.Type.statusBars())
-                    Lifecycle.Event.ON_RESUME -> controller?.hide(WindowInsetsCompat.Type.statusBars())
-                    else -> Unit
-                }
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> restoreSystemBars()
+                Lifecycle.Event.ON_RESUME -> applyReaderSystemBars()
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            restoreSystemBars()
+        }
     }
     DisposableEffect(state.settings.keepScreenOn, view) {
         val previous = view.keepScreenOn
@@ -434,21 +475,22 @@ private fun ReaderScreen(
     val exitReader: () -> Unit = {
         if (!exitRequested) {
             exitRequested = true
-            val controller = context.findActivity()?.window?.let {
-                WindowCompat.getInsetsController(it, view)
-            }
-            controller?.show(WindowInsetsCompat.Type.statusBars())
+            restoreSystemBars()
             scope.launch {
-                if (!state.settings.showStatusBar) {
-                    var previousTop = -1
+                if (!state.settings.showStatusBar || state.settings.hideNavigationBar) {
+                    var previousInsets = Int.MIN_VALUE to Int.MIN_VALUE
                     var stableFrames = 0
                     for (frame in 0 until 12) {
                         withFrameNanos { }
-                        val top = ViewCompat.getRootWindowInsets(view)
-                            ?.getInsets(WindowInsetsCompat.Type.statusBars())
-                            ?.top ?: 0
-                        stableFrames = if (top > 0 && top == previousTop) stableFrames + 1 else 0
-                        previousTop = top
+                        val insets = ViewCompat.getRootWindowInsets(view)
+                        val currentInsets =
+                            (insets?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0) to
+                                (insets?.getInsets(WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0)
+                        stableFrames = if (
+                            (currentInsets.first > 0 || currentInsets.second > 0) &&
+                            currentInsets == previousInsets
+                        ) stableFrames + 1 else 0
+                        previousInsets = currentInsets
                         if (stableFrames >= 1) break
                     }
                 }
@@ -625,7 +667,7 @@ private fun ReaderScreen(
     }
 }
 
-@OptIn(kotlinx.coroutines.FlowPreview::class)
+@OptIn(kotlinx.coroutines.FlowPreview::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderContent(
     state: ReaderUiState,
@@ -643,8 +685,17 @@ private fun ReaderContent(
     val density = LocalDensity.current
     val paginationCoordinator = rememberReaderPaginationCoordinator()
     val paginationMeasurer = rememberTextMeasurer(cacheSize = READER_TEXT_MEASURE_CACHE_SIZE)
-    val topInsetDp = with(density) { WindowInsets.safeDrawing.getTop(this).toDp().value }
-    val bottomInsetDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp().value }
+    // The reading viewport must not change when transient system bars appear. Derive its
+    // reserved space from the preference and ignoring-visibility insets, never current visibility.
+    val stableTopInsets = if (state.settings.showStatusBar) {
+        WindowInsets.statusBarsIgnoringVisibility.union(WindowInsets.displayCutout)
+    } else {
+        WindowInsets.displayCutout
+    }
+    val topInsetDp = with(density) { stableTopInsets.getTop(this).toDp().value }
+    val bottomInsetDp = with(density) {
+        WindowInsets.navigationBarsIgnoringVisibility.getBottom(this).toDp().value
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val safeViewportHeight = (maxHeight.value - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
         val twoPageSpread = maxWidth >= 840.dp && maxWidth > maxHeight
@@ -1280,6 +1331,7 @@ private fun readerPageNumber(state: ReaderUiState, pageIndex: Int, pageCount: In
         null
     }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderControls(
     visible: Boolean,
@@ -1309,7 +1361,10 @@ private fun ReaderControls(
         visible = visible,
         modifier = Modifier.fillMaxSize(),
     ) {
-        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        val stableControlInsets = WindowInsets.statusBarsIgnoringVisibility
+            .union(WindowInsets.navigationBarsIgnoringVisibility)
+            .union(WindowInsets.displayCutout)
+        Box(Modifier.fillMaxSize().windowInsetsPadding(stableControlInsets)) {
             if (bookTitle.isNotBlank()) {
                 KixyuPopupSurface(
                     modifier = Modifier.align(Alignment.TopCenter)
@@ -2163,6 +2218,7 @@ private const val READER_TEXT_MEASURE_CACHE_SIZE = 0
 private const val PAGER_NAVIGATION_RADIUS = 10
 private const val CHAPTER_LOADING_INDICATOR_DELAY_MILLIS = 180L
 private const val READER_OVERLAY_SETTLE_MILLIS = 320L
+private const val SYSTEM_BAR_GESTURE_HIDE_MILLIS = 2_000L
 private const val READER_CONTROL_ACCENT_MIX = .18f
 private const val READER_CONTROL_DISABLED_ACCENT_MIX = .1f
 private const val MIN_ICON_CONTRAST = 3f

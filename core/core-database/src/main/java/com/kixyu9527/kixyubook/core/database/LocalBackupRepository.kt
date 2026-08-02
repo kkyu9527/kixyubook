@@ -62,6 +62,7 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("customNightTitle", settings.customNightTheme.titleHex)
                     setProperty("customNightAccent", settings.customNightTheme.accentHex)
                     setProperty("showStatusBar", settings.showStatusBar.toString())
+                    setProperty("hideNavigationBar", settings.hideNavigationBar.toString())
                     setProperty("showPageNumber", settings.showPageNumber.toString())
                     setProperty("volumeKeyPageTurn", settings.volumeKeyPageTurn.toString())
                     setProperty("keepScreenOn", settings.keepScreenOn.toString())
@@ -226,6 +227,7 @@ class LocalBackupRepository @Inject constructor(
             ),
             fontUuid = properties.getProperty("fontUuid"),
             showStatusBar = properties.boolean("showStatusBar", current.showStatusBar),
+            hideNavigationBar = properties.boolean("hideNavigationBar", current.hideNavigationBar),
             showPageNumber = properties.boolean("showPageNumber", current.showPageNumber),
             volumeKeyPageTurn = properties.boolean("volumeKeyPageTurn", current.volumeKeyPageTurn),
             keepScreenOn = properties.boolean("keepScreenOn", current.keepScreenOn),

@@ -161,6 +161,7 @@ data class ReaderSettings(
     val appColorTheme: AppColorTheme = AppColorTheme.DEFAULT,
     val appUiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     val showStatusBar: Boolean = true,
+    val hideNavigationBar: Boolean = true,
     val showPageNumber: Boolean = true,
     val volumeKeyPageTurn: Boolean = false,
     val keepScreenOn: Boolean = true,
