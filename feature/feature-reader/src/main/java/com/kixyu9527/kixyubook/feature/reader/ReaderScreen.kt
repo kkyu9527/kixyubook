@@ -2185,7 +2185,9 @@ private fun ReaderSettingsSheet(
 }
 
 private fun readerPalette(settings: ReaderSettings, systemDark: Boolean): ReaderRenderPalette {
-    val dark = ReaderRenderPalette(Color(0xFF11120F), Color(0xFFD9D9D0), Color(0xFFF0F0E7), Color(0xFFB8CCBD), Color(0xFF92948B))
+    // Built-in night reading always uses true black for OLED panels. Custom reading themes
+    // intentionally keep the exact background selected by the user below.
+    val dark = ReaderRenderPalette(Color.Black, Color(0xFFD9D9D0), Color(0xFFF0F0E7), Color(0xFFB8CCBD), Color(0xFF92948B))
     val day = ReaderRenderPalette(Color(0xFFFAF8F2), Color(0xFF282620), Color(0xFF171713), Color(0xFF52655A), Color(0xFF716F67))
     val useNightColors = when (settings.theme) {
         ReaderTheme.SYSTEM -> systemDark
