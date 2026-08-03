@@ -217,6 +217,7 @@ private fun LoadedReaderRoute(
         selectSearchResult = viewModel::selectSearchResult,
         moveSearchResult = viewModel::moveSearchResult,
         clearSearch = viewModel::clearSearch,
+        acceptRemoteProgress = viewModel::acceptRemoteProgress,
         chapterRendered = viewModel::chapterRendered,
         setPageInteractionActive = viewModel::setPageInteractionActive,
         addFont = {
@@ -290,6 +291,7 @@ private fun ReaderScreen(
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
     clearSearch: () -> Unit,
+    acceptRemoteProgress: () -> Unit,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
     addFont: () -> Unit,
@@ -567,6 +569,59 @@ private fun ReaderScreen(
                             color = palette.body,
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
+                        )
+                    }
+                }
+            }
+            ReaderControlVisibility(
+                visible = state.syncNotice != null,
+                modifier = Modifier.align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = KixyuSpacing.small),
+            ) {
+                KixyuPopupSurface(shadowElevation = 0.dp) {
+                    Text(
+                        text = state.syncNotice.orEmpty(),
+                        modifier = Modifier.padding(
+                            horizontal = KixyuSpacing.medium,
+                            vertical = KixyuSpacing.small,
+                        ),
+                        color = palette.body,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                    )
+                }
+            }
+            ReaderControlVisibility(
+                visible = state.remoteProgressPrompt != null,
+                modifier = Modifier.align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = KixyuSpacing.small),
+            ) {
+                KixyuPopupSurface(shadowElevation = 0.dp) {
+                    Row(
+                        modifier = Modifier
+                            .clickable(onClick = acceptRemoteProgress)
+                            .padding(
+                                horizontal = KixyuSpacing.medium,
+                                vertical = KixyuSpacing.small,
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = state.remoteProgressPrompt?.let {
+                                "其他设备读到${it.chapterTitle}，点击前往"
+                            }.orEmpty(),
+                            color = palette.body,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                            contentDescription = null,
+                            tint = palette.accent,
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }

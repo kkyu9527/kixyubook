@@ -2,6 +2,9 @@ package com.kixyu9527.kixyubook.core.sync
 
 import android.app.Activity
 import android.content.Intent
+import com.kixyu9527.kixyubook.core.common.repository.CloudSyncCoordinator
+import com.kixyu9527.kixyubook.core.common.repository.PriorityBookSyncPhase
+import com.kixyu9527.kixyubook.core.common.repository.PriorityBookSyncState
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +17,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,10 +33,16 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     private val accounts: GoogleAccountClient,
     private val engine: CloudSyncEngine,
     private val scheduler: CloudSyncScheduler,
-) : CloudSyncManager {
+) : CloudSyncManager, CloudSyncCoordinator {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val initialSyncDecision = MutableStateFlow<InitialSyncDecision?>(null)
     private val inspectingInitialSync = MutableStateFlow(false)
+    private val _priorityBookSync = MutableStateFlow(PriorityBookSyncState())
+    override val priorityBookSync = _priorityBookSync
+    private var priorityBookJob: Job? = null
+    private val priorityRefresh = Channel<String>(Channel.CONFLATED)
+    @Volatile private var activeBookUuid: String? = null
+    @Volatile private var lastReaderBookUuid: String? = null
     override val state = combine(
         preferences.state,
         syncDao.observePendingCount(),
@@ -131,6 +146,101 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override fun syncNow() = scheduler.requestImmediate()
 
+    override fun onAppForeground() {
+        scope.launch {
+            val persisted = preferences.current()
+            if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
+            // The visible reader owns its low-latency channel. Starting a full WorkManager chain
+            // here would make it wait behind EPUB uploads again.
+            if (activeBookUuid != null) {
+                scheduler.pauseForPriorityBook()
+            } else {
+                scheduler.ensurePeriodic()
+                scheduler.requestImmediate(lastReaderBookUuid)
+            }
+        }
+    }
+
+    override fun onAppBackground() {
+        scope.launch {
+            val persisted = preferences.current()
+            if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
+            scheduler.requestBackgroundFlush(activeBookUuid ?: lastReaderBookUuid)
+        }
+    }
+
+    override fun prioritizeBook(bookUuid: String) {
+        activeBookUuid = bookUuid
+        lastReaderBookUuid = bookUuid
+        if (
+            priorityBookJob?.isActive == true &&
+            _priorityBookSync.value.bookUuid == bookUuid
+        ) {
+            if (_priorityBookSync.value.phase != PriorityBookSyncPhase.PULLING) {
+                priorityRefresh.trySend(bookUuid)
+            }
+            return
+        }
+        priorityBookJob?.cancel()
+        _priorityBookSync.value = PriorityBookSyncState(bookUuid, PriorityBookSyncPhase.PULLING)
+        scheduler.pauseForPriorityBook()
+        priorityBookJob = scope.launch(Dispatchers.IO) {
+            val persisted = preferences.current()
+            if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
+                _priorityBookSync.value = PriorityBookSyncState(bookUuid, PriorityBookSyncPhase.READY)
+                return@launch
+            }
+            var firstAttempt = true
+            while (isActive && activeBookUuid == bookUuid) {
+                engine.synchronizePriorityBook(bookUuid).fold(
+                    onSuccess = {
+                        if (activeBookUuid == bookUuid) {
+                            _priorityBookSync.value = PriorityBookSyncState(bookUuid, PriorityBookSyncPhase.READY)
+                        }
+                    },
+                    onFailure = { error ->
+                        if (error is CancellationException) throw error
+                        if (firstAttempt && activeBookUuid == bookUuid) {
+                            _priorityBookSync.value = PriorityBookSyncState(
+                                bookUuid,
+                                PriorityBookSyncPhase.ERROR,
+                                error.message ?: "当前书籍同步失败",
+                            )
+                        }
+                    },
+                )
+                firstAttempt = false
+                withTimeoutOrNull(PRIORITY_REFRESH_MILLIS) {
+                    var requestedBook: String
+                    do {
+                        requestedBook = priorityRefresh.receive()
+                    } while (requestedBook != bookUuid)
+                }
+                // Coalesce the page-settle writes generated by one gesture without making the
+                // user-visible pull wait for WorkManager's debounce window.
+                delay(PRIORITY_WRITE_COALESCE_MILLIS)
+            }
+        }
+    }
+
+    override fun releaseBook(bookUuid: String) {
+        if (activeBookUuid == bookUuid) activeBookUuid = null
+        lastReaderBookUuid = bookUuid
+        priorityBookJob?.cancel()
+        priorityBookJob = null
+        scheduler.resumeAfterPriorityBook()
+        if (_priorityBookSync.value.bookUuid == bookUuid) {
+            _priorityBookSync.value = PriorityBookSyncState()
+        }
+        scope.launch {
+            val persisted = preferences.current()
+            if (persisted.enabled && persisted.account != null && persisted.initialSyncApproved) {
+                scheduler.ensurePeriodic()
+                scheduler.requestBackgroundFlush(bookUuid)
+            }
+        }
+    }
+
     override suspend fun deleteCloudData(activity: Activity): Result<Unit> = runCatching {
         val authorization = accounts.authorize(activity)
         require(authorization is GoogleConnectResult.Connected) { "需要先完成 Google Drive 授权" }
@@ -184,5 +294,10 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         initialSyncDecision.value = null
         scheduler.ensurePeriodic()
         scheduler.requestImmediate()
+    }
+
+    private companion object {
+        const val PRIORITY_REFRESH_MILLIS = 15_000L
+        const val PRIORITY_WRITE_COALESCE_MILLIS = 600L
     }
 }

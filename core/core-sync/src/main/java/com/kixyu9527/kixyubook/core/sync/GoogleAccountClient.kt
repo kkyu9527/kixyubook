@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
+import com.google.android.gms.auth.api.identity.ClearTokenRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.auth.api.identity.RevokeAccessRequest
 import com.google.android.gms.common.api.Scope
@@ -15,6 +16,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -28,6 +31,9 @@ class GoogleAccountClient @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val preferences: SyncPreferencesStore,
 ) {
+    private val tokenMutex = Mutex()
+    @Volatile private var cachedToken: CachedAccessToken? = null
+
     suspend fun connect(activity: Activity): GoogleConnectResult = authorize(activity)
 
     suspend fun authorize(activity: Activity): GoogleConnectResult = runCatching {
@@ -45,13 +51,38 @@ class GoogleAccountClient @Inject constructor(
     }.getOrElse { GoogleConnectResult.Failed(it.authorizationMessage()) }
 
     suspend fun accessToken(): String? {
-        val result = Identity.getAuthorizationClient(context)
-            .authorize(authorizationRequest())
-            .await()
-        return if (result.hasResolution()) null else result.accessToken
+        cachedToken?.takeIf(CachedAccessToken::isUsable)?.let { return it.value }
+        return tokenMutex.withLock {
+            cachedToken?.takeIf(CachedAccessToken::isUsable)?.value ?: run {
+                val result = Identity.getAuthorizationClient(context)
+                    .authorize(authorizationRequest())
+                    .await()
+                if (result.hasResolution()) return@run null
+                result.accessToken?.takeIf(String::isNotBlank)?.also { token ->
+                    // AuthorizationResult does not expose expiry. Google access tokens normally
+                    // live for an hour, so use a conservative process-local window and let a 401
+                    // clear both this value and Google Play services' token cache.
+                    cachedToken = CachedAccessToken(token, System.currentTimeMillis() + TOKEN_CACHE_MILLIS)
+                }
+            }
+        }
+    }
+
+    suspend fun invalidateAccessToken(token: String? = cachedToken?.value) {
+        tokenMutex.withLock {
+            cachedToken = null
+            if (!token.isNullOrBlank()) {
+                runCatching {
+                    Identity.getAuthorizationClient(context)
+                        .clearToken(ClearTokenRequest.builder().setToken(token).build())
+                        .await()
+                }
+            }
+        }
     }
 
     suspend fun disconnect() {
+        invalidateAccessToken()
         val email = preferences.current().account?.email.orEmpty()
         if (email.isNotBlank()) {
             runCatching {
@@ -92,6 +123,9 @@ class GoogleAccountClient @Inject constructor(
         val connectResult = result.toConnectResult()
             ?: return GoogleConnectResult.Failed("Google Drive 授权流程不可用")
         if (connectResult is GoogleConnectResult.Connected) {
+            result.accessToken?.takeIf(String::isNotBlank)?.let { token ->
+                cachedToken = CachedAccessToken(token, System.currentTimeMillis() + TOKEN_CACHE_MILLIS)
+            }
             saveAuthorizedAccount(result.accessToken.orEmpty())
         }
         return connectResult
@@ -142,6 +176,11 @@ class GoogleAccountClient @Inject constructor(
         private const val PROFILE_SCOPE = "https://www.googleapis.com/auth/userinfo.profile"
         private const val USER_INFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo"
         private const val GOOGLE_ACCOUNT_TYPE = "com.google"
+        private const val TOKEN_CACHE_MILLIS = 45 * 60 * 1_000L
+    }
+
+    private data class CachedAccessToken(val value: String, val expiresAt: Long) {
+        fun isUsable(): Boolean = value.isNotBlank() && System.currentTimeMillis() < expiresAt
     }
 }
 

@@ -95,3 +95,31 @@ interface SyncMutationRecorder {
         operation: SyncMutationOperation = SyncMutationOperation.UPSERT,
     )
 }
+
+/**
+ * Coordinates cloud work with the visible app and reader without exposing a cloud provider to
+ * feature modules. Implementations must keep these calls non-blocking.
+ */
+interface CloudSyncCoordinator {
+    val priorityBookSync: StateFlow<PriorityBookSyncState>
+
+    /** Starts a lightweight progress pull followed by durable background reconciliation. */
+    fun onAppForeground()
+
+    /** Flushes the last visible book and leaves durable work running after the app is backgrounded. */
+    fun onAppBackground()
+
+    /** Gives one book's progress priority over library and binary-file synchronization. */
+    fun prioritizeBook(bookUuid: String)
+
+    /** Releases the foreground priority while retaining the book for the final progress flush. */
+    fun releaseBook(bookUuid: String)
+}
+
+enum class PriorityBookSyncPhase { IDLE, PULLING, READY, ERROR }
+
+data class PriorityBookSyncState(
+    val bookUuid: String? = null,
+    val phase: PriorityBookSyncPhase = PriorityBookSyncPhase.IDLE,
+    val errorMessage: String? = null,
+)

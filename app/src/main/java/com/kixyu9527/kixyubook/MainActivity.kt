@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
@@ -59,6 +60,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
@@ -80,9 +82,12 @@ import com.kixyu9527.kixyubook.feature.settings.DataAndBackupRoute
 import com.kixyu9527.kixyubook.feature.settings.AboutRoute
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
+import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
+import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
@@ -93,6 +98,16 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         updateDownloader.resumePendingInstallIfPermitted()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        appViewModel.onAppForeground()
+    }
+
+    override fun onStop() {
+        if (!isChangingConfigurations) appViewModel.onAppBackground()
+        super.onStop()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,6 +127,7 @@ class MainActivity : ComponentActivity() {
             val settings by appViewModel.settings.collectAsState()
             val updateState by appViewModel.updateState.collectAsState()
             val releaseNotesState by appViewModel.releaseNotesState.collectAsState()
+            val cloudSyncState by appViewModel.cloudSyncState.collectAsState()
             val loadedSettings = settings
             if (loadedSettings == null) {
                 // This surface normally exists for only a few milliseconds. It
@@ -124,7 +140,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Box(Modifier.fillMaxSize().background(bootstrapBackground))
             } else {
-                KixyuBookApp(loadedSettings, updateState, releaseNotesState)
+                KixyuBookApp(loadedSettings, updateState, releaseNotesState, cloudSyncState)
             }
         }
     }
@@ -134,8 +150,10 @@ class MainActivity : ComponentActivity() {
         settings: com.kixyu9527.kixyubook.core.common.model.ReaderSettings,
         updateState: AppUpdateState,
         releaseNotesState: ReleaseNotesState,
+        cloudSyncState: CloudSyncState,
     ) {
         val navController = rememberNavController()
+        val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
         // The UI-style setting adds/removes a MIUIX theme provider. Keep the
         // navigation subtree movable so a deliberate runtime style switch does
         // not recreate the current screen or bottom bar.
@@ -153,6 +171,7 @@ class MainActivity : ComponentActivity() {
                     onUpdateResultConsumed = appViewModel::clearUpdateResult,
                     onLoadReleaseNotes = appViewModel::loadCurrentReleaseNotes,
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
+                    onPrioritizeBookSync = appViewModel::prioritizeBookSync,
                 )
             }
         }
@@ -202,6 +221,42 @@ class MainActivity : ComponentActivity() {
                                 MaterialTheme.colorScheme.background.copy(alpha = styleTransitionVeil.value),
                             ),
                         )
+                    }
+                    var showGlobalSync by remember { mutableStateOf(false) }
+                    LaunchedEffect(cloudSyncState.phase, currentRoute) {
+                        showGlobalSync = false
+                        if (cloudSyncState.phase == CloudSyncPhase.SYNCING &&
+                            currentRoute?.startsWith("reader") != true
+                        ) {
+                            delay(700)
+                            showGlobalSync = cloudSyncState.phase == CloudSyncPhase.SYNCING
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = showGlobalSync,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(top = KixyuSpacing.small),
+                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .98f),
+                    ) {
+                        KixyuPopupSurface(shadowElevation = 0.dp) {
+                            Row(
+                                modifier = Modifier.padding(
+                                    horizontal = KixyuSpacing.medium,
+                                    vertical = KixyuSpacing.small,
+                                ),
+                                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text("正在同步云端数据", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
                     }
                 }
                 KixyuAdaptiveModal(
@@ -306,6 +361,7 @@ private fun KixyuNavHost(
     onUpdateResultConsumed: () -> Unit,
     onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
+    onPrioritizeBookSync: (String) -> Unit,
 ) {
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
@@ -353,6 +409,7 @@ private fun KixyuNavHost(
     val openBook: (String) -> Unit = { bookUuid ->
         if (navController.currentDestination?.route == Routes.HOME && !bookNavigationPending) {
             bookNavigationPending = true
+            onPrioritizeBookSync(bookUuid)
             // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
             // from a Compose frame callback. withFrameNanos resumed at the beginning of the next
             // VSYNC and placed destination creation directly inside that frame's 8.3 ms budget.

@@ -136,6 +136,13 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(ERROR)
     }
 
+    /** Completes a priority progress exchange without advancing the global Drive change cursor. */
+    suspend fun markPrioritySuccess() = context.cloudSyncDataStore.edit {
+        it[PHASE] = CloudSyncPhase.SUCCESS.name
+        it[LAST_SYNC] = System.currentTimeMillis()
+        it.remove(ERROR)
+    }
+
     suspend fun markAuthRequired(message: String) = markFailure(CloudSyncPhase.AUTH_REQUIRED, message)
     suspend fun markError(message: String) = markFailure(CloudSyncPhase.ERROR, message)
 

@@ -16,6 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -42,7 +43,14 @@ data class ReaderUiState(
     val loading: Boolean = true,
     val chapterLoading: Boolean = false,
     val pendingChapterTitle: String? = null,
+    val syncNotice: String? = null,
+    val remoteProgressPrompt: RemoteProgressPrompt? = null,
     val error: String? = null,
+)
+
+data class RemoteProgressPrompt(
+    val progress: ReadingProgress,
+    val chapterTitle: String,
 )
 
 @HiltViewModel
@@ -52,6 +60,7 @@ class ReaderViewModel @Inject constructor(
     private val settingsRepository: ReaderSettingsRepository,
     private val fonts: FontRepository,
     private val stats: ReadingStatsRepository,
+    private val cloudSync: CloudSyncCoordinator,
 ) : ViewModel() {
     private val bookUuid: String = checkNotNull(savedStateHandle["bookUuid"])
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -67,8 +76,17 @@ class ReaderViewModel @Inject constructor(
     private var pendingChapterIndex: Int? = null
     private var prefetchedAroundChapterIndex: Int? = null
     private var pageInteractionActive = false
+    private var acceptedProgressUpdatedAt = Long.MIN_VALUE
+    private var latestLocalProgressWriteAt = Long.MIN_VALUE
+    private var prioritySyncReady = false
+    private var openingChapterId: Long? = null
+    private var openingPosition = 0
+    private var userMovedBeforePrioritySync = false
+    private var userHasReadSinceOpen = false
+    private var deferredLocalProgress: ReadingProgress? = null
 
     init {
+        cloudSync.prioritizeBook(bookUuid)
         viewModelScope.launch {
             // Initial loading already performs the first chapter/progress queries. Starting the
             // long-lived observers at the same time duplicated those reads. Settings and fonts
@@ -109,6 +127,23 @@ class ReaderViewModel @Inject constructor(
                     _uiState.update { it.copy(bookmarks = bookmarks) }
                 }
             }
+            launch {
+                books.observeProgress(bookUuid).filterNotNull().collect(::applySyncedProgress)
+            }
+            launch {
+                cloudSync.priorityBookSync
+                    .filter { it.bookUuid == bookUuid }
+                    .collect { priority ->
+                        when (priority.phase) {
+                            PriorityBookSyncPhase.READY -> finishPriorityProgressGate(syncSucceeded = true)
+                            PriorityBookSyncPhase.ERROR -> finishPriorityProgressGate(
+                                syncSucceeded = false,
+                                errorMessage = priority.errorMessage,
+                            )
+                            else -> Unit
+                        }
+                    }
+            }
         }
     }
 
@@ -132,9 +167,12 @@ class ReaderViewModel @Inject constructor(
         val chapters = initialData.chapters
         require(chapters.isNotEmpty()) { "书籍没有可阅读章节" }
         val progress = initialData.progress
+        acceptedProgressUpdatedAt = progress?.updatedTime ?: Long.MIN_VALUE
         val index = progress?.chapterId?.let { id -> chapters.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
         val content = chapterLoad(index, chapters, ChapterLoadPriority.USER).await() ?: error("章节读取失败")
         lastPosition = progress?.position ?: 0
+        openingChapterId = progress?.chapterId ?: chapters[index].id
+        openingPosition = lastPosition
         _uiState.update {
             it.copy(
                 book = book,
@@ -183,7 +221,7 @@ class ReaderViewModel @Inject constructor(
         )
     }
 
-    private fun navigateToChapter(index: Int, position: Int) {
+    private fun navigateToChapter(index: Int, position: Int, persistProgress: Boolean = true) {
         val state = _uiState.value
         if (index == state.chapterIndex && state.chapter != null) {
             chapterNavigationJob?.cancel()
@@ -205,7 +243,7 @@ class ReaderViewModel @Inject constructor(
         // newly active Pager.
         state.prefetchedChapters[index]?.let { cached ->
             pendingChapterIndex = null
-            activateChapter(index, position, cached)
+            activateChapter(index, position, cached, persistProgress)
             return
         }
 
@@ -220,7 +258,7 @@ class ReaderViewModel @Inject constructor(
         chapterNavigationJob = viewModelScope.launch {
             var chapterLoaded = false
             try {
-                chapterLoaded = loadChapter(index, position)
+                chapterLoaded = loadChapter(index, position, persistProgress)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -238,7 +276,7 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadChapter(index: Int, position: Int): Boolean {
+    private suspend fun loadChapter(index: Int, position: Int, persistProgress: Boolean): Boolean {
         val currentState = _uiState.value
         if (index == currentState.chapterIndex && currentState.chapter != null) return true
         if (currentState.chapters.getOrNull(index) == null) return false
@@ -248,11 +286,16 @@ class ReaderViewModel @Inject constructor(
         val readerChapter = currentState.prefetchedChapters[index]
             ?: chapterLoad(index, currentState.chapters, ChapterLoadPriority.USER).await()
             ?: return false
-        activateChapter(index, position, readerChapter)
+        activateChapter(index, position, readerChapter, persistProgress)
         return true
     }
 
-    private fun activateChapter(index: Int, position: Int, readerChapter: ReaderChapter) {
+    private fun activateChapter(
+        index: Int,
+        position: Int,
+        readerChapter: ReaderChapter,
+        persistProgress: Boolean,
+    ) {
         lastPosition = if (position == Int.MAX_VALUE) readerChapter.contentParagraphs().lastOrNull()?.index ?: 0 else position
         _uiState.update {
             it.copy(
@@ -269,7 +312,87 @@ class ReaderViewModel @Inject constructor(
                 error = null,
             )
         }
-        savePosition(lastPosition)
+        if (persistProgress) savePosition(lastPosition)
+    }
+
+    private fun applySyncedProgress(progress: ReadingProgress) {
+        if (_uiState.value.loading || !shouldApplySyncedProgress(
+                incomingUpdatedAt = progress.updatedTime,
+                acceptedUpdatedAt = acceptedProgressUpdatedAt,
+                latestLocalWriteAt = latestLocalProgressWriteAt,
+            )
+        ) return
+        acceptedProgressUpdatedAt = progress.updatedTime
+        val state = _uiState.value
+        val targetIndex = state.chapters.indexOfFirst { chapter ->
+            chapter.id == progress.chapterId ||
+                (progress.chapterKey.isNotBlank() && chapter.chapterKey == progress.chapterKey)
+        }
+        if (targetIndex < 0) return
+        val targetPosition = progress.position.coerceAtLeast(0)
+        if (targetIndex == state.chapterIndex && targetPosition == state.currentPosition) return
+
+        val chapterTitle = state.chapters[targetIndex].title
+        if (userHasReadSinceOpen) {
+            _uiState.update {
+                it.copy(remoteProgressPrompt = RemoteProgressPrompt(progress, chapterTitle))
+            }
+            return
+        }
+
+        val notice = "已同步到$chapterTitle"
+
+        if (targetIndex == state.chapterIndex && state.chapter != null) {
+            chapterNavigationJob?.cancel()
+            pendingChapterIndex = null
+            lastPosition = targetPosition
+            _uiState.update { current ->
+                current.copy(
+                    restorePosition = targetPosition,
+                    currentPosition = targetPosition,
+                    navigationVersion = current.navigationVersion + 1,
+                    syncNotice = notice,
+                )
+            }
+        } else {
+            _uiState.update { it.copy(syncNotice = notice) }
+            navigateToChapter(targetIndex, targetPosition, persistProgress = false)
+        }
+        viewModelScope.launch {
+            delay(SYNC_NOTICE_MILLIS)
+            _uiState.update { current ->
+                if (current.syncNotice == notice) current.copy(syncNotice = null) else current
+            }
+        }
+    }
+
+    private suspend fun finishPriorityProgressGate(syncSucceeded: Boolean, errorMessage: String? = null) {
+        if (prioritySyncReady) return
+        if (syncSucceeded) {
+            // Room and coordinator are independent flows. Read once after the engine completes so
+            // a fast remote write cannot be missed between observer registration and READY.
+            books.observeProgress(bookUuid).first()?.let(::applySyncedProgress)
+        }
+        prioritySyncReady = true
+        val pending = deferredLocalProgress
+        deferredLocalProgress = null
+        if (userMovedBeforePrioritySync && pending != null) {
+            persistProgress(pending.copy(updatedTime = System.currentTimeMillis()))
+        } else if (!syncSucceeded && !errorMessage.isNullOrBlank()) {
+            _uiState.update { it.copy(syncNotice = "云端进度暂不可用，已保留本地位置") }
+        }
+    }
+
+    fun acceptRemoteProgress() {
+        val prompt = _uiState.value.remoteProgressPrompt ?: return
+        _uiState.update { it.copy(remoteProgressPrompt = null) }
+        val state = _uiState.value
+        val targetIndex = state.chapters.indexOfFirst { chapter ->
+            chapter.id == prompt.progress.chapterId ||
+                (prompt.progress.chapterKey.isNotBlank() && chapter.chapterKey == prompt.progress.chapterKey)
+        }
+        if (targetIndex < 0) return
+        navigateToChapter(targetIndex, prompt.progress.position.coerceAtLeast(0))
     }
 
     private fun chapterLoad(
@@ -384,7 +507,39 @@ class ReaderViewModel @Inject constructor(
             paragraphCount = content.size,
             chapterComplete = chapterComplete,
         )
-        viewModelScope.launch { books.saveProgress(ReadingProgress(bookUuid, chapter.id, safePosition, updatedTime = System.currentTimeMillis(), fraction = total)) }
+        val progress = ReadingProgress(
+            bookUuid,
+            chapter.id,
+            safePosition,
+            updatedTime = System.currentTimeMillis(),
+            fraction = total,
+        )
+        val moved = hasReaderMovedFromOpening(
+            openingChapterId = openingChapterId,
+            openingPosition = openingPosition,
+            currentChapterId = chapter.id,
+            currentPosition = safePosition,
+        )
+        if (moved) userHasReadSinceOpen = true
+        if (!prioritySyncReady) {
+            if (moved) {
+                userMovedBeforePrioritySync = true
+                deferredLocalProgress = progress
+            }
+            return
+        }
+        persistProgress(progress)
+    }
+
+    private fun persistProgress(progress: ReadingProgress) {
+        latestLocalProgressWriteAt = progress.updatedTime
+        acceptedProgressUpdatedAt = maxOf(acceptedProgressUpdatedAt, progress.updatedTime)
+        viewModelScope.launch {
+            books.saveProgress(progress)
+            // Reusing prioritizeBook here wakes the already active conflated P1 channel; it does
+            // not restart the reader or enqueue a global Worker.
+            cloudSync.prioritizeBook(bookUuid)
+        }
     }
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { settingsRepository.update(transform) } }
@@ -556,10 +711,18 @@ class ReaderViewModel @Inject constructor(
         chapterLoads.clear()
         criticalNeighborPublishJob?.cancel()
         books.setReaderInteractionActive(false)
+        cloudSync.releaseBook(bookUuid)
         books.releaseReaderMemory(bookUuid)
         super.onCleared()
     }
 }
+
+internal fun hasReaderMovedFromOpening(
+    openingChapterId: Long?,
+    openingPosition: Int,
+    currentChapterId: Long,
+    currentPosition: Int,
+): Boolean = openingChapterId != currentChapterId || openingPosition != currentPosition
 
 private data class ChapterLoadRequest(
     val priority: ChapterLoadPriority,
@@ -587,3 +750,10 @@ private const val CHAPTER_PREFETCH_RADIUS = 2
 // The renderer composes only the immediate previous/next chapter, but retaining a second decoded
 // pair gives one-page EPUB chapters enough runway for rapid consecutive boundary gestures.
 private const val RENDER_PREFETCH_RADIUS = 2
+private const val SYNC_NOTICE_MILLIS = 2_400L
+
+internal fun shouldApplySyncedProgress(
+    incomingUpdatedAt: Long,
+    acceptedUpdatedAt: Long,
+    latestLocalWriteAt: Long,
+): Boolean = incomingUpdatedAt > acceptedUpdatedAt && incomingUpdatedAt > latestLocalWriteAt

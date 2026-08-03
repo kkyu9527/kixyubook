@@ -17,7 +17,10 @@ import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -35,6 +38,12 @@ private data class LocalCloudObject(
     val temporary: Boolean = false,
 )
 
+private data class RemoteSnapshot(
+    val known: MutableMap<String, DriveObject>,
+    val changed: MutableMap<String, DriveObject>,
+    val nextPageToken: String?,
+)
+
 @Singleton
 class CloudSyncEngine @Inject constructor(
     @param:ApplicationContext private val context: Context,
@@ -50,6 +59,8 @@ class CloudSyncEngine @Inject constructor(
     private val drive: DriveAppDataClient,
     private val accountClient: GoogleAccountClient,
 ) {
+    private val syncMutex = Mutex()
+
     suspend fun inspectInitialSync(): InitialSyncDecision = withContext(Dispatchers.IO) {
         val token = accountClient.accessToken()
             ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
@@ -101,8 +112,8 @@ class CloudSyncEngine @Inject constructor(
         syncDao.clearObjectStates()
     }
 
-    suspend fun synchronize(): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+    suspend fun synchronize(preferredBookUuid: String? = null): Result<Unit> = withContext(Dispatchers.IO) {
+        syncMutex.withLock { runCatching {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
                 return@runCatching
@@ -111,26 +122,35 @@ class CloudSyncEngine @Inject constructor(
             preferences.markRunning()
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
-            var remote = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
+            val snapshot = loadRemoteSnapshot(token, persisted)
+            var remote = snapshot.known
 
-            // A durable page token is maintained for incremental wake-ups. A full appData listing
-            // remains the recovery path if Google invalidates an old token or local state is lost.
-            val newPageToken = runCatching {
-                persisted.pageToken?.let { drive.listChanges(token, it).newStartPageToken }
-                    ?: drive.startPageToken(token)
-            }.getOrNull()
-
-            applyRemoteTombstones(token, remote)
+            applyRemoteTombstones(token, snapshot.changed)
             resolveDirtyProgress(token, remote)
             val conflicts = findProvenConflicts(remote)
             if (conflicts.isNotEmpty()) {
                 preferences.setConflicts(conflicts)
                 return@runCatching
             }
-            applyRemoteChanges(token, remote, persisted.initialMergeComplete)
+            applyRemoteChanges(
+                token = token,
+                changedRemote = snapshot.changed,
+                knownRemote = remote,
+                initialMergeComplete = persisted.initialMergeComplete,
+                preferredBookUuid = preferredBookUuid,
+            )
 
             if (!persisted.initialMergeComplete) seedInitialOutbox()
-            val pending = syncDao.pending()
+            val pending = syncDao.pending().sortedWith(
+                compareBy<SyncOutboxEntity> {
+                    when {
+                        it.entityType == SyncEntityType.PROGRESS.name && it.entityId == preferredBookUuid -> 0
+                        it.entityType == SyncEntityType.PROGRESS.name -> 1
+                        it.entityType == SyncEntityType.BOOK.name || it.entityType == SyncEntityType.FONT.name -> 3
+                        else -> 2
+                    }
+                }.thenBy { it.changedAt },
+            )
             pending.forEach { mutation ->
                 try {
                     if (mutation.operation == SyncMutationOperation.DELETE.name) {
@@ -167,18 +187,247 @@ class CloudSyncEngine @Inject constructor(
                         if (!deferredLargePayload) syncDao.removeOutbox(listOf(mutation.uuid))
                     }
                 } catch (error: Throwable) {
-                    syncDao.markAttempts(listOf(mutation.uuid))
+                    if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
                     throw error
                 }
             }
-            preferences.markSuccess(newPageToken ?: persisted.pageToken)
+            preferences.markSuccess(snapshot.nextPageToken ?: persisted.pageToken)
         }.onFailure { error ->
+            if (error is CancellationException) throw error
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
+                if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
             } else {
                 preferences.markError(error.message ?: "同步失败")
             }
+        } }
+    }
+
+    /**
+     * Exchanges only the current (or most recently read) book's progress. It deliberately does
+     * not touch the global Drive change cursor, allowing the following durable full worker to
+     * reconcile metadata, deletions and binary files without losing changes.
+     */
+    suspend fun synchronizePriorityBook(preferredBookUuid: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        syncMutex.withLock { runCatching {
+            val persisted = preferences.current()
+            if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
+                return@runCatching
+            }
+            if (persisted.conflicts.isNotEmpty()) return@runCatching
+            val bookUuid = preferredBookUuid
+                ?: books.getAllProgress().maxByOrNull(ReadingProgressEntity::updatedTime)?.bookUuid
+                ?: return@runCatching
+            if (!books.bookExists(bookUuid)) return@runCatching
+            preferences.markRunning()
+            val token = accountClient.accessToken()
+                ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+            val key = "progress/$bookUuid"
+            var remote = findRemoteObject(token, key, "progress-$bookUuid.json")
+
+            var cloudTime = Long.MIN_VALUE
+            if (remote != null) {
+                try {
+                    withJsonDownload(token, requireNotNull(remote)) { json ->
+                        cloudTime = json.optLong("updatedTime")
+                        val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
+                        if (cloudTime > localTime && applyRemoteProgressJson(json)) {
+                            syncDao.removeOutbox(SyncEntityType.PROGRESS.name, bookUuid)
+                        }
+                    }
+                } catch (error: DriveHttpException) {
+                    if (error.statusCode != 404) throw error
+                    syncDao.removeObjectState(key)
+                    remote = drive.findByObjectKey(token, key)
+                    remote?.let { refreshed ->
+                        withJsonDownload(token, refreshed) { json ->
+                            cloudTime = json.optLong("updatedTime")
+                            val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
+                            if (cloudTime > localTime && applyRemoteProgressJson(json)) {
+                                syncDao.removeOutbox(SyncEntityType.PROGRESS.name, bookUuid)
+                            }
+                        }
+                    }
+                }
+                remote?.let { currentRemote ->
+                    rememberRemote(key, currentRemote)
+                }
+            }
+
+            // Bookmarks and reader settings are small JSON objects and belong to the same
+            // latency-sensitive reader transaction. Only changed Drive versions are downloaded;
+            // original books/fonts remain paused for the durable background channel.
+            pullPriorityJson(
+                token = token,
+                key = "bookmarks/$bookUuid",
+                name = "bookmarks-$bookUuid.json",
+                type = SyncEntityType.BOOKMARKS,
+                entityId = bookUuid,
+                apply = ::applyRemoteBookmarksJson,
+            )
+            pullPriorityJson(
+                token = token,
+                key = "settings/global",
+                name = "settings-global.json",
+                type = SyncEntityType.SETTINGS,
+                entityId = "global",
+                apply = ::applyRemoteSettingsJson,
+            )
+
+            val mutation = syncDao.allPending().lastOrNull {
+                it.entityType == SyncEntityType.PROGRESS.name &&
+                    it.entityId == bookUuid &&
+                    it.operation == SyncMutationOperation.UPSERT.name
+            }
+            val localProgress = books.getProgress(bookUuid)
+            if (mutation != null && localProgress != null && localProgress.updatedTime >= cloudTime) {
+                val local = materialize(mutation, includeLargePayload = false).singleOrNull()
+                if (local != null) {
+                    try {
+                        val uploaded = drive.upload(
+                            token = token,
+                            name = local.name,
+                            objectKey = local.key,
+                            mimeType = local.mimeType,
+                            source = local.file,
+                            existingFileId = remote?.id,
+                        )
+                        rememberRemote(key, uploaded)
+                        syncDao.removeOutbox(SyncEntityType.PROGRESS.name, bookUuid)
+                    } finally {
+                        if (local.temporary) local.file.delete()
+                    }
+                }
+            }
+            preferences.markPrioritySuccess()
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
+                if (error is DriveHttpException) accountClient.invalidateAccessToken()
+                preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
+            } else {
+                preferences.markError(error.message ?: "同步失败")
+            }
+        } }
+    }
+
+    private suspend fun findRemoteObject(token: String, key: String, name: String): DriveObject? {
+        val state = syncDao.objectState(key)
+        return state?.driveFileId?.let { driveFileId ->
+            DriveObject(
+                id = driveFileId,
+                name = name,
+                objectKey = key,
+                mimeType = "application/json",
+                modifiedAt = state.remoteModifiedAt,
+                version = state.remoteVersion,
+                size = 0,
+                md5 = null,
+            )
+        } ?: drive.findByObjectKey(token, key)
+    }
+
+    private suspend fun pullPriorityJson(
+        token: String,
+        key: String,
+        name: String,
+        type: SyncEntityType,
+        entityId: String,
+        apply: suspend (JSONObject) -> Unit,
+    ) {
+        val known = syncDao.objectState(key)
+        var remote = drive.findByObjectKey(token, key) ?: return
+        if (known != null && remote.version != 0L && remote.version <= known.remoteVersion) return
+        val localMutation = syncDao.allPending().lastOrNull {
+            it.entityType == type.name && it.entityId == entityId
         }
+        if (localMutation != null && localMutation.changedAt >= remote.modifiedAt) return
+        try {
+            withJsonDownload(token, remote) { json -> apply(json) }
+        } catch (error: DriveHttpException) {
+            if (error.statusCode != 404) throw error
+            syncDao.removeObjectState(key)
+            remote = drive.findByObjectKey(token, key) ?: return
+            withJsonDownload(token, remote) { json -> apply(json) }
+        }
+        syncDao.removeOutbox(type.name, entityId)
+        rememberRemote(key, remote)
+    }
+
+    suspend fun requiresLongRunningWorker(): Boolean = withContext(Dispatchers.IO) {
+        val persisted = preferences.current()
+        if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@withContext false
+        if (!persisted.initialMergeComplete) return@withContext true
+        syncDao.allPending().any { mutation ->
+            when (runCatching { SyncEntityType.valueOf(mutation.entityType) }.getOrNull()) {
+                SyncEntityType.BOOK -> persisted.syncOriginalFiles &&
+                    books.getBook(mutation.entityId)?.storagePath?.let(::File)?.isFile == true
+                SyncEntityType.FONT -> persisted.syncFonts &&
+                    fonts.getFont(mutation.entityId)?.filePath?.let(::File)?.isFile == true
+                else -> false
+            }
+        }
+    }
+
+    private suspend fun loadRemoteSnapshot(
+        token: String,
+        persisted: PersistedSyncState,
+    ): RemoteSnapshot {
+        if (!persisted.initialMergeComplete || persisted.pageToken == null) {
+            val all = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
+            return RemoteSnapshot(
+                known = all.toMutableMap(),
+                changed = all,
+                nextPageToken = drive.startPageToken(token),
+            )
+        }
+
+        val states = syncDao.allObjectStates()
+        val known = states.mapNotNull { state ->
+            val fileId = state.driveFileId ?: return@mapNotNull null
+            state.objectKey to DriveObject(
+                id = fileId,
+                name = state.objectKey.substringAfterLast('/'),
+                objectKey = state.objectKey,
+                mimeType = if (state.objectKey.endsWith("/source")) {
+                    "application/octet-stream"
+                } else {
+                    "application/json"
+                },
+                modifiedAt = state.remoteModifiedAt,
+                version = state.remoteVersion,
+                size = 0,
+                md5 = null,
+            )
+        }.toMap().toMutableMap()
+
+        val page = try {
+            drive.listChanges(token, persisted.pageToken)
+        } catch (error: DriveHttpException) {
+            if (error.statusCode != 410) throw error
+            val all = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
+            return RemoteSnapshot(all.toMutableMap(), all, drive.startPageToken(token))
+        }
+        val changed = mutableMapOf<String, DriveObject>()
+        val statesByFileId = states.mapNotNull { state -> state.driveFileId?.let { it to state } }.toMap()
+        page.changes.forEach { change ->
+            if (change.removed) {
+                statesByFileId[change.fileId]?.let { state ->
+                    known.remove(state.objectKey)
+                    syncDao.removeObjectState(state.objectKey)
+                }
+            } else {
+                change.file?.let { file ->
+                    known[file.objectKey] = file
+                    changed[file.objectKey] = file
+                }
+            }
+        }
+        return RemoteSnapshot(
+            known = known,
+            changed = changed,
+            nextPageToken = page.newStartPageToken ?: persisted.pageToken,
+        )
     }
 
     suspend fun deleteAllCloudData(token: String) = withContext(Dispatchers.IO) {
@@ -396,20 +645,38 @@ class CloudSyncEngine @Inject constructor(
 
     private suspend fun applyRemoteChanges(
         token: String,
-        remote: Map<String, DriveObject>,
+        changedRemote: Map<String, DriveObject>,
+        knownRemote: Map<String, DriveObject>,
         initialMergeComplete: Boolean,
+        preferredBookUuid: String?,
     ) {
         val dirty = syncDao.pending().flatMap(::keysForMutation).toSet()
         val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
-        val candidates = remote.filter { (key, value) ->
+        val candidates = changedRemote.filter { (key, value) ->
             !key.startsWith("tombstones/") && key !in dirty &&
                 (!initialMergeComplete || value.modifiedAt > (localStates[key]?.remoteModifiedAt ?: 0))
         }
 
-        // Restore immutable sources before applying dependent progress and bookmarks.
-        candidates.filterKeys { it.endsWith("/metadata") && it.startsWith("books/") }.forEach { (key, metadata) ->
-            val uuid = key.split('/').getOrNull(1) ?: return@forEach
-            val sourceInfo = remote["books/$uuid/source"] ?: return@forEach
+        // Existing-book progress is the latency-sensitive path. Apply it before metadata/source
+        // restoration so entering a book never waits behind unrelated EPUB downloads.
+        candidates.filterKeys { key ->
+            key.startsWith("progress/") &&
+                key.substringAfter("progress/") == preferredBookUuid
+        }.forEach { (_, info) -> applyRemoteProgress(token, info) }
+
+        // Treat metadata + source as one logical book. They are uploaded sequentially and may
+        // therefore arrive in two Drive change pages; either half must complete the restoration.
+        val changedBookUuids = candidates.keys.asSequence()
+            .filter { it.startsWith("books/") }
+            .mapNotNull { it.split('/').getOrNull(1) }
+            .distinct()
+            .filter { uuid ->
+                "books/$uuid/metadata" !in dirty && "books/$uuid/source" !in dirty
+            }
+        changedBookUuids.forEach { uuid ->
+            val key = "books/$uuid/metadata"
+            val metadata = knownRemote[key] ?: return@forEach
+            val sourceInfo = knownRemote["books/$uuid/source"] ?: return@forEach
             if (!books.bookExists(uuid)) {
                 val metaFile = tempFile("book-meta")
                 val sourceFile = tempFile("book-source")
@@ -438,13 +705,15 @@ class CloudSyncEngine @Inject constructor(
 
         candidates.forEach { (key, info) ->
             when {
-                key.startsWith("progress/") -> applyRemoteProgress(token, info)
+                key.startsWith("progress/") && key.substringAfter("progress/") != preferredBookUuid ->
+                    applyRemoteProgress(token, info)
                 key.startsWith("bookmarks/") -> applyRemoteBookmarks(token, info)
                 key == "settings/global" -> applyRemoteSettings(token, info)
                 key.startsWith("sessions/") -> applyRemoteSession(token, info)
-                key.startsWith("fonts/") && key.endsWith("/metadata") -> {
+                key.startsWith("fonts/") && (key.endsWith("/metadata") || key.endsWith("/source")) -> {
                     val uuid = key.split('/').getOrNull(1) ?: return@forEach
-                    remote["fonts/$uuid/source"]?.let { applyRemoteFont(token, info, it) }
+                    val metadata = knownRemote["fonts/$uuid/metadata"] ?: return@forEach
+                    knownRemote["fonts/$uuid/source"]?.let { applyRemoteFont(token, metadata, it) }
                 }
             }
             rememberRemote(key, info)
@@ -452,15 +721,24 @@ class CloudSyncEngine @Inject constructor(
     }
 
     private suspend fun applyRemoteProgress(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
+        applyRemoteProgressJson(json)
+    }
+
+    private suspend fun applyRemoteProgressJson(json: JSONObject): Boolean {
         val bookUuid = json.getString("bookUuid")
-        if (!books.bookExists(bookUuid)) return@withJsonDownload
+        if (!books.bookExists(bookUuid)) return false
         val chapterKey = json.optString("chapterKey")
         val chapter = books.getChapterByKey(bookUuid, chapterKey)
             ?: books.getChapter(bookUuid, json.optInt("chapterIndex"))
-            ?: return@withJsonDownload
+            ?: return false
         val remoteTime = json.optLong("updatedTime")
         val local = books.getProgress(bookUuid)
-        if (local != null && local.updatedTime > remoteTime) return@withJsonDownload
+        if (local != null && local.updatedTime > remoteTime) return false
+        val remoteFraction = json.optDouble("progression").toFloat()
+        // A newer timestamp can represent a reread on another device. Never move the visible
+        // device backwards automatically; the current device's explicit movement is uploaded as
+        // a new latest state instead.
+        if (local != null && remoteFraction + PROGRESS_EPSILON < local.fraction) return false
         mutations.withoutRecording {
             bookRepository.saveProgress(
                 ReadingProgress(
@@ -469,7 +747,7 @@ class CloudSyncEngine @Inject constructor(
                     position = json.optInt("paragraphIndex"),
                     offset = json.optInt("charOffset"),
                     updatedTime = remoteTime,
-                    fraction = json.optDouble("progression").toFloat(),
+                    fraction = remoteFraction,
                     chapterKey = chapter.chapterKey,
                     paragraphIndex = json.optInt("paragraphIndex"),
                     charOffset = json.optInt("charOffset"),
@@ -477,11 +755,16 @@ class CloudSyncEngine @Inject constructor(
                 ),
             )
         }
+        return true
     }
 
     private suspend fun applyRemoteBookmarks(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
+        applyRemoteBookmarksJson(json)
+    }
+
+    private suspend fun applyRemoteBookmarksJson(json: JSONObject) {
         val bookUuid = json.getString("bookUuid")
-        if (!books.bookExists(bookUuid)) return@withJsonDownload
+        if (!books.bookExists(bookUuid)) return
         mutations.withoutRecording {
             database.withTransaction {
                 books.deleteBookmarksForBook(bookUuid)
@@ -507,6 +790,10 @@ class CloudSyncEngine @Inject constructor(
     }
 
     private suspend fun applyRemoteSettings(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
+        applyRemoteSettingsJson(json)
+    }
+
+    private suspend fun applyRemoteSettingsJson(json: JSONObject) {
         val remote = jsonToSettings(json.getJSONObject("reader"))
         val goal = json.optInt("readingGoalMinutes", 30)
         mutations.withoutRecording {
@@ -691,5 +978,6 @@ class CloudSyncEngine @Inject constructor(
 
     private companion object {
         const val PERMANENT_TOMBSTONE_EXPIRY = Long.MAX_VALUE
+        const val PROGRESS_EPSILON = 0.000_001f
     }
 }

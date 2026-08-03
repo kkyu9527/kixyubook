@@ -1,8 +1,14 @@
 package com.kixyu9527.kixyubook.core.sync
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
@@ -10,6 +16,8 @@ import java.nio.charset.StandardCharsets
 import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 data class DriveObject(
     val id: String,
@@ -28,11 +36,30 @@ data class DriveChangePage(val changes: List<DriveChange>, val nextPageToken: St
 class DriveHttpException(val statusCode: Int, message: String) : Exception(message)
 
 @Singleton
-class DriveAppDataClient @Inject constructor() {
+class DriveAppDataClient @Inject constructor(
+    @ApplicationContext context: Context,
+) {
+    private val uploadSessions = context.getSharedPreferences("drive_resumable_uploads", Context.MODE_PRIVATE)
+    suspend fun findByObjectKey(token: String, objectKey: String): DriveObject? {
+        val escapedKey = objectKey.replace("\\", "\\\\").replace("'", "\\'")
+        val query = buildList {
+            add("spaces=appDataFolder")
+            add("pageSize=2")
+            add("q=${encode("appProperties has { key='objectKey' and value='$escapedKey' } and trashed=false")}")
+            add("fields=${encode("files($FILE_FIELDS)")}")
+        }.joinToString("&")
+        return requestJson("GET", "$DRIVE_API/files?$query", token)
+            .optJSONArray("files")
+            ?.takeIf { it.length() > 0 }
+            ?.getJSONObject(0)
+            ?.toDriveObject()
+    }
+
     suspend fun listAll(token: String): List<DriveObject> {
         val result = mutableListOf<DriveObject>()
         var pageToken: String? = null
         do {
+            currentCoroutineContext().ensureActive()
             val query = buildList {
                 add("spaces=appDataFolder")
                 add("pageSize=1000")
@@ -57,6 +84,7 @@ class DriveAppDataClient @Inject constructor() {
         var pageToken: String? = initialPageToken
         var newStart: String? = null
         do {
+            currentCoroutineContext().ensureActive()
             val fields = "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,modifiedTime,version,size,md5Checksum,appProperties))"
             val url = "$DRIVE_API/changes?pageSize=1000&spaces=appDataFolder&includeRemoved=true" +
                 "&fields=${encode(fields)}&pageToken=${encode(requireNotNull(pageToken))}"
@@ -76,11 +104,37 @@ class DriveAppDataClient @Inject constructor() {
 
     suspend fun download(token: String, fileId: String, destination: File) {
         destination.parentFile?.mkdirs()
-        val connection = open("$DRIVE_API/files/${encode(fileId)}?alt=media", "GET", token)
+        val downloadKey = fileId.hashCode().toUInt().toString(16)
+        val partial = File(destination.parentFile, ".drive-$downloadKey.part")
+        val offset = partial.length()
+        val connection = open("$DRIVE_API/files/${encode(fileId)}?alt=media", "GET", token).apply {
+            if (offset > 0L) {
+                setRequestProperty("Range", "bytes=$offset-")
+                uploadSessions.getString("download.$downloadKey.etag", null)?.let {
+                    setRequestProperty("If-Range", it)
+                }
+            }
+        }
         try {
             connection.connect()
+            if (connection.responseCode == 416) {
+                partial.delete()
+                uploadSessions.edit().remove("download.$downloadKey.etag").apply()
+                return download(token, fileId, destination)
+            }
             ensureSuccess(connection)
-            connection.inputStream.use { input -> destination.outputStream().buffered().use(input::copyTo) }
+            connection.getHeaderField("ETag")?.let { etag ->
+                uploadSessions.edit().putString("download.$downloadKey.etag", etag).apply()
+            }
+            val append = offset > 0L && connection.responseCode == HttpURLConnection.HTTP_PARTIAL
+            connection.inputStream.use { input ->
+                FileOutputStream(partial, append).buffered().use { output ->
+                    copyCancellable(input, output)
+                }
+            }
+            partial.copyTo(destination, overwrite = true)
+            partial.delete()
+            uploadSessions.edit().remove("download.$downloadKey.etag").apply()
         } finally {
             connection.disconnect()
         }
@@ -105,31 +159,141 @@ class DriveAppDataClient @Inject constructor() {
         } else {
             "$DRIVE_UPLOAD/files/${encode(existingFileId)}?uploadType=resumable&fields=${encode(FILE_FIELDS)}"
         }
+        val sessionKey = objectKey.hashCode().toUInt().toString(16)
+        val storedLength = uploadSessions.getLong("$sessionKey.length", -1L)
+        var location = uploadSessions.getString("$sessionKey.url", null)
+            ?.takeIf { storedLength == source.length() }
+        if (location == null) {
+            uploadSessions.edit().remove("$sessionKey.url").remove("$sessionKey.length").apply()
+            location = createUploadSession(endpoint, method, token, mimeType, source.length(), metadata)
+            uploadSessions.edit()
+                .putString("$sessionKey.url", location)
+                .putLong("$sessionKey.length", source.length())
+                .apply()
+        }
+        return try {
+            uploadChunks(location, token, mimeType, source, objectKey)
+        } catch (error: DriveHttpException) {
+            if (error.statusCode == 404 || error.statusCode == 410) {
+                uploadSessions.edit().remove("$sessionKey.url").remove("$sessionKey.length").apply()
+                val replacement = createUploadSession(endpoint, method, token, mimeType, source.length(), metadata)
+                uploadSessions.edit()
+                    .putString("$sessionKey.url", replacement)
+                    .putLong("$sessionKey.length", source.length())
+                    .apply()
+                uploadChunks(replacement, token, mimeType, source, objectKey)
+            } else {
+                throw error
+            }
+        }.also {
+            uploadSessions.edit().remove("$sessionKey.url").remove("$sessionKey.length").apply()
+        }
+    }
+
+    private fun createUploadSession(
+        endpoint: String,
+        method: String,
+        token: String,
+        mimeType: String,
+        length: Long,
+        metadata: JSONObject,
+    ): String {
         val session = open(endpoint, method, token).apply {
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("X-Upload-Content-Type", mimeType)
-            setRequestProperty("X-Upload-Content-Length", source.length().toString())
+            setRequestProperty("X-Upload-Content-Length", length.toString())
         }
-        val location = try {
+        return try {
             session.outputStream.use { it.write(metadata.toString().toByteArray()) }
             ensureSuccess(session)
             session.getHeaderField("Location") ?: error("Google Drive 未返回上传地址")
         } finally {
             session.disconnect()
         }
-        val upload = open(location, "PUT", token).apply {
+    }
+
+    private suspend fun uploadChunks(
+        location: String,
+        token: String,
+        mimeType: String,
+        source: File,
+        objectKey: String,
+    ): DriveObject {
+        var offset = queryUploadOffset(location, token, source.length())
+        if (offset >= source.length()) {
+            return driveObjectAfterCompletedUpload(token, objectKey)
+        }
+        RandomAccessFile(source, "r").use { input ->
+            while (offset < source.length()) {
+                currentCoroutineContext().ensureActive()
+                val endExclusive = minOf(offset + UPLOAD_CHUNK_BYTES, source.length())
+                val count = (endExclusive - offset).toInt()
+                val upload = open(location, "PUT", token).apply {
+                    doOutput = true
+                    setRequestProperty("Content-Type", mimeType)
+                    setRequestProperty("Content-Range", "bytes $offset-${endExclusive - 1}/${source.length()}")
+                    setFixedLengthStreamingMode(count)
+                }
+                try {
+                    input.seek(offset)
+                    upload.outputStream.buffered().use { output ->
+                        var remaining = count
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (remaining > 0) {
+                            currentCoroutineContext().ensureActive()
+                            val read = input.read(buffer, 0, minOf(buffer.size, remaining))
+                            if (read < 0) error("上传源文件提前结束")
+                            output.write(buffer, 0, read)
+                            remaining -= read
+                        }
+                    }
+                    when (val code = upload.responseCode) {
+                        308 -> offset = uploadedOffset(upload) ?: endExclusive
+                        in 200..299 -> return JSONObject(
+                            upload.inputStream.bufferedReader().use { it.readText() },
+                        ).toDriveObject()
+                        else -> throw driveError(upload, code)
+                    }
+                } finally {
+                    upload.disconnect()
+                }
+            }
+        }
+        error("Google Drive 上传未返回文件信息")
+    }
+
+    private suspend fun driveObjectAfterCompletedUpload(token: String, objectKey: String): DriveObject =
+        findByObjectKey(token, objectKey) ?: error("Google Drive 已完成上传，但未返回文件信息")
+
+    private fun queryUploadOffset(location: String, token: String, total: Long): Long {
+        val query = open(location, "PUT", token).apply {
             doOutput = true
-            setRequestProperty("Content-Type", mimeType)
-            setFixedLengthStreamingMode(source.length())
+            setFixedLengthStreamingMode(0)
+            setRequestProperty("Content-Range", "bytes */$total")
         }
         return try {
-            source.inputStream().buffered().use { input -> upload.outputStream.buffered().use(input::copyTo) }
-            ensureSuccess(upload)
-            JSONObject(upload.inputStream.bufferedReader().use { it.readText() }).toDriveObject()
+            query.connect()
+            when (val code = query.responseCode) {
+                308 -> uploadedOffset(query) ?: 0L
+                in 200..299 -> total
+                404, 410 -> throw DriveHttpException(code, "Google Drive 上传会话已过期")
+                else -> throw driveError(query, code)
+            }
         } finally {
-            upload.disconnect()
+            query.disconnect()
         }
+    }
+
+    private fun uploadedOffset(connection: HttpURLConnection): Long? = connection
+        .getHeaderField("Range")
+        ?.substringAfterLast('-')
+        ?.toLongOrNull()
+        ?.plus(1)
+
+    private fun driveError(connection: HttpURLConnection, code: Int): DriveHttpException {
+        val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        return DriveHttpException(code, body.ifBlank { "Google Drive 请求失败 ($code)" })
     }
 
     suspend fun delete(token: String, fileId: String) {
@@ -168,6 +332,16 @@ class DriveAppDataClient @Inject constructor() {
         throw DriveHttpException(connection.responseCode, body.ifBlank { "Google Drive 请求失败 (${connection.responseCode})" })
     }
 
+    private suspend fun copyCancellable(input: InputStream, output: OutputStream) {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val count = input.read(buffer)
+            if (count < 0) break
+            output.write(buffer, 0, count)
+        }
+    }
+
     private fun JSONObject.toDriveObject(): DriveObject {
         val properties = optJSONObject("appProperties")
         return DriveObject(
@@ -187,6 +361,7 @@ class DriveAppDataClient @Inject constructor() {
     }
 
     private companion object {
+        const val UPLOAD_CHUNK_BYTES = 8L * 1024 * 1024
         const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"
         const val FILE_FIELDS = "id,name,mimeType,modifiedTime,version,size,md5Checksum,appProperties"

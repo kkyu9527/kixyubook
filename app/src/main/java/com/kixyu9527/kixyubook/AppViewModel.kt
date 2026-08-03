@@ -8,6 +8,9 @@ import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.common.repository.AppUpdateRepository
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.common.repository.CloudSyncCoordinator
+import com.kixyu9527.kixyubook.core.sync.CloudSyncManager
+import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +24,8 @@ class AppViewModel @Inject constructor(
     settingsRepository: ReaderSettingsRepository,
     private val books: BookRepository,
     private val updates: AppUpdateRepository,
+    private val cloudSync: CloudSyncCoordinator,
+    cloudSyncManager: CloudSyncManager,
 ) : ViewModel() {
     /**
      * `null` means that the persisted app appearance has not been read yet.
@@ -37,6 +42,7 @@ class AppViewModel @Inject constructor(
 
     val updateState: StateFlow<AppUpdateState> = updates.state
     val releaseNotesState: StateFlow<ReleaseNotesState> = updates.releaseNotesState
+    val cloudSyncState: StateFlow<CloudSyncState> = cloudSyncManager.state
 
     init {
         viewModelScope.launch { updates.checkForUpdates(manual = false) }
@@ -57,6 +63,12 @@ class AppViewModel @Inject constructor(
     fun setAnimationActive(active: Boolean) {
         books.setAppAnimationActive(active)
     }
+
+    fun onAppForeground() = cloudSync.onAppForeground()
+
+    fun onAppBackground() = cloudSync.onAppBackground()
+
+    fun prioritizeBookSync(bookUuid: String) = cloudSync.prioritizeBook(bookUuid)
 
     override fun onCleared() {
         books.setAppAnimationActive(false)
