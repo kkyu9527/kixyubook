@@ -26,6 +26,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -356,6 +357,29 @@ fun KixyuButton(
         ) { MiuixText(text, maxLines = 1) }
     } else {
         Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+        ) { Text(text, maxLines = 1) }
+    }
+}
+
+@Composable
+fun KixyuSecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        MiuixButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            colors = MiuixButtonDefaults.buttonColors(),
+        ) { MiuixText(text, maxLines = 1) }
+    } else {
+        FilledTonalButton(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,

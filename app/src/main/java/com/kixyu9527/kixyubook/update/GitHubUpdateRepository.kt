@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.update
 import com.kixyu9527.kixyubook.BuildConfig
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
+import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.common.repository.AppUpdateRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,8 +25,11 @@ import javax.inject.Singleton
 class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
     private val mutableState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     override val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
+    private val mutableReleaseNotesState = MutableStateFlow<ReleaseNotesState>(ReleaseNotesState.Idle)
+    override val releaseNotesState: StateFlow<ReleaseNotesState> = mutableReleaseNotesState.asStateFlow()
 
     private val checkMutex = Mutex()
+    private val releaseNotesMutex = Mutex()
 
     override suspend fun checkForUpdates(manual: Boolean) {
         checkMutex.withLock {
@@ -55,6 +60,22 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         mutableState.value = AppUpdateState.Idle
     }
 
+    override suspend fun loadReleaseNotes(versionName: String) {
+        releaseNotesMutex.withLock {
+            mutableReleaseNotesState.value = ReleaseNotesState.Loading
+            mutableReleaseNotesState.value = runCatching { fetchRelease(versionName) }.fold(
+                onSuccess = { release ->
+                    if (release == null) {
+                        ReleaseNotesState.Unavailable("GitHub 尚未发布 v$versionName 的 Release Note")
+                    } else {
+                        ReleaseNotesState.Available(release)
+                    }
+                },
+                onFailure = { error -> ReleaseNotesState.Unavailable(error.toUserMessage()) },
+            )
+        }
+    }
+
     private fun manualResult(manual: Boolean): AppUpdateState =
         if (manual) AppUpdateState.UpToDate(BuildConfig.VERSION_NAME) else AppUpdateState.Idle
 
@@ -67,16 +88,37 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
             }
     }
 
+    private suspend fun fetchRelease(versionName: String): AppUpdateInfo? = withContext(Dispatchers.IO) {
+        val normalizedVersion = versionName.trim().removePrefix("v").removePrefix("V")
+        require(normalizedVersion.isNotBlank()) { "当前版本号无效" }
+        runCatching {
+            fetchReleaseFromApi("v$normalizedVersion")
+                ?: fetchReleaseFromApi(normalizedVersion)
+        }.getOrElse { apiError ->
+            runCatching { fetchReleaseFromFeed(normalizedVersion) }
+                .getOrElse { throw apiError }
+        }
+    }
+
+    private fun fetchReleaseFromApi(tag: String): AppUpdateInfo? {
+        val encodedTag = URLEncoder.encode(tag, StandardCharsets.UTF_8.name()).replace("+", "%20")
+        val connection = URL("$RELEASE_BY_TAG_API$encodedTag").openConnection() as HttpURLConnection
+        return try {
+            configureGitHubApiConnection(connection)
+            when (val responseCode = connection.responseCode) {
+                HttpURLConnection.HTTP_OK -> parseRelease(connection.inputStream.bufferedReader().use { it.readText() })
+                HttpURLConnection.HTTP_NOT_FOUND -> null
+                else -> error("GitHub 返回 HTTP $responseCode")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun fetchLatestReleaseFromApi(): AppUpdateInfo? {
         val connection = URL(LATEST_RELEASE_API).openConnection() as HttpURLConnection
         return try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = NETWORK_TIMEOUT_MILLIS
-            connection.readTimeout = NETWORK_TIMEOUT_MILLIS
-            connection.instanceFollowRedirects = true
-            connection.setRequestProperty("Accept", "application/vnd.github+json")
-            connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            connection.setRequestProperty("User-Agent", "KixyuBook/${BuildConfig.VERSION_NAME}")
+            configureGitHubApiConnection(connection)
 
             when (val responseCode = connection.responseCode) {
                 HttpURLConnection.HTTP_OK -> parseRelease(connection.inputStream.bufferedReader().use { it.readText() })
@@ -86,6 +128,16 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun configureGitHubApiConnection(connection: HttpURLConnection) {
+        connection.requestMethod = "GET"
+        connection.connectTimeout = NETWORK_TIMEOUT_MILLIS
+        connection.readTimeout = NETWORK_TIMEOUT_MILLIS
+        connection.instanceFollowRedirects = true
+        connection.setRequestProperty("Accept", "application/vnd.github+json")
+        connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        connection.setRequestProperty("User-Agent", "KixyuBook/${BuildConfig.VERSION_NAME}")
     }
 
     private fun fetchLatestReleaseFromRedirect(): AppUpdateInfo? {
@@ -152,6 +204,21 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         }
     }
 
+    private fun fetchReleaseFromFeed(versionName: String): AppUpdateInfo? {
+        val connection = URL(RELEASES_FEED).openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = NETWORK_TIMEOUT_MILLIS
+            connection.readTimeout = NETWORK_TIMEOUT_MILLIS
+            connection.setRequestProperty("Accept", "application/atom+xml")
+            connection.setRequestProperty("User-Agent", "KixyuBook/${BuildConfig.VERSION_NAME}")
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
+            parseReleaseFeed(connection.inputStream.bufferedReader().use { it.readText() }, versionName)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun parseRelease(payload: String): AppUpdateInfo {
         val json = JSONObject(payload)
         val version = json.getString("tag_name").trim().removePrefix("v").removePrefix("V")
@@ -202,6 +269,7 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
 
     private companion object {
         const val LATEST_RELEASE_API = "https://api.github.com/repos/kkyu9527/kixyubook/releases/latest"
+        const val RELEASE_BY_TAG_API = "https://api.github.com/repos/kkyu9527/kixyubook/releases/tags/"
         const val LATEST_RELEASE_PAGE = "https://github.com/kkyu9527/kixyubook/releases/latest"
         const val RELEASES_FEED = "https://github.com/kkyu9527/kixyubook/releases.atom"
         const val RELEASE_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/"
@@ -215,6 +283,17 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
 
 internal fun parseLatestReleaseFeed(payload: String): AppUpdateInfo? {
     val entry = ATOM_ENTRY_REGEX.find(payload)?.groupValues?.get(1) ?: return null
+    return parseReleaseFeedEntry(entry)
+}
+
+internal fun parseReleaseFeed(payload: String, versionName: String): AppUpdateInfo? {
+    val normalizedVersion = versionName.trim().removePrefix("v").removePrefix("V")
+    return ATOM_ENTRY_REGEX.findAll(payload)
+        .mapNotNull { match -> parseReleaseFeedEntry(match.groupValues[1]) }
+        .firstOrNull { release -> release.versionName.equals(normalizedVersion, ignoreCase = true) }
+}
+
+private fun parseReleaseFeedEntry(entry: String): AppUpdateInfo? {
     val releaseUrl = ATOM_RELEASE_URL_REGEX.find(entry)?.groupValues?.get(1)
         ?.decodeXmlEntities()
         ?: return null

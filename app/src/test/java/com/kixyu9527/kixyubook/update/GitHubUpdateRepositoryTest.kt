@@ -46,4 +46,29 @@ class GitHubUpdateRepositoryTest {
         assertTrue(release?.releaseNotes.orEmpty().contains("- 应用内更新"))
         assertNull(release?.downloadUrl)
     }
+
+    @Test
+    fun atomFallbackSelectsTheInstalledVersionInsteadOfTheLatestRelease() {
+        val release = parseReleaseFeed(
+            payload = """
+                <feed xmlns="http://www.w3.org/2005/Atom">
+                  <entry>
+                    <link href="https://github.com/kkyu9527/kixyubook/releases/tag/v2.2.0"/>
+                    <title>v2.2.0</title>
+                    <content type="html">&lt;p&gt;较新版本&lt;/p&gt;</content>
+                  </entry>
+                  <entry>
+                    <link href="https://github.com/kkyu9527/kixyubook/releases/tag/v2.1.1"/>
+                    <title>Kixyu Book 2.1.1</title>
+                    <content type="html">&lt;h2&gt;修复&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;目标版本说明&lt;/li&gt;&lt;/ul&gt;</content>
+                  </entry>
+                </feed>
+            """.trimIndent(),
+            versionName = "2.1.1",
+        )
+
+        assertEquals("2.1.1", release?.versionName)
+        assertEquals("Kixyu Book 2.1.1", release?.releaseName)
+        assertTrue(release?.releaseNotes.orEmpty().contains("目标版本说明"))
+    }
 }

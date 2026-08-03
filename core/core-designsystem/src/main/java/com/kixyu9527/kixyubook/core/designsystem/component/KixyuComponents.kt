@@ -197,23 +197,25 @@ fun KixyuSettingsRow(
     supportingText: String? = null,
     icon: ImageVector? = null,
     onClick: (() -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
+    val leadingContent: (@Composable () -> Unit)? = leading ?: icon?.let { image ->
+        {
+            Icon(
+                image,
+                null,
+                Modifier.size(KixyuSize.icon),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixBasicComponent(
             modifier = modifier.fillMaxWidth().heightIn(min = KixyuSize.rowMinHeight),
             title = title,
             summary = supportingText,
-            startAction = icon?.let { image ->
-                {
-                    Icon(
-                        image,
-                        null,
-                        Modifier.size(KixyuSize.icon),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            },
+            startAction = leadingContent,
             endActions = trailing,
             insideMargin = PaddingValues(
                 horizontal = KixyuSpacing.rowHorizontal,
@@ -229,8 +231,8 @@ fun KixyuSettingsRow(
             .padding(horizontal = KixyuSpacing.rowHorizontal, vertical = KixyuSpacing.rowVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        icon?.let {
-            Icon(it, null, Modifier.size(KixyuSize.icon), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        leadingContent?.let {
+            it()
             Spacer(Modifier.width(KixyuSpacing.medium))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {

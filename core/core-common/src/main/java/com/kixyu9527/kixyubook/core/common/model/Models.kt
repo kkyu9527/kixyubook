@@ -200,3 +200,10 @@ sealed interface AppUpdateState {
     data class UpToDate(val currentVersion: String) : AppUpdateState
     data class Failed(val message: String) : AppUpdateState
 }
+
+sealed interface ReleaseNotesState {
+    data object Idle : ReleaseNotesState
+    data object Loading : ReleaseNotesState
+    data class Available(val release: AppUpdateInfo) : ReleaseNotesState
+    data class Unavailable(val message: String) : ReleaseNotesState
+}

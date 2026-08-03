@@ -16,13 +16,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
@@ -37,6 +41,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -62,6 +67,7 @@ import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
+import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.navigation.Routes
 import com.kixyu9527.kixyubook.feature.home.HomeRoute
 import com.kixyu9527.kixyubook.feature.library.LibraryRoute
@@ -104,6 +110,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by appViewModel.settings.collectAsState()
             val updateState by appViewModel.updateState.collectAsState()
+            val releaseNotesState by appViewModel.releaseNotesState.collectAsState()
             val loadedSettings = settings
             if (loadedSettings == null) {
                 // This surface normally exists for only a few milliseconds. It
@@ -116,7 +123,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Box(Modifier.fillMaxSize().background(bootstrapBackground))
             } else {
-                KixyuBookApp(loadedSettings, updateState)
+                KixyuBookApp(loadedSettings, updateState, releaseNotesState)
             }
         }
     }
@@ -125,6 +132,7 @@ class MainActivity : ComponentActivity() {
     private fun KixyuBookApp(
         settings: com.kixyu9527.kixyubook.core.common.model.ReaderSettings,
         updateState: AppUpdateState,
+        releaseNotesState: ReleaseNotesState,
     ) {
         val navController = rememberNavController()
         // The UI-style setting adds/removes a MIUIX theme provider. Keep the
@@ -132,14 +140,17 @@ class MainActivity : ComponentActivity() {
         // not recreate the current screen or bottom bar.
         val latestSettings = rememberUpdatedState(settings)
         val latestUpdateState = rememberUpdatedState(updateState)
+        val latestReleaseNotesState = rememberUpdatedState(releaseNotesState)
         val appContent = remember {
             movableContentOf {
                 KixyuNavHost(
                     navController = navController,
                     initialReaderSettings = latestSettings.value,
                     updateState = latestUpdateState.value,
+                    releaseNotesState = latestReleaseNotesState.value,
                     onCheckForUpdates = appViewModel::checkForUpdates,
                     onUpdateResultConsumed = appViewModel::clearUpdateResult,
+                    onLoadReleaseNotes = appViewModel::loadCurrentReleaseNotes,
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
                 )
             }
@@ -289,8 +300,10 @@ private fun KixyuNavHost(
     navController: NavHostController,
     initialReaderSettings: ReaderSettings,
     updateState: AppUpdateState,
+    releaseNotesState: ReleaseNotesState,
     onCheckForUpdates: () -> Unit,
     onUpdateResultConsumed: () -> Unit,
+    onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
 ) {
     val entry by navController.currentBackStackEntryAsState()
@@ -306,9 +319,11 @@ private fun KixyuNavHost(
     val pagerState = rememberPagerState(pageCount = { top.size })
     val scope = rememberCoroutineScope()
     val view = LocalView.current
+    val uriHandler = LocalUriHandler.current
     var pageAnimation by remember { mutableStateOf<Job?>(null) }
     var animationPriorityJob by remember { mutableStateOf<Job?>(null) }
     var bookNavigationPending by remember { mutableStateOf(false) }
+    var releaseNotesVisible by remember { mutableStateOf(false) }
     val topLevelActive = route == null || route == Routes.HOME
     val prioritizeAnimation: () -> Unit = {
         onAnimationPriorityChanged(true)
@@ -483,6 +498,23 @@ private fun KixyuNavHost(
                         currentVersion = BuildConfig.VERSION_NAME,
                         onCheckForUpdates = onCheckForUpdates,
                         onUpdateResultConsumed = onUpdateResultConsumed,
+                        onShowReleaseNotes = {
+                            onLoadReleaseNotes()
+                            releaseNotesVisible = true
+                        },
+                        onOpenProjectSource = {
+                            runCatching { uriHandler.openUri(PROJECT_SOURCE_URL) }.isSuccess
+                        },
+                        onContactTelegram = {
+                            runCatching { uriHandler.openUri(TELEGRAM_CONTACT_URL) }.isSuccess
+                        },
+                        appLogo = {
+                            Image(
+                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                                contentDescription = "Kixyu Book Logo",
+                                modifier = Modifier.size(56.dp),
+                            )
+                        },
                         onBack = {
                             prioritizeAnimation()
                             navController.popBackStack()
@@ -528,6 +560,106 @@ private fun KixyuNavHost(
                     onSelected = selectTopDestination,
                 )
             }
+            ReleaseNotesModal(
+                show = releaseNotesVisible,
+                state = releaseNotesState,
+                onDismiss = { releaseNotesVisible = false },
+                onRetry = onLoadReleaseNotes,
+                onOpenReleasePage = {
+                    runCatching {
+                        uriHandler.openUri(
+                            (releaseNotesState as? ReleaseNotesState.Available)
+                                ?.release
+                                ?.releaseUrl
+                                ?: "$PROJECT_SOURCE_URL/releases",
+                        )
+                    }.isSuccess
+                },
+            )
         }
     }
 }
+
+@Composable
+private fun ReleaseNotesModal(
+    show: Boolean,
+    state: ReleaseNotesState,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+    onOpenReleasePage: () -> Boolean,
+) {
+    val useBottomSheet = kixyuWindowWidthClass() == KixyuWindowWidthClass.COMPACT
+    KixyuAdaptiveModal(show = show, onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .then(if (useBottomSheet) Modifier.navigationBarsPadding() else Modifier)
+                .padding(
+                    start = KixyuSpacing.large,
+                    end = KixyuSpacing.large,
+                    top = KixyuSpacing.medium,
+                    bottom = KixyuSpacing.large,
+                ),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+        ) {
+            Text(
+                text = "更新日志 · v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+            )
+            when (state) {
+                ReleaseNotesState.Idle,
+                ReleaseNotesState.Loading,
+                -> Box(
+                    Modifier.fillMaxWidth().weight(1f, fill = false),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+                is ReleaseNotesState.Available -> Column(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                ) {
+                    Text(
+                        text = state.release.releaseName,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    ReleaseNotesMarkdown(
+                        markdown = state.release.releaseNotes.takeIf { it.isNotBlank() }
+                            ?: "此版本未填写 Release Note。",
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(
+                        text = "在 GitHub 查看此版本",
+                        modifier = Modifier.clickable { onOpenReleasePage() },
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            textDecoration = TextDecoration.Underline,
+                        ),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                is ReleaseNotesState.Unavailable -> Column(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = state.message,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    KixyuButton(text = "重试", onClick = onRetry)
+                    KixyuTextButton(text = "前往 GitHub", onClick = { onOpenReleasePage() })
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                KixyuTextButton(text = "关闭", onClick = onDismiss)
+            }
+        }
+    }
+}
+
+private const val PROJECT_SOURCE_URL = "https://github.com/kkyu9527/kixyubook"
+private const val TELEGRAM_CONTACT_URL = "https://t.me/kkyu9527s_bot"

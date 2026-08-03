@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
+import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.common.repository.AppUpdateRepository
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
@@ -35,6 +36,7 @@ class AppViewModel @Inject constructor(
         )
 
     val updateState: StateFlow<AppUpdateState> = updates.state
+    val releaseNotesState: StateFlow<ReleaseNotesState> = updates.releaseNotesState
 
     init {
         viewModelScope.launch { updates.checkForUpdates(manual = false) }
@@ -46,6 +48,10 @@ class AppViewModel @Inject constructor(
 
     fun clearUpdateResult() {
         updates.clearResult()
+    }
+
+    fun loadCurrentReleaseNotes() {
+        viewModelScope.launch { updates.loadReleaseNotes(BuildConfig.VERSION_NAME) }
     }
 
     fun setAnimationActive(active: Boolean) {

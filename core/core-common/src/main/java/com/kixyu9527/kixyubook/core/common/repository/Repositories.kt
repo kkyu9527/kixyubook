@@ -78,7 +78,9 @@ interface BackupContributor {
 
 interface AppUpdateRepository {
     val state: StateFlow<AppUpdateState>
+    val releaseNotesState: StateFlow<ReleaseNotesState>
     suspend fun checkForUpdates(manual: Boolean)
+    suspend fun loadReleaseNotes(versionName: String)
     fun clearResult()
 }
 

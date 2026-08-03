@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDone
@@ -46,10 +47,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
@@ -66,6 +69,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorCo
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSecondaryButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
@@ -86,6 +90,7 @@ import kotlin.system.exitProcess
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -835,8 +840,16 @@ fun AboutRoute(
     currentVersion: String,
     onCheckForUpdates: () -> Unit,
     onUpdateResultConsumed: () -> Unit,
+    onShowReleaseNotes: () -> Unit,
+    onOpenProjectSource: () -> Boolean,
+    onContactTelegram: () -> Boolean,
+    appLogo: @Composable () -> Unit,
 ) {
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val openExternal: ((() -> Boolean), String) -> Unit = { open, errorMessage ->
+        if (!open()) scope.launch { snackbar.showSnackbar(errorMessage) }
+    }
     LaunchedEffect(updateState) {
         when (val result = updateState) {
             is AppUpdateState.UpToDate -> {
@@ -883,19 +896,65 @@ fun AboutRoute(
                     KixyuSettingsRow(
                         title = "Kixyu Book",
                         supportingText = "本地离线小说阅读器",
+                        leading = appLogo,
                     ) {
                         Text("v$currentVersion", style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                     KixyuDivider()
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                     ) {
                         KixyuButton(
                             text = if (updateState == AppUpdateState.Checking) "正在检查…" else "检查更新",
                             onClick = onCheckForUpdates,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.weight(1f),
                             enabled = updateState != AppUpdateState.Checking,
                         )
+                        KixyuSecondaryButton(
+                            text = "更新日志",
+                            onClick = onShowReleaseNotes,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+            item {
+                KixyuSection(title = "项目与联系") {
+                    KixyuSettingsRow(
+                        title = "项目源码",
+                        supportingText = "github.com/kkyu9527/kixyubook",
+                        onClick = {
+                            openExternal(onOpenProjectSource, "无法打开 GitHub，请检查可用的浏览器")
+                        },
+                        leading = {
+                            Icon(
+                                painterResource(R.drawable.ic_brand_github),
+                                null,
+                                Modifier.size(KixyuSize.icon),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(KixyuSize.icon))
+                    }
+                    KixyuDivider()
+                    KixyuSettingsRow(
+                        title = "Telegram 联系",
+                        supportingText = "@kkyu9527s_bot",
+                        onClick = {
+                            openExternal(onContactTelegram, "无法打开 Telegram 联系链接")
+                        },
+                        leading = {
+                            Icon(
+                                painterResource(R.drawable.ic_brand_telegram),
+                                null,
+                                Modifier.size(KixyuSize.icon),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(KixyuSize.icon))
                     }
                 }
             }
