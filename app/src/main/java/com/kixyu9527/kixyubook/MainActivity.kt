@@ -315,7 +315,9 @@ private fun KixyuNavHost(
             TopDestination(Routes.SETTINGS, "设置", Icons.Outlined.Settings),
         )
     }
-    val useNavigationRail = kixyuWindowWidthClass() != KixyuWindowWidthClass.COMPACT
+    val windowSize = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
+    val useNavigationRail = kixyuWindowWidthClass() != KixyuWindowWidthClass.COMPACT &&
+        windowSize.width > windowSize.height
     val pagerState = rememberPagerState(pageCount = { top.size })
     val scope = rememberCoroutineScope()
     val view = LocalView.current
@@ -430,7 +432,7 @@ private fun KixyuNavHost(
                     HorizontalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize().padding(
-                            start = if (useNavigationRail) KixyuSize.navigationRailWidth else 0.dp,
+                            start = if (useNavigationRail) KixyuSize.navigationRailContentWidth else 0.dp,
                         ),
                         // Keep the adjacent library ready, but do not build all three complete page
                         // trees in the launch frame. Compose's pager prefetches the next page while

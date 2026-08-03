@@ -2,13 +2,15 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +26,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 enum class KixyuWindowWidthClass { COMPACT, MEDIUM, EXPANDED }
 
@@ -65,16 +68,15 @@ fun KixyuNavigationRail(
     enabled: Boolean = true,
 ) {
     Surface(
-        modifier = modifier.width(KixyuSize.navigationRailWidth).fillMaxHeight(),
+        modifier = modifier
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
+            .padding(start = KixyuSpacing.medium)
+            .width(KixyuSize.navigationRailWidth),
+        shape = RoundedCornerShape(KixyuSize.navigationRailCornerRadius),
         color = MaterialTheme.colorScheme.surfaceContainer,
+        shadowElevation = KixyuSpacing.extraSmall,
     ) {
-        NavigationRail(
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            windowInsets = WindowInsets.safeDrawing.only(
-                WindowInsetsSides.Start + WindowInsetsSides.Vertical,
-            ),
-        ) {
-            Spacer(Modifier.weight(1f))
+        Column {
             items.forEach { item ->
                 NavigationRailItem(
                     selected = selectedKey == item.route,
@@ -83,9 +85,11 @@ fun KixyuNavigationRail(
                     label = { Text(item.label, maxLines = 1) },
                     enabled = enabled,
                     alwaysShowLabel = true,
+                    modifier = Modifier
+                        .width(KixyuSize.navigationRailWidth)
+                        .height(KixyuSize.navigationRailItemHeight),
                 )
             }
-            Spacer(Modifier.weight(1f))
         }
     }
 }

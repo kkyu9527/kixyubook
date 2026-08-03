@@ -119,7 +119,10 @@ object KixyuSize {
     val bottomNavigationBarHeight = 64.dp
     val bottomNavigationCornerRadius = 32.dp
     val bottomNavigationContentHeight = 76.dp
-    val navigationRailWidth = 88.dp
+    val navigationRailWidth = 72.dp
+    val navigationRailItemHeight = 64.dp
+    val navigationRailCornerRadius = 36.dp
+    val navigationRailContentWidth = 96.dp
     val pageContentMaxWidth = 840.dp
     val expandedPageContentMaxWidth = 1200.dp
     val readerTextMaxWidth = 760.dp

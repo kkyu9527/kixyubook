@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -101,12 +103,22 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
             if (expanded && state.recent.isNotEmpty()) {
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
                         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        ContinueReading(state.recent.first(), onOpenBook, Modifier.weight(1.15f))
-                        StatsOverview(state, Modifier.weight(1f))
+                        ContinueReading(
+                            item = state.recent.first(),
+                            open = onOpenBook,
+                            modifier = Modifier.weight(1.15f).fillMaxHeight(),
+                            fillAvailableHeight = true,
+                        )
+                        StatsOverview(
+                            state = state,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            showSectionTitle = true,
+                            fillAvailableHeight = true,
+                        )
                     }
                 }
             } else {
@@ -150,11 +162,44 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
 }
 
 @Composable
-private fun StatsOverview(state: HomeUiState, modifier: Modifier = Modifier) {
+private fun StatsOverview(
+    state: HomeUiState,
+    modifier: Modifier = Modifier,
+    showSectionTitle: Boolean = false,
+    fillAvailableHeight: Boolean = false,
+) {
     val stats = state.stats
     val goalMillis = TimeUnit.MINUTES.toMillis(stats.goalMinutes.toLong()).coerceAtLeast(1)
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+    ) {
+        if (showSectionTitle) {
+            Text(
+                "阅读统计",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+            )
+        }
+        val surfaceModifier = if (fillAvailableHeight) {
+            Modifier.fillMaxWidth().weight(1f)
+        } else {
+            Modifier.fillMaxWidth()
+        }
+        StatsSurface(state, goalMillis, surfaceModifier)
+    }
+}
+
+@Composable
+private fun StatsSurface(
+    state: HomeUiState,
+    goalMillis: Long,
+    modifier: Modifier,
+) {
+    val stats = state.stats
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
     ) {
@@ -190,11 +235,21 @@ private fun StatItem(icon: androidx.compose.ui.graphics.vector.ImageVector, valu
 }
 
 @Composable
-private fun ContinueReading(item: LibraryBook, open: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun ContinueReading(
+    item: LibraryBook,
+    open: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    fillAvailableHeight: Boolean = false,
+) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
         Text("继续阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+        val surfaceModifier = if (fillAvailableHeight) {
+            Modifier.fillMaxWidth().weight(1f)
+        } else {
+            Modifier.fillMaxWidth()
+        }
         Surface(
-            modifier = Modifier.fillMaxWidth()
+            modifier = surfaceModifier
                 .semantics { contentDescription = "打开书籍：${item.book.title}" }
                 .clickable { open(item.book.uuid) },
             color = MaterialTheme.colorScheme.surfaceContainerLow,
