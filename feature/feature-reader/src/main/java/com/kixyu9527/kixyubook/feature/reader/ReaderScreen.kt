@@ -1074,17 +1074,18 @@ private fun PagedReader(
             pageNumber = readerPageNumber(state, initialActual, pages.size),
         )
     }
-    val pagerEdgeTap by rememberUpdatedState<(Float) -> Unit> { fraction ->
+    val pagerTap by rememberUpdatedState<(Float) -> Unit> { fraction ->
         if (textSelectionActive) return@rememberUpdatedState
         when {
             fraction < .33f && hasPrevious -> turnRequests.trySend(-1)
             fraction > .67f && hasNext -> turnRequests.trySend(1)
+            fraction in .33f..67f -> middleTap()
         }
     }
     HorizontalPager(
         state = pager,
-        modifier = Modifier.fillMaxSize().observePagerEdgeTap(
-            onTapFraction = { fraction -> pagerEdgeTap(fraction) },
+        modifier = Modifier.fillMaxSize().observePagerTap(
+            onTapFraction = { fraction -> pagerTap(fraction) },
         ),
         // Only one already-measured neighbour is precomposed. This keeps the gesture surface
         // continuous without laying out the entire retained chapter window.
@@ -1160,11 +1161,12 @@ private fun ReaderPagerLeaf(
 }
 
 /**
- * Edge turns belong to the stable Pager node instead of page-local content. The current page can
+ * Page taps belong to the stable Pager node instead of page-local content. The current page can
  * be replaced by a lightweight chapter placeholder in the same frame that a rapid tap arrives;
- * keeping this observer above those pages prevents that tap from being discarded.
+ * keeping this observer above those pages prevents that tap from being discarded. It also makes
+ * the tablet spread gutter and an empty companion leaf participate in the center-tap interaction.
  */
-private fun Modifier.observePagerEdgeTap(
+private fun Modifier.observePagerTap(
     onTapFraction: (Float) -> Unit,
 ): Modifier = pointerInput(Unit) {
     awaitEachGesture {
@@ -1175,10 +1177,10 @@ private fun Modifier.observePagerEdgeTap(
         val stayedInPlace = delta.x * delta.x + delta.y * delta.y <=
             viewConfiguration.touchSlop * viewConfiguration.touchSlop
         val fraction = up.position.x / size.width.coerceAtLeast(1)
-        if (isShortTap && stayedInPlace && (fraction < .33f || fraction > .67f)) {
+        if (isShortTap && stayedInPlace) {
             // Initial pass reaches this stable parent before the translated page-local handler.
-            // Consume only the completed edge tap so the moving child cannot reinterpret the
-            // same screen coordinate as a center tap. Drags remain unconsumed for Pager.
+            // Consume only the completed tap so leaf renderers cannot toggle the controls twice.
+            // Drags remain unconsumed for Pager.
             up.consume()
             onTapFraction(fraction)
         }
