@@ -24,6 +24,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
@@ -85,8 +86,11 @@ fun KixyuNavigationRail(
     enabled: Boolean = true,
 ) {
     val appUiStyle = LocalAppUiStyle.current
-    val showLabels = with(LocalDensity.current) {
-        LocalWindowInfo.current.containerSize.height.toDp() >= 600.dp
+    val showLabels = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val itemHeight = if (showLabels) {
+        KixyuSize.navigationRailLabeledItemHeight
+    } else {
+        KixyuSize.navigationRailItemHeight
     }
     Box(
         modifier = modifier
@@ -123,7 +127,7 @@ fun KixyuNavigationRail(
                                 enabled = enabled,
                                 modifier = Modifier
                                     .width(KixyuSize.navigationRailWidth)
-                                    .height(KixyuSize.navigationRailItemHeight),
+                                    .height(itemHeight),
                             )
                         }
                     }
@@ -144,7 +148,7 @@ fun KixyuNavigationRail(
                             alwaysShowLabel = showLabels,
                             modifier = Modifier
                                 .width(KixyuSize.navigationRailWidth)
-                                .height(KixyuSize.navigationRailItemHeight),
+                                .height(itemHeight),
                         )
                     }
                 }
