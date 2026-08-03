@@ -2,7 +2,9 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
@@ -14,11 +16,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +29,11 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
+import top.yukonga.miuix.kmp.basic.LocalNavigationRailDisplayMode
+import top.yukonga.miuix.kmp.basic.NavigationRailDisplayMode
+import top.yukonga.miuix.kmp.basic.NavigationRailItem as MiuixNavigationRailItem
 
 enum class KixyuWindowWidthClass { COMPACT, MEDIUM, EXPANDED }
 
@@ -41,6 +48,16 @@ fun kixyuWindowWidthClass(): KixyuWindowWidthClass {
         width < 840.dp -> KixyuWindowWidthClass.MEDIUM
         else -> KixyuWindowWidthClass.EXPANDED
     }
+}
+
+/**
+ * Top-level navigation follows the current window orientation instead of the device category.
+ * This keeps a resized tablet and a landscape phone on the same compact floating-rail layout.
+ */
+@Composable
+fun kixyuUsesNavigationRail(): Boolean {
+    val windowSize = LocalWindowInfo.current.containerSize
+    return windowSize.width > windowSize.height
 }
 
 /**
@@ -67,28 +84,70 @@ fun KixyuNavigationRail(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    Surface(
+    val appUiStyle = LocalAppUiStyle.current
+    val showLabels = with(LocalDensity.current) {
+        LocalWindowInfo.current.containerSize.height.toDp() >= 600.dp
+    }
+    Box(
         modifier = modifier
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
-            .padding(start = KixyuSpacing.medium)
-            .width(KixyuSize.navigationRailWidth),
-        shape = RoundedCornerShape(KixyuSize.navigationRailCornerRadius),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shadowElevation = KixyuSpacing.extraSmall,
+            .fillMaxHeight()
+            .windowInsetsPadding(
+                WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Start + WindowInsetsSides.Vertical,
+                ),
+            )
+            .padding(start = KixyuSpacing.medium),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        Column {
-            items.forEach { item ->
-                NavigationRailItem(
-                    selected = selectedKey == item.route,
-                    onClick = { onSelected(item) },
-                    icon = { Icon(item.icon, item.label) },
-                    label = { Text(item.label, maxLines = 1) },
-                    enabled = enabled,
-                    alwaysShowLabel = true,
-                    modifier = Modifier
-                        .width(KixyuSize.navigationRailWidth)
-                        .height(KixyuSize.navigationRailItemHeight),
-                )
+        Surface(
+            modifier = Modifier.width(KixyuSize.navigationRailWidth),
+            shape = RoundedCornerShape(KixyuSize.navigationContainerCornerRadius),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shadowElevation = if (appUiStyle == AppUiStyle.MIUIX) 0.dp else KixyuSpacing.extraSmall,
+        ) {
+            if (appUiStyle == AppUiStyle.MIUIX) {
+                CompositionLocalProvider(
+                    LocalNavigationRailDisplayMode provides if (showLabels) {
+                        NavigationRailDisplayMode.IconAndText
+                    } else {
+                        NavigationRailDisplayMode.IconOnly
+                    },
+                ) {
+                    Column {
+                        items.forEach { item ->
+                            MiuixNavigationRailItem(
+                                selected = selectedKey == item.route,
+                                onClick = { onSelected(item) },
+                                icon = item.icon,
+                                label = item.label,
+                                enabled = enabled,
+                                modifier = Modifier
+                                    .width(KixyuSize.navigationRailWidth)
+                                    .height(KixyuSize.navigationRailItemHeight),
+                            )
+                        }
+                    }
+                }
+            } else {
+                Column {
+                    items.forEach { item ->
+                        NavigationRailItem(
+                            selected = selectedKey == item.route,
+                            onClick = { onSelected(item) },
+                            icon = { Icon(item.icon, item.label) },
+                            label = if (showLabels) {
+                                { Text(item.label, maxLines = 1) }
+                            } else {
+                                null
+                            },
+                            enabled = enabled,
+                            alwaysShowLabel = showLabels,
+                            modifier = Modifier
+                                .width(KixyuSize.navigationRailWidth)
+                                .height(KixyuSize.navigationRailItemHeight),
+                        )
+                    }
+                }
             }
         }
     }

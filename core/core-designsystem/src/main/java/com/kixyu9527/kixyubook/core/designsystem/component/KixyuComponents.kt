@@ -117,11 +117,10 @@ object KixyuSize {
     val recentCoverHeight = 64.dp
     val bottomNavigationItemWidth = 80.dp
     val bottomNavigationBarHeight = 64.dp
-    val bottomNavigationCornerRadius = 32.dp
+    val navigationContainerCornerRadius = 16.dp
     val bottomNavigationContentHeight = 76.dp
     val navigationRailWidth = 72.dp
     val navigationRailItemHeight = 64.dp
-    val navigationRailCornerRadius = 36.dp
     val navigationRailContentWidth = 96.dp
     val pageContentMaxWidth = 840.dp
     val expandedPageContentMaxWidth = 1200.dp
@@ -827,6 +826,7 @@ fun KixyuNavigationBar(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val appUiStyle = LocalAppUiStyle.current
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -848,11 +848,11 @@ fun KixyuNavigationBar(
                         min = KixyuSize.bottomNavigationBarHeight,
                         max = KixyuSize.bottomNavigationBarHeight,
                     ),
-                shape = RoundedCornerShape(KixyuSize.bottomNavigationCornerRadius),
+                shape = RoundedCornerShape(KixyuSize.navigationContainerCornerRadius),
                 color = MaterialTheme.colorScheme.surfaceContainer,
-                shadowElevation = KixyuSpacing.extraSmall,
+                shadowElevation = if (appUiStyle == AppUiStyle.MIUIX) 0.dp else KixyuSpacing.extraSmall,
             ) {
-                if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+                if (appUiStyle == AppUiStyle.MIUIX) {
                     MiuixNavigationBar(
                         modifier = Modifier.fillMaxSize(),
                         showDivider = false,

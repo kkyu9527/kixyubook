@@ -62,6 +62,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -315,9 +316,7 @@ private fun KixyuNavHost(
             TopDestination(Routes.SETTINGS, "设置", Icons.Outlined.Settings),
         )
     }
-    val windowSize = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
-    val useNavigationRail = kixyuWindowWidthClass() != KixyuWindowWidthClass.COMPACT &&
-        windowSize.width > windowSize.height
+    val useNavigationRail = kixyuUsesNavigationRail()
     val pagerState = rememberPagerState(pageCount = { top.size })
     val scope = rememberCoroutineScope()
     val view = LocalView.current
