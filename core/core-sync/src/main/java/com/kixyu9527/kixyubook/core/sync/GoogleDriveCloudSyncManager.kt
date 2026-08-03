@@ -44,7 +44,13 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             lastSyncTime = persisted.lastSyncTime,
             pendingCount = pending,
             errorMessage = persisted.error,
-            initialSyncDecision = decision,
+            initialSyncDecision = decision ?: persisted.conflicts.takeIf { it.isNotEmpty() }?.let { conflicts ->
+                InitialSyncDecision(
+                    localBookCount = 0,
+                    cloudBookCount = 0,
+                    conflicts = conflicts,
+                )
+            },
             inspectingInitialSync = inspecting,
         )
     }.stateIn(scope, SharingStarted.Eagerly, CloudSyncState())
@@ -104,18 +110,21 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     }
 
     override suspend fun resolveInitialSync(choice: InitialSyncChoice): Result<Unit> = runCatching {
+        val decision = initialSyncDecision.value
+        val conflicts = decision?.conflicts ?: preferences.current().conflicts
+        if (conflicts.isEmpty()) return@runCatching
         inspectingInitialSync.value = true
-        if (choice == InitialSyncChoice.USE_LOCAL_LIBRARY) {
-            engine.replaceCloudWithLocalLibrary()
+        if (choice == InitialSyncChoice.USE_CLOUD_CHANGES) {
+            engine.discardLocalChanges(conflicts)
         } else {
-            engine.prepareCloudRestore()
+            engine.acceptLocalChanges(conflicts)
         }
         preferences.approveInitialSync()
         initialSyncDecision.value = null
         scheduler.ensurePeriodic()
         scheduler.requestImmediate()
     }.onFailure { error ->
-        preferences.markError(error.message ?: "首次同步准备失败")
+        preferences.markError(error.message ?: "同步冲突处理失败")
     }.also {
         inspectingInitialSync.value = false
     }
@@ -151,16 +160,29 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         inspectingInitialSync.value = true
         runCatching { engine.inspectInitialSync() }
             .onSuccess { snapshot ->
-                if (snapshot.requiresUserDecision()) {
-                    initialSyncDecision.value = snapshot
-                } else {
-                    preferences.approveInitialSync()
-                    initialSyncDecision.value = null
-                    scheduler.ensurePeriodic()
-                    scheduler.requestImmediate()
+                // An empty local library on an unapproved installation is the normal new-device
+                // case. Clear any stale local sync bookkeeping and restore the existing cloud
+                // library automatically; an empty client must never offer to erase cloud data.
+                when {
+                    snapshot.shouldRestoreFromCloud() -> {
+                        engine.prepareCloudRestore()
+                        approveAndSchedule()
+                    }
+                    snapshot.requiresUserDecision() -> {
+                        preferences.setConflicts(snapshot.conflicts)
+                        initialSyncDecision.value = snapshot
+                    }
+                    else -> approveAndSchedule()
                 }
             }
             .onFailure { error -> preferences.markError(error.message ?: "无法检查云端书库") }
         inspectingInitialSync.value = false
+    }
+
+    private suspend fun approveAndSchedule() {
+        preferences.approveInitialSync()
+        initialSyncDecision.value = null
+        scheduler.ensurePeriodic()
+        scheduler.requestImmediate()
     }
 }

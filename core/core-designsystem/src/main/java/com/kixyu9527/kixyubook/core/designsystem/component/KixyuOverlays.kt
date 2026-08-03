@@ -491,6 +491,62 @@ fun KixyuActionDialog(
     dismissLabel: String? = "取消",
     content: @Composable () -> Unit,
 ) {
+    if (kixyuWindowWidthClass() != KixyuWindowWidthClass.COMPACT) {
+        if (!show) return
+        Dialog(
+            onDismissRequest = onDismissRequest,
+            properties = KixyuAdaptiveDialogProperties,
+        ) {
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(KixyuSpacing.extraLarge),
+                contentAlignment = Alignment.Center,
+            ) {
+                val surfaceWidth = minOf(maxWidth, 600.dp)
+                KixyuPopupSurface(
+                    modifier = Modifier.width(surfaceWidth),
+                    shadowElevation = KixyuSpacing.small,
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                        )
+                        CompositionLocalProvider(
+                            LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant,
+                            content = content,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            dismissLabel?.let {
+                                KixyuSecondaryButton(
+                                    text = it,
+                                    onClick = onDismissRequest,
+                                    modifier = Modifier.widthIn(min = 112.dp),
+                                )
+                            }
+                            KixyuButton(
+                                text = confirmLabel,
+                                onClick = onConfirm,
+                                enabled = confirmEnabled,
+                                modifier = Modifier.widthIn(min = 112.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         OverlayDialog(
             show = show,

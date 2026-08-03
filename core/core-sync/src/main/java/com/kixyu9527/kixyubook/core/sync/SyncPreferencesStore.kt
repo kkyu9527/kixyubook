@@ -28,6 +28,7 @@ data class PersistedSyncState(
     val error: String? = null,
     val initialMergeComplete: Boolean = false,
     val initialSyncApproved: Boolean = false,
+    val conflicts: List<InitialSyncConflict> = emptyList(),
 )
 
 @Singleton
@@ -57,6 +58,7 @@ class SyncPreferencesStore @Inject constructor(
             initialMergeComplete = values[INITIAL_MERGE] ?: false,
             initialSyncApproved = values[INITIAL_SYNC_APPROVED]
                 ?: (values[INITIAL_MERGE] ?: false),
+            conflicts = decodeConflicts(values[SYNC_CONFLICTS]),
         )
     }
 
@@ -74,6 +76,7 @@ class SyncPreferencesStore @Inject constructor(
             it[INITIAL_MERGE] = false
             it.remove(PAGE_TOKEN)
             it.remove(LAST_SYNC)
+            it.remove(SYNC_CONFLICTS)
         }
         it[PHASE] = CloudSyncPhase.IDLE.name
         it.remove(ERROR)
@@ -83,6 +86,7 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(ACCOUNT_SUBJECT); it.remove(ACCOUNT_EMAIL); it.remove(ACCOUNT_NAME); it.remove(ACCOUNT_AVATAR)
         it.remove(PAGE_TOKEN); it.remove(LAST_SYNC); it.remove(ERROR); it.remove(INITIAL_MERGE)
         it.remove(INITIAL_SYNC_APPROVED)
+        it.remove(SYNC_CONFLICTS)
         it[ENABLED] = false
         it[PHASE] = CloudSyncPhase.IDLE.name
     }
@@ -95,6 +99,19 @@ class SyncPreferencesStore @Inject constructor(
     suspend fun approveInitialSync() = context.cloudSyncDataStore.edit {
         it[INITIAL_SYNC_APPROVED] = true
         it[ENABLED] = true
+        it[PHASE] = CloudSyncPhase.IDLE.name
+        it.remove(ERROR)
+        it.remove(SYNC_CONFLICTS)
+    }
+
+    suspend fun setConflicts(conflicts: List<InitialSyncConflict>) = context.cloudSyncDataStore.edit {
+        if (conflicts.isEmpty()) {
+            it.remove(SYNC_CONFLICTS)
+        } else {
+            it[SYNC_CONFLICTS] = conflicts.joinToString("\n") { conflict ->
+                "${conflict.entityType.name}\t${conflict.entityId}"
+            }
+        }
         it[PHASE] = CloudSyncPhase.IDLE.name
         it.remove(ERROR)
     }
@@ -115,6 +132,7 @@ class SyncPreferencesStore @Inject constructor(
         pageToken?.let { value -> it[PAGE_TOKEN] = value }
         it[INITIAL_MERGE] = true
         it[INITIAL_SYNC_APPROVED] = true
+        it.remove(SYNC_CONFLICTS)
         it.remove(ERROR)
     }
 
@@ -137,6 +155,19 @@ class SyncPreferencesStore @Inject constructor(
         it[ERROR] = message
     }
 
+    private fun decodeConflicts(value: String?): List<InitialSyncConflict> = value.orEmpty()
+        .lineSequence()
+        .mapNotNull { line ->
+            val (typeName, entityId) = line.split('\t', limit = 2).takeIf { it.size == 2 }
+                ?: return@mapNotNull null
+            val type = runCatching {
+                com.kixyu9527.kixyubook.core.common.repository.SyncEntityType.valueOf(typeName)
+            }.getOrNull() ?: return@mapNotNull null
+            InitialSyncConflict(type, entityId)
+        }
+        .distinct()
+        .toList()
+
     private companion object {
         val ACCOUNT_SUBJECT = stringPreferencesKey("account_subject")
         val ACCOUNT_EMAIL = stringPreferencesKey("account_email")
@@ -152,6 +183,7 @@ class SyncPreferencesStore @Inject constructor(
         val ERROR = stringPreferencesKey("error")
         val INITIAL_MERGE = booleanPreferencesKey("initial_merge_complete")
         val INITIAL_SYNC_APPROVED = booleanPreferencesKey("initial_sync_approved")
+        val SYNC_CONFLICTS = stringPreferencesKey("sync_conflicts")
         val DEVICE_ID = stringPreferencesKey("device_id")
     }
 }

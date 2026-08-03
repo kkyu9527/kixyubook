@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.core.sync
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
+import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import kotlinx.coroutines.flow.StateFlow
 
 data class SyncAccount(
@@ -17,14 +18,22 @@ enum class CloudSyncPhase { IDLE, AUTHORIZING, SYNCING, SUCCESS, AUTH_REQUIRED, 
 data class InitialSyncDecision(
     val localBookCount: Int,
     val cloudBookCount: Int,
+    val conflicts: List<InitialSyncConflict> = emptyList(),
 )
 
-internal fun InitialSyncDecision.requiresUserDecision(): Boolean =
+internal fun InitialSyncDecision.shouldRestoreFromCloud(): Boolean =
     localBookCount == 0 && cloudBookCount > 0
 
+internal fun InitialSyncDecision.requiresUserDecision(): Boolean = conflicts.isNotEmpty()
+
+data class InitialSyncConflict(
+    val entityType: SyncEntityType,
+    val entityId: String,
+)
+
 enum class InitialSyncChoice {
-    RESTORE_FROM_CLOUD,
-    USE_LOCAL_LIBRARY,
+    KEEP_LOCAL_CHANGES,
+    USE_CLOUD_CHANGES,
 }
 
 data class CloudSyncState(

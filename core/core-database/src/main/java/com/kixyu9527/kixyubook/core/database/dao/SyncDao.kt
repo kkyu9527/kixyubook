@@ -17,6 +17,9 @@ interface SyncDao {
     @Query("SELECT * FROM sync_outbox ORDER BY changedAt, logicalCounter LIMIT :limit")
     suspend fun pending(limit: Int = 256): List<SyncOutboxEntity>
 
+    @Query("SELECT * FROM sync_outbox ORDER BY changedAt, logicalCounter")
+    suspend fun allPending(): List<SyncOutboxEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertOutbox(value: SyncOutboxEntity)
 

@@ -63,14 +63,35 @@ class CloudSyncEngine @Inject constructor(
         InitialSyncDecision(
             localBookCount = books.getAllBooks().size,
             cloudBookCount = restorableBooks,
+            conflicts = findProvenConflicts(remote),
         )
     }
 
-    suspend fun replaceCloudWithLocalLibrary() = withContext(Dispatchers.IO) {
+    suspend fun discardLocalChanges(conflicts: List<InitialSyncConflict>) = withContext(Dispatchers.IO) {
+        conflicts.forEach { conflict ->
+            syncDao.removeOutbox(conflict.entityType.name, conflict.entityId)
+        }
+    }
+
+    suspend fun acceptLocalChanges(conflicts: List<InitialSyncConflict>) = withContext(Dispatchers.IO) {
         val token = accountClient.accessToken()
             ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
-        deleteAllCloudData(token)
-        seedInitialOutbox()
+        val remote = drive.listAll(token).associateBy(DriveObject::objectKey)
+        conflicts.forEach { conflict ->
+            val key = mutableKeyForConflict(conflict.entityType, conflict.entityId) ?: return@forEach
+            val cloud = remote[key] ?: return@forEach
+            val baseline = syncDao.objectState(key)
+            syncDao.upsertObjectState(
+                SyncObjectStateEntity(
+                    objectKey = key,
+                    driveFileId = cloud.id,
+                    localHash = baseline?.localHash,
+                    localChangedAt = baseline?.localChangedAt ?: 0,
+                    remoteModifiedAt = cloud.modifiedAt,
+                    remoteVersion = cloud.version,
+                ),
+            )
+        }
     }
 
     suspend fun prepareCloudRestore() = withContext(Dispatchers.IO) {
@@ -86,6 +107,7 @@ class CloudSyncEngine @Inject constructor(
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
                 return@runCatching
             }
+            if (persisted.conflicts.isNotEmpty()) return@runCatching
             preferences.markRunning()
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
@@ -99,6 +121,12 @@ class CloudSyncEngine @Inject constructor(
             }.getOrNull()
 
             applyRemoteTombstones(token, remote)
+            resolveDirtyProgress(token, remote)
+            val conflicts = findProvenConflicts(remote)
+            if (conflicts.isNotEmpty()) {
+                preferences.setConflicts(conflicts)
+                return@runCatching
+            }
             applyRemoteChanges(token, remote, persisted.initialMergeComplete)
 
             if (!persisted.initialMergeComplete) seedInitialOutbox()
@@ -161,6 +189,53 @@ class CloudSyncEngine @Inject constructor(
     }
 
     suspend fun enqueueAllCurrentState() = withContext(Dispatchers.IO) { seedInitialOutbox() }
+
+    private suspend fun findProvenConflicts(
+        remote: Map<String, DriveObject>,
+    ): List<InitialSyncConflict> {
+        val states = syncDao.allObjectStates().associateBy(SyncObjectStateEntity::objectKey)
+        return syncDao.allPending().mapNotNull { mutation ->
+            if (mutation.operation == SyncMutationOperation.DELETE.name) return@mapNotNull null
+            val type = runCatching { SyncEntityType.valueOf(mutation.entityType) }.getOrNull()
+                ?: return@mapNotNull null
+            val mutableKey = mutableKeyForConflict(type, mutation.entityId) ?: return@mapNotNull null
+            val baseline = states[mutableKey] ?: return@mapNotNull null
+            val cloud = remote[mutableKey] ?: return@mapNotNull null
+            if (cloud.modifiedAt <= baseline.remoteModifiedAt) return@mapNotNull null
+            InitialSyncConflict(type, mutation.entityId)
+        }.distinct()
+    }
+
+    private suspend fun resolveDirtyProgress(
+        token: String,
+        remote: Map<String, DriveObject>,
+    ) {
+        syncDao.allPending().forEach { mutation ->
+            if (
+                mutation.entityType != SyncEntityType.PROGRESS.name ||
+                mutation.operation != SyncMutationOperation.UPSERT.name
+            ) return@forEach
+            val cloud = remote["progress/${mutation.entityId}"] ?: return@forEach
+            val localTime = books.getProgress(mutation.entityId)?.updatedTime ?: Long.MIN_VALUE
+            var cloudTime = Long.MIN_VALUE
+            withJsonDownload(token, cloud) { json -> cloudTime = json.optLong("updatedTime") }
+            if (cloudTime > localTime) {
+                syncDao.removeOutbox(SyncEntityType.PROGRESS.name, mutation.entityId)
+            }
+        }
+    }
+
+    private fun mutableKeyForConflict(type: SyncEntityType, entityId: String): String? = when (type) {
+        SyncEntityType.BOOK -> "books/$entityId/metadata"
+        SyncEntityType.BOOKMARKS -> "bookmarks/$entityId"
+        SyncEntityType.SETTINGS -> "settings/global"
+        // Progress is resolved automatically by updatedTime, sessions are additive,
+        // and source/font objects are immutable for a stable UUID.
+        SyncEntityType.PROGRESS,
+        SyncEntityType.SESSION,
+        SyncEntityType.FONT,
+        -> null
+    }
 
     private suspend fun seedInitialOutbox() {
         books.getAllBooks().forEach { mutations.record(SyncEntityType.BOOK, it.uuid) }

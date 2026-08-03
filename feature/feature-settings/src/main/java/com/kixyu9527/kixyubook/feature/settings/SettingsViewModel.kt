@@ -89,7 +89,7 @@ class SettingsViewModel @Inject constructor(
     fun setWifiOnlyForLargeFiles(enabled: Boolean) = viewModelScope.launch { cloudSync.setWifiOnlyForLargeFiles(enabled) }
     fun resolveInitialSync(choice: InitialSyncChoice) = viewModelScope.launch {
         cloudSync.resolveInitialSync(choice)
-            .onFailure { _messages.emit(it.message ?: "首次同步准备失败") }
+            .onFailure { _messages.emit(it.message ?: "同步冲突处理失败") }
     }
     fun syncNow() = cloudSync.syncNow()
     fun disconnectGoogle() = viewModelScope.launch { cloudSync.disconnect() }
