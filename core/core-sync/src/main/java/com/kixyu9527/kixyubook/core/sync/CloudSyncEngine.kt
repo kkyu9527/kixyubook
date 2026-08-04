@@ -208,7 +208,10 @@ class CloudSyncEngine @Inject constructor(
      * not touch the global Drive change cursor, allowing the following durable full worker to
      * reconcile metadata, deletions and binary files without losing changes.
      */
-    suspend fun synchronizePriorityBook(preferredBookUuid: String?): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun synchronizePriorityBook(
+        preferredBookUuid: String?,
+        followedByFullSync: Boolean = false,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         syncMutex.withLock { runCatching {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
@@ -299,7 +302,11 @@ class CloudSyncEngine @Inject constructor(
                     }
                 }
             }
-            preferences.markPrioritySuccess()
+            // WorkManager runs the priority exchange and full reconciliation as one logical
+            // chain. Keep its public phase at SYNCING between those stages so app-level status
+            // UI does not dismiss and immediately reappear. The in-process Reader channel has
+            // no following stage and therefore still completes its own state normally.
+            if (!followedByFullSync) preferences.markPrioritySuccess()
         }.onFailure { error ->
             if (error is CancellationException) throw error
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {

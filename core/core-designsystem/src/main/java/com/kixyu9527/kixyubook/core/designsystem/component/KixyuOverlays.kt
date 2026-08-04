@@ -1,5 +1,11 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -22,6 +28,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -437,6 +445,80 @@ fun KixyuPopupSurface(
             shadowElevation = shadowElevation,
             content = content,
         )
+    }
+}
+
+/**
+ * Interactive popup surface that owns its complete pointer hit area. This prevents gestures from
+ * falling through to content behind the popup while keeping nested buttons and fields interactive.
+ */
+@Composable
+fun KixyuInteractivePopupSurface(
+    modifier: Modifier = Modifier,
+    shadowElevation: Dp = KixyuSpacing.extraSmall,
+    content: @Composable () -> Unit,
+) {
+    KixyuPopupSurface(
+        modifier = modifier.pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) awaitPointerEvent()
+            }
+        },
+        shadowElevation = shadowElevation,
+        content = content,
+    )
+}
+
+/**
+ * App-level non-blocking status popup. Its placement owns safe-drawing Insets, including status
+ * bars, display cutouts and landscape camera holes, so callers must not add system padding.
+ */
+@Composable
+fun KixyuTransientStatusPopup(
+    visible: Boolean,
+    message: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(
+                horizontal = KixyuSpacing.medium,
+                vertical = KixyuSpacing.small,
+            ),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .98f),
+        ) {
+            KixyuPopupSurface(
+                modifier = Modifier.widthIn(max = 560.dp),
+                shadowElevation = 0.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(
+                        horizontal = KixyuSpacing.medium,
+                        vertical = KixyuSpacing.small,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
     }
 }
 

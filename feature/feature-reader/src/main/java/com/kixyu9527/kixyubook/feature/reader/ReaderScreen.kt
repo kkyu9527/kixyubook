@@ -28,8 +28,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.TextSelectionColors
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.focusable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Toc
@@ -56,7 +54,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -85,6 +82,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleContro
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuInteractivePopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
@@ -95,6 +93,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorCo
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSearchField
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
@@ -1986,7 +1985,7 @@ private fun ReaderSearchOverlay(
                 .padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.small),
             contentAlignment = Alignment.BottomCenter,
         ) {
-            KixyuPopupSurface(
+            KixyuInteractivePopupSurface(
                 modifier = Modifier.fillMaxWidth()
                     .widthIn(max = KixyuSize.readerSearchPanelMaxWidth)
                     .heightIn(max = KixyuSize.readerSearchPanelMaxHeight)
@@ -2014,23 +2013,22 @@ private fun ReaderSearchOverlay(
                             }
                         }
                     }
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
+                    KixyuSearchField(
+                        query = query,
+                        onQueryChange = { query = it },
+                        onSearch = ::submit,
+                        expanded = expanded,
+                        onExpandedChange = { if (it) expanded = true },
                         modifier = Modifier
-                            .fillMaxWidth()
                             .focusRequester(focusRequester)
                             .onFocusChanged { if (it.isFocused) expanded = true },
-                        placeholder = { Text("搜索书中内容", maxLines = 1) },
+                        placeholder = "搜索书中内容",
                         leadingIcon = { Icon(Icons.Outlined.Search, null) },
                         trailingIcon = {
                             KixyuIconButton(onClick = ::submit, enabled = query.isNotBlank()) {
                                 Icon(Icons.AutoMirrored.Outlined.ArrowForward, "搜索")
                             }
                         },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { submit() }),
                     )
                     if (state.searchResults.isNotEmpty() && query.trim() == state.searchQuery) {
                 if (!expanded) {
@@ -2068,34 +2066,16 @@ private fun ReaderSearchOverlay(
                 ) {
                     items(state.searchResults.size) { index ->
                         val result = state.searchResults[index]
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    result.chapterTitle,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                )
-                            },
-                            supportingContent = {
-                                Text(
-                                    result.text,
-                                    maxLines = 2,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                )
-                            },
-                            leadingContent = { Text("${index + 1}", style = MaterialTheme.typography.labelMedium) },
-                            trailingContent = { Icon(Icons.Outlined.ChevronRight, null) },
-                            colors = ListItemDefaults.colors(
-                                containerColor = if (index == state.selectedSearchIndex) {
-                                    MaterialTheme.colorScheme.secondaryContainer
-                                } else Color.Transparent,
-                            ),
-                            modifier = Modifier.pointerInput(index) {
-                                detectTapGestures {
-                                    onSelect(index)
-                                    focusManager.clearFocus()
-                                    expanded = false
-                                }
+                        KixyuListRow(
+                            title = result.chapterTitle,
+                            supportingText = result.text,
+                            selected = index == state.selectedSearchIndex,
+                            leading = { Text("${index + 1}", style = MaterialTheme.typography.labelMedium) },
+                            trailing = { Icon(Icons.Outlined.ChevronRight, null) },
+                            onClick = {
+                                onSelect(index)
+                                focusManager.clearFocus()
+                                expanded = false
                             },
                         )
                     }

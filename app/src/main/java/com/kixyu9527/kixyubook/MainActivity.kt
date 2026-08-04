@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
@@ -60,7 +59,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTransientStatusPopup
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
@@ -232,32 +231,10 @@ class MainActivity : ComponentActivity() {
                             showGlobalSync = cloudSyncState.phase == CloudSyncPhase.SYNCING
                         }
                     }
-                    AnimatedVisibility(
+                    KixyuTransientStatusPopup(
                         visible = showGlobalSync,
-                        modifier = Modifier.align(Alignment.TopCenter)
-                            .statusBarsPadding()
-                            .padding(top = KixyuSpacing.small),
-                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .98f),
-                    ) {
-                        KixyuPopupSurface(shadowElevation = 0.dp) {
-                            Row(
-                                modifier = Modifier.padding(
-                                    horizontal = KixyuSpacing.medium,
-                                    vertical = KixyuSpacing.small,
-                                ),
-                                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                                Text("正在同步云端数据", style = MaterialTheme.typography.labelLarge)
-                            }
-                        }
-                    }
+                        message = "正在同步云端数据",
+                    )
                 }
                 KixyuAdaptiveModal(
                     show = availableUpdate != null,

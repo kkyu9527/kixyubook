@@ -145,7 +145,10 @@ class CloudSyncWorker(
             setForeground(syncForegroundInfo())
         }
         val operation = when (mode) {
-            SyncWorkerMode.PRIORITY_BOOK -> engine.synchronizePriorityBook(preferredBookUuid)
+            SyncWorkerMode.PRIORITY_BOOK -> engine.synchronizePriorityBook(
+                preferredBookUuid = preferredBookUuid,
+                followedByFullSync = true,
+            )
             SyncWorkerMode.FULL -> engine.synchronize(preferredBookUuid)
         }
         return operation.fold(

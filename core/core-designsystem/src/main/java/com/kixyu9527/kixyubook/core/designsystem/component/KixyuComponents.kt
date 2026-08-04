@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
@@ -66,6 +68,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
@@ -81,6 +84,8 @@ import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.HorizontalDivider as MiuixHorizontalDivider
 import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
+import top.yukonga.miuix.kmp.basic.InputField as MiuixInputField
+import top.yukonga.miuix.kmp.basic.SearchBarDefaults as MiuixSearchBarDefaults
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 
@@ -301,6 +306,59 @@ fun KixyuListRow(
             trailingContent = { trailing() },
             colors = ListItemDefaults.colors(containerColor = containerColor),
             modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+        )
+    }
+}
+
+/** Search input that follows the selected Material 3 or MIUIX component system. */
+@Composable
+fun KixyuSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "",
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+) {
+    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        val spacedLeadingIcon = leadingIcon?.let { icon ->
+            @Composable {
+                Box(
+                    modifier = Modifier.padding(
+                        start = MiuixSearchBarDefaults.LeadingIconStartPadding,
+                        end = MiuixSearchBarDefaults.LeadingIconEndPadding,
+                    ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    icon()
+                }
+            }
+        }
+        MiuixInputField(
+            query = query,
+            onQueryChange = onQueryChange,
+            onSearch = { onSearch() },
+            expanded = expanded,
+            onExpandedChange = onExpandedChange,
+            modifier = modifier.fillMaxWidth().heightIn(min = KixyuSize.rowMinHeight),
+            label = placeholder,
+            leadingIcon = spacedLeadingIcon,
+            trailingIcon = trailingIcon,
+        )
+    } else {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = modifier.fillMaxWidth(),
+            placeholder = { Text(placeholder, maxLines = 1) },
+            leadingIcon = leadingIcon,
+            trailingIcon = trailingIcon,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSearch() }),
         )
     }
 }
