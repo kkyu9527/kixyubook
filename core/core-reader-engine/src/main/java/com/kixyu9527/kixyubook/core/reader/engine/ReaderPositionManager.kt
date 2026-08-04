@@ -15,6 +15,7 @@ class ReaderPositionManager {
         pages: List<ReaderPage>,
         paragraphIndex: Int,
         searchQuery: String? = null,
+        charOffset: Int = 0,
     ): Int {
         if (pages.isEmpty()) return 0
         val normalizedQuery = searchQuery?.trim().orEmpty()
@@ -43,12 +44,34 @@ class ReaderPositionManager {
             }
             if (matchingOffsetPage >= 0) return matchingOffsetPage
         }
+        val safeCharOffset = charOffset.coerceAtLeast(0)
         val exactTextPage = pages.indexOfFirst { page ->
+            page.blocks.any { block ->
+                block.kind == ParagraphKind.TEXT &&
+                    block.paragraphIndex == paragraphIndex &&
+                    safeCharOffset >= block.textStart &&
+                    safeCharOffset < block.textStart + block.visibleText.length.coerceAtLeast(1)
+            }
+        }
+        if (exactTextPage >= 0) return exactTextPage
+
+        // Pagination may skip whitespace between two fragments. Prefer the first fragment after
+        // the persisted offset so a cross-device restore still lands at the same reading point.
+        val followingFragmentPage = pages.indexOfFirst { page ->
+            page.blocks.any { block ->
+                block.kind == ParagraphKind.TEXT &&
+                    block.paragraphIndex == paragraphIndex &&
+                    block.textStart >= safeCharOffset
+            }
+        }
+        if (followingFragmentPage >= 0) return followingFragmentPage
+
+        val lastParagraphPage = pages.indexOfLast { page ->
             page.blocks.any { block ->
                 block.kind == ParagraphKind.TEXT && block.paragraphIndex == paragraphIndex
             }
         }
-        if (exactTextPage >= 0) return exactTextPage
+        if (lastParagraphPage >= 0) return lastParagraphPage
 
         val followingTextPage = pages.indexOfFirst { page ->
             page.blocks.any { block ->

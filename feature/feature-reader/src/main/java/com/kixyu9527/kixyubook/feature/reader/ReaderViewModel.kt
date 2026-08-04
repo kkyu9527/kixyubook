@@ -30,7 +30,9 @@ data class ReaderUiState(
     val prefetchedChapters: Map<Int, ReaderChapter> = emptyMap(),
     val chapterIndex: Int = 0,
     val restorePosition: Int = 0,
+    val restoreCharOffset: Int = 0,
     val currentPosition: Int = 0,
+    val currentCharOffset: Int = 0,
     val settings: ReaderSettings = ReaderSettings(),
     val settingsLoaded: Boolean = false,
     val fontPath: String? = null,
@@ -68,6 +70,7 @@ class ReaderViewModel @Inject constructor(
     private val sessionFinished = AtomicBoolean(false)
     private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
+    private var lastCharOffset = 0
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, ChapterLoadRequest>()
     private var chapterNavigationJob: Job? = null
@@ -81,6 +84,7 @@ class ReaderViewModel @Inject constructor(
     private var prioritySyncReady = false
     private var openingChapterId: Long? = null
     private var openingPosition = 0
+    private var openingCharOffset = 0
     private var userMovedBeforePrioritySync = false
     private var userHasReadSinceOpen = false
     private var deferredLocalProgress: ReadingProgress? = null
@@ -170,9 +174,11 @@ class ReaderViewModel @Inject constructor(
         acceptedProgressUpdatedAt = progress?.updatedTime ?: Long.MIN_VALUE
         val index = progress?.chapterId?.let { id -> chapters.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
         val content = chapterLoad(index, chapters, ChapterLoadPriority.USER).await() ?: error("章节读取失败")
-        lastPosition = progress?.position ?: 0
+        lastPosition = progress?.paragraphIndex ?: 0
+        lastCharOffset = progress?.charOffset?.coerceAtLeast(0) ?: 0
         openingChapterId = progress?.chapterId ?: chapters[index].id
         openingPosition = lastPosition
+        openingCharOffset = lastCharOffset
         _uiState.update {
             it.copy(
                 book = book,
@@ -181,7 +187,9 @@ class ReaderViewModel @Inject constructor(
                 prefetchedChapters = mapOf(index to content),
                 chapterIndex = index,
                 restorePosition = lastPosition,
+                restoreCharOffset = lastCharOffset,
                 currentPosition = lastPosition,
+                currentCharOffset = lastCharOffset,
                 settings = initialData.presentation.settings,
                 settingsLoaded = true,
                 fontPath = initialData.presentation.fontPath,
@@ -221,12 +229,17 @@ class ReaderViewModel @Inject constructor(
         )
     }
 
-    private fun navigateToChapter(index: Int, position: Int, persistProgress: Boolean = true) {
+    private fun navigateToChapter(
+        index: Int,
+        position: Int,
+        charOffset: Int = 0,
+        persistProgress: Boolean = true,
+    ) {
         val state = _uiState.value
         if (index == state.chapterIndex && state.chapter != null) {
             chapterNavigationJob?.cancel()
             pendingChapterIndex = null
-            _uiState.update { it.copy(chapterLoading = false, pendingChapterTitle = null) }
+            applyPositionWithinCurrentChapter(position, charOffset, persistProgress)
             return
         }
         chapterNavigationJob?.cancel()
@@ -243,7 +256,7 @@ class ReaderViewModel @Inject constructor(
         // newly active Pager.
         state.prefetchedChapters[index]?.let { cached ->
             pendingChapterIndex = null
-            activateChapter(index, position, cached, persistProgress)
+            activateChapter(index, position, charOffset, cached, persistProgress)
             return
         }
 
@@ -258,7 +271,7 @@ class ReaderViewModel @Inject constructor(
         chapterNavigationJob = viewModelScope.launch {
             var chapterLoaded = false
             try {
-                chapterLoaded = loadChapter(index, position, persistProgress)
+                chapterLoaded = loadChapter(index, position, charOffset, persistProgress)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -276,7 +289,12 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadChapter(index: Int, position: Int, persistProgress: Boolean): Boolean {
+    private suspend fun loadChapter(
+        index: Int,
+        position: Int,
+        charOffset: Int,
+        persistProgress: Boolean,
+    ): Boolean {
         val currentState = _uiState.value
         if (index == currentState.chapterIndex && currentState.chapter != null) return true
         if (currentState.chapters.getOrNull(index) == null) return false
@@ -286,17 +304,19 @@ class ReaderViewModel @Inject constructor(
         val readerChapter = currentState.prefetchedChapters[index]
             ?: chapterLoad(index, currentState.chapters, ChapterLoadPriority.USER).await()
             ?: return false
-        activateChapter(index, position, readerChapter, persistProgress)
+        activateChapter(index, position, charOffset, readerChapter, persistProgress)
         return true
     }
 
     private fun activateChapter(
         index: Int,
         position: Int,
+        charOffset: Int,
         readerChapter: ReaderChapter,
         persistProgress: Boolean,
     ) {
         lastPosition = if (position == Int.MAX_VALUE) readerChapter.contentParagraphs().lastOrNull()?.index ?: 0 else position
+        lastCharOffset = if (position == Int.MAX_VALUE) Int.MAX_VALUE else charOffset.coerceAtLeast(0)
         _uiState.update {
             it.copy(
                 chapter = readerChapter,
@@ -304,7 +324,9 @@ class ReaderViewModel @Inject constructor(
                     .filterKeys { chapterIndex -> abs(chapterIndex - index) <= RENDER_PREFETCH_RADIUS },
                 chapterIndex = index,
                 restorePosition = lastPosition,
+                restoreCharOffset = lastCharOffset,
                 currentPosition = lastPosition,
+                currentCharOffset = lastCharOffset,
                 navigationVersion = it.navigationVersion + 1,
                 loading = false,
                 chapterLoading = false,
@@ -312,7 +334,33 @@ class ReaderViewModel @Inject constructor(
                 error = null,
             )
         }
-        if (persistProgress) savePosition(lastPosition)
+        if (persistProgress) savePosition(lastPosition, lastCharOffset)
+    }
+
+    private fun applyPositionWithinCurrentChapter(
+        position: Int,
+        charOffset: Int,
+        persistProgress: Boolean,
+    ) {
+        val chapter = _uiState.value.chapter ?: return
+        lastPosition = if (position == Int.MAX_VALUE) {
+            chapter.contentParagraphs().lastOrNull()?.index ?: 0
+        } else {
+            position.coerceAtLeast(0)
+        }
+        lastCharOffset = if (position == Int.MAX_VALUE) Int.MAX_VALUE else charOffset.coerceAtLeast(0)
+        _uiState.update { current ->
+            current.copy(
+                restorePosition = lastPosition,
+                restoreCharOffset = lastCharOffset,
+                currentPosition = lastPosition,
+                currentCharOffset = lastCharOffset,
+                navigationVersion = current.navigationVersion + 1,
+                chapterLoading = false,
+                pendingChapterTitle = null,
+            )
+        }
+        if (persistProgress) savePosition(lastPosition, lastCharOffset)
     }
 
     private fun applySyncedProgress(progress: ReadingProgress) {
@@ -329,8 +377,13 @@ class ReaderViewModel @Inject constructor(
                 (progress.chapterKey.isNotBlank() && chapter.chapterKey == progress.chapterKey)
         }
         if (targetIndex < 0) return
-        val targetPosition = progress.position.coerceAtLeast(0)
-        if (targetIndex == state.chapterIndex && targetPosition == state.currentPosition) return
+        val targetPosition = progress.paragraphIndex.coerceAtLeast(0)
+        val targetCharOffset = progress.charOffset.coerceAtLeast(0)
+        if (
+            targetIndex == state.chapterIndex &&
+            targetPosition == state.currentPosition &&
+            targetCharOffset == state.currentCharOffset
+        ) return
 
         val chapterTitle = state.chapters[targetIndex].title
         if (userHasReadSinceOpen) {
@@ -346,17 +399,25 @@ class ReaderViewModel @Inject constructor(
             chapterNavigationJob?.cancel()
             pendingChapterIndex = null
             lastPosition = targetPosition
+            lastCharOffset = targetCharOffset
             _uiState.update { current ->
                 current.copy(
                     restorePosition = targetPosition,
+                    restoreCharOffset = targetCharOffset,
                     currentPosition = targetPosition,
+                    currentCharOffset = targetCharOffset,
                     navigationVersion = current.navigationVersion + 1,
                     syncNotice = notice,
                 )
             }
         } else {
             _uiState.update { it.copy(syncNotice = notice) }
-            navigateToChapter(targetIndex, targetPosition, persistProgress = false)
+            navigateToChapter(
+                targetIndex,
+                targetPosition,
+                targetCharOffset,
+                persistProgress = false,
+            )
         }
         viewModelScope.launch {
             delay(SYNC_NOTICE_MILLIS)
@@ -392,7 +453,11 @@ class ReaderViewModel @Inject constructor(
                 (prompt.progress.chapterKey.isNotBlank() && chapter.chapterKey == prompt.progress.chapterKey)
         }
         if (targetIndex < 0) return
-        navigateToChapter(targetIndex, prompt.progress.position.coerceAtLeast(0))
+        navigateToChapter(
+            targetIndex,
+            prompt.progress.paragraphIndex.coerceAtLeast(0),
+            prompt.progress.charOffset.coerceAtLeast(0),
+        )
     }
 
     private fun chapterLoad(
@@ -473,37 +538,26 @@ class ReaderViewModel @Inject constructor(
         val safeChapter = state.chapters.indexOfFirst { it.index == chapterIndex }
             .takeIf { it >= 0 }
             ?: chapterIndex.coerceIn(0, state.chapters.lastIndex)
-        if (safeChapter != state.chapterIndex || state.chapter == null) {
-            navigateToChapter(safeChapter, position.coerceAtLeast(0))
-            return
-        }
-        chapterNavigationJob?.cancel()
-        pendingChapterIndex = null
-        chapterNavigationJob = viewModelScope.launch {
-            lastPosition = position.coerceAtLeast(0)
-            _uiState.update { current ->
-                current.copy(
-                    restorePosition = lastPosition,
-                    currentPosition = lastPosition,
-                    navigationVersion = current.navigationVersion + 1,
-                )
-            }
-            savePosition(lastPosition)
-        }
+        navigateToChapter(safeChapter, position.coerceAtLeast(0))
     }
 
-    fun savePosition(position: Int, chapterComplete: Boolean = false) {
+    fun savePosition(position: Int, charOffset: Int = 0, chapterComplete: Boolean = false) {
         val state = _uiState.value
         val chapter = state.chapter ?: return
         val content = chapter.contentParagraphs()
-        val currentOffset = content.indexOfLast { it.index <= position }.coerceAtLeast(0)
-        val safePosition = content.getOrNull(currentOffset)?.index ?: 0
+        val paragraphOffset = content.indexOfLast { it.index <= position }.coerceAtLeast(0)
+        val paragraph = content.getOrNull(paragraphOffset)
+        val safePosition = paragraph?.index ?: 0
+        val safeCharOffset = charOffset.coerceIn(0, paragraph?.text?.length ?: 0)
         lastPosition = safePosition
-        _uiState.update { it.copy(currentPosition = safePosition) }
+        lastCharOffset = safeCharOffset
+        _uiState.update {
+            it.copy(currentPosition = safePosition, currentCharOffset = safeCharOffset)
+        }
         val total = positions.bookFraction(
             chapterIndex = state.chapterIndex,
             chapterCount = state.chapters.size,
-            paragraphOffset = currentOffset,
+            paragraphOffset = paragraphOffset,
             paragraphCount = content.size,
             chapterComplete = chapterComplete,
         )
@@ -511,14 +565,19 @@ class ReaderViewModel @Inject constructor(
             bookUuid,
             chapter.id,
             safePosition,
+            offset = safeCharOffset,
             updatedTime = System.currentTimeMillis(),
             fraction = total,
+            paragraphIndex = safePosition,
+            charOffset = safeCharOffset,
         )
         val moved = hasReaderMovedFromOpening(
             openingChapterId = openingChapterId,
             openingPosition = openingPosition,
+            openingCharOffset = openingCharOffset,
             currentChapterId = chapter.id,
             currentPosition = safePosition,
+            currentCharOffset = safeCharOffset,
         )
         if (moved) userHasReadSinceOpen = true
         if (!prioritySyncReady) {
@@ -720,9 +779,13 @@ class ReaderViewModel @Inject constructor(
 internal fun hasReaderMovedFromOpening(
     openingChapterId: Long?,
     openingPosition: Int,
+    openingCharOffset: Int = 0,
     currentChapterId: Long,
     currentPosition: Int,
-): Boolean = openingChapterId != currentChapterId || openingPosition != currentPosition
+    currentCharOffset: Int = 0,
+): Boolean = openingChapterId != currentChapterId ||
+    openingPosition != currentPosition ||
+    openingCharOffset != currentCharOffset
 
 private data class ChapterLoadRequest(
     val priority: ChapterLoadPriority,

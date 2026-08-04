@@ -260,6 +260,28 @@ class ReaderEngineTest {
         assertEquals(1, positions.pageFor(pages, 7, "目标词"))
     }
 
+    @Test fun positionUsesCharacterOffsetInsideSplitParagraph() {
+        val positions = ReaderPositionManager()
+        val pages = listOf(
+            ReaderPage(
+                0,
+                0,
+                "章节",
+                false,
+                listOf(DocumentBlock(7, "很长的段落内容", "很长的", continuation = false, textStart = 0)),
+            ),
+            ReaderPage(
+                1,
+                0,
+                "章节",
+                false,
+                listOf(DocumentBlock(7, "很长的段落内容", "段落内容", continuation = true, textStart = 3)),
+            ),
+        )
+
+        assertEquals(1, positions.pageFor(pages, 7, charOffset = 3))
+    }
+
     @Test fun searchPositionSkipsEpubImageSharingTextIndex() {
         val positions = ReaderPositionManager()
         val image = DocumentBlock(

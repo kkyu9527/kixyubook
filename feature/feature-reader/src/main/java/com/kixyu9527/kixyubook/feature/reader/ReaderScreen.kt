@@ -283,7 +283,7 @@ private fun ReaderScreen(
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     jumpChapter: (Int) -> Unit,
     jumpPosition: (Int, Int) -> Unit,
-    savePosition: (Int, Boolean) -> Unit,
+    savePosition: (Int, Int, Boolean) -> Unit,
     updateSettings: ((ReaderSettings) -> ReaderSettings) -> Unit,
     addBookmark: () -> Unit,
     deleteBookmark: (String) -> Unit,
@@ -721,7 +721,7 @@ private fun ReaderScreen(
 private fun ReaderContent(
     state: ReaderUiState,
     palette: ReaderRenderPalette,
-    savePosition: (Int, Boolean) -> Unit,
+    savePosition: (Int, Int, Boolean) -> Unit,
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
@@ -789,7 +789,7 @@ private fun ReaderContent(
                         }
                         position to chapterComplete
                     }.distinctUntilChanged().debounce(500).collect { (position, complete) ->
-                        savePosition(position, complete)
+                        savePosition(position, 0, complete)
                     }
                 }
                 LaunchedEffect(listState) {
@@ -858,7 +858,7 @@ private fun PagedReader(
     chapter: ReaderChapter,
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
-    savePosition: (Int, Boolean) -> Unit,
+    savePosition: (Int, Int, Boolean) -> Unit,
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
@@ -956,6 +956,7 @@ private fun PagedReader(
     val pagerWindow = remember(
         state.chapterIndex,
         state.restorePosition,
+        state.restoreCharOffset,
         state.chapters.size,
         pages,
         previousPages,
@@ -990,7 +991,12 @@ private fun PagedReader(
     val initialActual = if (pages.isEmpty()) {
         if (state.restorePosition > 0) Int.MIN_VALUE else 0
     } else {
-        positions.pageFor(pages, state.restorePosition, targetSearchQuery).coerceIn(pages.indices)
+        positions.pageFor(
+            pages,
+            state.restorePosition,
+            searchQuery = targetSearchQuery,
+            charOffset = state.restoreCharOffset,
+        ).coerceIn(pages.indices)
     }
     val desiredItemKey = pagerWindow.firstOrNull {
         it.chapterIndex == state.chapterIndex && it.pageIndex == initialActual
@@ -1055,8 +1061,12 @@ private fun PagedReader(
                     val lastVisible = spread.items.lastOrNull { visible ->
                         visible.chapterIndex == item.chapterIndex && visible.page != null
                     } ?: item
+                    val anchor = item.page.blocks.firstOrNull { block ->
+                        block.kind == ParagraphKind.TEXT
+                    }
                     savePosition(
-                        item.page.startParagraph,
+                        anchor?.paragraphIndex ?: item.page.startParagraph,
+                        anchor?.textStart ?: 0,
                         lastVisible.pageIndex == lastVisible.pageCount - 1,
                     )
                 }

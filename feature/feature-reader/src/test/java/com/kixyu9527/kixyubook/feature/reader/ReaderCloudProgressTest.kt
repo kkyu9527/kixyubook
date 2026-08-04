@@ -51,12 +51,13 @@ class ReaderCloudProgressTest {
 
     @Test
     fun `initial pager settlement is not treated as reading`() {
-        assertFalse(hasReaderMovedFromOpening(12, 40, 12, 40))
+        assertFalse(hasReaderMovedFromOpening(12, 40, 20, 12, 40, 20))
     }
 
     @Test
     fun `chapter or position change opens the local progress gate`() {
-        assertTrue(hasReaderMovedFromOpening(12, 40, 12, 41))
-        assertTrue(hasReaderMovedFromOpening(12, 40, 13, 0))
+        assertTrue(hasReaderMovedFromOpening(12, 40, 20, 12, 41, 0))
+        assertTrue(hasReaderMovedFromOpening(12, 40, 20, 13, 0, 0))
+        assertTrue(hasReaderMovedFromOpening(12, 40, 20, 12, 40, 21))
     }
 }
