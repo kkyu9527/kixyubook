@@ -92,6 +92,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSafeTopPopup
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSearchField
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
@@ -320,7 +321,11 @@ private fun ReaderScreen(
     val palette = readerPalette(state.settings, systemDark)
     val overlayVisible = controls || menu || toolsMenu || searchVisible ||
         bookInfoVisible || sheet != null
-    val statusBarVisible = state.settings.showStatusBar || overlayVisible
+    val topSyncOverlayVisible = state.syncNotice != null || state.remoteProgressPrompt != null
+    // HyperOS can briefly report a zero top inset while immersive status bars are hidden. Keep
+    // only the transparent status bar visible for sync prompts so both automatic and confirmed
+    // cloud-progress jumps retain a stable cutout-safe anchor. Navigation-bar policy is unchanged.
+    val statusBarVisible = state.settings.showStatusBar || overlayVisible || topSyncOverlayVisible
     val navigationBarVisible = !state.settings.hideNavigationBar || overlayVisible
     val systemBarDensity = LocalDensity.current
     val actualStatusBarVisible = WindowInsets.statusBars.getTop(systemBarDensity) > 0
@@ -572,57 +577,47 @@ private fun ReaderScreen(
                     }
                 }
             }
-            ReaderControlVisibility(
+            KixyuSafeTopPopup(
                 visible = state.syncNotice != null,
-                modifier = Modifier.align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = KixyuSpacing.small),
             ) {
-                KixyuPopupSurface(shadowElevation = 0.dp) {
-                    Text(
-                        text = state.syncNotice.orEmpty(),
-                        modifier = Modifier.padding(
+                Text(
+                    text = state.syncNotice.orEmpty(),
+                    modifier = Modifier.padding(
+                        horizontal = KixyuSpacing.medium,
+                        vertical = KixyuSpacing.small,
+                    ),
+                    color = palette.body,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                )
+            }
+            KixyuSafeTopPopup(
+                visible = state.remoteProgressPrompt != null,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clickable(onClick = acceptRemoteProgress)
+                        .padding(
                             horizontal = KixyuSpacing.medium,
                             vertical = KixyuSpacing.small,
                         ),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = state.remoteProgressPrompt?.let {
+                            "其他设备读到${it.chapterTitle}，点击前往"
+                        }.orEmpty(),
                         color = palette.body,
                         style = MaterialTheme.typography.labelLarge,
                         maxLines = 1,
                     )
-                }
-            }
-            ReaderControlVisibility(
-                visible = state.remoteProgressPrompt != null,
-                modifier = Modifier.align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = KixyuSpacing.small),
-            ) {
-                KixyuPopupSurface(shadowElevation = 0.dp) {
-                    Row(
-                        modifier = Modifier
-                            .clickable(onClick = acceptRemoteProgress)
-                            .padding(
-                                horizontal = KixyuSpacing.medium,
-                                vertical = KixyuSpacing.small,
-                            ),
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = state.remoteProgressPrompt?.let {
-                                "其他设备读到${it.chapterTitle}，点击前往"
-                            }.orEmpty(),
-                            color = palette.body,
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                        )
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
-                            contentDescription = null,
-                            tint = palette.accent,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                        contentDescription = null,
+                        tint = palette.accent,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
             ReaderControls(

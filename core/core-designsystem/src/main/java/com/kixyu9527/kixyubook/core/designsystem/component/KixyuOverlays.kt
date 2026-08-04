@@ -469,15 +469,12 @@ fun KixyuInteractivePopupSurface(
     )
 }
 
-/**
- * App-level non-blocking status popup. Its placement owns safe-drawing Insets, including status
- * bars, display cutouts and landscape camera holes, so callers must not add system padding.
- */
 @Composable
-fun KixyuTransientStatusPopup(
+fun KixyuSafeTopPopup(
     visible: Boolean,
-    message: String,
     modifier: Modifier = Modifier,
+    shadowElevation: Dp = 0.dp,
+    content: @Composable () -> Unit,
 ) {
     Box(
         modifier = modifier.fillMaxSize()
@@ -490,34 +487,50 @@ fun KixyuTransientStatusPopup(
     ) {
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .98f),
+            enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)) +
+                scaleIn(tween(KixyuMotion.ReaderPopupEnterMillis), initialScale = .96f),
+            exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)) +
+                scaleOut(tween(KixyuMotion.ReaderPopupExitMillis), targetScale = .98f),
         ) {
             KixyuPopupSurface(
                 modifier = Modifier.widthIn(max = 560.dp),
-                shadowElevation = 0.dp,
-            ) {
-                Row(
-                    modifier = Modifier.padding(
-                        horizontal = KixyuSpacing.medium,
-                        vertical = KixyuSpacing.small,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                    )
-                }
-            }
+                shadowElevation = shadowElevation,
+                content = content,
+            )
+        }
+    }
+}
+
+/**
+ * App-level non-blocking status popup. Its placement owns safe-drawing Insets, including status
+ * bars, display cutouts and landscape camera holes, so callers must not add system padding.
+ */
+@Composable
+fun KixyuTransientStatusPopup(
+    visible: Boolean,
+    message: String,
+    modifier: Modifier = Modifier,
+) {
+    KixyuSafeTopPopup(visible = visible, modifier = modifier) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = KixyuSpacing.medium,
+                vertical = KixyuSpacing.small,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
         }
     }
 }
