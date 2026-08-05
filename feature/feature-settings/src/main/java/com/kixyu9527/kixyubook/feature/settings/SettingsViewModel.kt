@@ -5,12 +5,16 @@ import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
-import com.kixyu9527.kixyubook.core.common.repository.BackupRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.sync.BackupOperationType
+import com.kixyu9527.kixyubook.core.sync.BackupTaskPhase
+import com.kixyu9527.kixyubook.core.sync.BackupWorkScheduler
 import com.kixyu9527.kixyubook.core.sync.CloudSyncManager
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import com.kixyu9527.kixyubook.core.sync.GoogleConnectResult
 import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
+import com.kixyu9527.kixyubook.core.sync.ReadingReminderScheduler
+import com.kixyu9527.kixyubook.core.sync.ReadingReminderSettings
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
@@ -24,22 +28,45 @@ data class SettingsUiState(
     val settings: ReaderSettings = ReaderSettings(),
     val fonts: List<UserFont> = emptyList(),
     val goalMinutes: Int = 30,
-    val backupOperation: BackupOperation? = null,
+    val backupOperation: BackupOperationType? = null,
     val cloudSync: CloudSyncState = CloudSyncState(),
+    val readingReminder: ReadingReminderSettings = ReadingReminderSettings(),
 )
-
-enum class BackupOperation { EXPORT, RESTORE }
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: ReaderSettingsRepository,
     private val fonts: FontRepository,
-    private val backups: BackupRepository,
+    private val backups: BackupWorkScheduler,
     private val cloudSync: CloudSyncManager,
+    private val readingReminders: ReadingReminderScheduler,
 ) : ViewModel() {
-    private val backupOperation = MutableStateFlow<BackupOperation?>(null)
-    val uiState = combine(repository.settings, fonts.observeFonts(), repository.readingGoalMinutes, backupOperation, cloudSync.state) { settings, fontList, goal, operation, sync ->
-        SettingsUiState(settings, fontList, goal, operation, sync)
+    private data class BasicSettings(
+        val settings: ReaderSettings,
+        val fonts: List<UserFont>,
+        val goalMinutes: Int,
+    )
+
+    private val basicSettings = combine(
+        repository.settings,
+        fonts.observeFonts(),
+        repository.readingGoalMinutes,
+    ) { settings, fontList, goal -> BasicSettings(settings, fontList, goal) }
+
+    val uiState = combine(
+        basicSettings,
+        backups.state,
+        cloudSync.state,
+        readingReminders.settings,
+    ) { basic, backup, sync, reminder ->
+        SettingsUiState(
+            settings = basic.settings,
+            fonts = basic.fonts,
+            goalMinutes = basic.goalMinutes,
+            backupOperation = backup.operation.takeIf { backup.isActive },
+            cloudSync = sync,
+            readingReminder = reminder,
+        )
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
     private val _messages = MutableSharedFlow<String>()
@@ -49,6 +76,28 @@ class SettingsViewModel @Inject constructor(
     private val _authorizationRequests = Channel<PendingIntent>(Channel.BUFFERED)
     val authorizationRequests = _authorizationRequests.receiveAsFlow()
 
+    init {
+        viewModelScope.launch {
+            var lastReportedWorkId: java.util.UUID? = null
+            backups.state.collect { task ->
+                val workId = task.workId ?: return@collect
+                if (workId == lastReportedWorkId) return@collect
+                when (task.phase) {
+                    BackupTaskPhase.SUCCEEDED -> {
+                        lastReportedWorkId = workId
+                        if (task.requiresRestart) _restoreCompleted.emit(Unit)
+                        else _messages.emit("完整备份已保存：${task.bookCount ?: 0} 本书")
+                    }
+                    BackupTaskPhase.FAILED -> {
+                        lastReportedWorkId = workId
+                        _messages.emit(task.error ?: "完整备份任务失败")
+                    }
+                    else -> Unit
+                }
+            }
+        }
+    }
+
     fun update(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { repository.update(transform) } }
     fun setGoal(minutes: Int) { viewModelScope.launch { repository.setReadingGoalMinutes(minutes) } }
     fun importFont(uri: String) { viewModelScope.launch { fonts.importFont(uri).onFailure { _messages.emit(it.message ?: "字体导入失败") } } }
@@ -57,26 +106,16 @@ class SettingsViewModel @Inject constructor(
         fonts.deleteFont(font.uuid)
     } }
 
-    fun exportBackup(uri: String) = viewModelScope.launch {
-        backupOperation.value = BackupOperation.EXPORT
-        try {
-            backups.exportTo(uri)
-                .onSuccess { _messages.emit("完整备份已保存：${it.bookCount} 本书") }
-                .onFailure { _messages.emit(it.message ?: "备份失败") }
-        } finally {
-            backupOperation.value = null
-        }
+    fun exportBackup(uri: String) = backups.enqueue(BackupOperationType.EXPORT, uri)
+
+    fun restoreBackup(uri: String) = backups.enqueue(BackupOperationType.RESTORE, uri)
+
+    fun setReadingReminderEnabled(enabled: Boolean) = viewModelScope.launch {
+        readingReminders.setEnabled(enabled)
     }
 
-    fun restoreBackup(uri: String) = viewModelScope.launch {
-        backupOperation.value = BackupOperation.RESTORE
-        try {
-            backups.restoreFrom(uri)
-                .onSuccess { _restoreCompleted.emit(Unit) }
-                .onFailure { _messages.emit(it.message ?: "恢复失败") }
-        } finally {
-            backupOperation.value = null
-        }
+    fun setReadingReminderTime(hour: Int, minute: Int) = viewModelScope.launch {
+        readingReminders.setTime(hour, minute)
     }
 
     fun connectGoogle(activity: Activity) = viewModelScope.launch { handleConnectResult(cloudSync.connect(activity)) }
@@ -101,7 +140,7 @@ class SettingsViewModel @Inject constructor(
 
     private suspend fun handleConnectResult(result: GoogleConnectResult) {
         when (result) {
-            GoogleConnectResult.Connected -> _messages.emit("Google 账号已连接，正在检查同步数据")
+            GoogleConnectResult.Connected -> _messages.emit("Google 账号已连接，正在自动同步")
             is GoogleConnectResult.NeedsAuthorization -> _authorizationRequests.send(result.pendingIntent)
             is GoogleConnectResult.Failed -> _messages.emit(result.message)
         }

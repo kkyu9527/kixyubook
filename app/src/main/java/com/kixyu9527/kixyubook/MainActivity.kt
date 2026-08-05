@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook
 
 import android.os.Bundle
 import android.os.Build
+import android.content.Intent
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -84,16 +85,20 @@ import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
+import com.kixyu9527.kixyubook.core.sync.LocalNotificationManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val appViewModel: AppViewModel by viewModels()
     @Inject lateinit var updateDownloader: AppUpdateDownloader
+    @Inject lateinit var localNotifications: LocalNotificationManager
+    private val notificationDestination = MutableStateFlow<String?>(null)
 
     override fun onResume() {
         super.onResume()
@@ -119,6 +124,12 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         super.onCreate(savedInstanceState)
+        // Mark the process visible before the eagerly-created sync state can emit an action-needed
+        // notification for a conflict that is already being shown inside this Activity.
+        localNotifications.onAppForeground()
+        notificationDestination.value = intent.getStringExtra(
+            LocalNotificationManager.EXTRA_NOTIFICATION_DESTINATION,
+        )
         // Select the target display mode before Compose produces its first frame. Changing the
         // window mode from a DisposableEffect after the initial draw can trigger an avoidable
         // relayout and a visible 60 -> 120 Hz hitch during cold start.
@@ -145,6 +156,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        notificationDestination.value = intent.getStringExtra(
+            LocalNotificationManager.EXTRA_NOTIFICATION_DESTINATION,
+        )
+    }
+
     @Composable
     private fun KixyuBookApp(
         settings: com.kixyu9527.kixyubook.core.common.model.ReaderSettings,
@@ -153,6 +172,19 @@ class MainActivity : ComponentActivity() {
         cloudSyncState: CloudSyncState,
     ) {
         val navController = rememberNavController()
+        val pendingNotificationDestination by notificationDestination.collectAsState()
+        LaunchedEffect(pendingNotificationDestination) {
+            val destination = pendingNotificationDestination ?: return@LaunchedEffect
+            val route = when (destination) {
+                LocalNotificationManager.DESTINATION_CLOUD_SYNC -> Routes.CLOUD_SYNC
+                LocalNotificationManager.DESTINATION_DATA_BACKUP -> Routes.DATA_AND_BACKUP
+                else -> Routes.HOME
+            }
+            if (navController.currentDestination?.route != route) {
+                navController.navigate(route) { launchSingleTop = true }
+            }
+            notificationDestination.value = null
+        }
         val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
         // The UI-style setting adds/removes a MIUIX theme provider. Keep the
         // navigation subtree movable so a deliberate runtime style switch does

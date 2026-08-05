@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -22,6 +23,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,10 +35,12 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     private val accounts: GoogleAccountClient,
     private val engine: CloudSyncEngine,
     private val scheduler: CloudSyncScheduler,
+    private val notifications: LocalNotificationManager,
 ) : CloudSyncManager, CloudSyncCoordinator {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val initialSyncDecision = MutableStateFlow<InitialSyncDecision?>(null)
     private val inspectingInitialSync = MutableStateFlow(false)
+    private val initialSyncMutex = Mutex()
     private val _priorityBookSync = MutableStateFlow(PriorityBookSyncState())
     override val priorityBookSync = _priorityBookSync
     private var priorityBookJob: Job? = null
@@ -72,10 +77,21 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     init {
         scope.launch { clearStaleSyncPhase() }
         scope.launch {
+            state.map { it.initialSyncDecision?.conflicts.orEmpty() }
+                .distinctUntilChanged()
+                .collectLatest { conflicts ->
+                    if (conflicts.isEmpty()) {
+                        notifications.clearSyncConflict()
+                    } else {
+                        notifications.showSyncConflict(conflicts.size, conflicts.fingerprint())
+                    }
+                }
+        }
+        scope.launch {
             preferences.state
                 .map { Triple(it.account?.subject, it.initialSyncApproved, it.enabled) }
                 .distinctUntilChanged()
-                .collectLatest { (accountSubject, approved, _) ->
+                .collect { (accountSubject, approved, _) ->
                     if (accountSubject != null && !approved) prepareInitialSync()
                 }
         }
@@ -96,6 +112,8 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         initialSyncDecision.value = null
         inspectingInitialSync.value = false
         accounts.disconnect()
+        notifications.clearAuthorizationFailure()
+        notifications.clearSyncConflict()
     }
 
     override suspend fun setEnabled(enabled: Boolean) {
@@ -140,6 +158,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 }
                 preferences.approveInitialSync()
                 initialSyncDecision.value = null
+                notifications.clearSyncConflict()
                 scheduler.ensurePeriodic()
                 scheduler.requestImmediate()
             }.onFailure { error ->
@@ -156,6 +175,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     override fun syncNow() = scheduler.requestImmediate()
 
     override fun onAppForeground() {
+        notifications.onAppForeground()
         scope.launch {
             clearStaleSyncPhase()
             val persisted = preferences.current()
@@ -171,8 +191,15 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     }
 
     override fun onAppBackground() {
+        notifications.onAppBackground()
         scope.launch {
             val persisted = preferences.current()
+            persisted.conflicts.takeIf { it.isNotEmpty() }?.let { conflicts ->
+                notifications.showSyncConflict(conflicts.size, conflicts.fingerprint())
+            }
+            if (persisted.phase == CloudSyncPhase.AUTH_REQUIRED) {
+                notifications.recordAuthorizationFailure(persisted.error ?: "需要重新授权 Google Drive")
+            }
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
             if (syncDao.pending(limit = 1).isNotEmpty()) {
                 scheduler.requestBackgroundFlush(activeBookUuid ?: lastReaderBookUuid)
@@ -277,7 +304,12 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     private suspend fun handleAuthorizationResult(result: GoogleConnectResult) {
         when (result) {
             GoogleConnectResult.Connected -> {
-                if (preferences.current().initialSyncApproved) {
+                notifications.clearAuthorizationFailure()
+                val persisted = preferences.current()
+                if (persisted.initialSyncApproved) {
+                    // Explicit sign-in means syncing should be active. This also repairs an older
+                    // state where an approved account was persisted while automatic sync was off.
+                    if (!persisted.enabled) preferences.setEnabled(true)
                     scheduler.ensurePeriodic()
                     scheduler.requestImmediate()
                 } else {
@@ -289,11 +321,21 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         }
     }
 
-    private suspend fun prepareInitialSync() {
-        if (inspectingInitialSync.value || preferences.current().account == null) return
+    private suspend fun prepareInitialSync() = initialSyncMutex.withLock {
+        val persisted = preferences.current()
+        if (
+            persisted.account == null ||
+            persisted.initialSyncApproved ||
+            persisted.conflicts.isNotEmpty() ||
+            initialSyncDecision.value != null
+        ) return@withLock
+        val accountSubject = persisted.account.subject
         inspectingInitialSync.value = true
         try {
             val snapshot = engine.inspectInitialSync()
+            // Disconnecting while the remote inspection is running must not re-enable sync for
+            // an account that is no longer connected.
+            if (preferences.current().account?.subject != accountSubject) return@withLock
             // An empty local library on an unapproved installation is the normal new-device
             // case. Clear any stale local sync bookkeeping and restore the existing cloud
             // library automatically; an empty client must never offer to erase cloud data.
@@ -305,13 +347,16 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 snapshot.requiresUserDecision() -> {
                     preferences.setConflicts(snapshot.conflicts)
                     initialSyncDecision.value = snapshot
+                    notifications.showSyncConflict(snapshot.conflicts.size, snapshot.conflicts.fingerprint())
                 }
                 else -> approveAndSchedule()
             }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            preferences.markError(error.message ?: "无法检查云端书库")
+            if (preferences.current().account?.subject == accountSubject) {
+                preferences.markError(error.message ?: "无法检查云端书库")
+            }
         } finally {
             inspectingInitialSync.value = false
         }
@@ -343,6 +388,10 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         const val PRIORITY_WRITE_COALESCE_MILLIS = 600L
     }
 }
+
+private fun List<InitialSyncConflict>.fingerprint(): String =
+    sortedWith(compareBy({ it.entityType.name }, { it.entityId }))
+        .joinToString("|") { "${it.entityType.name}:${it.entityId}" }
 
 internal fun shouldClearStaleSyncPhase(
     phase: CloudSyncPhase,

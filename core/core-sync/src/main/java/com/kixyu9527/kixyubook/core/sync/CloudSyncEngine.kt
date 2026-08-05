@@ -93,6 +93,7 @@ class CloudSyncEngine @Inject constructor(
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
     private val accountClient: GoogleAccountClient,
+    private val notifications: LocalNotificationManager,
 ) {
     private val syncMutex = Mutex()
     private val preparedSnapshotLock = Any()
@@ -174,7 +175,10 @@ class CloudSyncEngine @Inject constructor(
         syncDao.clearObjectStates()
     }
 
-    suspend fun synchronize(preferredBookUuid: String? = null): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun synchronize(
+        preferredBookUuid: String? = null,
+        onProgress: suspend (CloudSyncProgress) -> Unit = {},
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         syncMutex.withLock { runCatching {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
@@ -211,6 +215,7 @@ class CloudSyncEngine @Inject constructor(
                 knownRemote = remote,
                 initialMergeComplete = persisted.initialMergeComplete,
                 preferredBookUuid = preferredBookUuid,
+                onProgress = onProgress,
             )
 
             if (!persisted.initialMergeComplete) seedInitialOutbox()
@@ -224,9 +229,21 @@ class CloudSyncEngine @Inject constructor(
                     }
                 }.thenBy { it.changedAt },
             )
+            var uploadedCount = 0
+            if (pending.isNotEmpty()) {
+                onProgress(
+                    CloudSyncProgress(
+                        title = "正在上传云端更改",
+                        text = "已处理 0/${pending.size} 项",
+                        completed = 0,
+                        total = pending.size,
+                    ),
+                )
+            }
             val uploadBatch = mutableListOf<SyncOutboxEntity>()
             suspend fun flushUploadBatch() {
                 if (uploadBatch.isEmpty()) return
+                val batchSize = uploadBatch.size
                 val knownRemote = remote.toMap()
                 val uploaded = coroutineScope {
                     uploadBatch.map { mutation ->
@@ -235,12 +252,30 @@ class CloudSyncEngine @Inject constructor(
                 }
                 uploaded.forEach { (key, value) -> remote[key] = value }
                 uploadBatch.clear()
+                uploadedCount += batchSize
+                onProgress(
+                    CloudSyncProgress(
+                        title = "正在上传云端更改",
+                        text = "已处理 $uploadedCount/${pending.size} 项",
+                        completed = uploadedCount,
+                        total = pending.size,
+                    ),
+                )
             }
             pending.forEach { mutation ->
                 if (mutation.operation == SyncMutationOperation.DELETE.name) {
                     flushUploadBatch()
                     try {
                         remote = pushDeletion(token, mutation, remote)
+                        uploadedCount++
+                        onProgress(
+                            CloudSyncProgress(
+                                title = "正在上传云端更改",
+                                text = "已处理 $uploadedCount/${pending.size} 项",
+                                completed = uploadedCount,
+                                total = pending.size,
+                            ),
+                        )
                     } catch (error: Throwable) {
                         if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
                         throw error
@@ -252,6 +287,7 @@ class CloudSyncEngine @Inject constructor(
             }
             flushUploadBatch()
             preferences.markSuccess(snapshot.nextPageToken ?: persisted.pageToken)
+            notifications.clearAuthorizationFailure()
         }.onFailure { error ->
             if (error is CancellationException) {
                 withContext(NonCancellable) { preferences.markInterrupted() }
@@ -260,6 +296,7 @@ class CloudSyncEngine @Inject constructor(
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
+                notifications.recordAuthorizationFailure(error.message ?: "需要重新授权 Google Drive")
             } else {
                 preferences.markError(error.message ?: "同步失败")
             }
@@ -374,6 +411,7 @@ class CloudSyncEngine @Inject constructor(
                     }
                 }
             }
+            notifications.clearAuthorizationFailure()
         }.onFailure { error ->
             if (error is CancellationException) {
                 if (followedByFullSync) {
@@ -384,6 +422,7 @@ class CloudSyncEngine @Inject constructor(
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
+                notifications.recordAuthorizationFailure(error.message ?: "需要重新授权 Google Drive")
             } else if (followedByFullSync) {
                 preferences.markError(error.message ?: "同步失败")
             }
@@ -796,6 +835,7 @@ class CloudSyncEngine @Inject constructor(
         knownRemote: Map<String, DriveObject>,
         initialMergeComplete: Boolean,
         preferredBookUuid: String?,
+        onProgress: suspend (CloudSyncProgress) -> Unit,
     ) {
         val dirty = syncDao.pending().flatMap(::keysForMutation).toSet()
         val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
@@ -829,10 +869,30 @@ class CloudSyncEngine @Inject constructor(
             }
             .toList()
 
+        var restoredBooks = 0
+        if (changedBookUuids.isNotEmpty()) {
+            onProgress(
+                CloudSyncProgress(
+                    title = if (initialMergeComplete) "正在下载书籍" else "正在恢复云端书库",
+                    text = "已恢复 0/${changedBookUuids.size} 本",
+                    completed = 0,
+                    total = changedBookUuids.size,
+                ),
+            )
+        }
         suspend fun restoreBook(uuid: String) {
             restoreRemoteBook(token, uuid, knownRemote)
             handledKeys += "books/$uuid/metadata"
             handledKeys += "books/$uuid/source"
+            restoredBooks++
+            onProgress(
+                CloudSyncProgress(
+                    title = if (initialMergeComplete) "正在下载书籍" else "正在恢复云端书库",
+                    text = "已恢复 $restoredBooks/${changedBookUuids.size} 本",
+                    completed = restoredBooks,
+                    total = changedBookUuids.size,
+                ),
+            )
         }
 
         if (initialMergeComplete) {

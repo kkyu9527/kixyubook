@@ -1,11 +1,8 @@
 package com.kixyu9527.kixyubook.core.sync
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
-import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.Data
@@ -26,9 +23,15 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Singleton
@@ -157,67 +160,94 @@ class CloudSyncWorker(
     appContext: Context,
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
-        val engine = EntryPointAccessors.fromApplication(
+    override suspend fun doWork(): Result = coroutineScope {
+        val dependencies = EntryPointAccessors.fromApplication(
             applicationContext,
             CloudSyncWorkerEntryPoint::class.java,
-        ).engine()
+        )
+        val engine = dependencies.engine()
+        val notifications = dependencies.notifications()
         val mode = inputData.getString(KEY_MODE)
             ?.let { runCatching { SyncWorkerMode.valueOf(it) }.getOrNull() }
             ?: SyncWorkerMode.FULL
         val preferredBookUuid = inputData.getString(KEY_BOOK_UUID)
-        if (mode == SyncWorkerMode.FULL && engine.requiresLongRunningWorker()) {
-            setForeground(syncForegroundInfo())
-        }
-        val operation = when (mode) {
-            SyncWorkerMode.PRIORITY_BOOK -> engine.synchronizePriorityBook(
-                preferredBookUuid = preferredBookUuid,
-                followedByFullSync = true,
-            )
-            SyncWorkerMode.FULL -> engine.synchronize(preferredBookUuid)
-        }
-        return operation.fold(
-            onSuccess = { Result.success() },
-            onFailure = { error ->
-                if (error is DriveHttpException && error.statusCode in 400..499) Result.failure()
-                else Result.retry()
-            },
+        val latestProgress = AtomicReference(
+            CloudSyncProgress("正在同步书籍", "正在检查本地与云端数据"),
         )
+        val foregroundStarted = AtomicBoolean(false)
+        var foregroundJob: Job? = null
+        if (mode == SyncWorkerMode.FULL) {
+            val largeTransferExpected = engine.requiresLongRunningWorker()
+            foregroundJob = launch {
+                if (largeTransferExpected) {
+                    notifications.awaitBackgroundOrDelay(FOREGROUND_NOTIFICATION_DELAY_MILLIS)
+                } else {
+                    delay(FOREGROUND_NOTIFICATION_DELAY_MILLIS)
+                }
+                foregroundStarted.set(true)
+                try {
+                    setForeground(syncForegroundInfo(notifications, latestProgress.get()))
+                } catch (_: RuntimeException) {
+                    foregroundStarted.set(false)
+                }
+            }
+        }
+        try {
+            val operation = when (mode) {
+                SyncWorkerMode.PRIORITY_BOOK -> engine.synchronizePriorityBook(
+                    preferredBookUuid = preferredBookUuid,
+                    followedByFullSync = true,
+                )
+                SyncWorkerMode.FULL -> engine.synchronize(preferredBookUuid) { progress ->
+                    latestProgress.set(progress)
+                    if (foregroundStarted.get()) {
+                        try {
+                            setForeground(syncForegroundInfo(notifications, progress))
+                        } catch (_: RuntimeException) {
+                            foregroundStarted.set(false)
+                        }
+                    }
+                }
+            }
+            operation.fold(
+                onSuccess = { Result.success() },
+                onFailure = { error ->
+                    if (error is DriveHttpException && error.statusCode in 400..499) Result.failure()
+                    else Result.retry()
+                },
+            )
+        } finally {
+            foregroundJob?.cancel()
+            foregroundJob = null
+        }
     }
 
-    private fun syncForegroundInfo(): ForegroundInfo {
-        val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "Google Drive 同步",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply { description = "在后台恢复或上传书籍文件" },
+    private fun syncForegroundInfo(
+        notifications: LocalNotificationManager,
+        progress: CloudSyncProgress,
+    ): ForegroundInfo {
+        val notification = notifications.syncProgressNotification(
+            title = progress.title,
+            text = progress.text,
+            completed = progress.completed,
+            total = progress.total,
+            workerId = id,
         )
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_cloud_sync)
-            .setContentTitle("正在同步书籍")
-            .setContentText("可离开应用，完成后会自动更新")
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .build()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
-                NOTIFICATION_ID,
+                LocalNotificationManager.NOTIFICATION_SYNC_PROGRESS,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
+            ForegroundInfo(LocalNotificationManager.NOTIFICATION_SYNC_PROGRESS, notification)
         }
     }
 
     companion object {
         const val KEY_MODE = "sync_mode"
         const val KEY_BOOK_UUID = "preferred_book_uuid"
-        private const val CHANNEL_ID = "cloud_sync"
-        private const val NOTIFICATION_ID = 2107
+        private const val FOREGROUND_NOTIFICATION_DELAY_MILLIS = 10_000L
     }
 }
 
@@ -226,4 +256,5 @@ class CloudSyncWorker(
 interface CloudSyncWorkerEntryPoint {
     fun engine(): CloudSyncEngine
     fun scheduler(): CloudSyncScheduler
+    fun notifications(): LocalNotificationManager
 }

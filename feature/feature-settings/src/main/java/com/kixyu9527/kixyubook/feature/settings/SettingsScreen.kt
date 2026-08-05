@@ -1,7 +1,11 @@
 package com.kixyu9527.kixyubook.feature.settings
 
+import android.Manifest
 import android.app.Activity
+import android.app.TimePickerDialog
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -59,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.ContextCompat
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
@@ -93,6 +98,7 @@ import kotlin.system.exitProcess
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
+import com.kixyu9527.kixyubook.core.sync.BackupOperationType
 import kotlinx.coroutines.launch
 
 enum class SettingsPane { CLOUD_SYNC, READING, APPEARANCE, DATA_AND_BACKUP, ABOUT }
@@ -255,6 +261,7 @@ fun CloudSyncRoute(
     val syncAccount = state.cloudSync.account
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var conflictDeferred by rememberSaveable { mutableStateOf(false) }
+    val requestNotificationPermission = rememberNotificationPermissionAction()
     val authorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (activity != null) viewModel.finishGoogleAuthorization(activity, result.data)
     }
@@ -275,14 +282,18 @@ fun CloudSyncRoute(
             if (syncAccount == null) {
                 KixyuSettingsRow(
                     title = "使用 Google 账号登录",
-                    supportingText = "登录后在设备间同步书籍、进度与设置",
+                    supportingText = "登录成功后自动同步书籍、进度与设置",
                     icon = Icons.Outlined.Cloud,
                 )
                 KixyuDivider()
                 Row(Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal)) {
                     KixyuButton(
                         text = "选择 Google 账号",
-                        onClick = { activity?.let(viewModel::connectGoogle) },
+                        onClick = {
+                            requestNotificationPermission(false) {
+                                activity?.let(viewModel::connectGoogle)
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = activity != null,
                     )
@@ -312,13 +323,20 @@ fun CloudSyncRoute(
                         if (state.cloudSync.initialSyncDecision != null) {
                             conflictDeferred = false
                         } else {
-                            viewModel.setCloudSyncEnabled(!state.cloudSync.enabled)
+                            val enabled = !state.cloudSync.enabled
+                            if (enabled) requestNotificationPermission(false) {
+                                viewModel.setCloudSyncEnabled(true)
+                            } else viewModel.setCloudSyncEnabled(false)
                         }
                     },
                 ) {
                     KixyuSwitch(
                         checked = state.cloudSync.enabled,
-                        onCheckedChange = viewModel::setCloudSyncEnabled,
+                        onCheckedChange = { enabled ->
+                            if (enabled) requestNotificationPermission(false) {
+                                viewModel.setCloudSyncEnabled(true)
+                            } else viewModel.setCloudSyncEnabled(false)
+                        },
                         enabled = state.cloudSync.initialSyncDecision == null &&
                             !state.cloudSync.inspectingInitialSync,
                     )
@@ -344,7 +362,7 @@ fun CloudSyncRoute(
                         state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED -> "重新授权"
                         state.cloudSync.phase == CloudSyncPhase.SYNCING -> "正在同步…"
                         !state.cloudSync.enabled -> "同步已暂停"
-                        else -> "立即同步"
+                        else -> "重新同步"
                     },
                     onClick = {
                         if (state.cloudSync.initialSyncDecision != null) {
@@ -387,14 +405,42 @@ fun CloudSyncRoute(
             KixyuSettingsRow(
                 title = "原始书籍文件",
                 supportingText = "同步 TXT / EPUB，供其他设备完整恢复",
-                onClick = { viewModel.setSyncOriginalFiles(!state.cloudSync.syncOriginalFiles) },
-            ) { KixyuSwitch(state.cloudSync.syncOriginalFiles, viewModel::setSyncOriginalFiles) }
+                onClick = {
+                    val enabled = !state.cloudSync.syncOriginalFiles
+                    if (enabled) requestNotificationPermission(false) {
+                        viewModel.setSyncOriginalFiles(true)
+                    } else viewModel.setSyncOriginalFiles(false)
+                },
+            ) {
+                KixyuSwitch(
+                    checked = state.cloudSync.syncOriginalFiles,
+                    onCheckedChange = { enabled ->
+                        if (enabled) requestNotificationPermission(false) {
+                            viewModel.setSyncOriginalFiles(true)
+                        } else viewModel.setSyncOriginalFiles(false)
+                    },
+                )
+            }
             KixyuDivider()
             KixyuSettingsRow(
                 title = "用户字体",
                 supportingText = "同步已导入的 TTF / OTF",
-                onClick = { viewModel.setSyncFonts(!state.cloudSync.syncFonts) },
-            ) { KixyuSwitch(state.cloudSync.syncFonts, viewModel::setSyncFonts) }
+                onClick = {
+                    val enabled = !state.cloudSync.syncFonts
+                    if (enabled) requestNotificationPermission(false) {
+                        viewModel.setSyncFonts(true)
+                    } else viewModel.setSyncFonts(false)
+                },
+            ) {
+                KixyuSwitch(
+                    checked = state.cloudSync.syncFonts,
+                    onCheckedChange = { enabled ->
+                        if (enabled) requestNotificationPermission(false) {
+                            viewModel.setSyncFonts(true)
+                        } else viewModel.setSyncFonts(false)
+                    },
+                )
+            }
         }
     }
     val networkSection: @Composable () -> Unit = {
@@ -536,6 +582,44 @@ private enum class LargeFileNetwork {
     ANY_NETWORK,
 }
 
+/** Requests notification permission only after a related user action, never at app launch. */
+@Composable
+private fun rememberNotificationPermissionAction(): (Boolean, () -> Unit) -> Unit {
+    val context = LocalContext.current
+    val permissionPreferences = remember(context) {
+        context.getSharedPreferences("notification_state", android.content.Context.MODE_PRIVATE)
+    }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var permissionRequired by remember { mutableStateOf(false) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val action = pendingAction
+        pendingAction = null
+        if (granted || !permissionRequired) action?.invoke()
+        permissionRequired = false
+    }
+    return remember(context, launcher) {
+        actionGate@{ requirePermission, action ->
+            val alreadyGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+            if (alreadyGranted) {
+                action()
+            } else {
+                val now = System.currentTimeMillis()
+                val lastRequest = permissionPreferences.getLong("last_permission_request", 0L)
+                if (now - lastRequest < 48 * 60 * 60_000L) {
+                    if (!requirePermission) action()
+                    return@actionGate
+                }
+                pendingAction = action
+                permissionRequired = requirePermission
+                permissionPreferences.edit().putLong("last_permission_request", now).apply()
+                launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+}
+
 private fun LargeFileNetwork.label(): String = when (this) {
     LargeFileNetwork.WIFI_ONLY -> "仅 Wi-Fi"
     LargeFileNetwork.ANY_NETWORK -> "Wi-Fi 和移动数据"
@@ -607,7 +691,18 @@ fun ReadingSettingsRoute(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    val requestNotificationPermission = rememberNotificationPermissionAction()
+    val updateReminderEnabled: (Boolean) -> Unit = { enabled ->
+        if (!enabled) {
+            viewModel.setReadingReminderEnabled(false)
+        } else {
+            requestNotificationPermission(true) {
+                viewModel.setReadingReminderEnabled(true)
+            }
+        }
+    }
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.importFont(it.toString()) }
     }
@@ -685,6 +780,47 @@ fun ReadingSettingsRoute(
                         decreaseEnabled = state.goalMinutes > 5,
                         increaseEnabled = state.goalMinutes < 120,
                     )
+                    KixyuDivider()
+                    KixyuSettingsRow(
+                        title = "每日目标提醒",
+                        supportingText = if (state.readingReminder.enabled) {
+                            "目标未完成时，在 ${state.readingReminder.hour.toString().padStart(2, '0')}:" +
+                                state.readingReminder.minute.toString().padStart(2, '0') + " 提醒"
+                        } else {
+                            "关闭 · 仅在主动开启后发送"
+                        },
+                        onClick = { updateReminderEnabled(!state.readingReminder.enabled) },
+                    ) {
+                        KixyuSwitch(
+                            checked = state.readingReminder.enabled,
+                            onCheckedChange = updateReminderEnabled,
+                        )
+                    }
+                    if (state.readingReminder.enabled) {
+                        KixyuDivider()
+                        KixyuSettingsRow(
+                            title = "提醒时间",
+                            supportingText = "系统可能根据省电策略延后少量时间",
+                            onClick = {
+                                TimePickerDialog(
+                                    context,
+                                    { _, hour, minute -> viewModel.setReadingReminderTime(hour, minute) },
+                                    state.readingReminder.hour,
+                                    state.readingReminder.minute,
+                                    true,
+                                ).show()
+                            },
+                        ) {
+                            Text(
+                                "%02d:%02d".format(
+                                    Locale.US,
+                                    state.readingReminder.hour,
+                                    state.readingReminder.minute,
+                                ),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                 }
             }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
@@ -755,13 +891,27 @@ fun DataAndBackupRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    val requestNotificationPermission = rememberNotificationPermissionAction()
     var pendingRestore by rememberSaveable { mutableStateOf<String?>(null) }
     var restored by rememberSaveable { mutableStateOf(false) }
     val backupCreator = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
-    ) { uri -> uri?.let { viewModel.exportBackup(it.toString()) } }
+    ) { uri -> uri?.let {
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                it,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+        viewModel.exportBackup(it.toString())
+    } }
     val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { pendingRestore = it.toString() }
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            pendingRestore = it.toString()
+        }
     }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(Unit) { viewModel.restoreCompleted.collect { restored = true } }
@@ -804,19 +954,23 @@ fun DataAndBackupRoute(
                         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                     ) {
                         KixyuButton(
-                            text = if (state.backupOperation == BackupOperation.EXPORT) "正在导出…" else "导出",
+                            text = if (state.backupOperation == BackupOperationType.EXPORT) "正在导出…" else "导出",
                             onClick = {
-                                backupCreator.launch(
-                                    "KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup",
-                                )
+                                requestNotificationPermission(false) {
+                                    backupCreator.launch(
+                                        "KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup",
+                                    )
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             enabled = state.backupOperation == null,
                         )
                         KixyuButton(
-                            text = if (state.backupOperation == BackupOperation.RESTORE) "正在恢复…" else "恢复",
+                            text = if (state.backupOperation == BackupOperationType.RESTORE) "正在恢复…" else "恢复",
                             onClick = {
-                                backupPicker.launch(arrayOf("application/zip", "application/octet-stream"))
+                                requestNotificationPermission(false) {
+                                    backupPicker.launch(arrayOf("application/zip", "application/octet-stream"))
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             enabled = state.backupOperation == null,

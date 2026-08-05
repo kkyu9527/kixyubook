@@ -53,6 +53,13 @@ data class CloudSyncState(
     val inspectingInitialSync: Boolean = false,
 )
 
+data class CloudSyncProgress(
+    val title: String,
+    val text: String,
+    val completed: Int? = null,
+    val total: Int? = null,
+)
+
 sealed interface GoogleConnectResult {
     data object Connected : GoogleConnectResult
     data class NeedsAuthorization(val pendingIntent: PendingIntent) : GoogleConnectResult
