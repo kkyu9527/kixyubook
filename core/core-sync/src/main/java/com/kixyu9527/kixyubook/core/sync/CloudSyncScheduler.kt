@@ -16,6 +16,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
@@ -27,6 +28,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Singleton
 class CloudSyncScheduler @Inject constructor(
@@ -65,6 +68,7 @@ class CloudSyncScheduler @Inject constructor(
         val full = OneTimeWorkRequestBuilder<CloudSyncWorker>()
             .setConstraints(connected)
             .setInputData(workerData(SyncWorkerMode.FULL, preferredBookUuid))
+            .addTag(FULL_SYNC_WORK_TAG)
             .build()
         workManager.beginUniqueWork(SYNC_CHAIN_WORK, policy, quick)
             .then(full)
@@ -103,6 +107,22 @@ class CloudSyncScheduler @Inject constructor(
         workManager.cancelUniqueWork(PERIODIC_WORK)
     }
 
+    /**
+     * DataStore keeps the last public phase across process death, while WorkManager is the source
+     * of truth for whether a full sync is currently executing. Fail closed on query errors so a
+     * transient database issue never hides a real synchronization.
+     */
+    suspend fun isFullSyncRunning(): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            workManager.getWorkInfosForUniqueWork(SYNC_CHAIN_WORK)
+                .get(WORK_INFO_QUERY_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .any { work ->
+                    work.state == WorkInfo.State.RUNNING &&
+                        FULL_SYNC_WORK_TAG in work.tags
+                }
+        }.getOrDefault(true)
+    }
+
     private fun workerData(mode: SyncWorkerMode, preferredBookUuid: String?) = Data.Builder()
         .putString(CloudSyncWorker.KEY_MODE, mode.name)
         .apply { preferredBookUuid?.let { putString(CloudSyncWorker.KEY_BOOK_UUID, it) } }
@@ -112,6 +132,8 @@ class CloudSyncScheduler @Inject constructor(
         const val SYNC_CHAIN_WORK = "google-cloud-sync-chain"
         const val DEBOUNCE_TRIGGER_WORK = "google-cloud-sync-debounce-trigger"
         const val PERIODIC_WORK = "google-cloud-sync-periodic"
+        const val FULL_SYNC_WORK_TAG = "google-cloud-sync-full"
+        const val WORK_INFO_QUERY_TIMEOUT_SECONDS = 5L
     }
 }
 

@@ -70,6 +70,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     }.stateIn(scope, SharingStarted.Eagerly, CloudSyncState())
 
     init {
+        scope.launch { clearStaleSyncPhase() }
         scope.launch {
             preferences.state
                 .map { Triple(it.account?.subject, it.initialSyncApproved, it.enabled) }
@@ -123,32 +124,40 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         scheduler.requestDebounced()
     }
 
-    override suspend fun resolveInitialSync(choice: InitialSyncChoice): Result<Unit> = runCatching {
+    override suspend fun resolveInitialSync(choice: InitialSyncChoice): Result<Unit> {
         val decision = initialSyncDecision.value
         val conflicts = decision?.conflicts ?: preferences.current().conflicts
-        if (conflicts.isEmpty()) return@runCatching
+        if (conflicts.isEmpty()) return Result.success(Unit)
         inspectingInitialSync.value = true
-        if (choice == InitialSyncChoice.USE_CLOUD_CHANGES) {
-            engine.discardLocalChanges(conflicts)
-            preferences.clearLocalConflictPreference()
-        } else {
-            engine.acceptLocalChanges(conflicts)
-            preferences.preferLocalConflictsFor(LOCAL_CONFLICT_PREFERENCE_MILLIS)
+        return try {
+            runCatching {
+                if (choice == InitialSyncChoice.USE_CLOUD_CHANGES) {
+                    engine.discardLocalChanges(conflicts)
+                    preferences.clearLocalConflictPreference()
+                } else {
+                    engine.acceptLocalChanges(conflicts)
+                    preferences.preferLocalConflictsFor(LOCAL_CONFLICT_PREFERENCE_MILLIS)
+                }
+                preferences.approveInitialSync()
+                initialSyncDecision.value = null
+                scheduler.ensurePeriodic()
+                scheduler.requestImmediate()
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                preferences.markError(error.message ?: "同步冲突处理失败")
+            }
+        } finally {
+            // StateFlow assignment is non-suspending, so cancellation cannot strand the sheet in
+            // its inspecting state.
+            inspectingInitialSync.value = false
         }
-        preferences.approveInitialSync()
-        initialSyncDecision.value = null
-        scheduler.ensurePeriodic()
-        scheduler.requestImmediate()
-    }.onFailure { error ->
-        preferences.markError(error.message ?: "同步冲突处理失败")
-    }.also {
-        inspectingInitialSync.value = false
     }
 
     override fun syncNow() = scheduler.requestImmediate()
 
     override fun onAppForeground() {
         scope.launch {
+            clearStaleSyncPhase()
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
             scheduler.ensurePeriodic()
@@ -283,25 +292,29 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     private suspend fun prepareInitialSync() {
         if (inspectingInitialSync.value || preferences.current().account == null) return
         inspectingInitialSync.value = true
-        runCatching { engine.inspectInitialSync() }
-            .onSuccess { snapshot ->
-                // An empty local library on an unapproved installation is the normal new-device
-                // case. Clear any stale local sync bookkeeping and restore the existing cloud
-                // library automatically; an empty client must never offer to erase cloud data.
-                when {
-                    snapshot.shouldRestoreFromCloud() -> {
-                        engine.prepareCloudRestore()
-                        approveAndSchedule()
-                    }
-                    snapshot.requiresUserDecision() -> {
-                        preferences.setConflicts(snapshot.conflicts)
-                        initialSyncDecision.value = snapshot
-                    }
-                    else -> approveAndSchedule()
+        try {
+            val snapshot = engine.inspectInitialSync()
+            // An empty local library on an unapproved installation is the normal new-device
+            // case. Clear any stale local sync bookkeeping and restore the existing cloud
+            // library automatically; an empty client must never offer to erase cloud data.
+            when {
+                snapshot.shouldRestoreFromCloud() -> {
+                    engine.prepareCloudRestore()
+                    approveAndSchedule()
                 }
+                snapshot.requiresUserDecision() -> {
+                    preferences.setConflicts(snapshot.conflicts)
+                    initialSyncDecision.value = snapshot
+                }
+                else -> approveAndSchedule()
             }
-            .onFailure { error -> preferences.markError(error.message ?: "无法检查云端书库") }
-        inspectingInitialSync.value = false
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            preferences.markError(error.message ?: "无法检查云端书库")
+        } finally {
+            inspectingInitialSync.value = false
+        }
     }
 
     private suspend fun approveAndSchedule() {
@@ -311,9 +324,27 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         scheduler.requestImmediate()
     }
 
+    private suspend fun clearStaleSyncPhase() {
+        val persisted = preferences.current()
+        if (persisted.phase != CloudSyncPhase.SYNCING) return
+        if (
+            shouldClearStaleSyncPhase(
+                phase = persisted.phase,
+                fullSyncRunning = scheduler.isFullSyncRunning(),
+            )
+        ) {
+            preferences.markInterrupted()
+        }
+    }
+
     private companion object {
         const val LOCAL_CONFLICT_PREFERENCE_MILLIS = 5 * 60_000L
         const val FOREGROUND_REMOTE_CHECK_INTERVAL_MILLIS = 5 * 60_000L
         const val PRIORITY_WRITE_COALESCE_MILLIS = 600L
     }
 }
+
+internal fun shouldClearStaleSyncPhase(
+    phase: CloudSyncPhase,
+    fullSyncRunning: Boolean,
+): Boolean = phase == CloudSyncPhase.SYNCING && !fullSyncRunning

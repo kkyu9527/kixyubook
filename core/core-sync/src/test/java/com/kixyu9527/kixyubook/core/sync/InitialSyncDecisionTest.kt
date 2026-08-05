@@ -45,4 +45,14 @@ class InitialSyncDecisionTest {
     fun localConflictPreferenceExpiresAtDeadline() {
         assertFalse(shouldPreferLocalConflicts(preferLocalUntil = 301_000L, now = 301_000L))
     }
+
+    @Test
+    fun staleSyncingPhaseIsClearedWhenNoFullWorkerIsRunning() {
+        assertTrue(shouldClearStaleSyncPhase(CloudSyncPhase.SYNCING, fullSyncRunning = false))
+    }
+
+    @Test
+    fun runningFullWorkerKeepsSyncingPhaseVisible() {
+        assertFalse(shouldClearStaleSyncPhase(CloudSyncPhase.SYNCING, fullSyncRunning = true))
+    }
 }

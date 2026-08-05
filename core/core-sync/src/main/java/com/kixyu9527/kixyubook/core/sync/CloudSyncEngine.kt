@@ -286,7 +286,9 @@ class CloudSyncEngine @Inject constructor(
                 ?: books.getAllProgress().maxByOrNull(ReadingProgressEntity::updatedTime)?.bookUuid
                 ?: return@runCatching
             if (!books.bookExists(bookUuid)) return@runCatching
-            if (followedByFullSync) preferences.markRunning()
+            // This priority stage is intentionally silent. The following FULL worker owns the
+            // persisted global phase; otherwise a cancelled/delayed continuation can leave the
+            // app displaying SYNCING after this quick stage has already finished.
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
             val key = "progress/$bookUuid"
