@@ -83,6 +83,10 @@ data class Paragraph(
     val intrinsicHeight: Int = 0,
     /** EPUB inline semantics normalized independently from publisher colors and fonts. */
     val spans: List<ReaderTextSpan> = emptyList(),
+    /** The source XHTML dedicates its complete page to this image. */
+    val isFullPageImage: Boolean = false,
+    /** The publisher requested a cover-style crop (for example a CSS body background). */
+    val cropImageToFill: Boolean = false,
 )
 
 data class ReadingProgress(

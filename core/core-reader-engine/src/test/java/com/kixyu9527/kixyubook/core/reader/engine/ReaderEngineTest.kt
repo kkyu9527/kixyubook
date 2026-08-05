@@ -95,6 +95,67 @@ class ReaderEngineTest {
         assertNull(cache.read(key, chapter))
     }
 
+    @Test fun paginationDiskCacheRestoresFullPageImageSemantics() {
+        val noBackupRoot = folder.newFolder("full-page-cache")
+        val image = Paragraph(
+            id = 4,
+            chapterId = 20,
+            index = 0,
+            text = "人物彩图",
+            kind = ParagraphKind.IMAGE,
+            resourcePath = "OPS/plate.png",
+            mediaType = "image/png",
+            intrinsicWidth = 800,
+            intrinsicHeight = 1200,
+            isFullPageImage = true,
+            cropImageToFill = true,
+        )
+        val chapter = ReaderChapter(20, "art-book", "人物彩图", 1, listOf(image))
+        val page = ReaderPage(
+            0,
+            chapter.index,
+            chapter.title,
+            false,
+            listOf(
+                DocumentBlock(
+                    paragraphIndex = 0,
+                    fullText = image.text,
+                    visibleText = "",
+                    continuation = false,
+                    bottomSpacing = false,
+                    kind = ParagraphKind.IMAGE,
+                    resourcePath = image.resourcePath,
+                    mediaType = image.mediaType,
+                    intrinsicWidth = image.intrinsicWidth,
+                    intrinsicHeight = image.intrinsicHeight,
+                    imageWidthDp = 400f,
+                    imageHeightDp = 760f,
+                    isFullPageImage = true,
+                    cropImageToFill = true,
+                ),
+            ),
+        )
+        val key = PaginationCacheKey(
+            chapter.bookUuid,
+            "art-content",
+            chapter.id,
+            chapter.title,
+            ReaderLayoutSpec(400f, 760f, 18f, 1.6f, 0f, 16f),
+            null,
+            true,
+            3f,
+            1f,
+            LayoutDirection.Ltr,
+        )
+        val cache = ReaderPaginationDiskCache(readerPaginationCacheRoot(noBackupRoot))
+
+        cache.write(key, listOf(page))
+
+        assertEquals(listOf(page), cache.read(key, chapter))
+        assertTrue(cache.read(key, chapter)!!.single().isFullPageImage)
+        assertTrue(cache.read(key, chapter)!!.single().blocks.single().cropImageToFill)
+    }
+
     @Test fun txtParserDetectsGb18030StripsMetadataAndRecognizesHua() = runBlocking {
         val source = """书名：安静的书
 作者：测试作者
@@ -584,6 +645,69 @@ class ReaderEngineTest {
         assertEquals("场景插画", chapter.images.single().altText)
         assertEquals(1200, chapter.images.single().intrinsicWidth)
         assertEquals(800, chapter.images.single().intrinsicHeight)
+        assertFalse(chapter.images.single().isFullPage)
+    }
+
+    @Test fun epubParserMarksEveryDedicatedImageSpineItemAsFullPage() = runBlocking {
+        val epub = folder.newFile("full-page-art.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>彩图书</dc:title></metadata><manifest><item id="p1" href="plate-1.xhtml" media-type="application/xhtml+xml"/><item id="p2" href="plate-2.xhtml" media-type="application/xhtml+xml"/><item id="art" href="art.png" media-type="image/png"/></manifest><spine><itemref idref="p1"/><itemref idref="p2"/></spine></package>""")
+            entry("OPS/plate-1.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><p><img src="art.png" alt="角色彩图一"/></p></body></html>""")
+            entry("OPS/plate-2.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1200"><image href="art.png"/></svg></body></html>""")
+            val pngHeader = ByteArray(24).apply {
+                this[0] = 0x89.toByte(); this[1] = 0x50; this[2] = 0x4E; this[3] = 0x47
+                this[16] = 0; this[17] = 0; this[18] = 0x03; this[19] = 0x20
+                this[20] = 0; this[21] = 0; this[22] = 0x04; this[23] = 0xB0.toByte()
+            }
+            zip.putNextEntry(ZipEntry("OPS/art.png")); zip.write(pngHeader); zip.closeEntry()
+        }
+
+        val wrappedImage = EpubBookParser().readChapter(epub, 0)!!
+        val svgImage = EpubBookParser().readChapter(epub, 1)!!
+
+        assertTrue(wrappedImage.paragraphs.isEmpty())
+        assertTrue(wrappedImage.images.single().isFullPage)
+        assertEquals("角色彩图一", wrappedImage.images.single().altText)
+        assertTrue(svgImage.paragraphs.isEmpty())
+        assertTrue(svgImage.images.single().isFullPage)
+    }
+
+    @Test fun epubParserReadsEmptyBodyBackgroundImageAsFullPageContent() = runBlocking {
+        val epub = folder.newFile("css-background-art.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>人物书</dc:title></metadata><manifest><item id="person" href="Text/person.xhtml" media-type="application/xhtml+xml"/><item id="prose" href="Text/prose.xhtml" media-type="application/xhtml+xml"/><item id="css" href="Styles/page.css" media-type="text/css"/><item id="art" href="Images/CharacterArt.PNG" media-type="image/png"/></manifest><spine><itemref idref="person"/><itemref idref="prose"/></spine></package>""")
+            entry("OPS/Styles/page.css", """body.person, body.prose { background-image: url('../Images/CharacterArt.PNG'); background-size: cover; background-position: bottom center; }""")
+            entry("OPS/Text/person.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><head><link href="../Styles/page.css" rel="stylesheet" type="text/css"/></head><body class="person"><h2 style="display:none">裴谦</h2><p>&#160;</p></body></html>""")
+            entry("OPS/Text/prose.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><head><link href="../Styles/page.css" rel="stylesheet" type="text/css"/></head><body class="prose"><h2>正文</h2><p>背景图不能替代正文。</p></body></html>""")
+            val pngHeader = ByteArray(24).apply {
+                this[0] = 0x89.toByte(); this[1] = 0x50; this[2] = 0x4E; this[3] = 0x47
+                this[16] = 0; this[17] = 0; this[18] = 0x04; this[19] = 0xB0.toByte()
+                this[20] = 0; this[21] = 0; this[22] = 0x07; this[23] = 0x08
+            }
+            zip.putNextEntry(ZipEntry("OPS/Images/CharacterArt.PNG")); zip.write(pngHeader); zip.closeEntry()
+        }
+
+        val parser = EpubBookParser()
+        val person = parser.readChapter(epub, 0)!!
+        val prose = parser.readChapter(epub, 1)!!
+
+        assertEquals("裴谦", person.title)
+        assertTrue(person.paragraphs.isEmpty())
+        assertEquals("OPS/Images/CharacterArt.PNG", person.images.single().resourcePath)
+        assertTrue(person.images.single().isFullPage)
+        assertTrue(person.images.single().cropToFill)
+        assertEquals(listOf("背景图不能替代正文。"), prose.paragraphs)
+        assertTrue(prose.images.isEmpty())
     }
 
     @Test fun epubParserOmitsInlineImagesWithoutCreatingLogoTextOrImageBlocks() = runBlocking {

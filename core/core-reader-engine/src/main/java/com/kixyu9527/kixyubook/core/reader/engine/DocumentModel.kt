@@ -23,6 +23,8 @@ data class DocumentImage(
     val altText: String = "",
     val intrinsicWidth: Int = 0,
     val intrinsicHeight: Int = 0,
+    val isFullPage: Boolean = false,
+    val cropToFill: Boolean = false,
 )
 
 data class DocumentChapter(
@@ -177,6 +179,8 @@ data class DocumentBlock(
     val spans: List<ReaderTextSpan> = emptyList(),
     /** UTF-16 character offset of [visibleText] inside [fullText]. */
     val textStart: Int = 0,
+    val isFullPageImage: Boolean = false,
+    val cropImageToFill: Boolean = false,
 )
 
 @Immutable
@@ -188,4 +192,9 @@ data class ReaderPage(
     val blocks: List<DocumentBlock>,
 ) {
     val startParagraph: Int get() = blocks.firstOrNull()?.paragraphIndex ?: 0
+    val isFullPageImage: Boolean get() = blocks.singleOrNull()?.isFullPageImage == true
+}
+
+fun ReaderChapter.fullPageImageParagraph(): Paragraph? = contentParagraphs().singleOrNull()?.takeIf {
+    it.kind == ParagraphKind.IMAGE && it.resourcePath != null && it.isFullPageImage
 }

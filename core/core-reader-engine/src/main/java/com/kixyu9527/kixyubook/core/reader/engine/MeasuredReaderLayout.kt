@@ -236,6 +236,25 @@ private class MeasuredReaderPaginator(
         family: androidx.compose.ui.text.font.FontFamily,
         showRegularChapterTitle: Boolean,
     ): List<ReaderPage> {
+        chapter.fullPageImageParagraph()?.let { image ->
+            val block = DocumentBlock(
+                paragraphIndex = image.index,
+                fullText = image.text,
+                visibleText = "",
+                continuation = false,
+                bottomSpacing = false,
+                kind = ParagraphKind.IMAGE,
+                resourcePath = image.resourcePath,
+                mediaType = image.mediaType,
+                intrinsicWidth = image.intrinsicWidth,
+                intrinsicHeight = image.intrinsicHeight,
+                imageWidthDp = spec.viewportWidthDp,
+                imageHeightDp = spec.viewportHeightDp,
+                isFullPageImage = true,
+                cropImageToFill = image.cropImageToFill,
+            )
+            return listOf(ReaderPage(0, chapter.index, chapter.title, false, listOf(block)))
+        }
         val contentWidthDp = (spec.viewportWidthDp - spec.horizontalMarginDp * 2f)
             .coerceAtLeast(MIN_BODY_WIDTH_DP)
         val widthPx = with(density) { contentWidthDp.dp.roundToPx() }
@@ -291,6 +310,8 @@ private class MeasuredReaderPaginator(
                     intrinsicHeight = paragraph.intrinsicHeight,
                     imageWidthDp = imageLayout.widthDp,
                     imageHeightDp = imageLayout.heightDp,
+                    isFullPageImage = paragraph.isFullPageImage,
+                    cropImageToFill = paragraph.cropImageToFill,
                 )
                 usedHeightPx += imageHeightPx + spacingPx
                 if (bodyHeightPx() - usedHeightPx < spacingPx) flush()

@@ -53,6 +53,8 @@ internal class ReaderPaginationDiskCache(private val root: File) {
                             imageHeightDp = imageHeightDp,
                             spans = paragraph.spans.sliceForText(textStart, textEnd),
                             textStart = textStart,
+                            isFullPageImage = paragraph.isFullPageImage,
+                            cropImageToFill = paragraph.cropImageToFill,
                         )
                     }
                     ReaderPage(pageIndex, chapter.index, chapter.title, opening, blocks)
@@ -164,9 +166,9 @@ private fun String.safePathSegment() = replace(Regex("[^a-zA-Z0-9._-]"), "_")
 
 private const val CACHE_ROOT_NAME = "reader-pages"
 private const val MAGIC = 0x4B585047
-// Version 2 recalculates chapter-opening space after middle dots in a chapter name stopped being
-// mistaken for a legacy volume separator.
-private const val VERSION = 2
+// Version 3 adds dedicated full-page image pagination and invalidates constrained illustration
+// dimensions previously cached for image-only spine items.
+private const val VERSION = 3
 private const val MAX_PAGES = 100_000
 private const val MAX_BLOCKS_PER_PAGE = 10_000
 private const val MAX_CACHE_FILES = 1_500

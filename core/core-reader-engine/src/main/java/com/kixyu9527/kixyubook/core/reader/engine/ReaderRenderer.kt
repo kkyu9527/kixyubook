@@ -71,6 +71,7 @@ fun ReaderScrollRenderer(
 ) {
     val family = rememberReaderFont(fontPath)
     val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
+    val fullPageImage = remember(chapter) { chapter.fullPageImageParagraph() }
     var selectionVersion by remember(chapter.id) { mutableIntStateOf(0) }
     var selectionActive by remember(chapter.id) { androidx.compose.runtime.mutableStateOf(false) }
     val handleTap: (Float) -> Unit = { fraction ->
@@ -87,49 +88,85 @@ fun ReaderScrollRenderer(
                 state = listState,
                 modifier = modifier.readerTapInput(handleTap) { selectionActive = true },
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = spec.horizontalMarginDp.dp,
-                    end = spec.horizontalMarginDp.dp,
-                    top = (topInsetDp + 20f).dp,
-                    bottom = (bottomInsetDp + 8f).dp,
+                    start = if (fullPageImage == null) spec.horizontalMarginDp.dp else 0.dp,
+                    end = if (fullPageImage == null) spec.horizontalMarginDp.dp else 0.dp,
+                    top = (topInsetDp + if (fullPageImage == null) 20f else 0f).dp,
+                    bottom = (bottomInsetDp + if (fullPageImage == null) 8f else 0f).dp,
                 ),
             ) {
-                item {
-                    ReaderChapterOpeningTitle(chapter.title, palette, family)
-                    Spacer(Modifier.height(24.dp))
-                }
-                itemsIndexed(contentParagraphs, key = { _, paragraph -> paragraph.id }) { _, paragraph ->
-                    if (paragraph.kind == ParagraphKind.IMAGE) {
-                        val layout = standardizedReaderImageLayout(
-                            availableWidthDp = spec.viewportWidthDp - spec.horizontalMarginDp * 2f,
-                            intrinsicWidth = paragraph.intrinsicWidth,
-                            intrinsicHeight = paragraph.intrinsicHeight,
-                        )
-                        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (fullPageImage != null) {
+                    item(key = fullPageImage.id) {
+                        val sizeClass = standardizedReaderImageLayout(
+                            spec.viewportWidthDp,
+                            fullPageImage.intrinsicWidth,
+                            fullPageImage.intrinsicHeight,
+                        ).sizeClass
+                        Box(
+                            Modifier.fillMaxWidth().height(spec.viewportHeightDp.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             ReaderEpubImage(
                                 epubPath = epubPath,
-                                resourcePath = paragraph.resourcePath,
-                                altText = paragraph.text,
-                                layout = layout,
+                                resourcePath = fullPageImage.resourcePath,
+                                altText = fullPageImage.text,
+                                layout = ReaderImageLayout(
+                                    spec.viewportWidthDp,
+                                    spec.viewportHeightDp,
+                                    sizeClass,
+                                ),
                                 placeholderColor = palette.secondary,
                                 onTapFraction = handleTap,
+                                fullPage = true,
+                                cropToFill = fullPageImage.cropImageToFill,
                             )
                         }
-                    } else {
-                        ReaderBodyText(
-                            paragraph.text,
-                            spec,
-                            palette.body,
-                            family,
-                            spans = paragraph.spans,
-                            accentColor = palette.accent,
-                            backgroundColor = palette.background,
-                            highlightQuery = highlightQuery,
-                            highlightColor = palette.accent,
-                        )
+                    }
+                } else {
+                    item {
+                        ReaderChapterOpeningTitle(chapter.title, palette, family)
+                        Spacer(Modifier.height(24.dp))
+                    }
+                    itemsIndexed(contentParagraphs, key = { _, paragraph -> paragraph.id }) { _, paragraph ->
+                        if (paragraph.kind == ParagraphKind.IMAGE) {
+                            val layout = standardizedReaderImageLayout(
+                                availableWidthDp = spec.viewportWidthDp - spec.horizontalMarginDp * 2f,
+                                intrinsicWidth = paragraph.intrinsicWidth,
+                                intrinsicHeight = paragraph.intrinsicHeight,
+                            )
+                            Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                ReaderEpubImage(
+                                    epubPath = epubPath,
+                                    resourcePath = paragraph.resourcePath,
+                                    altText = paragraph.text,
+                                    layout = layout,
+                                    placeholderColor = palette.secondary,
+                                    onTapFraction = handleTap,
+                                )
+                            }
+                        } else {
+                            ReaderBodyText(
+                                paragraph.text,
+                                spec,
+                                palette.body,
+                                family,
+                                spans = paragraph.spans,
+                                accentColor = palette.accent,
+                                backgroundColor = palette.background,
+                                highlightQuery = highlightQuery,
+                                highlightColor = palette.accent,
+                            )
+                        }
                     }
                 }
                 item {
-                    Column(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(
+                            start = spec.horizontalMarginDp.dp,
+                            top = 20.dp,
+                            end = spec.horizontalMarginDp.dp,
+                        ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
                         Text("· 本章完 ·", color = palette.secondary)
                         androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (hasPrevious) androidx.compose.material3.TextButton(onClick = onPreviousChapter) { Text("上一章", color = palette.accent) }
@@ -218,6 +255,33 @@ private fun ReaderPageContent(
     handleTap: (Float) -> Unit,
     onLongPress: () -> Unit,
 ) {
+    val fullPageBlock = page.blocks.singleOrNull()?.takeIf { it.isFullPageImage }
+    if (fullPageBlock != null) {
+        Box(
+            modifier.fillMaxSize().readerTapInput(handleTap, onLongPress),
+            contentAlignment = Alignment.Center,
+        ) {
+            ReaderEpubImage(
+                epubPath = epubPath,
+                resourcePath = fullPageBlock.resourcePath,
+                altText = fullPageBlock.fullText,
+                layout = ReaderImageLayout(
+                    spec.viewportWidthDp,
+                    spec.viewportHeightDp,
+                    standardizedReaderImageLayout(
+                        spec.viewportWidthDp,
+                        fullPageBlock.intrinsicWidth,
+                        fullPageBlock.intrinsicHeight,
+                    ).sizeClass,
+                ),
+                placeholderColor = palette.secondary,
+                onTapFraction = handleTap,
+                fullPage = true,
+                cropToFill = fullPageBlock.cropImageToFill,
+            )
+        }
+        return
+    }
     Column(
         modifier.fillMaxSize()
             .readerTapInput(handleTap, onLongPress)

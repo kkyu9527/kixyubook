@@ -769,6 +769,8 @@ private fun DocumentChapter.toReaderParagraphs(
                             mediaType = image.mediaType,
                             intrinsicWidth = image.intrinsicWidth,
                             intrinsicHeight = image.intrinsicHeight,
+                            isFullPageImage = image.isFullPage,
+                            cropImageToFill = image.cropToFill,
                         ),
                     )
                 }

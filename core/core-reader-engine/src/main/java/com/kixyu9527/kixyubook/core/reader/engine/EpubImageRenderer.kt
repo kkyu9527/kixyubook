@@ -48,6 +48,8 @@ internal fun ReaderEpubImage(
     placeholderColor: Color,
     onTapFraction: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    fullPage: Boolean = false,
+    cropToFill: Boolean = false,
 ) {
     val targetWidth = layout.widthDp.dp
     val targetHeight = layout.heightDp.dp
@@ -68,7 +70,7 @@ internal fun ReaderEpubImage(
     }
     val imageModifier = modifier
         .size(targetWidth, targetHeight)
-        .clip(MaterialTheme.shapes.medium)
+        .then(if (fullPage) Modifier else Modifier.clip(MaterialTheme.shapes.medium))
         .background(placeholderColor.copy(alpha = .08f))
         .pointerInput(Unit) {
             detectTapGestures { onTapFraction(it.x / size.width.coerceAtLeast(1)) }
@@ -79,7 +81,7 @@ internal fun ReaderEpubImage(
             bitmap = bitmap,
             contentDescription = altText.ifBlank { "书内插图" },
             modifier = imageModifier,
-            contentScale = ContentScale.Fit,
+            contentScale = if (cropToFill) ContentScale.Crop else ContentScale.Fit,
         )
     } else {
         Box(imageModifier, contentAlignment = Alignment.Center) {

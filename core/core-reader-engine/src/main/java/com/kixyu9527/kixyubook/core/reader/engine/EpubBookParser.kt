@@ -156,7 +156,15 @@ class EpubBookParser : BookParser {
         val images = body.mapIndexedNotNull { contentIndex, block ->
             (block as? XhtmlBlock.Image)?.image?.copy(contentIndex = contentIndex)
         }
-        return DocumentChapter(title, paragraphs, images, styledParagraphs.map(StyledText::spans))
+        // A spine item containing one image and no readable text is a publisher-authored page,
+        // not an illustration embedded in reflowable prose. This covers covers, character art,
+        // volume plates and SVG image wrappers without relying on fragile file names.
+        val presentedImages = if (styledParagraphs.isEmpty() && images.size == 1) {
+            listOf(images.single().copy(isFullPage = true))
+        } else {
+            images
+        }
+        return DocumentChapter(title, paragraphs, presentedImages, styledParagraphs.map(StyledText::spans))
     }
 
     private fun readPackage(file: File, zip: ZipFile): PackageDocument {
@@ -324,16 +332,19 @@ class EpubBookParser : BookParser {
                 val readableBlock = tag in CONTENT_TAGS ||
                     (tag in FALLBACK_CONTENT_TAGS && !element.hasDescendantReadableBlock())
                 if (readableBlock && !element.hasContentAncestor()) {
-                    val text = element.toStyledText(stylesheet).takeIf { it.text.isNotBlank() } ?: continue
-                    if (heading == null && tag in HEADING_TAGS) heading = text.text
-                    add(XhtmlBlock.Text(text))
+                    val styledText = element.toStyledText(stylesheet)
+                    if (heading == null && tag in HEADING_TAGS) {
+                        heading = styledText.text.takeIf(String::isNotBlank)
+                            ?: element.textContent?.singleLineBookHeading()?.takeIf(String::isNotBlank)
+                    }
+                    if (styledText.text.isBlank()) continue
+                    add(XhtmlBlock.Text(styledText))
                     continue
                 }
                 val reference = element.imageReference(tag) ?: continue
-                // Images embedded inside a paragraph are represented by their semantic emoji/
-                // alternative text in that paragraph. Rendering them again as a block would
-                // create a duplicated, enlarged image on a separate line.
-                if (element.hasContentAncestor()) continue
+                // Omit a genuinely inline image surrounded by prose. An image wrapped by an
+                // otherwise empty <p> is still a block page used by many EPUB generators.
+                if (element.hasTextBearingContentAncestor()) continue
                 val resourcePath = resolveArchivePath(xhtmlPath, reference)
                 val entry = zip.findEntry(resourcePath) ?: continue
                 val mediaType = manifest.firstOrNull { it.path.equals(resourcePath, true) }?.mediaType
@@ -355,7 +366,50 @@ class EpubBookParser : BookParser {
                 )
             }
         }
-        return XhtmlContent(heading, blocks)
+        // Some fixed-layout EPUB generators put the only page image on the root element through
+        // CSS instead of emitting an <img>. Treat it as content only when the XHTML body produced
+        // no readable blocks, so decorative backgrounds behind normal prose remain app-owned.
+        val presentedBlocks = if (blocks.isEmpty()) {
+            document.fullPageBackgroundImage(stylesheet, zip, xhtmlPath, manifest)
+                ?.let { listOf(XhtmlBlock.Image(it)) }
+                ?: blocks
+        } else {
+            blocks
+        }
+        return XhtmlContent(heading, presentedBlocks)
+    }
+
+    private fun org.w3c.dom.Document.fullPageBackgroundImage(
+        stylesheet: CssStylesheet,
+        zip: ZipFile,
+        xhtmlPath: String,
+        manifest: Collection<ManifestItem>,
+    ): DocumentImage? {
+        val roots = buildList {
+            (getElementsByTagNameNS("*", "body").item(0) as? Element)?.let(::add)
+            documentElement?.takeUnless { it in this }?.let(::add)
+        }
+        roots.forEach { root ->
+            val background = root.backgroundImage(stylesheet.rules, xhtmlPath) ?: return@forEach
+            val resourcePath = resolveArchivePath(background.basePath, background.reference)
+            val entry = zip.findEntry(resourcePath) ?: return@forEach
+            val mediaType = manifest.firstOrNull { it.path.equals(resourcePath, true) }?.mediaType
+                ?.takeIf { it.startsWith("image/", true) }
+                ?: mediaTypeFor(resourcePath)
+            if (!mediaType.startsWith("image/")) return@forEach
+            val dimensions = zip.readImageDimensions(entry, mediaType)
+            return DocumentImage(
+                contentIndex = 0,
+                resourcePath = entry.name,
+                mediaType = mediaType,
+                altText = "整页插图",
+                intrinsicWidth = dimensions.first,
+                intrinsicHeight = dimensions.second,
+                isFullPage = true,
+                cropToFill = background.cropToFill,
+            )
+        }
+        return null
     }
 
     private fun readStylesheet(
@@ -379,7 +433,7 @@ class EpubBookParser : BookParser {
                         appendCss(imported, path, depth + 1)
                     }
                 }
-                addAll(parseCss(source))
+                addAll(parseCss(source, basePath))
             }
             fun appendCssEntry(rawPath: String, depth: Int = 0) {
                 val path = rawPath.lowercase()
@@ -394,7 +448,7 @@ class EpubBookParser : BookParser {
                     }
                     ParsedCssSource(
                         imports = CSS_IMPORT.findAll(source).map { it.groupValues[1] }.toList(),
-                        rules = parseCss(source),
+                        rules = parseCss(source, entry.name),
                     ).also { synchronized(cssSourceCache) { cssSourceCache[key] = it } }
                 }
                 if (depth < MAX_CSS_IMPORT_DEPTH) {
@@ -428,7 +482,7 @@ class EpubBookParser : BookParser {
         return CssStylesheet(rules, rootVariables)
     }
 
-    private fun parseCss(source: String): List<CssRule> {
+    private fun parseCss(source: String, sourcePath: String): List<CssRule> {
         val clean = source.replace(CSS_COMMENT, "").replace(CSS_IMPORT, "")
         return CSS_RULE.findAll(clean).flatMap { match ->
             val declarations = match.groupValues[2].split(';').mapNotNull { declaration ->
@@ -436,15 +490,60 @@ class EpubBookParser : BookParser {
                 if (separator <= 0) null else {
                     val property = declaration.substring(0, separator).trim().lowercase()
                     if (property !in SUPPORTED_CSS_PROPERTIES && !property.startsWith("--")) null
-                    else property to declaration.substring(separator + 1)
-                        .substringBefore("!important").trim().lowercase()
+                    else {
+                        val rawValue = declaration.substring(separator + 1)
+                            .substringBefore("!important").trim()
+                        property to if (property in CASE_SENSITIVE_CSS_PROPERTIES) rawValue else rawValue.lowercase()
+                    }
                 }
             }.toMap()
             match.groupValues[1].split(',').asSequence()
                 .map(String::trim)
                 .filter { it.isNotBlank() && !it.startsWith('@') }
-                .map { selector -> CssRule(selector, declarations, cssSpecificity(selector)) }
+                .map { selector -> CssRule(selector, declarations, cssSpecificity(selector), sourcePath = sourcePath) }
         }.toList()
+    }
+
+    private fun Element.backgroundImage(cssRules: List<CssRule>, xhtmlPath: String): CssBackgroundImage? {
+        var reference: String? = getAttribute("background").trim().takeIf(String::isNotBlank)
+        var basePath = xhtmlPath
+        var cropToFill = false
+
+        fun applyDeclarations(declarations: Map<String, String>, declarationBasePath: String) {
+            declarations.forEach { (property, value) ->
+                when (property) {
+                    "background" -> {
+                        reference = value.cssUrlReference()
+                        basePath = declarationBasePath
+                        cropToFill = CSS_COVER_VALUE.containsMatchIn(value)
+                    }
+                    "background-image" -> {
+                        reference = value.cssUrlReference()
+                        basePath = declarationBasePath
+                    }
+                    "background-size" -> cropToFill = CSS_COVER_VALUE.containsMatchIn(value)
+                }
+            }
+        }
+
+        cssRules.asSequence()
+            .filter { matchesCssSelector(it.selector) }
+            .sortedWith(compareBy(CssRule::specificity, CssRule::order))
+            .forEach { applyDeclarations(it.declarations, it.sourcePath) }
+
+        val inlineDeclarations = linkedMapOf<String, String>()
+        getAttribute("style").split(';').forEach { declaration ->
+            val separator = declaration.indexOf(':')
+            if (separator > 0) {
+                inlineDeclarations[declaration.substring(0, separator).trim().lowercase()] =
+                    declaration.substring(separator + 1).substringBefore("!important").trim()
+            }
+        }
+        applyDeclarations(inlineDeclarations, xhtmlPath)
+
+        return reference?.takeIf { it.isNotBlank() && !it.startsWith("data:", true) }?.let {
+            CssBackgroundImage(it, basePath, cropToFill)
+        }
     }
 
     private fun Element.toStyledText(stylesheet: CssStylesheet): StyledText {
@@ -710,6 +809,17 @@ class EpubBookParser : BookParser {
         return false
     }
 
+    private fun Element.hasTextBearingContentAncestor(): Boolean {
+        var ancestor: Node? = parentNode
+        while (ancestor is Element) {
+            if (ancestor.localName.orEmpty().lowercase() in CONTENT_TAGS) {
+                return !ancestor.textContent.isNullOrBlank()
+            }
+            ancestor = ancestor.parentNode
+        }
+        return false
+    }
+
     private fun Element.hasDescendantReadableBlock(): Boolean {
         val descendants = getElementsByTagNameNS("*", "*")
         for (index in 0 until descendants.length) {
@@ -760,6 +870,12 @@ class EpubBookParser : BookParser {
         val declarations: Map<String, String>,
         val specificity: Int,
         val order: Int = 0,
+        val sourcePath: String,
+    )
+    private data class CssBackgroundImage(
+        val reference: String,
+        val basePath: String,
+        val cropToFill: Boolean,
     )
     private data class CssStylesheet(
         val rules: List<CssRule>,
@@ -864,8 +980,9 @@ class EpubBookParser : BookParser {
             "font", "font-family", "font-style", "font-variant", "font-variant-caps", "font-weight",
             "text-decoration", "text-decoration-line", "border-bottom", "border-bottom-style",
             "white-space", "display", "visibility", "vertical-align", "color",
-            "-webkit-text-fill-color", "background", "background-color",
+            "-webkit-text-fill-color", "background", "background-color", "background-image", "background-size",
         )
+        val CASE_SENSITIVE_CSS_PROPERTIES = setOf("background", "background-image")
         val CSS_COMMENT = Regex("/\\*.*?\\*/", setOf(RegexOption.DOT_MATCHES_ALL))
         val CSS_RULE = Regex("([^{}]+)\\{([^{}]*)\\}")
         val CSS_PSEUDO = Regex("::?[a-zA-Z-]+(?:\\([^)]*\\))?")
@@ -878,8 +995,19 @@ class EpubBookParser : BookParser {
             "@import\\s+(?:url\\(\\s*)?[\"']?([^\"')\\s;]+)[\"']?\\s*\\)?[^;]*;",
             RegexOption.IGNORE_CASE,
         )
+        val CSS_COVER_VALUE = Regex("(?:^|\\s|/)cover(?:$|\\s)", RegexOption.IGNORE_CASE)
     }
 }
+
+private val EPUB_CSS_URL = Regex(
+    "url\\(\\s*(?:\"([^\"]+)\"|'([^']+)'|([^)'\"\\s]+))\\s*\\)",
+    RegexOption.IGNORE_CASE,
+)
+
+private fun String.cssUrlReference(): String? = EPUB_CSS_URL.find(this)?.groupValues
+    ?.drop(1)
+    ?.firstOrNull(String::isNotBlank)
+    ?.trim()
 
 private fun String.resolveCssVariables(variables: Map<String, String>): String {
     var resolved = this
