@@ -55,7 +55,7 @@ data class ReaderChapter(
 data class ReaderChapterHeading(val ordinal: String?, val name: String)
 
 fun splitReaderChapterHeading(rawTitle: String): ReaderChapterHeading {
-    val title = rawTitle.substringAfterLast('·').singleLineBookHeading()
+    val title = readerChapterTitle(rawTitle)
     val match = CHAPTER_ORDINAL_PATTERN.matchEntire(title)
         ?: return ReaderChapterHeading(ordinal = null, name = title)
     val rawOrdinal = match.groupValues[1].trim()
@@ -72,7 +72,7 @@ fun splitReaderChapterHeading(rawTitle: String): ReaderChapterHeading {
 
 fun ReaderChapter.contentParagraphs(): List<Paragraph> {
     val fullTitle = title.normalizedReaderHeading()
-    val chapterTitle = title.substringAfterLast('·').normalizedReaderHeading()
+    val chapterTitle = readerChapterTitle(title).normalizedReaderHeading()
     val firstTextIndex = paragraphs.indexOfFirst { it.kind == ParagraphKind.TEXT }
     if (firstTextIndex < 0) return paragraphs
     val candidate = paragraphs[firstTextIndex].text.normalizedReaderHeading()
@@ -81,6 +81,17 @@ fun ReaderChapter.contentParagraphs(): List<Paragraph> {
     } else {
         paragraphs
     }
+}
+
+private fun readerChapterTitle(rawTitle: String): String {
+    val fullTitle = rawTitle.singleLineBookHeading()
+    if (CHAPTER_ORDINAL_PATTERN.matches(fullTitle)) return fullTitle
+
+    // Some legacy entries combine a volume and chapter as "卷名 · 第一章 标题". Only strip
+    // that prefix when the suffix is independently a chapter heading; a middle dot may also be
+    // part of the actual title or a transliterated name, for example "催眠钱宁·卢".
+    val suffix = rawTitle.substringAfterLast('·').singleLineBookHeading()
+    return suffix.takeIf { it != fullTitle && CHAPTER_ORDINAL_PATTERN.matches(it) } ?: fullTitle
 }
 
 private fun String.normalizedReaderHeading(): String = trim().replace(Regex("[\\s　]+"), "").trim('：', ':', '-', '—')

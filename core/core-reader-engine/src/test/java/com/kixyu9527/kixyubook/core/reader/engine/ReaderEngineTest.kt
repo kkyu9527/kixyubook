@@ -352,6 +352,25 @@ class ReaderEngineTest {
             ReaderChapterHeading("第十三章", "换行标题"),
             splitReaderChapterHeading("第十三章\n\u200B换行标题"),
         )
+        assertEquals(
+            ReaderChapterHeading("第77章", "催眠钱宁·卢"),
+            splitReaderChapterHeading("第77章 催眠钱宁·卢"),
+        )
+    }
+
+    @Test fun middleDotInsideChapterNameDoesNotHideTheFirstBodyParagraph() {
+        val chapter = ReaderChapter(
+            1,
+            "uuid",
+            "第77章 催眠钱宁·卢",
+            0,
+            listOf(
+                Paragraph(1, 1, 0, "卢"),
+                Paragraph(2, 1, 1, "正文。"),
+            ),
+        )
+
+        assertEquals(listOf("卢", "正文。"), chapter.contentParagraphs().map { it.text })
     }
 
     @Test fun epubParserCollapsesBreaksInsideChapterHeading() = runBlocking {
