@@ -30,6 +30,9 @@
             android:name="android.supports_size_changes"
             android:value="true" />
         <meta-data
+            android:name="android.allow_multiple_resumed_activities"
+            android:value="true" />
+        <meta-data
             android:name="miui.supportAppContinuity"
             android:value="true" />
         <!-- HyperOS workstation / continuous freeform window. Mode 1 allows both axes to resize. -->
@@ -44,6 +47,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density"
             android:resizeableActivity="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -58,10 +62,6 @@
                 <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
             </intent-filter>
         </receiver>
-        <service
-            android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="dataSync"
-            tools:node="merge" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

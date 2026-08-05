@@ -116,6 +116,8 @@ object KixyuSize {
     val searchCorner = 16.dp
     val libraryCoverWidth = 62.dp
     val libraryCoverHeight = 88.dp
+    val libraryDetailCoverWidth = 128.dp
+    val libraryDetailCoverHeight = 180.dp
     val continueCoverWidth = 84.dp
     val continueCoverHeight = 118.dp
     val recentCoverWidth = 46.dp

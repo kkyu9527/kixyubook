@@ -1,8 +1,13 @@
 package com.kixyu9527.kixyubook.feature.library
 
+import android.app.Activity
+import android.content.ClipDescription
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +40,6 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -63,11 +67,24 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.mimeTypes
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -76,16 +93,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuEdgeToEdgeDialogProperties
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
 
@@ -112,6 +129,9 @@ fun LibraryRoute(
         onReparse = viewModel::reparseTxt,
         onUpdateMetadata = viewModel::updateMetadata,
         onSetCategory = viewModel::setCategory,
+        onDropDocuments = { uris, releasePermission ->
+            viewModel.import(uris) { releasePermission?.invoke() }
+        },
     )
 }
 
@@ -129,24 +149,63 @@ private fun LibraryScreen(
     onReparse: (String) -> Unit,
     onUpdateMetadata: (String, String, String, String) -> Unit,
     onSetCategory: (String, String) -> Unit,
+    onDropDocuments: (List<String>, (() -> Unit)?) -> Unit,
 ) {
-    var managing by remember { mutableStateOf<LibraryBook?>(null) }
-    var deleting by remember { mutableStateOf<LibraryBook?>(null) }
-    var reparsing by remember { mutableStateOf<LibraryBook?>(null) }
-    var optionsExpanded by remember { mutableStateOf(false) }
-    var selectionMode by remember { mutableStateOf(false) }
-    var selectedBookUuids by remember { mutableStateOf(emptySet<String>()) }
-    var confirmingBatchDelete by remember { mutableStateOf(false) }
+    var managingUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var deletingUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var reparsingUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var optionsExpanded by rememberSaveable { mutableStateOf(false) }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    val stringSetSaver = remember {
+        Saver<Set<String>, List<String>>(save = { it.toList() }, restore = { it.toSet() })
+    }
+    var selectedBookUuids by rememberSaveable(stateSaver = stringSetSaver) { mutableStateOf(emptySet()) }
+    var confirmingBatchDelete by rememberSaveable { mutableStateOf(false) }
+    var previewBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    val managing = state.books.firstOrNull { it.book.uuid == managingUuid }
+    val deleting = state.books.firstOrNull { it.book.uuid == deletingUuid }
+    val reparsing = state.books.firstOrNull { it.book.uuid == reparsingUuid }
     val visibleBookUuids = state.books.mapTo(linkedSetOf()) { it.book.uuid }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
-    val expanded = kixyuWindowWidthClass() == KixyuWindowWidthClass.EXPANDED
+    val expanded = kixyuWindowSizeClass().supportsTwoPane
+    val activity = LocalContext.current.findActivity()
+    val latestDropDocuments by rememberUpdatedState(onDropDocuments)
+    val dropTarget = remember(activity) {
+        object : DragAndDropTarget {
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                val androidEvent = event.toAndroidDragEvent()
+                val clipData = androidEvent.clipData ?: return false
+                val uris = buildList {
+                    repeat(clipData.itemCount) {
+                        clipData.getItemAt(it).uri?.toString()?.let(::add)
+                    }
+                }
+                if (uris.isEmpty()) return false
+                val permission = activity?.requestDragAndDropPermissions(androidEvent)
+                latestDropDocuments(uris) { permission?.release() }
+                return true
+            }
+        }
+    }
     LaunchedEffect(visibleBookUuids) {
         selectedBookUuids = selectedBookUuids.intersect(visibleBookUuids)
         if (visibleBookUuids.isEmpty()) selectionMode = false
+        if (previewBookUuid !in visibleBookUuids) previewBookUuid = state.books.firstOrNull()?.book?.uuid
     }
     KixyuPageScaffold(
         title = if (selectionMode) "已选择 ${selectedBookUuids.size} 本" else "书库",
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().dragAndDropTarget(
+            shouldStartDragAndDrop = { event ->
+                event.mimeTypes().any { mime ->
+                    mime == ClipDescription.MIMETYPE_TEXT_URILIST ||
+                        mime == "text/plain" ||
+                        mime == "application/epub+zip" ||
+                        mime == "application/zip" ||
+                        mime == "application/octet-stream"
+                }
+            },
+            target = dropTarget,
+        ),
         actions = {
                     if (selectionMode) {
                         KixyuIconButton(
@@ -208,78 +267,70 @@ private fun LibraryScreen(
             )
         },
     ) { innerPadding ->
-        LazyColumn(
-            Modifier.kixyuPageContentWidth(
-                if (expanded) KixyuSize.expandedPageContentMaxWidth else KixyuSize.pageContentMaxWidth,
-            )
-                .padding(innerPadding)
-                .consumeWindowInsets(innerPadding),
-            contentPadding = PaddingValues(
-                horizontal = KixyuSpacing.screenHorizontal,
-                vertical = KixyuSpacing.screenVertical,
-            ),
-            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-        ) {
-            item {
-                TextField(
-                    value = state.query,
-                    onValueChange = onSearch,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text("搜索书名或作者", maxLines = 1) },
-                    leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(KixyuSize.icon)) },
-                    trailingIcon = {
-                        if (state.query.isNotEmpty()) IconButton({ onSearch("") }) {
-                            Icon(Icons.Outlined.Close, "清除", Modifier.size(KixyuSize.icon))
-                        }
-                    },
-                    shape = MaterialTheme.shapes.large,
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
+        if (expanded) {
+            Row(
+                modifier = Modifier.kixyuPageContentWidth(KixyuSize.expandedPageContentMaxWidth)
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding)
+                    .padding(
+                        horizontal = KixyuSpacing.screenHorizontal,
+                        vertical = KixyuSpacing.screenVertical,
                     ),
-                    textStyle = MaterialTheme.typography.bodyLarge,
-                )
-            }
-            item {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+            ) {
+                Column(
+                    modifier = Modifier.weight(.58f).fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                 ) {
-                    state.categories.forEach { category ->
-                        FilterChip(state.category == category, { onCategory(category) }, { Text(category, maxLines = 1) })
-                    }
-                }
-            }
-            if (state.books.isEmpty()) {
-                item { LibraryEmptyState(Modifier.fillParentMaxSize().padding(KixyuSpacing.extraLarge)) }
-            }
-            if (expanded) {
-                items(state.books.chunked(2), key = { books -> books.first().book.uuid }) { books ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                        verticalAlignment = Alignment.Top,
+                    LibraryFilters(state, onSearch, onCategory)
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                        contentPadding = PaddingValues(bottom = navigationContentPadding),
                     ) {
-                        books.forEach { item ->
+                        if (state.books.isEmpty()) {
+                            item { LibraryEmptyState(Modifier.fillParentMaxSize().padding(KixyuSpacing.extraLarge)) }
+                        }
+                        items(state.books, key = { it.book.uuid }) { item ->
                             LibraryBookRow(
                                 item = item,
-                                selected = item.book.uuid in selectedBookUuids,
+                                selected = if (selectionMode) item.book.uuid in selectedBookUuids
+                                else item.book.uuid == previewBookUuid,
                                 selectionMode = selectionMode,
                                 onOpen = {
                                     if (selectionMode) selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
-                                    else onOpenBook(item.book.uuid)
+                                    else previewBookUuid = item.book.uuid
                                 },
                                 onSelectionChange = { selectedBookUuids = selectedBookUuids.toggle(item.book.uuid) },
-                                onManage = { managing = item },
-                                onDelete = { deleting = item },
-                                modifier = Modifier.weight(1f),
+                                onManage = { managingUuid = item.book.uuid },
+                                onDelete = { deletingUuid = item.book.uuid },
                             )
                         }
-                        if (books.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
-            } else {
+                LibraryBookDetailPane(
+                    item = state.books.firstOrNull { it.book.uuid == previewBookUuid },
+                    onOpen = onOpenBook,
+                    onManage = { managingUuid = it },
+                    onDelete = { deletingUuid = it },
+                    modifier = Modifier.weight(.42f).fillMaxSize(),
+                )
+            }
+        } else {
+            LazyColumn(
+                Modifier.kixyuPageContentWidth()
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding),
+                contentPadding = PaddingValues(
+                    horizontal = KixyuSpacing.screenHorizontal,
+                    vertical = KixyuSpacing.screenVertical,
+                ),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+            ) {
+                item { LibraryFilters(state, onSearch, onCategory) }
+                if (state.books.isEmpty()) {
+                    item { LibraryEmptyState(Modifier.fillParentMaxSize().padding(KixyuSpacing.extraLarge)) }
+                }
                 items(state.books, key = { it.book.uuid }) { item ->
                     LibraryBookRow(
                         item = item,
@@ -290,68 +341,173 @@ private fun LibraryScreen(
                             else onOpenBook(item.book.uuid)
                         },
                         onSelectionChange = { selectedBookUuids = selectedBookUuids.toggle(item.book.uuid) },
-                        onManage = { managing = item },
-                        onDelete = { deleting = item },
+                        onManage = { managingUuid = item.book.uuid },
+                        onDelete = { deletingUuid = item.book.uuid },
                     )
                 }
+                item { Spacer(Modifier.height(navigationContentPadding)) }
+                item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
             }
-            item { Spacer(Modifier.height(navigationContentPadding)) }
-            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }
 
     managing?.let { item ->
         BookManagementDialog(
             item = item,
-            dismiss = { managing = null },
-            reparse = { managing = null; reparsing = item },
+            dismiss = { managingUuid = null },
+            reparse = { managingUuid = null; reparsingUuid = item.book.uuid },
             save = { title, author, description, category ->
                 onUpdateMetadata(item.book.uuid, title, author, description)
                 onSetCategory(item.book.uuid, category)
-                managing = null
+                managingUuid = null
             },
         )
     }
     deleting?.let { item ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            properties = KixyuEdgeToEdgeDialogProperties,
-            title = { Text("删除《${item.book.title}》？", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            text = { Text("书籍文件、阅读进度和统计也会一并删除。") },
-            confirmButton = { TextButton({ onDelete(item.book.uuid); deleting = null }) { Text("删除") } },
-            dismissButton = { TextButton({ deleting = null }) { Text("取消") } },
-        )
+        KixyuActionDialog(
+            show = true,
+            title = "删除《${item.book.title}》？",
+            onDismissRequest = { deletingUuid = null },
+            confirmLabel = "删除",
+            onConfirm = { onDelete(item.book.uuid); deletingUuid = null },
+        ) { Text("书籍文件、阅读进度和统计也会一并删除。") }
     }
     reparsing?.let { item ->
-        AlertDialog(
-            onDismissRequest = { reparsing = null },
-            properties = KixyuEdgeToEdgeDialogProperties,
-            title = { Text("重新解析正文？", maxLines = 1) },
-            text = { Text("将按新的编码和章节规则重建目录。书籍信息、分类和可恢复的阅读位置会保留。") },
-            confirmButton = {
-                TextButton({ onReparse(item.book.uuid); reparsing = null }) { Text("重新解析") }
-            },
-            dismissButton = { TextButton({ reparsing = null }) { Text("取消") } },
-        )
+        KixyuActionDialog(
+            show = true,
+            title = "重新解析正文？",
+            onDismissRequest = { reparsingUuid = null },
+            confirmLabel = "重新解析",
+            onConfirm = { onReparse(item.book.uuid); reparsingUuid = null },
+        ) { Text("将按新的编码和章节规则重建目录。书籍信息、分类和可恢复的阅读位置会保留。") }
     }
     if (confirmingBatchDelete) {
-        AlertDialog(
+        KixyuActionDialog(
+            show = true,
+            title = "删除选中的 ${selectedBookUuids.size} 本书？",
             onDismissRequest = { confirmingBatchDelete = false },
-            properties = KixyuEdgeToEdgeDialogProperties,
-            title = { Text("删除选中的 ${selectedBookUuids.size} 本书？", maxLines = 1) },
-            text = { Text("书籍文件、阅读进度和统计也会一并删除。") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteMany(selectedBookUuids)
-                        confirmingBatchDelete = false
-                        selectionMode = false
-                        selectedBookUuids = emptySet()
-                    },
-                ) { Text("删除") }
+            confirmLabel = "删除",
+            onConfirm = {
+                onDeleteMany(selectedBookUuids)
+                confirmingBatchDelete = false
+                selectionMode = false
+                selectedBookUuids = emptySet()
             },
-            dismissButton = { TextButton({ confirmingBatchDelete = false }) { Text("取消") } },
+        ) { Text("书籍文件、阅读进度和统计也会一并删除。") }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+@Composable
+private fun LibraryFilters(
+    state: LibraryUiState,
+    onSearch: (String) -> Unit,
+    onCategory: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+        TextField(
+            value = state.query,
+            onValueChange = onSearch,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text("搜索书名或作者", maxLines = 1) },
+            leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(KixyuSize.icon)) },
+            trailingIcon = {
+                if (state.query.isNotEmpty()) IconButton({ onSearch("") }) {
+                    Icon(Icons.Outlined.Close, "清除", Modifier.size(KixyuSize.icon))
+                }
+            },
+            shape = MaterialTheme.shapes.large,
+            colors = TextFieldDefaults.colors(
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+            textStyle = MaterialTheme.typography.bodyLarge,
         )
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+        ) {
+            state.categories.forEach { category ->
+                FilterChip(state.category == category, { onCategory(category) }, { Text(category, maxLines = 1) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryBookDetailPane(
+    item: LibraryBook?,
+    onOpen: (String) -> Unit,
+    onManage: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+    ) {
+        if (item == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("选择一本书查看详情", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(KixyuSpacing.large),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                BookCover(
+                    item.book.title,
+                    item.book.coverPath,
+                    Modifier.size(KixyuSize.libraryDetailCoverWidth, KixyuSize.libraryDetailCoverHeight),
+                )
+                Text(
+                    item.book.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    item.book.author,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    item.book.description.ifBlank { "暂无简介" },
+                    modifier = Modifier.weight(1f, fill = false),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                item.progress?.let {
+                    LinearProgressIndicator(
+                        progress = { it.fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
+                    )
+                }
+                KixyuButton(
+                    text = if (item.progress == null) "开始阅读" else "继续阅读",
+                    onClick = { onOpen(item.book.uuid) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+                    OutlinedButton(onClick = { onManage(item.book.uuid) }, modifier = Modifier.weight(1f)) {
+                        Text("管理", maxLines = 1)
+                    }
+                    OutlinedButton(onClick = { onDelete(item.book.uuid) }, modifier = Modifier.weight(1f)) {
+                        Text("删除", maxLines = 1)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -370,6 +526,18 @@ private fun LibraryBookRow(
     Surface(
         onClick = onOpen,
         modifier = modifier.fillMaxWidth()
+            .pointerHoverIcon(PointerIcon.Hand)
+            .pointerInput(onManage) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                            onManage()
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                }
+            }
             .semantics { contentDescription = "打开书籍：${item.book.title}" },
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
@@ -436,30 +604,29 @@ private fun BookManagementDialog(
     reparse: () -> Unit,
     save: (String, String, String, String) -> Unit,
 ) {
-    var title by remember { mutableStateOf(item.book.title) }
-    var author by remember { mutableStateOf(item.book.author) }
-    var description by remember { mutableStateOf(item.book.description) }
-    var category by remember { mutableStateOf(item.book.category) }
-    AlertDialog(
+    var title by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.title) }
+    var author by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.author) }
+    var description by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.description) }
+    var category by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.category) }
+    KixyuActionDialog(
+        show = true,
+        title = "编辑书籍",
         onDismissRequest = dismiss,
-        properties = KixyuEdgeToEdgeDialogProperties,
-        title = { Text("编辑书籍", maxLines = 1) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-                OutlinedTextField(title, { title = it }, label = { Text("书名") }, singleLine = true)
-                OutlinedTextField(author, { author = it }, label = { Text("作者") }, singleLine = true)
-                OutlinedTextField(description, { description = it }, label = { Text("简介") }, minLines = 2, maxLines = 4)
-                OutlinedTextField(category, { category = it }, label = { Text("分类") }, singleLine = true)
-                if (item.book.format == com.kixyu9527.kixyubook.core.common.model.BookFormat.TXT) {
-                    OutlinedButton(onClick = reparse, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Outlined.Refresh, null, Modifier.size(KixyuSize.iconSmall))
-                        Spacer(Modifier.size(KixyuSize.compactButtonIconGap))
-                        Text("重新解析正文", maxLines = 1)
-                    }
+        confirmLabel = "保存",
+        onConfirm = { save(title, author, description, category) },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+            OutlinedTextField(title, { title = it }, label = { Text("书名") }, singleLine = true)
+            OutlinedTextField(author, { author = it }, label = { Text("作者") }, singleLine = true)
+            OutlinedTextField(description, { description = it }, label = { Text("简介") }, minLines = 2, maxLines = 4)
+            OutlinedTextField(category, { category = it }, label = { Text("分类") }, singleLine = true)
+            if (item.book.format == com.kixyu9527.kixyubook.core.common.model.BookFormat.TXT) {
+                OutlinedButton(onClick = reparse, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Refresh, null, Modifier.size(KixyuSize.iconSmall))
+                    Spacer(Modifier.size(KixyuSize.compactButtonIconGap))
+                    Text("重新解析正文", maxLines = 1)
                 }
             }
-        },
-        confirmButton = { TextButton({ save(title, author, description, category) }) { Text("保存") } },
-        dismissButton = { TextButton(dismiss) { Text("取消") } },
-    )
+        }
+    }
 }

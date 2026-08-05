@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -357,7 +358,7 @@ private fun KixyuNavHost(
     var pageAnimation by remember { mutableStateOf<Job?>(null) }
     var animationPriorityJob by remember { mutableStateOf<Job?>(null) }
     var bookNavigationPending by remember { mutableStateOf(false) }
-    var releaseNotesVisible by remember { mutableStateOf(false) }
+    var releaseNotesVisible by rememberSaveable { mutableStateOf(false) }
     val topLevelActive = route == null || route == Routes.HOME
     val prioritizeAnimation: () -> Unit = {
         onAnimationPriorityChanged(true)
@@ -498,6 +499,47 @@ private fun KixyuNavHost(
                                 onAbout = {
                                     prioritizeAnimation()
                                     navController.navigate(Routes.ABOUT)
+                                },
+                                detailContent = { pane ->
+                                    when (pane) {
+                                        com.kixyu9527.kixyubook.feature.settings.SettingsPane.CLOUD_SYNC ->
+                                            CloudSyncRoute(onBack = {}, embedded = true)
+                                        com.kixyu9527.kixyubook.feature.settings.SettingsPane.READING ->
+                                            ReadingSettingsRoute(onBack = {}, embedded = true)
+                                        com.kixyu9527.kixyubook.feature.settings.SettingsPane.APPEARANCE ->
+                                            com.kixyu9527.kixyubook.feature.settings.AppearanceRoute(
+                                                onBack = {},
+                                                embedded = true,
+                                            )
+                                        com.kixyu9527.kixyubook.feature.settings.SettingsPane.DATA_AND_BACKUP ->
+                                            DataAndBackupRoute(onBack = {}, embedded = true)
+                                        com.kixyu9527.kixyubook.feature.settings.SettingsPane.ABOUT ->
+                                            AboutRoute(
+                                                updateState = updateState,
+                                                currentVersion = BuildConfig.VERSION_NAME,
+                                                onCheckForUpdates = onCheckForUpdates,
+                                                onUpdateResultConsumed = onUpdateResultConsumed,
+                                                onShowReleaseNotes = {
+                                                    onLoadReleaseNotes()
+                                                    releaseNotesVisible = true
+                                                },
+                                                onOpenProjectSource = {
+                                                    runCatching { uriHandler.openUri(PROJECT_SOURCE_URL) }.isSuccess
+                                                },
+                                                onContactTelegram = {
+                                                    runCatching { uriHandler.openUri(TELEGRAM_CONTACT_URL) }.isSuccess
+                                                },
+                                                appLogo = {
+                                                    Image(
+                                                        painter = painterResource(R.drawable.ic_launcher_foreground),
+                                                        contentDescription = "Kixyu Book Logo",
+                                                        modifier = Modifier.size(56.dp),
+                                                    )
+                                                },
+                                                onBack = {},
+                                                embedded = true,
+                                            )
+                                    }
                                 },
                             )
                         }

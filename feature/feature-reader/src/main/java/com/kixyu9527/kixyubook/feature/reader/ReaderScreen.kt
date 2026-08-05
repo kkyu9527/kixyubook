@@ -49,11 +49,14 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -64,6 +67,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -74,7 +78,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.ViewCompat
+import androidx.window.layout.FoldingFeature
+import androidx.window.layout.WindowInfoTracker
 import com.kixyu9527.kixyubook.core.common.model.*
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
@@ -317,6 +324,8 @@ private fun ReaderScreen(
     var overlayAnimationPriority by remember { mutableStateOf(false) }
     var overlayMotionObserved by remember { mutableStateOf(false) }
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
+    val windowSizeClass = kixyuWindowSizeClass()
+    val directoryAsSidePanel = windowSizeClass.supportsTwoPane
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val palette = readerPalette(state.settings, systemDark)
     val overlayVisible = controls || menu || toolsMenu || searchVisible ||
@@ -453,7 +462,9 @@ private fun ReaderScreen(
             }
         }
     }
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    LaunchedEffect(searchVisible, sheet, bookInfoVisible) {
+        if (!searchVisible && sheet == null && !bookInfoVisible) focusRequester.requestFocus()
+    }
     PredictiveBackHandler(
         enabled = sheet == null && (searchVisible || menu || toolsMenu || state.searchResults.isNotEmpty()),
     ) { events ->
@@ -468,6 +479,16 @@ private fun ReaderScreen(
                 menu -> menu = false
                 state.searchResults.isNotEmpty() -> clearSearch()
             }
+        } catch (_: CancellationException) { } finally {
+            backProgress = 0f
+        }
+    }
+    PredictiveBackHandler(
+        enabled = directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY,
+    ) { events ->
+        try {
+            events.collect { backProgress = it.progress }
+            sheet = null
         } catch (_: CancellationException) { } finally {
             backProgress = 0f
         }
@@ -513,12 +534,54 @@ private fun ReaderScreen(
                 .focusRequester(focusRequester)
                 .onPreviewKeyEvent { event ->
                     val isVolumeKey = event.key == Key.VolumeUp || event.key == Key.VolumeDown
-                    if (!state.settings.volumeKeyPageTurn || !isVolumeKey) return@onPreviewKeyEvent false
-                    if (event.type == KeyEventType.KeyDown) {
-                        controls = false
-                        menu = false
-                        toolsMenu = false
-                        volumeTurns.tryEmit(if (event.key == Key.VolumeUp) -1 else 1)
+                    val isSearchShortcut = event.isCtrlPressed && event.key == Key.F
+                    val isPageShortcut = event.key == Key.DirectionLeft ||
+                        event.key == Key.DirectionRight ||
+                        event.key == Key.PageUp ||
+                        event.key == Key.PageDown ||
+                        event.key == Key.Spacebar
+                    val handled = when {
+                        isSearchShortcut -> true
+                        event.key == Key.Escape &&
+                            (searchVisible || sheet != null || controls || menu || toolsMenu) -> true
+                        isVolumeKey -> state.settings.volumeKeyPageTurn
+                        isPageShortcut -> !searchVisible && sheet == null && !bookInfoVisible &&
+                            !controls && !menu && !toolsMenu
+                        else -> false
+                    }
+                    if (!handled) return@onPreviewKeyEvent false
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
+
+                    when {
+                        isSearchShortcut -> {
+                            searchVisible = true
+                            controls = false
+                            menu = false
+                            toolsMenu = false
+                        }
+                        event.key == Key.Escape -> {
+                            when {
+                                searchVisible -> {
+                                    searchVisible = false
+                                    clearSearch()
+                                }
+                                sheet != null -> sheet = null
+                                toolsMenu -> toolsMenu = false
+                                menu -> menu = false
+                                controls -> controls = false
+                            }
+                        }
+                        else -> {
+                            controls = false
+                            menu = false
+                            toolsMenu = false
+                            val direction = when (event.key) {
+                                Key.VolumeUp, Key.DirectionLeft, Key.PageUp -> -1
+                                Key.Spacebar -> if (event.isShiftPressed) -1 else 1
+                                else -> 1
+                            }
+                            volumeTurns.tryEmit(direction)
+                        }
                     }
                     true
                 }
@@ -680,7 +743,7 @@ private fun ReaderScreen(
 
         val activeSheet = sheet ?: retainedSheet
         KixyuBottomSheet(
-            show = sheet != null,
+            show = sheet != null && !(directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY),
             onDismissRequest = { sheet = null },
         ) {
             when (activeSheet) {
@@ -708,12 +771,85 @@ private fun ReaderScreen(
                 null -> Unit
             }
         }
+        AnimatedVisibility(
+            visible = directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY,
+            modifier = Modifier.fillMaxSize(),
+            enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
+            exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(Color.Black.copy(alpha = .28f))
+                        .clickable(onClick = { sheet = null }),
+                )
+                Box(
+                    Modifier.align(Alignment.CenterEnd)
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(KixyuSpacing.medium),
+                ) {
+                    KixyuInteractivePopupSurface(
+                        modifier = Modifier
+                            .widthIn(min = 360.dp, max = 480.dp)
+                            .fillMaxHeight()
+                            .graphicsLayer {
+                                translationX = size.width * backProgress
+                                alpha = 1f - backProgress * .35f
+                            },
+                    ) {
+                        DirectorySheet(
+                            state = state,
+                            selectChapter = { index ->
+                                sheet = null
+                                controls = false
+                                menu = false
+                                toolsMenu = false
+                                jumpChapter(index)
+                            },
+                            selectBookmark = { bookmark ->
+                                sheet = null
+                                controls = false
+                                menu = false
+                                toolsMenu = false
+                                jumpPosition(bookmark.chapterIndex, bookmark.position)
+                            },
+                            deleteBookmark = deleteBookmark,
+                            expandedLayout = true,
+                        )
+                    }
+                }
+            }
+        }
         BookInfoDialog(
             show = bookInfoVisible,
             book = state.book,
             dismiss = { bookInfoVisible = false },
         )
     }
+}
+
+@Composable
+private fun rememberReaderFoldingFeature(): FoldingFeature? {
+    val activity = LocalContext.current.findActivity()
+    var foldingFeature by remember(activity) { mutableStateOf<FoldingFeature?>(null) }
+    LaunchedEffect(activity) {
+        if (activity == null) {
+            foldingFeature = null
+            return@LaunchedEffect
+        }
+        WindowInfoTracker.getOrCreate(activity)
+            .windowLayoutInfo(activity)
+            .collectLatest { layoutInfo ->
+                foldingFeature = layoutInfo.displayFeatures
+                    .filterIsInstance<FoldingFeature>()
+                    .firstOrNull { feature ->
+                        feature.orientation == FoldingFeature.Orientation.VERTICAL &&
+                            (feature.isSeparating ||
+                                feature.state == FoldingFeature.State.HALF_OPENED)
+                    }
+            }
+    }
+    return foldingFeature
 }
 
 @OptIn(kotlinx.coroutines.FlowPreview::class, ExperimentalLayoutApi::class)
@@ -732,6 +868,7 @@ private fun ReaderContent(
 ) {
     val chapter = state.chapter ?: return
     val density = LocalDensity.current
+    val foldingFeature = rememberReaderFoldingFeature()
     val paginationCoordinator = rememberReaderPaginationCoordinator()
     val paginationMeasurer = rememberTextMeasurer(cacheSize = READER_TEXT_MEASURE_CACHE_SIZE)
     // The reading viewport must not change when transient system bars appear. Derive its
@@ -747,9 +884,14 @@ private fun ReaderContent(
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val safeViewportHeight = (maxHeight.value - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
-        val twoPageSpread = maxWidth >= 840.dp && maxWidth > maxHeight
+        val twoPageSpread = maxWidth > maxHeight &&
+            (maxWidth >= 840.dp || foldingFeature != null)
+        val physicalHingeWidth = with(density) {
+            foldingFeature?.bounds?.width()?.toDp() ?: 0.dp
+        }
+        val spreadGutter = maxOf(KixyuSize.readerSpreadGutter, physicalHingeWidth)
         val pageViewportWidth = if (twoPageSpread) {
-            ((maxWidth - KixyuSize.readerSpreadGutter) / 2).value
+            ((maxWidth - spreadGutter) / 2).value
         } else {
             maxWidth.value
         }
@@ -846,6 +988,7 @@ private fun ReaderContent(
                     state, chapter, spec, palette, savePosition, moveChapterFromPage,
                     middleTap, dismissControls, volumeTurns, paginationCoordinator, paginationMeasurer,
                     chapterRendered, setPageInteractionActive, resourcePriorityActive, twoPageSpread,
+                    spreadGutter,
                 )
             }
         }
@@ -869,6 +1012,7 @@ private fun PagedReader(
     setPageInteractionActive: (Boolean) -> Unit,
     resourcePriorityActive: Boolean,
     twoPageSpread: Boolean,
+    spreadGutter: Dp,
 ) {
     var retainedPage by remember(
         spec,
@@ -964,6 +1108,7 @@ private fun PagedReader(
         hasPrevious,
         hasNext,
         twoPageSpread,
+        spreadGutter,
     ) {
         buildReaderPagerWindow(
             currentChapterIndex = state.chapterIndex,
@@ -1010,6 +1155,7 @@ private fun PagedReader(
         pageCount = { pagerSpreads.size },
     )
     val turnRequests = remember { Channel<Int>(Channel.UNLIMITED) }
+    var lastWheelTurnAt by remember { mutableLongStateOf(0L) }
     var settledSpreadKey by remember { mutableStateOf(desiredSpreadKey) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
     val latestReaderState by rememberUpdatedState(state)
@@ -1143,9 +1289,30 @@ private fun PagedReader(
     }
     HorizontalPager(
         state = pager,
-        modifier = Modifier.fillMaxSize().observePagerTap(
-            onTapFraction = { fraction -> pagerTap(fraction) },
-        ),
+        modifier = Modifier.fillMaxSize()
+            .pointerInput(turnRequests) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type != PointerEventType.Scroll) continue
+                        val change = event.changes.firstOrNull() ?: continue
+                        val delta = change.scrollDelta
+                        val dominantDelta = if (kotlin.math.abs(delta.y) >= kotlin.math.abs(delta.x)) {
+                            delta.y
+                        } else {
+                            delta.x
+                        }
+                        if (dominantDelta != 0f && change.uptimeMillis - lastWheelTurnAt >= 180L) {
+                            lastWheelTurnAt = change.uptimeMillis
+                            turnRequests.trySend(if (dominantDelta > 0f) 1 else -1)
+                        }
+                        change.consume()
+                    }
+                }
+            }
+            .observePagerTap(
+                onTapFraction = { fraction -> pagerTap(fraction) },
+            ),
         // Only one already-measured neighbour is precomposed. This keeps the gesture surface
         // continuous without laying out the entire retained chapter window.
         beyondViewportPageCount = if (resourcePriorityActive) 0 else 1,
@@ -1167,11 +1334,11 @@ private fun PagedReader(
                     )
                 }
                 if (index < spread.items.lastIndex) {
-                    Spacer(Modifier.width(KixyuSize.readerSpreadGutter))
+                    Spacer(Modifier.width(spreadGutter))
                 }
             }
             if (twoPageSpread && spread.items.size == 1) {
-                Spacer(Modifier.width(KixyuSize.readerSpreadGutter))
+                Spacer(Modifier.width(spreadGutter))
                 Spacer(Modifier.weight(1f).fillMaxHeight())
             }
         }
@@ -1605,6 +1772,7 @@ private fun DirectorySheet(
     selectChapter: (Int) -> Unit,
     selectBookmark: (Bookmark) -> Unit,
     deleteBookmark: (String) -> Unit,
+    expandedLayout: Boolean = false,
 ) {
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     var directoryView by rememberSaveable { mutableStateOf(DirectoryView.CHAPTERS) }
@@ -1633,7 +1801,7 @@ private fun DirectorySheet(
             if (targetRows.isNotEmpty()) listState.scrollToItem(target)
         }
     }
-    Column(Modifier.fillMaxWidth()) {
+    Column(if (expandedLayout) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(start = KixyuSpacing.large, end = KixyuSpacing.small),
             verticalAlignment = Alignment.CenterVertically,
@@ -1655,6 +1823,7 @@ private fun DirectorySheet(
         }
         AnimatedContent(
             targetState = directoryView,
+            modifier = if (expandedLayout) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth(),
             transitionSpec = {
                 if (targetState == DirectoryView.BOOKMARKS) {
                     (slideInHorizontally(tween(KixyuMotion.ReaderPopupEnterMillis)) { it / 3 } +
@@ -1671,7 +1840,10 @@ private fun DirectorySheet(
             label = "directoryBookmarks",
         ) { view ->
             if (view == DirectoryView.CHAPTERS) {
-                Box(Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent)) {
+                Box(
+                    if (expandedLayout) Modifier.fillMaxSize()
+                    else Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
+                ) {
                     androidx.compose.foundation.lazy.LazyColumn(
                         modifier = Modifier.fillMaxWidth().padding(
                             end = if (directoryRows.size >= FAST_SCROLLER_MIN_CHAPTERS) {
@@ -1756,14 +1928,16 @@ private fun DirectorySheet(
                 }
             } else if (state.bookmarks.isEmpty()) {
                 Box(
-                    Modifier.fillMaxWidth().height(180.dp),
+                    if (expandedLayout) Modifier.fillMaxSize()
+                    else Modifier.fillMaxWidth().height(180.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("还没有书签", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 androidx.compose.foundation.lazy.LazyColumn(
-                    Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
+                    if (expandedLayout) Modifier.fillMaxSize()
+                    else Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
                 ) {
                     items(state.bookmarks, key = Bookmark::uuid) { bookmark ->
                         KixyuListRow(

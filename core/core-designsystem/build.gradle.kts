@@ -18,5 +18,6 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.miuix.ui.android)
     implementation(libs.miuix.preference.android)
+    testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

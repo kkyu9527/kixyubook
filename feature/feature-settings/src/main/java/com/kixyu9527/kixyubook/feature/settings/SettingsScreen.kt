@@ -6,6 +6,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -41,6 +43,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,10 +82,9 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuStepperRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuThemeModeControl
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.designsystem.component.displayName
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -92,6 +95,8 @@ import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
 import kotlinx.coroutines.launch
 
+enum class SettingsPane { CLOUD_SYNC, READING, APPEARANCE, DATA_AND_BACKUP, ABOUT }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsRoute(
@@ -101,12 +106,19 @@ fun SettingsRoute(
     onDataAndBackup: () -> Unit,
     onAbout: () -> Unit,
     currentVersion: String,
+    detailContent: (@Composable (SettingsPane) -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
     val syncAccount = state.cloudSync.account
-    val expanded = kixyuWindowWidthClass() == KixyuWindowWidthClass.EXPANDED
+    val windowSizeClass = kixyuWindowSizeClass()
+    val twoPane = windowSizeClass.supportsTwoPane && detailContent != null
+    var selectedPaneName by rememberSaveable { mutableStateOf(SettingsPane.READING.name) }
+    val selectedPane = SettingsPane.entries.firstOrNull { it.name == selectedPaneName } ?: SettingsPane.READING
+    val openPane: (SettingsPane, () -> Unit) -> Unit = { pane, compactNavigation ->
+        if (twoPane) selectedPaneName = pane.name else compactNavigation()
+    }
 
     val accountSection: @Composable () -> Unit = {
         KixyuSection(title = "账号") {
@@ -124,7 +136,7 @@ fun SettingsRoute(
                     state.cloudSync.initialSyncDecision != null -> Icons.Outlined.CloudSync
                     else -> Icons.Outlined.CloudDone
                 },
-                onClick = onCloudSync,
+                onClick = { openPane(SettingsPane.CLOUD_SYNC, onCloudSync) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
@@ -138,14 +150,14 @@ fun SettingsRoute(
                     append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
                 },
                 icon = Icons.Outlined.Tune,
-                onClick = onReadingSettings,
+                onClick = { openPane(SettingsPane.READING, onReadingSettings) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
             KixyuDivider()
             KixyuSettingsRow(
                 title = "外观",
                 supportingText = "${state.settings.theme.displayName()} · ${state.settings.appUiStyle.displayName()} · ${state.settings.appColorTheme.displayName()}",
                 icon = Icons.Outlined.Palette,
-                onClick = onAppearance,
+                onClick = { openPane(SettingsPane.APPEARANCE, onAppearance) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
@@ -155,7 +167,7 @@ fun SettingsRoute(
                 title = "数据与备份",
                 supportingText = "导出或恢复书库、进度与个人设置",
                 icon = Icons.Outlined.Backup,
-                onClick = onDataAndBackup,
+                onClick = { openPane(SettingsPane.DATA_AND_BACKUP, onDataAndBackup) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
@@ -165,7 +177,7 @@ fun SettingsRoute(
                 title = "关于 Kixyu Book",
                 supportingText = "版本 $currentVersion · 更新与项目信息",
                 icon = Icons.Outlined.Info,
-                onClick = onAbout,
+                onClick = { openPane(SettingsPane.ABOUT, onAbout) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
@@ -174,49 +186,52 @@ fun SettingsRoute(
         title = "设置",
         modifier = Modifier.fillMaxSize(),
     ) { innerPadding ->
-        LazyColumn(
-            Modifier.kixyuPageContentWidth(
-                if (expanded) KixyuSize.expandedPageContentMaxWidth else KixyuSize.pageContentMaxWidth,
-            )
-                .padding(innerPadding)
-                .consumeWindowInsets(innerPadding),
-            contentPadding = PaddingValues(
-                horizontal = KixyuSpacing.screenHorizontal,
-                vertical = KixyuSpacing.screenVertical,
-            ),
-            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-        ) {
-            if (expanded) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-                        ) {
-                            accountSection()
-                            preferenceSection()
-                        }
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-                        ) {
-                            dataSection()
-                            aboutSection()
-                        }
-                    }
+        if (twoPane) {
+            Row(
+                modifier = Modifier.kixyuPageContentWidth(KixyuSize.expandedPageContentMaxWidth)
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding)
+                    .padding(horizontal = KixyuSpacing.screenHorizontal),
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+            ) {
+                LazyColumn(
+                    modifier = Modifier.weight(.36f).fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = KixyuSpacing.screenVertical),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+                ) {
+                    item { accountSection() }
+                    item { preferenceSection() }
+                    item { dataSection() }
+                    item { aboutSection() }
+                    item { Spacer(Modifier.height(navigationContentPadding)) }
                 }
-            } else {
+                Surface(
+                    modifier = Modifier.weight(.64f).fillMaxSize()
+                        .padding(vertical = KixyuSpacing.screenVertical),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Box(Modifier.fillMaxSize()) { detailContent.invoke(selectedPane) }
+                }
+            }
+        } else {
+            LazyColumn(
+                Modifier.kixyuPageContentWidth()
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding),
+                contentPadding = PaddingValues(
+                    horizontal = KixyuSpacing.screenHorizontal,
+                    vertical = KixyuSpacing.screenVertical,
+                ),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+            ) {
                 item { accountSection() }
                 item { preferenceSection() }
                 item { dataSection() }
                 item { aboutSection() }
+                item { Spacer(Modifier.height(navigationContentPadding)) }
+                item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
             }
-            item { Spacer(Modifier.height(navigationContentPadding)) }
-            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }
 }
@@ -224,6 +239,7 @@ fun SettingsRoute(
 @Composable
 fun CloudSyncRoute(
     onBack: () -> Unit,
+    embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -231,9 +247,9 @@ fun CloudSyncRoute(
     val activity = context as? Activity
     val snackbar = remember { SnackbarHostState() }
     val syncAccount = state.cloudSync.account
-    var confirmDelete by remember { mutableStateOf(false) }
-    var conflictDeferred by remember { mutableStateOf(false) }
-    var autoAuthorizationAttempted by remember { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var conflictDeferred by rememberSaveable { mutableStateOf(false) }
+    var autoAuthorizationAttempted by rememberSaveable { mutableStateOf(false) }
     val authorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (activity != null) viewModel.finishGoogleAuthorization(activity, result.data)
     }
@@ -259,7 +275,7 @@ fun CloudSyncRoute(
         if (state.cloudSync.initialSyncDecision != null) conflictDeferred = false
     }
 
-    val expanded = kixyuWindowWidthClass() == KixyuWindowWidthClass.EXPANDED
+    val expanded = kixyuWindowSizeClass().supportsTwoPane
     val accountSection: @Composable () -> Unit = {
         KixyuSection(title = "账号") {
             if (syncAccount == null) {
@@ -436,7 +452,9 @@ fun CloudSyncRoute(
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
-            KixyuIconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
+            if (!embedded) {
+                KixyuIconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
+            }
         },
         snackbarHost = {
             KixyuSnackbarHost(
@@ -618,6 +636,7 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
 @Composable
 fun ReadingSettingsRoute(
     onBack: () -> Unit,
+    embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -631,8 +650,10 @@ fun ReadingSettingsRoute(
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
-            KixyuIconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+            if (!embedded) {
+                KixyuIconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                }
             }
         },
         snackbarHost = {
@@ -707,6 +728,7 @@ fun ReadingSettingsRoute(
 @Composable
 fun AppearanceRoute(
     onBack: () -> Unit,
+    embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -715,8 +737,10 @@ fun AppearanceRoute(
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
-            KixyuIconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+            if (!embedded) {
+                KixyuIconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                }
             }
         },
     ) { innerPadding ->
@@ -756,13 +780,14 @@ fun AppearanceRoute(
 @Composable
 fun DataAndBackupRoute(
     onBack: () -> Unit,
+    embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    var pendingRestore by remember { mutableStateOf<String?>(null) }
-    var restored by remember { mutableStateOf(false) }
+    var pendingRestore by rememberSaveable { mutableStateOf<String?>(null) }
+    var restored by rememberSaveable { mutableStateOf(false) }
     val backupCreator = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri -> uri?.let { viewModel.exportBackup(it.toString()) } }
@@ -777,8 +802,10 @@ fun DataAndBackupRoute(
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
-            KixyuIconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+            if (!embedded) {
+                KixyuIconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                }
             }
         },
         snackbarHost = {
@@ -872,6 +899,7 @@ fun AboutRoute(
     onOpenProjectSource: () -> Boolean,
     onContactTelegram: () -> Boolean,
     appLogo: @Composable () -> Unit,
+    embedded: Boolean = false,
 ) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -896,8 +924,10 @@ fun AboutRoute(
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
-            KixyuIconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+            if (!embedded) {
+                KixyuIconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                }
             }
         },
         snackbarHost = {

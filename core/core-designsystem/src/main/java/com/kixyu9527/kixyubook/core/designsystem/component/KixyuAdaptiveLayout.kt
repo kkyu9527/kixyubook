@@ -24,7 +24,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
@@ -37,18 +36,58 @@ import top.yukonga.miuix.kmp.basic.NavigationRailDisplayMode
 import top.yukonga.miuix.kmp.basic.NavigationRailItem as MiuixNavigationRailItem
 
 enum class KixyuWindowWidthClass { COMPACT, MEDIUM, EXPANDED }
+enum class KixyuWindowHeightClass { COMPACT, MEDIUM, EXPANDED }
+
+data class KixyuWindowSizeClass(
+    val widthClass: KixyuWindowWidthClass,
+    val heightClass: KixyuWindowHeightClass,
+    val width: Dp,
+    val height: Dp,
+) {
+    val isLandscape: Boolean get() = width > height
+
+    /** Medium landscape and expanded windows have enough room for persistent master/detail panes. */
+    val supportsTwoPane: Boolean
+        get() = widthClass == KixyuWindowWidthClass.EXPANDED ||
+            (widthClass == KixyuWindowWidthClass.MEDIUM && isLandscape)
+
+    /** Short landscape windows keep the rail icon-only so labels cannot be clipped. */
+    val showNavigationLabels: Boolean
+        get() = widthClass != KixyuWindowWidthClass.COMPACT &&
+            heightClass != KixyuWindowHeightClass.COMPACT
+}
+
+fun classifyKixyuWindowSize(width: Dp, height: Dp): KixyuWindowSizeClass =
+    KixyuWindowSizeClass(
+        widthClass = when {
+            width < 600.dp -> KixyuWindowWidthClass.COMPACT
+            width < 840.dp -> KixyuWindowWidthClass.MEDIUM
+            else -> KixyuWindowWidthClass.EXPANDED
+        },
+        heightClass = when {
+            height < 480.dp -> KixyuWindowHeightClass.COMPACT
+            height < 900.dp -> KixyuWindowHeightClass.MEDIUM
+            else -> KixyuWindowHeightClass.EXPANDED
+        },
+        width = width,
+        height = height,
+    )
+
+/** Uses the current app window, not the physical display, so split/freeform changes recompose. */
+@Composable
+fun kixyuWindowSizeClass(): KixyuWindowSizeClass {
+    val density = LocalDensity.current
+    val container = LocalWindowInfo.current.containerSize
+    return classifyKixyuWindowSize(
+        width = with(density) { container.width.toDp() },
+        height = with(density) { container.height.toDp() },
+    )
+}
 
 /** Window-relative width class that also updates for split screen and freeform resizing. */
 @Composable
 fun kixyuWindowWidthClass(): KixyuWindowWidthClass {
-    val width = with(LocalDensity.current) {
-        LocalWindowInfo.current.containerSize.width.toDp()
-    }
-    return when {
-        width < 600.dp -> KixyuWindowWidthClass.COMPACT
-        width < 840.dp -> KixyuWindowWidthClass.MEDIUM
-        else -> KixyuWindowWidthClass.EXPANDED
-    }
+    return kixyuWindowSizeClass().widthClass
 }
 
 /**
@@ -57,8 +96,7 @@ fun kixyuWindowWidthClass(): KixyuWindowWidthClass {
  */
 @Composable
 fun kixyuUsesNavigationRail(): Boolean {
-    val windowSize = LocalWindowInfo.current.containerSize
-    return windowSize.width > windowSize.height
+    return kixyuWindowSizeClass().isLandscape
 }
 
 /**
@@ -86,7 +124,7 @@ fun KixyuNavigationRail(
     enabled: Boolean = true,
 ) {
     val appUiStyle = LocalAppUiStyle.current
-    val showLabels = LocalConfiguration.current.smallestScreenWidthDp >= 600
+    val showLabels = kixyuWindowSizeClass().showNavigationLabels
     val itemHeight = if (showLabels) {
         KixyuSize.navigationRailLabeledItemHeight
     } else {

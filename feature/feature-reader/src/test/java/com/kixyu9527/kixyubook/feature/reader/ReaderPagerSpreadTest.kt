@@ -20,6 +20,21 @@ class ReaderPagerSpreadTest {
     }
 
     @Test
+    fun resizingKeepsTheSameLogicalLeafKey() {
+        val pages = chapterPages(chapter = 2, count = 5)
+        val phone = buildReaderPagerSpreads(pages, false)
+        val tablet = buildReaderPagerSpreads(pages, true)
+        val currentLeafKey = phone[3].items.single().key
+
+        val resizedSpread = tablet.single { spread ->
+            spread.items.any { item -> item.key == currentLeafKey }
+        }
+
+        assertEquals(listOf(2, 3), resizedSpread.items.map { it.pageIndex })
+        assertEquals(currentLeafKey, resizedSpread.items.last().key)
+    }
+
+    @Test
     fun spreadNeverPairsLeavesAcrossChapterBoundary() {
         val items = chapterPages(chapter = 2, count = 1) + chapterPages(chapter = 3, count = 2)
 

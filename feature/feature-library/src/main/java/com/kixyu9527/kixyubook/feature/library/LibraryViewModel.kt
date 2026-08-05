@@ -52,23 +52,30 @@ class LibraryViewModel @Inject constructor(
     fun search(value: String) { query.value = value }
     fun selectCategory(value: String) { category.value = value }
 
-    fun import(uriStrings: List<String>) = viewModelScope.launch {
-        if (uriStrings.isEmpty()) return@launch
-        val result = try {
-            repository.importDocuments(uriStrings)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            messages.send(error.message ?: "导入失败，请重新选择文件")
-            null
+    fun import(uriStrings: List<String>, onComplete: () -> Unit = {}) = viewModelScope.launch {
+        try {
+            if (uriStrings.isEmpty()) return@launch
+            val result = try {
+                repository.importDocuments(uriStrings)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                messages.send(error.message ?: "导入失败，请重新选择文件")
+                null
+            }
+            if (result == null) return@launch
+            val success = buildString {
+                if (result.importedCount > 0) append("已导入 ${result.importedCount} 本书")
+                if (result.duplicateCount > 0) {
+                    append(if (isNotEmpty()) "，" else "")
+                    append("已跳过 ${result.duplicateCount} 本重复书籍")
+                }
+            }
+            val failure = result.failures.joinToString("\n")
+            messages.send(listOf(success, failure).filter(String::isNotBlank).joinToString("\n"))
+        } finally {
+            onComplete()
         }
-        if (result == null) return@launch
-        val success = buildString {
-            if (result.importedCount > 0) append("已导入 ${result.importedCount} 本书")
-            if (result.duplicateCount > 0) append(if (isNotEmpty()) "，" else "").append("已跳过 ${result.duplicateCount} 本重复书籍")
-        }
-        val failure = result.failures.joinToString("\n")
-        messages.send(listOf(success, failure).filter(String::isNotBlank).joinToString("\n"))
     }
 
     fun delete(bookUuid: String) = viewModelScope.launch { repository.deleteBook(bookUuid) }

@@ -54,9 +54,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import java.util.concurrent.TimeUnit
 
@@ -82,8 +81,8 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
         }
     }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
-    val widthClass = kixyuWindowWidthClass()
-    val expanded = widthClass == KixyuWindowWidthClass.EXPANDED
+    val windowSizeClass = kixyuWindowSizeClass()
+    val expanded = windowSizeClass.supportsTwoPane
     KixyuPageScaffold(
         title = "今天读什么？",
         modifier = Modifier.fillMaxSize(),

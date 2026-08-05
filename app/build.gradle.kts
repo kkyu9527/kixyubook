@@ -16,8 +16,9 @@ android {
         applicationId = "com.kixyu9527.kixyubook"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2202
-        versionName = "2.2.2"
+        versionCode = 2300
+        versionName = "2.3.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     val externalSigningFile = file(
@@ -70,6 +71,11 @@ dependencies {
     implementation(libs.androidx.profileinstaller)
     ksp(libs.hilt.compiler)
     testImplementation(libs.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     baselineProfile(project(":baselineprofile"))
 
