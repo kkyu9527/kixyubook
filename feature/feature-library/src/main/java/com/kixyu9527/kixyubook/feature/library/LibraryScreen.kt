@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -273,8 +274,9 @@ private fun LibraryScreen(
                     .padding(innerPadding)
                     .consumeWindowInsets(innerPadding)
                     .padding(
-                        horizontal = KixyuSpacing.screenHorizontal,
-                        vertical = KixyuSpacing.screenVertical,
+                        start = KixyuSpacing.screenHorizontal,
+                        top = KixyuSpacing.screenVertical,
+                        end = KixyuSpacing.screenHorizontal,
                     ),
                 horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
             ) {
@@ -459,7 +461,10 @@ private fun LibraryBookDetailPane(
             }
         } else {
             Column(
-                modifier = Modifier.fillMaxSize().padding(KixyuSpacing.large),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(KixyuSpacing.large),
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {

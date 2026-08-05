@@ -207,7 +207,7 @@ fun SettingsRoute(
                 }
                 Surface(
                     modifier = Modifier.weight(.64f).fillMaxSize()
-                        .padding(vertical = KixyuSpacing.screenVertical),
+                        .padding(top = KixyuSpacing.screenVertical),
                     color = MaterialTheme.colorScheme.surfaceContainerLowest,
                     shape = MaterialTheme.shapes.large,
                 ) {
@@ -275,7 +275,6 @@ fun CloudSyncRoute(
         if (state.cloudSync.initialSyncDecision != null) conflictDeferred = false
     }
 
-    val expanded = kixyuWindowSizeClass().supportsTwoPane
     val accountSection: @Composable () -> Unit = {
         KixyuSection(title = "账号") {
             if (syncAccount == null) {
@@ -467,47 +466,21 @@ fun CloudSyncRoute(
         },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.kixyuPageContentWidth(
-                maxWidth = if (expanded) KixyuSize.expandedPageContentMaxWidth else KixyuSize.pageContentMaxWidth,
-            ).padding(innerPadding).consumeWindowInsets(innerPadding),
+            Modifier.kixyuPageContentWidth()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
             contentPadding = PaddingValues(
                 horizontal = KixyuSpacing.screenHorizontal,
                 vertical = KixyuSpacing.screenVertical,
             ),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
-            if (syncAccount != null && expanded) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-                        ) {
-                            accountSection()
-                            statusSection()
-                            accountActionsSection()
-                        }
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-                        ) {
-                            contentSection()
-                            networkSection()
-                        }
-                    }
-                }
-            } else {
-                item { accountSection() }
-                if (syncAccount != null) {
-                    item { statusSection() }
-                    item { contentSection() }
-                    item { networkSection() }
-                    item { accountActionsSection() }
-                }
+            item { accountSection() }
+            if (syncAccount != null) {
+                item { statusSection() }
+                item { contentSection() }
+                item { networkSection() }
+                item { accountActionsSection() }
             }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
