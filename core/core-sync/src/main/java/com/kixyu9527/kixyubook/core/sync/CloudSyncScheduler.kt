@@ -33,7 +33,6 @@ class CloudSyncScheduler @Inject constructor(
 ) {
     private val workManager by lazy { WorkManager.getInstance(context) }
     private val connected = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-    @Volatile private var priorityBookActive = false
 
     /**
      * Replaces stale queued work with a latency-sensitive progress pull, then completes the full
@@ -42,18 +41,6 @@ class CloudSyncScheduler @Inject constructor(
     fun requestImmediate(preferredBookUuid: String? = null) {
         workManager.cancelUniqueWork(DEBOUNCE_TRIGGER_WORK)
         enqueuePriorityChain(preferredBookUuid, ExistingWorkPolicy.REPLACE)
-    }
-
-    /** Frees the global engine for an in-process visible-book pull. */
-    fun pauseForPriorityBook() {
-        priorityBookActive = true
-        workManager.cancelUniqueWork(SYNC_CHAIN_WORK)
-        workManager.cancelUniqueWork(DEBOUNCE_TRIGGER_WORK)
-        workManager.cancelUniqueWork(PERIODIC_WORK)
-    }
-
-    fun resumeAfterPriorityBook() {
-        priorityBookActive = false
     }
 
     /** Appends a final progress flush without cancelling work that already survived backgrounding. */
@@ -78,7 +65,6 @@ class CloudSyncScheduler @Inject constructor(
     }
 
     fun requestDebounced() {
-        if (priorityBookActive) return
         val request = OneTimeWorkRequestBuilder<CloudSyncTriggerWorker>()
             .setInitialDelay(5, TimeUnit.SECONDS)
             .setConstraints(connected)
@@ -94,7 +80,6 @@ class CloudSyncScheduler @Inject constructor(
     }
 
     fun cancel() {
-        priorityBookActive = false
         workManager.cancelUniqueWork(SYNC_CHAIN_WORK)
         workManager.cancelUniqueWork(DEBOUNCE_TRIGGER_WORK)
         workManager.cancelUniqueWork(PERIODIC_WORK)
@@ -170,7 +155,7 @@ class CloudSyncWorker(
             ).apply { description = "在后台恢复或上传书籍文件" },
         )
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setSmallIcon(R.drawable.ic_stat_cloud_sync)
             .setContentTitle("正在同步书籍")
             .setContentText("可离开应用，完成后会自动更新")
             .setOngoing(true)

@@ -150,12 +150,8 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         scope.launch {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
-            // The visible reader owns its low-latency channel. Starting a full WorkManager chain
-            // here would make it wait behind EPUB uploads again.
-            if (activeBookUuid != null) {
-                scheduler.pauseForPriorityBook()
-            } else {
-                scheduler.ensurePeriodic()
+            scheduler.ensurePeriodic()
+            if (activeBookUuid == null) {
                 scheduler.requestImmediate(lastReaderBookUuid)
             }
         }
@@ -183,7 +179,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         }
         priorityBookJob?.cancel()
         _priorityBookSync.value = PriorityBookSyncState(bookUuid, PriorityBookSyncPhase.PULLING)
-        scheduler.pauseForPriorityBook()
+        scheduler.ensurePeriodic()
         priorityBookJob = scope.launch(Dispatchers.IO) {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
@@ -221,6 +217,10 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 delay(PRIORITY_WRITE_COALESCE_MILLIS)
             }
         }
+        // Keep the durable full reconciliation alive while the reader's low-latency progress
+        // channel runs in-process. Queue it after launching the P1 pull so the visible book wins
+        // the engine mutex; the global status popup is suppressed on reader routes.
+        scheduler.requestBackgroundFlush(bookUuid)
     }
 
     override fun releaseBook(bookUuid: String) {
@@ -228,7 +228,6 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         lastReaderBookUuid = bookUuid
         priorityBookJob?.cancel()
         priorityBookJob = null
-        scheduler.resumeAfterPriorityBook()
         if (_priorityBookSync.value.bookUuid == bookUuid) {
             _priorityBookSync.value = PriorityBookSyncState()
         }

@@ -16,7 +16,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -45,7 +44,6 @@ data class ReaderUiState(
     val loading: Boolean = true,
     val chapterLoading: Boolean = false,
     val pendingChapterTitle: String? = null,
-    val syncNotice: String? = null,
     val remoteProgressPrompt: RemoteProgressPrompt? = null,
     val error: String? = null,
 )
@@ -140,10 +138,7 @@ class ReaderViewModel @Inject constructor(
                     .collect { priority ->
                         when (priority.phase) {
                             PriorityBookSyncPhase.READY -> finishPriorityProgressGate(syncSucceeded = true)
-                            PriorityBookSyncPhase.ERROR -> finishPriorityProgressGate(
-                                syncSucceeded = false,
-                                errorMessage = priority.errorMessage,
-                            )
+                            PriorityBookSyncPhase.ERROR -> finishPriorityProgressGate(syncSucceeded = false)
                             else -> Unit
                         }
                     }
@@ -393,8 +388,6 @@ class ReaderViewModel @Inject constructor(
             return
         }
 
-        val notice = "已同步到$chapterTitle"
-
         if (targetIndex == state.chapterIndex && state.chapter != null) {
             chapterNavigationJob?.cancel()
             pendingChapterIndex = null
@@ -407,11 +400,9 @@ class ReaderViewModel @Inject constructor(
                     currentPosition = targetPosition,
                     currentCharOffset = targetCharOffset,
                     navigationVersion = current.navigationVersion + 1,
-                    syncNotice = notice,
                 )
             }
         } else {
-            _uiState.update { it.copy(syncNotice = notice) }
             navigateToChapter(
                 targetIndex,
                 targetPosition,
@@ -419,15 +410,9 @@ class ReaderViewModel @Inject constructor(
                 persistProgress = false,
             )
         }
-        viewModelScope.launch {
-            delay(SYNC_NOTICE_MILLIS)
-            _uiState.update { current ->
-                if (current.syncNotice == notice) current.copy(syncNotice = null) else current
-            }
-        }
     }
 
-    private suspend fun finishPriorityProgressGate(syncSucceeded: Boolean, errorMessage: String? = null) {
+    private suspend fun finishPriorityProgressGate(syncSucceeded: Boolean) {
         if (prioritySyncReady) return
         if (syncSucceeded) {
             // Room and coordinator are independent flows. Read once after the engine completes so
@@ -439,8 +424,6 @@ class ReaderViewModel @Inject constructor(
         deferredLocalProgress = null
         if (userMovedBeforePrioritySync && pending != null) {
             persistProgress(pending.copy(updatedTime = System.currentTimeMillis()))
-        } else if (!syncSucceeded && !errorMessage.isNullOrBlank()) {
-            _uiState.update { it.copy(syncNotice = "云端进度暂不可用，已保留本地位置") }
         }
     }
 
@@ -813,7 +796,6 @@ private const val CHAPTER_PREFETCH_RADIUS = 2
 // The renderer composes only the immediate previous/next chapter, but retaining a second decoded
 // pair gives one-page EPUB chapters enough runway for rapid consecutive boundary gestures.
 private const val RENDER_PREFETCH_RADIUS = 2
-private const val SYNC_NOTICE_MILLIS = 2_400L
 
 internal fun shouldApplySyncedProgress(
     incomingUpdatedAt: Long,

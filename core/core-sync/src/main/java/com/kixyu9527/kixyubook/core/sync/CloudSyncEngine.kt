@@ -18,6 +18,8 @@ import com.kixyu9527.kixyubook.core.database.entity.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,11 +40,42 @@ private data class LocalCloudObject(
     val temporary: Boolean = false,
 )
 
+private const val INITIAL_PRIORITY_BOOK_LIMIT = 5
+
 private data class RemoteSnapshot(
     val known: MutableMap<String, DriveObject>,
     val changed: MutableMap<String, DriveObject>,
     val nextPageToken: String?,
 )
+
+private data class PreparedInitialSnapshot(
+    val accountSubject: String,
+    val snapshot: RemoteSnapshot,
+    val createdAt: Long,
+)
+
+internal data class InitialRestorePlan(
+    val priorityBookUuids: List<String>,
+    val remainingBookUuids: List<String>,
+)
+
+internal fun planInitialRestore(
+    bookUuids: List<String>,
+    remote: Map<String, DriveObject>,
+    priorityLimit: Int = INITIAL_PRIORITY_BOOK_LIMIT,
+): InitialRestorePlan {
+    val distinctBookUuids = bookUuids.distinct()
+    val priority = distinctBookUuids
+        .mapNotNull { uuid -> remote["progress/$uuid"]?.let { uuid to it.modifiedAt } }
+        .sortedByDescending { (_, modifiedAt) -> modifiedAt }
+        .take(priorityLimit)
+        .map { it.first }
+    val prioritySet = priority.toHashSet()
+    return InitialRestorePlan(
+        priorityBookUuids = priority,
+        remainingBookUuids = distinctBookUuids.filterNot(prioritySet::contains),
+    )
+}
 
 @Singleton
 class CloudSyncEngine @Inject constructor(
@@ -60,11 +93,31 @@ class CloudSyncEngine @Inject constructor(
     private val accountClient: GoogleAccountClient,
 ) {
     private val syncMutex = Mutex()
+    private val preparedSnapshotLock = Any()
+    private var preparedInitialSnapshot: PreparedInitialSnapshot? = null
 
     suspend fun inspectInitialSync(): InitialSyncDecision = withContext(Dispatchers.IO) {
         val token = accountClient.accessToken()
             ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
-        val remote = drive.listAll(token).associateBy(DriveObject::objectKey)
+        val (objects, pageToken) = coroutineScope {
+            val objects = async { drive.listAll(token) }
+            val pageToken = async { drive.startPageToken(token) }
+            objects.await() to pageToken.await()
+        }
+        val remote = objects.associateBy(DriveObject::objectKey)
+        preferences.current().account?.subject?.let { accountSubject ->
+            synchronized(preparedSnapshotLock) {
+                preparedInitialSnapshot = PreparedInitialSnapshot(
+                    accountSubject = accountSubject,
+                    snapshot = RemoteSnapshot(
+                        known = remote.toMutableMap(),
+                        changed = remote.toMutableMap(),
+                        nextPageToken = pageToken,
+                    ),
+                    createdAt = System.currentTimeMillis(),
+                )
+            }
+        }
         val restorableBooks = remote.keys.asSequence()
             .filter { it.startsWith("books/") && it.endsWith("/metadata") }
             .mapNotNull { it.split('/').getOrNull(1) }
@@ -381,6 +434,7 @@ class CloudSyncEngine @Inject constructor(
         persisted: PersistedSyncState,
     ): RemoteSnapshot {
         if (!persisted.initialMergeComplete || persisted.pageToken == null) {
+            takePreparedInitialSnapshot(persisted.account?.subject)?.let { return it }
             val all = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
             return RemoteSnapshot(
                 known = all.toMutableMap(),
@@ -436,6 +490,22 @@ class CloudSyncEngine @Inject constructor(
             nextPageToken = page.newStartPageToken ?: persisted.pageToken,
         )
     }
+
+    private fun takePreparedInitialSnapshot(accountSubject: String?): RemoteSnapshot? =
+        synchronized(preparedSnapshotLock) {
+            val prepared = preparedInitialSnapshot ?: return@synchronized null
+            preparedInitialSnapshot = null
+            if (
+                accountSubject == null ||
+                prepared.accountSubject != accountSubject ||
+                System.currentTimeMillis() - prepared.createdAt > PREPARED_SNAPSHOT_MAX_AGE_MILLIS
+            ) return@synchronized null
+            RemoteSnapshot(
+                known = prepared.snapshot.known.toMutableMap(),
+                changed = prepared.snapshot.changed.toMutableMap(),
+                nextPageToken = prepared.snapshot.nextPageToken,
+            )
+        }
 
     suspend fun deleteAllCloudData(token: String) = withContext(Dispatchers.IO) {
         drive.listAll(token).forEach { drive.delete(token, it.id) }
@@ -659,6 +729,7 @@ class CloudSyncEngine @Inject constructor(
     ) {
         val dirty = syncDao.pending().flatMap(::keysForMutation).toSet()
         val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
+        val handledKeys = mutableSetOf<String>()
         val candidates = changedRemote.filter { (key, value) ->
             !key.startsWith("tombstones/") && key !in dirty &&
                 (!initialMergeComplete || value.modifiedAt > (localStates[key]?.remoteModifiedAt ?: 0))
@@ -666,10 +737,16 @@ class CloudSyncEngine @Inject constructor(
 
         // Existing-book progress is the latency-sensitive path. Apply it before metadata/source
         // restoration so entering a book never waits behind unrelated EPUB downloads.
-        candidates.filterKeys { key ->
-            key.startsWith("progress/") &&
-                key.substringAfter("progress/") == preferredBookUuid
-        }.forEach { (_, info) -> applyRemoteProgress(token, info) }
+        if (initialMergeComplete) {
+            candidates.filterKeys { key ->
+                key.startsWith("progress/") &&
+                    key.substringAfter("progress/") == preferredBookUuid
+            }.forEach { (key, info) ->
+                applyRemoteProgress(token, info)
+                rememberRemote(key, info)
+                handledKeys += key
+            }
+        }
 
         // Treat metadata + source as one logical book. They are uploaded sequentially and may
         // therefore arrive in two Drive change pages; either half must complete the restoration.
@@ -680,51 +757,108 @@ class CloudSyncEngine @Inject constructor(
             .filter { uuid ->
                 "books/$uuid/metadata" !in dirty && "books/$uuid/source" !in dirty
             }
-        changedBookUuids.forEach { uuid ->
-            val key = "books/$uuid/metadata"
-            val metadata = knownRemote[key] ?: return@forEach
-            val sourceInfo = knownRemote["books/$uuid/source"] ?: return@forEach
-            if (!books.bookExists(uuid)) {
-                val metaFile = tempFile("book-meta")
-                val sourceFile = tempFile("book-source")
-                try {
-                    drive.download(token, metadata.id, metaFile)
-                    drive.download(token, sourceInfo.id, sourceFile)
-                    val book = parseBook(JSONObject(metaFile.readText()))
-                    mutations.withoutRecording { bookRepository.restoreSyncedBook(book, sourceFile.absolutePath) }
-                } finally {
-                    metaFile.delete(); sourceFile.delete()
-                }
-            } else {
-                val temp = tempFile("book-meta")
-                try {
-                    drive.download(token, metadata.id, temp)
-                    val book = parseBook(JSONObject(temp.readText()))
-                    mutations.withoutRecording {
-                        bookRepository.updateBookMetadata(book.uuid, book.title, book.author, book.description)
-                        bookRepository.setCategory(book.uuid, book.category)
-                    }
-                } finally { temp.delete() }
-            }
-            rememberRemote(key, metadata)
-            rememberRemote("books/$uuid/source", sourceInfo)
+            .toList()
+
+        suspend fun restoreBook(uuid: String) {
+            restoreRemoteBook(token, uuid, knownRemote)
+            handledKeys += "books/$uuid/metadata"
+            handledKeys += "books/$uuid/source"
         }
 
-        candidates.forEach { (key, info) ->
-            when {
-                key.startsWith("progress/") && key.substringAfter("progress/") != preferredBookUuid ->
+        if (initialMergeComplete) {
+            changedBookUuids.forEach { restoreBook(it) }
+        } else {
+            val restorePlan = planInitialRestore(changedBookUuids, knownRemote)
+            restorePlan.priorityBookUuids.forEach { uuid ->
+                restoreBook(uuid)
+                candidates["progress/$uuid"]?.let { info ->
                     applyRemoteProgress(token, info)
+                    rememberRemote("progress/$uuid", info)
+                    handledKeys += "progress/$uuid"
+                }
+                candidates["bookmarks/$uuid"]?.let { info ->
+                    applyRemoteBookmarks(token, info)
+                    rememberRemote("bookmarks/$uuid", info)
+                    handledKeys += "bookmarks/$uuid"
+                }
+            }
+
+            // Restore personalization only after the five most recently read books are usable.
+            candidates["settings/global"]?.let { info ->
+                applyRemoteSettings(token, info)
+                rememberRemote("settings/global", info)
+                handledKeys += "settings/global"
+            }
+
+            // Put every other source-backed book on the shelf before restoring its secondary data.
+            restorePlan.remainingBookUuids.forEach { restoreBook(it) }
+        }
+
+        // A font is represented by two Drive objects. Apply the pair once even when both objects
+        // occur in the same change page; the previous per-key loop imported every font twice.
+        candidates.keys.asSequence()
+            .filter { it.startsWith("fonts/") }
+            .mapNotNull { it.split('/').getOrNull(1) }
+            .distinct()
+            .forEach { uuid ->
+                val metadataKey = "fonts/$uuid/metadata"
+                val sourceKey = "fonts/$uuid/source"
+                val metadata = knownRemote[metadataKey] ?: return@forEach
+                val source = knownRemote[sourceKey] ?: return@forEach
+                applyRemoteFont(token, metadata, source)
+                rememberRemote(metadataKey, metadata)
+                rememberRemote(sourceKey, source)
+                handledKeys += metadataKey
+                handledKeys += sourceKey
+            }
+
+        candidates.forEach { (key, info) ->
+            if (key in handledKeys) return@forEach
+            when {
+                key.startsWith("progress/") -> applyRemoteProgress(token, info)
                 key.startsWith("bookmarks/") -> applyRemoteBookmarks(token, info)
                 key == "settings/global" -> applyRemoteSettings(token, info)
                 key.startsWith("sessions/") -> applyRemoteSession(token, info)
-                key.startsWith("fonts/") && (key.endsWith("/metadata") || key.endsWith("/source")) -> {
-                    val uuid = key.split('/').getOrNull(1) ?: return@forEach
-                    val metadata = knownRemote["fonts/$uuid/metadata"] ?: return@forEach
-                    knownRemote["fonts/$uuid/source"]?.let { applyRemoteFont(token, metadata, it) }
-                }
             }
             rememberRemote(key, info)
         }
+    }
+
+    private suspend fun restoreRemoteBook(
+        token: String,
+        uuid: String,
+        knownRemote: Map<String, DriveObject>,
+    ) {
+        val key = "books/$uuid/metadata"
+        val metadata = knownRemote[key] ?: return
+        val sourceInfo = knownRemote["books/$uuid/source"] ?: return
+        if (!books.bookExists(uuid)) {
+            val metaFile = tempFile("book-meta")
+            val sourceFile = tempFile("book-source")
+            try {
+                drive.download(token, metadata.id, metaFile)
+                drive.download(token, sourceInfo.id, sourceFile)
+                val book = parseBook(JSONObject(metaFile.readText()))
+                mutations.withoutRecording { bookRepository.restoreSyncedBook(book, sourceFile.absolutePath) }
+            } finally {
+                metaFile.delete()
+                sourceFile.delete()
+            }
+        } else {
+            val temp = tempFile("book-meta")
+            try {
+                drive.download(token, metadata.id, temp)
+                val book = parseBook(JSONObject(temp.readText()))
+                mutations.withoutRecording {
+                    bookRepository.updateBookMetadata(book.uuid, book.title, book.author, book.description)
+                    bookRepository.setCategory(book.uuid, book.category)
+                }
+            } finally {
+                temp.delete()
+            }
+        }
+        rememberRemote(key, metadata)
+        rememberRemote("books/$uuid/source", sourceInfo)
     }
 
     private suspend fun applyRemoteProgress(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
@@ -984,6 +1118,7 @@ class CloudSyncEngine @Inject constructor(
     private class AuthorizationRequiredException(message: String) : Exception(message)
 
     private companion object {
+        const val PREPARED_SNAPSHOT_MAX_AGE_MILLIS = 2 * 60_000L
         const val PERMANENT_TOMBSTONE_EXPIRY = Long.MAX_VALUE
         const val PROGRESS_EPSILON = 0.000_001f
     }

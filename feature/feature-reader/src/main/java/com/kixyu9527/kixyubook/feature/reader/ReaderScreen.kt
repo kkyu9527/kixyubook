@@ -330,10 +330,10 @@ private fun ReaderScreen(
     val palette = readerPalette(state.settings, systemDark)
     val overlayVisible = controls || menu || toolsMenu || searchVisible ||
         bookInfoVisible || sheet != null
-    val topSyncOverlayVisible = state.syncNotice != null || state.remoteProgressPrompt != null
+    val topSyncOverlayVisible = state.remoteProgressPrompt != null
     // HyperOS can briefly report a zero top inset while immersive status bars are hidden. Keep
-    // only the transparent status bar visible for sync prompts so both automatic and confirmed
-    // cloud-progress jumps retain a stable cutout-safe anchor. Navigation-bar policy is unchanged.
+    // only the transparent status bar visible for remote-progress confirmation so the prompt
+    // retains a stable cutout-safe anchor. Navigation-bar policy is unchanged.
     val statusBarVisible = state.settings.showStatusBar || overlayVisible || topSyncOverlayVisible
     val navigationBarVisible = !state.settings.hideNavigationBar || overlayVisible
     val systemBarDensity = LocalDensity.current
@@ -639,20 +639,6 @@ private fun ReaderScreen(
                         )
                     }
                 }
-            }
-            KixyuSafeTopPopup(
-                visible = state.syncNotice != null,
-            ) {
-                Text(
-                    text = state.syncNotice.orEmpty(),
-                    modifier = Modifier.padding(
-                        horizontal = KixyuSpacing.medium,
-                        vertical = KixyuSpacing.small,
-                    ),
-                    color = palette.body,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                )
             }
             KixyuSafeTopPopup(
                 visible = state.remoteProgressPrompt != null,
