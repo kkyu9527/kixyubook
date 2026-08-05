@@ -34,6 +34,7 @@ fun KixyuPageScaffold(
     title: String,
     modifier: Modifier = Modifier,
     largeTitle: Boolean = true,
+    showTopBar: Boolean = true,
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
@@ -43,15 +44,21 @@ fun KixyuPageScaffold(
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         val scrollBehavior = MiuixScrollBehavior()
         MiuixScaffold(
-            modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            modifier = if (showTopBar) {
+                modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
+            } else {
+                modifier
+            },
             topBar = {
-                MiuixTopAppBar(
-                    title = title,
-                    largeTitle = title,
-                    navigationIcon = navigationIcon,
-                    actions = actions,
-                    scrollBehavior = scrollBehavior,
-                )
+                if (showTopBar) {
+                    MiuixTopAppBar(
+                        title = title,
+                        largeTitle = title,
+                        navigationIcon = navigationIcon,
+                        actions = actions,
+                        scrollBehavior = scrollBehavior,
+                    )
+                }
             },
             snackbarHost = snackbarHost,
             contentWindowInsets = horizontalInsets,
@@ -61,32 +68,38 @@ fun KixyuPageScaffold(
         val topAppBarState = rememberTopAppBarState()
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
         Scaffold(
-            modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            modifier = if (showTopBar) {
+                modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
+            } else {
+                modifier
+            },
             contentWindowInsets = horizontalInsets,
             topBar = {
-                val titleContent: @Composable () -> Unit = { Text(title, maxLines = 1) }
-                val colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                )
-                if (largeTitle) {
-                    LargeTopAppBar(
-                        title = titleContent,
-                        navigationIcon = navigationIcon,
-                        actions = actions,
-                        scrollBehavior = scrollBehavior,
-                        colors = colors,
-                        expandedHeight = 116.dp,
+                if (showTopBar) {
+                    val titleContent: @Composable () -> Unit = { Text(title, maxLines = 1) }
+                    val colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                     )
-                } else {
-                    MediumTopAppBar(
-                        title = titleContent,
-                        navigationIcon = navigationIcon,
-                        actions = actions,
-                        scrollBehavior = scrollBehavior,
-                        colors = colors,
-                        expandedHeight = 88.dp,
-                    )
+                    if (largeTitle) {
+                        LargeTopAppBar(
+                            title = titleContent,
+                            navigationIcon = navigationIcon,
+                            actions = actions,
+                            scrollBehavior = scrollBehavior,
+                            colors = colors,
+                            expandedHeight = 116.dp,
+                        )
+                    } else {
+                        MediumTopAppBar(
+                            title = titleContent,
+                            navigationIcon = navigationIcon,
+                            actions = actions,
+                            scrollBehavior = scrollBehavior,
+                            colors = colors,
+                            expandedHeight = 88.dp,
+                        )
+                    }
                 }
             },
             snackbarHost = snackbarHost,

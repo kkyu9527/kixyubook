@@ -18,7 +18,9 @@ import com.kixyu9527.kixyubook.core.database.entity.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -141,6 +143,13 @@ class CloudSyncEngine @Inject constructor(
         val token = accountClient.accessToken()
             ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
         val remote = drive.listAll(token).associateBy(DriveObject::objectKey)
+        acceptLocalChanges(conflicts, remote)
+    }
+
+    private suspend fun acceptLocalChanges(
+        conflicts: List<InitialSyncConflict>,
+        remote: Map<String, DriveObject>,
+    ) {
         conflicts.forEach { conflict ->
             val key = mutableKeyForConflict(conflict.entityType, conflict.entityId) ?: return@forEach
             val cloud = remote[key] ?: return@forEach
@@ -182,8 +191,19 @@ class CloudSyncEngine @Inject constructor(
             resolveDirtyProgress(token, remote)
             val conflicts = findProvenConflicts(remote)
             if (conflicts.isNotEmpty()) {
-                preferences.setConflicts(conflicts)
-                return@runCatching
+                val preferLocal = shouldPreferLocalConflicts(
+                    preferLocalUntil = persisted.preferLocalConflictsUntil,
+                    now = System.currentTimeMillis(),
+                )
+                if (preferLocal) {
+                    // The user already chose local for this sync session. Advance the baseline to
+                    // the latest Drive versions and let the dirty local objects upload normally.
+                    acceptLocalChanges(conflicts, remote)
+                } else {
+                    preferences.clearLocalConflictPreference()
+                    preferences.setConflicts(conflicts)
+                    return@runCatching
+                }
             }
             applyRemoteChanges(
                 token = token,
@@ -204,49 +224,39 @@ class CloudSyncEngine @Inject constructor(
                     }
                 }.thenBy { it.changedAt },
             )
+            val uploadBatch = mutableListOf<SyncOutboxEntity>()
+            suspend fun flushUploadBatch() {
+                if (uploadBatch.isEmpty()) return
+                val knownRemote = remote.toMap()
+                val uploaded = coroutineScope {
+                    uploadBatch.map { mutation ->
+                        async { pushMutation(token, mutation, knownRemote) }
+                    }.awaitAll().flatten()
+                }
+                uploaded.forEach { (key, value) -> remote[key] = value }
+                uploadBatch.clear()
+            }
             pending.forEach { mutation ->
-                try {
-                    if (mutation.operation == SyncMutationOperation.DELETE.name) {
+                if (mutation.operation == SyncMutationOperation.DELETE.name) {
+                    flushUploadBatch()
+                    try {
                         remote = pushDeletion(token, mutation, remote)
-                    } else {
-                        val deferredLargePayload = shouldDeferLargePayload(mutation)
-                        materialize(mutation, includeLargePayload = !deferredLargePayload).forEach { local ->
-                            try {
-                                val hash = local.file.sha256()
-                                val known = remote[local.key]
-                                val uploaded = drive.upload(
-                                    token = token,
-                                    name = local.name,
-                                    objectKey = local.key,
-                                    mimeType = local.mimeType,
-                                    source = local.file,
-                                    existingFileId = known?.id,
-                                )
-                                remote[local.key] = uploaded
-                                syncDao.upsertObjectState(
-                                    SyncObjectStateEntity(
-                                        objectKey = local.key,
-                                        driveFileId = uploaded.id,
-                                        localHash = hash,
-                                        localChangedAt = mutation.changedAt,
-                                        remoteModifiedAt = uploaded.modifiedAt,
-                                        remoteVersion = uploaded.version,
-                                    ),
-                                )
-                            } finally {
-                                if (local.temporary) local.file.delete()
-                            }
-                        }
-                        if (!deferredLargePayload) syncDao.removeOutbox(listOf(mutation.uuid))
+                    } catch (error: Throwable) {
+                        if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
+                        throw error
                     }
-                } catch (error: Throwable) {
-                    if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
-                    throw error
+                } else {
+                    uploadBatch += mutation
+                    if (uploadBatch.size >= MAX_CONCURRENT_UPLOADS) flushUploadBatch()
                 }
             }
+            flushUploadBatch()
             preferences.markSuccess(snapshot.nextPageToken ?: persisted.pageToken)
         }.onFailure { error ->
-            if (error is CancellationException) throw error
+            if (error is CancellationException) {
+                withContext(NonCancellable) { preferences.markInterrupted() }
+                throw error
+            }
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
@@ -264,6 +274,7 @@ class CloudSyncEngine @Inject constructor(
     suspend fun synchronizePriorityBook(
         preferredBookUuid: String?,
         followedByFullSync: Boolean = false,
+        pullRemote: Boolean = true,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         syncMutex.withLock { runCatching {
             val persisted = preferences.current()
@@ -275,20 +286,23 @@ class CloudSyncEngine @Inject constructor(
                 ?: books.getAllProgress().maxByOrNull(ReadingProgressEntity::updatedTime)?.bookUuid
                 ?: return@runCatching
             if (!books.bookExists(bookUuid)) return@runCatching
-            preferences.markRunning()
+            if (followedByFullSync) preferences.markRunning()
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
             val key = "progress/$bookUuid"
             var remote = findRemoteObject(token, key, "progress-$bookUuid.json")
+            val mutationBeforePull = syncDao.allPending().lastOrNull {
+                it.entityType == SyncEntityType.PROGRESS.name && it.entityId == bookUuid
+            }
 
             var cloudTime = Long.MIN_VALUE
-            if (remote != null) {
+            if (pullRemote && remote != null) {
                 try {
                     withJsonDownload(token, requireNotNull(remote)) { json ->
                         cloudTime = json.optLong("updatedTime")
                         val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
                         if (cloudTime > localTime && applyRemoteProgressJson(json)) {
-                            syncDao.removeOutbox(SyncEntityType.PROGRESS.name, bookUuid)
+                            mutationBeforePull?.let { syncDao.removeOutbox(listOf(it.uuid)) }
                         }
                     }
                 } catch (error: DriveHttpException) {
@@ -300,7 +314,7 @@ class CloudSyncEngine @Inject constructor(
                             cloudTime = json.optLong("updatedTime")
                             val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
                             if (cloudTime > localTime && applyRemoteProgressJson(json)) {
-                                syncDao.removeOutbox(SyncEntityType.PROGRESS.name, bookUuid)
+                                mutationBeforePull?.let { syncDao.removeOutbox(listOf(it.uuid)) }
                             }
                         }
                     }
@@ -310,25 +324,26 @@ class CloudSyncEngine @Inject constructor(
                 }
             }
 
-            // Bookmarks and reader settings are small JSON objects and belong to the same
-            // latency-sensitive reader transaction. Only changed Drive versions are downloaded;
-            // original books/fonts remain paused for the durable background channel.
-            pullPriorityJson(
-                token = token,
-                key = "bookmarks/$bookUuid",
-                name = "bookmarks-$bookUuid.json",
-                type = SyncEntityType.BOOKMARKS,
-                entityId = bookUuid,
-                apply = ::applyRemoteBookmarksJson,
-            )
-            pullPriorityJson(
-                token = token,
-                key = "settings/global",
-                name = "settings-global.json",
-                type = SyncEntityType.SETTINGS,
-                entityId = "global",
-                apply = ::applyRemoteSettingsJson,
-            )
+            if (pullRemote) {
+                // Bookmarks and reader settings join the initial reader pull. Progress writes made
+                // afterwards only upload their coalesced JSON and avoid three redundant Drive reads.
+                pullPriorityJson(
+                    token = token,
+                    key = "bookmarks/$bookUuid",
+                    name = "bookmarks-$bookUuid.json",
+                    type = SyncEntityType.BOOKMARKS,
+                    entityId = bookUuid,
+                    apply = ::applyRemoteBookmarksJson,
+                )
+                pullPriorityJson(
+                    token = token,
+                    key = "settings/global",
+                    name = "settings-global.json",
+                    type = SyncEntityType.SETTINGS,
+                    entityId = "global",
+                    apply = ::applyRemoteSettingsJson,
+                )
+            }
 
             val mutation = syncDao.allPending().lastOrNull {
                 it.entityType == SyncEntityType.PROGRESS.name &&
@@ -349,23 +364,25 @@ class CloudSyncEngine @Inject constructor(
                             existingFileId = remote?.id,
                         )
                         rememberRemote(key, uploaded)
-                        syncDao.removeOutbox(SyncEntityType.PROGRESS.name, bookUuid)
+                        // Delete only the row represented by this upload snapshot. A page turn
+                        // that landed while Drive was responding has a new UUID and remains dirty.
+                        syncDao.removeOutbox(listOf(mutation.uuid))
                     } finally {
                         if (local.temporary) local.file.delete()
                     }
                 }
             }
-            // WorkManager runs the priority exchange and full reconciliation as one logical
-            // chain. Keep its public phase at SYNCING between those stages so app-level status
-            // UI does not dismiss and immediately reappear. The in-process Reader channel has
-            // no following stage and therefore still completes its own state normally.
-            if (!followedByFullSync) preferences.markPrioritySuccess()
         }.onFailure { error ->
-            if (error is CancellationException) throw error
+            if (error is CancellationException) {
+                if (followedByFullSync) {
+                    withContext(NonCancellable) { preferences.markInterrupted() }
+                }
+                throw error
+            }
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
-            } else {
+            } else if (followedByFullSync) {
                 preferences.markError(error.message ?: "同步失败")
             }
         } }
@@ -410,7 +427,9 @@ class CloudSyncEngine @Inject constructor(
             remote = drive.findByObjectKey(token, key) ?: return
             withJsonDownload(token, remote) { json -> apply(json) }
         }
-        syncDao.removeOutbox(type.name, entityId)
+        // Keep an edit created while the cloud object was being downloaded. Its replacement
+        // outbox row carries another UUID and must be uploaded on the next flush.
+        localMutation?.let { syncDao.removeOutbox(listOf(it.uuid)) }
         rememberRemote(key, remote)
     }
 
@@ -546,7 +565,7 @@ class CloudSyncEngine @Inject constructor(
             var cloudTime = Long.MIN_VALUE
             withJsonDownload(token, cloud) { json -> cloudTime = json.optLong("updatedTime") }
             if (cloudTime > localTime) {
-                syncDao.removeOutbox(SyncEntityType.PROGRESS.name, mutation.entityId)
+                syncDao.removeOutbox(listOf(mutation.uuid))
             }
         }
     }
@@ -628,6 +647,55 @@ class CloudSyncEngine @Inject constructor(
                 )
             }.orEmpty()
         } else emptyList()
+    }
+
+    private suspend fun pushMutation(
+        token: String,
+        mutation: SyncOutboxEntity,
+        knownRemote: Map<String, DriveObject>,
+    ): List<Pair<String, DriveObject>> = try {
+        val deferredLargePayload = shouldDeferLargePayload(mutation)
+        val uploadedObjects = mutableListOf<Pair<String, DriveObject>>()
+        materialize(mutation, includeLargePayload = !deferredLargePayload).forEach { local ->
+            try {
+                val hash = local.file.sha256()
+                val known = knownRemote[local.key]
+                val baseline = syncDao.objectState(local.key)
+                val alreadySynced = baseline != null &&
+                    known != null &&
+                    baseline.localHash == hash &&
+                    known.id == baseline.driveFileId &&
+                    known.version == baseline.remoteVersion
+                if (!alreadySynced) {
+                    val uploaded = drive.upload(
+                        token = token,
+                        name = local.name,
+                        objectKey = local.key,
+                        mimeType = local.mimeType,
+                        source = local.file,
+                        existingFileId = known?.id,
+                    )
+                    uploadedObjects += local.key to uploaded
+                    syncDao.upsertObjectState(
+                        SyncObjectStateEntity(
+                            objectKey = local.key,
+                            driveFileId = uploaded.id,
+                            localHash = hash,
+                            localChangedAt = mutation.changedAt,
+                            remoteModifiedAt = uploaded.modifiedAt,
+                            remoteVersion = uploaded.version,
+                        ),
+                    )
+                }
+            } finally {
+                if (local.temporary) local.file.delete()
+            }
+        }
+        if (!deferredLargePayload) syncDao.removeOutbox(listOf(mutation.uuid))
+        uploadedObjects
+    } catch (error: Throwable) {
+        if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
+        throw error
     }
 
     private suspend fun pushDeletion(
@@ -1118,6 +1186,7 @@ class CloudSyncEngine @Inject constructor(
     private class AuthorizationRequiredException(message: String) : Exception(message)
 
     private companion object {
+        const val MAX_CONCURRENT_UPLOADS = 4
         const val PREPARED_SNAPSHOT_MAX_AGE_MILLIS = 2 * 60_000L
         const val PERMANENT_TOMBSTONE_EXPIRY = Long.MAX_VALUE
         const val PROGRESS_EPSILON = 0.000_001f

@@ -18,6 +18,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -33,14 +34,20 @@ class CloudSyncScheduler @Inject constructor(
 ) {
     private val workManager by lazy { WorkManager.getInstance(context) }
     private val connected = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+    @Volatile private var activePriorityBookUuid: String? = null
 
     /**
-     * Replaces stale queued work with a latency-sensitive progress pull, then completes the full
-     * reconciliation in the same unique chain. The quick stage never waits behind book uploads.
+     * Starts a latency-sensitive progress pull followed by a full reconciliation. KEEP is
+     * intentional: frequent progress writes must never cancel an upload that is already running.
      */
     fun requestImmediate(preferredBookUuid: String? = null) {
         workManager.cancelUniqueWork(DEBOUNCE_TRIGGER_WORK)
-        enqueuePriorityChain(preferredBookUuid, ExistingWorkPolicy.REPLACE)
+        enqueuePriorityChain(preferredBookUuid, ExistingWorkPolicy.KEEP)
+    }
+
+    fun requestFromTrigger() {
+        // The debounce/periodic worker must not cancel its own unique work while it is running.
+        enqueuePriorityChain(preferredBookUuid = null, ExistingWorkPolicy.KEEP)
     }
 
     /** Appends a final progress flush without cancelling work that already survived backgrounding. */
@@ -70,6 +77,17 @@ class CloudSyncScheduler @Inject constructor(
             .setConstraints(connected)
             .build()
         workManager.enqueueUniqueWork(DEBOUNCE_TRIGGER_WORK, ExistingWorkPolicy.REPLACE, request)
+    }
+
+    fun requestDebounced(type: SyncEntityType, entityId: String) {
+        // Reader progress already has a low-latency in-process lane. Starting the full Drive chain
+        // for every page would make that upload wait behind metadata and large-file reconciliation.
+        if (type == SyncEntityType.PROGRESS && entityId == activePriorityBookUuid) return
+        requestDebounced()
+    }
+
+    fun setActivePriorityBook(bookUuid: String?) {
+        activePriorityBookUuid = bookUuid
     }
 
     fun ensurePeriodic() {
@@ -106,7 +124,7 @@ class CloudSyncTriggerWorker(
         EntryPointAccessors.fromApplication(
             applicationContext,
             CloudSyncWorkerEntryPoint::class.java,
-        ).scheduler().requestImmediate()
+        ).scheduler().requestFromTrigger()
         return Result.success()
     }
 }

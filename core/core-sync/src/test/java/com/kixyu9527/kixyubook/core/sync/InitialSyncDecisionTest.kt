@@ -35,4 +35,14 @@ class InitialSyncDecisionTest {
         )
         assertTrue(decision.requiresUserDecision())
     }
+
+    @Test
+    fun localConflictPreferenceRemainsActiveBeforeDeadline() {
+        assertTrue(shouldPreferLocalConflicts(preferLocalUntil = 301_000L, now = 1_000L))
+    }
+
+    @Test
+    fun localConflictPreferenceExpiresAtDeadline() {
+        assertFalse(shouldPreferLocalConflicts(preferLocalUntil = 301_000L, now = 301_000L))
+    }
 }

@@ -66,6 +66,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
@@ -80,6 +82,7 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import top.yukonga.miuix.kmp.basic.BasicComponent as MiuixBasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults as MiuixBasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.HorizontalDivider as MiuixHorizontalDivider
 import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
@@ -206,27 +209,67 @@ fun KixyuSettingsRow(
     modifier: Modifier = Modifier,
     supportingText: String? = null,
     icon: ImageVector? = null,
+    selected: Boolean? = null,
     onClick: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
+    val isSelected = selected == true
+    val containerColor = if (isSelected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        Color.Transparent
+    }
+    val selectedContentColor = MaterialTheme.colorScheme.onPrimary
+    val selectedSupportingColor = selectedContentColor.copy(alpha = .78f)
+    val rowModifier = (if (selected == null) {
+        modifier
+    } else {
+        modifier.semantics { this.selected = isSelected }
+    }).fillMaxWidth()
+        .background(containerColor, MaterialTheme.shapes.medium)
+        .heightIn(min = KixyuSize.rowMinHeight)
     val leadingContent: (@Composable () -> Unit)? = leading ?: icon?.let { image ->
         {
             Icon(
                 image,
                 null,
                 Modifier.size(KixyuSize.icon),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isSelected) {
+                    selectedContentColor
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
     }
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixBasicComponent(
-            modifier = modifier.fillMaxWidth().heightIn(min = KixyuSize.rowMinHeight),
+            modifier = rowModifier,
             title = title,
+            titleColor = if (isSelected) {
+                MiuixBasicComponentDefaults.titleColor(selectedContentColor)
+            } else {
+                MiuixBasicComponentDefaults.titleColor()
+            },
             summary = supportingText,
+            summaryColor = if (isSelected) {
+                MiuixBasicComponentDefaults.summaryColor(selectedSupportingColor)
+            } else {
+                MiuixBasicComponentDefaults.summaryColor()
+            },
             startAction = leadingContent,
-            endActions = trailing,
+            endActions = {
+                CompositionLocalProvider(
+                    LocalContentColor provides if (isSelected) {
+                        selectedContentColor
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                ) {
+                    trailing()
+                }
+            },
             insideMargin = PaddingValues(
                 horizontal = KixyuSpacing.rowHorizontal,
                 vertical = KixyuSpacing.rowVertical,
@@ -235,10 +278,12 @@ fun KixyuSettingsRow(
         )
         return
     }
-    val interactionModifier = if (onClick == null) modifier else modifier.clickable(onClick = onClick)
+    val interactionModifier = if (onClick == null) rowModifier else rowModifier.clickable(onClick = onClick)
     Row(
-        interactionModifier.fillMaxWidth().heightIn(min = KixyuSize.rowMinHeight)
-            .padding(horizontal = KixyuSpacing.rowHorizontal, vertical = KixyuSpacing.rowVertical),
+        interactionModifier.padding(
+            horizontal = KixyuSpacing.rowHorizontal,
+            vertical = KixyuSpacing.rowVertical,
+        ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leadingContent?.let {
@@ -246,19 +291,41 @@ fun KixyuSettingsRow(
             Spacer(Modifier.width(KixyuSpacing.medium))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (isSelected) {
+                    selectedContentColor
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             supportingText?.let {
                 Text(
                     it,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isSelected) {
+                        selectedSupportingColor
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
         Spacer(Modifier.width(KixyuSpacing.small))
-        trailing()
+        CompositionLocalProvider(
+            LocalContentColor provides if (isSelected) {
+                selectedContentColor
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        ) {
+            trailing()
+        }
     }
 }
 

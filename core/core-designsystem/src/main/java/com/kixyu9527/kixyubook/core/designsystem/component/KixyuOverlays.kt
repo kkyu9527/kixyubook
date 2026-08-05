@@ -590,6 +590,9 @@ fun KixyuActionDialog(
     confirmLabel: String,
     onConfirm: () -> Unit,
     confirmEnabled: Boolean = true,
+    alternativeLabel: String? = null,
+    onAlternative: (() -> Unit)? = null,
+    alternativeEnabled: Boolean = true,
     dismissLabel: String? = "取消",
     content: @Composable () -> Unit,
 ) {
@@ -629,12 +632,25 @@ fun KixyuActionDialog(
                             horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            dismissLabel?.let {
+                            if (alternativeLabel != null && onAlternative != null) {
+                                dismissLabel?.let {
+                                    KixyuTextButton(text = it, onClick = onDismissRequest)
+                                }
+                                Spacer(Modifier.weight(1f))
                                 KixyuSecondaryButton(
-                                    text = it,
-                                    onClick = onDismissRequest,
-                                    modifier = Modifier.widthIn(min = 112.dp),
+                                    text = alternativeLabel,
+                                    onClick = onAlternative,
+                                    enabled = alternativeEnabled,
+                                    modifier = Modifier.widthIn(min = 140.dp),
                                 )
+                            } else {
+                                dismissLabel?.let {
+                                    KixyuSecondaryButton(
+                                        text = it,
+                                        onClick = onDismissRequest,
+                                        modifier = Modifier.widthIn(min = 112.dp),
+                                    )
+                                }
                             }
                             KixyuButton(
                                 text = confirmLabel,
@@ -661,13 +677,43 @@ fun KixyuActionDialog(
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
             ) {
                 content()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
-                ) {
-                    dismissLabel?.let { MiuixTextButton(text = it, onClick = onDismissRequest) }
-                    MiuixButton(onClick = onConfirm, enabled = confirmEnabled) {
-                        MiuixText(confirmLabel, maxLines = 1)
+                if (alternativeLabel != null && onAlternative != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                        ) {
+                            KixyuSecondaryButton(
+                                text = alternativeLabel,
+                                onClick = onAlternative,
+                                enabled = alternativeEnabled,
+                                modifier = Modifier.weight(1f),
+                            )
+                            KixyuButton(
+                                text = confirmLabel,
+                                onClick = onConfirm,
+                                enabled = confirmEnabled,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        dismissLabel?.let {
+                            MiuixTextButton(
+                                text = it,
+                                onClick = onDismissRequest,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        dismissLabel?.let { MiuixTextButton(text = it, onClick = onDismissRequest) }
+                        MiuixButton(onClick = onConfirm, enabled = confirmEnabled) {
+                            MiuixText(confirmLabel, maxLines = 1)
+                        }
                     }
                 }
             }
@@ -679,10 +725,44 @@ fun KixyuActionDialog(
             title = { Text(title, maxLines = 1) },
             text = content,
             confirmButton = {
-                TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel) }
+                if (alternativeLabel != null && onAlternative != null) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                        ) {
+                            KixyuSecondaryButton(
+                                text = alternativeLabel,
+                                onClick = onAlternative,
+                                enabled = alternativeEnabled,
+                                modifier = Modifier.weight(1f),
+                            )
+                            KixyuButton(
+                                text = confirmLabel,
+                                onClick = onConfirm,
+                                enabled = confirmEnabled,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        dismissLabel?.let {
+                            KixyuTextButton(
+                                text = it,
+                                onClick = onDismissRequest,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                } else {
+                    TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel) }
+                }
             },
             dismissButton = {
-                dismissLabel?.let { TextButton(onClick = onDismissRequest) { Text(it) } }
+                if (alternativeLabel == null || onAlternative == null) {
+                    dismissLabel?.let { TextButton(onClick = onDismissRequest) { Text(it) } }
+                }
             },
         )
     }

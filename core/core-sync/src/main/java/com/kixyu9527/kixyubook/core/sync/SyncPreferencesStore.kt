@@ -29,6 +29,7 @@ data class PersistedSyncState(
     val initialMergeComplete: Boolean = false,
     val initialSyncApproved: Boolean = false,
     val conflicts: List<InitialSyncConflict> = emptyList(),
+    val preferLocalConflictsUntil: Long = 0,
 )
 
 @Singleton
@@ -59,6 +60,7 @@ class SyncPreferencesStore @Inject constructor(
             initialSyncApproved = values[INITIAL_SYNC_APPROVED]
                 ?: (values[INITIAL_MERGE] ?: false),
             conflicts = decodeConflicts(values[SYNC_CONFLICTS]),
+            preferLocalConflictsUntil = values[PREFER_LOCAL_CONFLICTS_UNTIL] ?: 0,
         )
     }
 
@@ -77,6 +79,7 @@ class SyncPreferencesStore @Inject constructor(
             it.remove(PAGE_TOKEN)
             it.remove(LAST_SYNC)
             it.remove(SYNC_CONFLICTS)
+            it.remove(PREFER_LOCAL_CONFLICTS_UNTIL)
         }
         it[PHASE] = CloudSyncPhase.IDLE.name
         it.remove(ERROR)
@@ -87,6 +90,7 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(PAGE_TOKEN); it.remove(LAST_SYNC); it.remove(ERROR); it.remove(INITIAL_MERGE)
         it.remove(INITIAL_SYNC_APPROVED)
         it.remove(SYNC_CONFLICTS)
+        it.remove(PREFER_LOCAL_CONFLICTS_UNTIL)
         it[ENABLED] = false
         it[PHASE] = CloudSyncPhase.IDLE.name
     }
@@ -116,6 +120,14 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(ERROR)
     }
 
+    suspend fun preferLocalConflictsFor(durationMillis: Long) = context.cloudSyncDataStore.edit {
+        it[PREFER_LOCAL_CONFLICTS_UNTIL] = System.currentTimeMillis() + durationMillis
+    }
+
+    suspend fun clearLocalConflictPreference() = context.cloudSyncDataStore.edit {
+        it.remove(PREFER_LOCAL_CONFLICTS_UNTIL)
+    }
+
     suspend fun markAuthorizing() = context.cloudSyncDataStore.edit {
         it[PHASE] = CloudSyncPhase.AUTHORIZING.name
         it.remove(ERROR)
@@ -126,6 +138,13 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(ERROR)
     }
 
+    suspend fun markInterrupted() = context.cloudSyncDataStore.edit {
+        if (it[PHASE] == CloudSyncPhase.SYNCING.name) {
+            it[PHASE] = CloudSyncPhase.IDLE.name
+            it.remove(ERROR)
+        }
+    }
+
     suspend fun markSuccess(pageToken: String?) = context.cloudSyncDataStore.edit {
         it[PHASE] = CloudSyncPhase.SUCCESS.name
         it[LAST_SYNC] = System.currentTimeMillis()
@@ -133,13 +152,6 @@ class SyncPreferencesStore @Inject constructor(
         it[INITIAL_MERGE] = true
         it[INITIAL_SYNC_APPROVED] = true
         it.remove(SYNC_CONFLICTS)
-        it.remove(ERROR)
-    }
-
-    /** Completes a priority progress exchange without advancing the global Drive change cursor. */
-    suspend fun markPrioritySuccess() = context.cloudSyncDataStore.edit {
-        it[PHASE] = CloudSyncPhase.SUCCESS.name
-        it[LAST_SYNC] = System.currentTimeMillis()
         it.remove(ERROR)
     }
 
@@ -191,6 +203,7 @@ class SyncPreferencesStore @Inject constructor(
         val INITIAL_MERGE = booleanPreferencesKey("initial_merge_complete")
         val INITIAL_SYNC_APPROVED = booleanPreferencesKey("initial_sync_approved")
         val SYNC_CONFLICTS = stringPreferencesKey("sync_conflicts")
+        val PREFER_LOCAL_CONFLICTS_UNTIL = longPreferencesKey("prefer_local_conflicts_until")
         val DEVICE_ID = stringPreferencesKey("device_id")
     }
 }

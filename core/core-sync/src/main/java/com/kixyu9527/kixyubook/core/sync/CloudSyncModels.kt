@@ -26,6 +26,9 @@ internal fun InitialSyncDecision.shouldRestoreFromCloud(): Boolean =
 
 internal fun InitialSyncDecision.requiresUserDecision(): Boolean = conflicts.isNotEmpty()
 
+internal fun shouldPreferLocalConflicts(preferLocalUntil: Long, now: Long): Boolean =
+    preferLocalUntil > now
+
 data class InitialSyncConflict(
     val entityType: SyncEntityType,
     val entityId: String,

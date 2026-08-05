@@ -136,6 +136,7 @@ fun SettingsRoute(
                     state.cloudSync.initialSyncDecision != null -> Icons.Outlined.CloudSync
                     else -> Icons.Outlined.CloudDone
                 },
+                selected = if (twoPane) selectedPane == SettingsPane.CLOUD_SYNC else null,
                 onClick = { openPane(SettingsPane.CLOUD_SYNC, onCloudSync) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
@@ -150,6 +151,7 @@ fun SettingsRoute(
                     append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
                 },
                 icon = Icons.Outlined.Tune,
+                selected = if (twoPane) selectedPane == SettingsPane.READING else null,
                 onClick = { openPane(SettingsPane.READING, onReadingSettings) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
             KixyuDivider()
@@ -157,6 +159,7 @@ fun SettingsRoute(
                 title = "外观",
                 supportingText = "${state.settings.theme.displayName()} · ${state.settings.appUiStyle.displayName()} · ${state.settings.appColorTheme.displayName()}",
                 icon = Icons.Outlined.Palette,
+                selected = if (twoPane) selectedPane == SettingsPane.APPEARANCE else null,
                 onClick = { openPane(SettingsPane.APPEARANCE, onAppearance) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
@@ -167,6 +170,7 @@ fun SettingsRoute(
                 title = "数据与备份",
                 supportingText = "导出或恢复书库、进度与个人设置",
                 icon = Icons.Outlined.Backup,
+                selected = if (twoPane) selectedPane == SettingsPane.DATA_AND_BACKUP else null,
                 onClick = { openPane(SettingsPane.DATA_AND_BACKUP, onDataAndBackup) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
@@ -177,6 +181,7 @@ fun SettingsRoute(
                 title = "关于 Kixyu Book",
                 supportingText = "版本 $currentVersion · 更新与项目信息",
                 icon = Icons.Outlined.Info,
+                selected = if (twoPane) selectedPane == SettingsPane.ABOUT else null,
                 onClick = { openPane(SettingsPane.ABOUT, onAbout) },
             ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
@@ -246,10 +251,10 @@ fun CloudSyncRoute(
     val context = LocalContext.current
     val activity = context as? Activity
     val snackbar = remember { SnackbarHostState() }
+    val navigationContentPadding = LocalKixyuNavigationContentPadding.current
     val syncAccount = state.cloudSync.account
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var conflictDeferred by rememberSaveable { mutableStateOf(false) }
-    var autoAuthorizationAttempted by rememberSaveable { mutableStateOf(false) }
     val authorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (activity != null) viewModel.finishGoogleAuthorization(activity, result.data)
     }
@@ -259,16 +264,6 @@ fun CloudSyncRoute(
     LaunchedEffect(Unit) {
         viewModel.authorizationRequests.collect { pendingIntent ->
             authorizationLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
-        }
-    }
-    LaunchedEffect(activity, syncAccount, state.cloudSync.phase) {
-        if (
-            activity != null &&
-            !autoAuthorizationAttempted &&
-            (syncAccount == null || state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED)
-        ) {
-            autoAuthorizationAttempted = true
-            viewModel.connectGoogle(activity)
         }
     }
     LaunchedEffect(state.cloudSync.initialSyncDecision) {
@@ -449,6 +444,7 @@ fun CloudSyncRoute(
     KixyuPageScaffold(
         title = "Google Drive 同步",
         largeTitle = false,
+        showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             if (!embedded) {
@@ -460,7 +456,7 @@ fun CloudSyncRoute(
                 hostState = snackbar,
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(bottom = KixyuSpacing.medium)
+                    .padding(bottom = navigationContentPadding + KixyuSpacing.medium)
                     .padding(horizontal = KixyuSpacing.screenHorizontal),
             )
         },
@@ -482,6 +478,7 @@ fun CloudSyncRoute(
                 item { networkSection() }
                 item { accountActionsSection() }
             }
+            item { Spacer(Modifier.height(navigationContentPadding)) }
             item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
         }
     }
@@ -509,6 +506,11 @@ fun CloudSyncRoute(
             viewModel.resolveInitialSync(InitialSyncChoice.KEEP_LOCAL_CHANGES)
         },
         confirmEnabled = !state.cloudSync.inspectingInitialSync,
+        alternativeLabel = "使用云端更改",
+        onAlternative = {
+            viewModel.resolveInitialSync(InitialSyncChoice.USE_CLOUD_CHANGES)
+        },
+        alternativeEnabled = !state.cloudSync.inspectingInitialSync,
         dismissLabel = "稍后处理",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
@@ -517,14 +519,6 @@ fun CloudSyncRoute(
                 "阅读进度、阅读记录和删除操作会自动合并；这里只列出无法安全判断的书籍信息、书签或阅读设置。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            KixyuSecondaryButton(
-                text = "使用云端更改",
-                onClick = {
-                    viewModel.resolveInitialSync(InitialSyncChoice.USE_CLOUD_CHANGES)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !state.cloudSync.inspectingInitialSync,
             )
         }
     }
@@ -621,6 +615,7 @@ fun ReadingSettingsRoute(
     KixyuPageScaffold(
         title = "阅读",
         largeTitle = false,
+        showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             if (!embedded) {
@@ -708,6 +703,7 @@ fun AppearanceRoute(
     KixyuPageScaffold(
         title = "外观",
         largeTitle = false,
+        showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             if (!embedded) {
@@ -773,6 +769,7 @@ fun DataAndBackupRoute(
     KixyuPageScaffold(
         title = "数据与备份",
         largeTitle = false,
+        showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             if (!embedded) {
@@ -895,6 +892,7 @@ fun AboutRoute(
     KixyuPageScaffold(
         title = "关于",
         largeTitle = false,
+        showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             if (!embedded) {

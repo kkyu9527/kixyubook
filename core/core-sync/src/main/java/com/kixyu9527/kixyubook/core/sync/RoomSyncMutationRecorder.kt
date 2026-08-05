@@ -34,7 +34,7 @@ class RoomSyncMutationRecorder @Inject constructor(
                 deviceId = preferences.deviceId(),
             ),
         )
-        if (preferences.current().enabled) scheduler.requestDebounced()
+        if (preferences.current().enabled) scheduler.requestDebounced(type, entityId)
     }
 
     suspend fun <T> withoutRecording(block: suspend () -> T): T {
