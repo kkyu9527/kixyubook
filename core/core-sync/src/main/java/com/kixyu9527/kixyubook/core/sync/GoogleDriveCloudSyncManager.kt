@@ -178,7 +178,13 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         notifications.onAppForeground()
         scope.launch {
             clearStaleSyncPhase()
-            val persisted = preferences.current()
+            var persisted = preferences.current()
+            if (persisted.phase == CloudSyncPhase.AUTH_REQUIRED && persisted.account != null) {
+                val recovered = runCatching { accounts.accessToken() }.getOrNull() != null
+                if (!recovered) return@launch
+                preferences.markIdle()
+                persisted = preferences.current()
+            }
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
             scheduler.ensurePeriodic()
             val hasPendingChanges = syncDao.pending(limit = 1).isNotEmpty()
@@ -196,9 +202,6 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             val persisted = preferences.current()
             persisted.conflicts.takeIf { it.isNotEmpty() }?.let { conflicts ->
                 notifications.showSyncConflict(conflicts.size, conflicts.fingerprint())
-            }
-            if (persisted.phase == CloudSyncPhase.AUTH_REQUIRED) {
-                notifications.recordAuthorizationFailure(persisted.error ?: "需要重新授权 Google Drive")
             }
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
             if (syncDao.pending(limit = 1).isNotEmpty()) {
@@ -355,7 +358,14 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             throw error
         } catch (error: Throwable) {
             if (preferences.current().account?.subject == accountSubject) {
-                preferences.markError(error.message ?: "无法检查云端书库")
+                if (
+                    error is CloudSyncEngine.AuthorizationRequiredException ||
+                    (error is DriveHttpException && error.statusCode == 401)
+                ) {
+                    preferences.markAuthRequired("需要重新授权 Google Drive")
+                } else {
+                    preferences.markError(error.message ?: "无法检查云端书库")
+                }
             }
         } finally {
             inspectingInitialSync.value = false

@@ -67,35 +67,7 @@ class LocalNotificationManager @Inject constructor(
         return runtimeGranted && manager.areNotificationsEnabled()
     }
 
-    fun recordAuthorizationFailure(message: String) {
-        val failures = preferences.getInt(KEY_AUTH_FAILURES, 0) + 1
-        preferences.edit().putInt(KEY_AUTH_FAILURES, failures).apply()
-        if (
-            failures < AUTH_FAILURES_BEFORE_NOTIFICATION ||
-            preferences.getBoolean(KEY_AUTH_NOTIFIED, false) ||
-            appInForeground ||
-            !canPostNotifications()
-        ) return
-        preferences.edit().putBoolean(KEY_AUTH_NOTIFIED, true).apply()
-        post(
-            NOTIFICATION_AUTH_REQUIRED,
-            NotificationCompat.Builder(context, CHANNEL_ACTION_REQUIRED)
-                .setSmallIcon(R.drawable.ic_stat_cloud_sync)
-                .setContentTitle("Google Drive 需要重新授权")
-                .setContentText(message)
-                .setStyle(NotificationCompat.BigTextStyle().bigText("后台同步已暂停。点击重新连接 Google 账号。"))
-                .setContentIntent(contentIntent(DESTINATION_CLOUD_SYNC, NOTIFICATION_AUTH_REQUIRED))
-                .setAutoCancel(true)
-                .setCategory(NotificationCompat.CATEGORY_ERROR)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setOnlyAlertOnce(true)
-                .build(),
-        )
-    }
-
     fun clearAuthorizationFailure() {
-        preferences.edit().remove(KEY_AUTH_FAILURES).remove(KEY_AUTH_NOTIFIED).apply()
         manager.cancel(NOTIFICATION_AUTH_REQUIRED)
     }
 
@@ -255,7 +227,7 @@ class LocalNotificationManager @Inject constructor(
                     "需要处理",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Google 授权失效或同步冲突等需要操作的提醒"
+                    description = "同步冲突等需要操作的提醒"
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
                     enableLights(true)
@@ -306,9 +278,6 @@ class LocalNotificationManager @Inject constructor(
         private const val LEGACY_CHANNEL_ACTION_REQUIRED = "action_required"
         private const val LEGACY_CHANNEL_REMINDERS = "reading_reminders"
         private const val PREFERENCES_NAME = "notification_state"
-        private const val KEY_AUTH_FAILURES = "auth_failures"
-        private const val KEY_AUTH_NOTIFIED = "auth_notified"
         private const val KEY_CONFLICT_FINGERPRINT = "conflict_fingerprint"
-        private const val AUTH_FAILURES_BEFORE_NOTIFICATION = 2
     }
 }

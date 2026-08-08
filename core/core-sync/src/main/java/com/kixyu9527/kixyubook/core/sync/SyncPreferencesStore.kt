@@ -145,6 +145,11 @@ class SyncPreferencesStore @Inject constructor(
         }
     }
 
+    suspend fun markIdle() = context.cloudSyncDataStore.edit {
+        it[PHASE] = CloudSyncPhase.IDLE.name
+        it.remove(ERROR)
+    }
+
     suspend fun markSuccess(pageToken: String?) = context.cloudSyncDataStore.edit {
         it[PHASE] = CloudSyncPhase.SUCCESS.name
         it[LAST_SYNC] = System.currentTimeMillis()
@@ -155,7 +160,12 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(ERROR)
     }
 
-    suspend fun markAuthRequired(message: String) = markFailure(CloudSyncPhase.AUTH_REQUIRED, message)
+    suspend fun markAuthRequired(@Suppress("UNUSED_PARAMETER") message: String) = context.cloudSyncDataStore.edit {
+        it[PHASE] = CloudSyncPhase.AUTH_REQUIRED.name
+        // Authorization is recovered silently on the next foreground pass. Never expose the
+        // provider/HTTP exception as a user-facing sync error while that recovery is pending.
+        it.remove(ERROR)
+    }
     suspend fun markError(message: String) = markFailure(CloudSyncPhase.ERROR, message)
 
     suspend fun deviceId(): String {

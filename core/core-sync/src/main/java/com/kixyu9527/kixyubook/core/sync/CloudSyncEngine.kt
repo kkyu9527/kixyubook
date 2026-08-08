@@ -222,10 +222,11 @@ class CloudSyncEngine @Inject constructor(
             val pending = syncDao.pending().sortedWith(
                 compareBy<SyncOutboxEntity> {
                     when {
-                        it.entityType == SyncEntityType.PROGRESS.name && it.entityId == preferredBookUuid -> 0
-                        it.entityType == SyncEntityType.PROGRESS.name -> 1
-                        it.entityType == SyncEntityType.BOOK.name || it.entityType == SyncEntityType.FONT.name -> 3
-                        else -> 2
+                        it.entityType == SyncEntityType.SETTINGS.name -> 0
+                        it.entityType == SyncEntityType.PROGRESS.name && it.entityId == preferredBookUuid -> 1
+                        it.entityType == SyncEntityType.PROGRESS.name -> 2
+                        it.entityType == SyncEntityType.BOOK.name || it.entityType == SyncEntityType.FONT.name -> 4
+                        else -> 3
                     }
                 }.thenBy { it.changedAt },
             )
@@ -296,7 +297,6 @@ class CloudSyncEngine @Inject constructor(
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
-                notifications.recordAuthorizationFailure(error.message ?: "需要重新授权 Google Drive")
             } else {
                 preferences.markError(error.message ?: "同步失败")
             }
@@ -422,7 +422,6 @@ class CloudSyncEngine @Inject constructor(
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
-                notifications.recordAuthorizationFailure(error.message ?: "需要重新授权 Google Drive")
             } else if (followedByFullSync) {
                 preferences.markError(error.message ?: "同步失败")
             }
@@ -845,6 +844,15 @@ class CloudSyncEngine @Inject constructor(
                 (!initialMergeComplete || value.modifiedAt > (localStates[key]?.remoteModifiedAt ?: 0))
         }
 
+        // Configuration changes affect the presentation and behavior of everything restored
+        // afterwards. Apply them before progress and book data during both initial and incremental
+        // synchronization, not only during the first shelf rebuild.
+        candidates["settings/global"]?.let { info ->
+            applyRemoteSettings(token, info)
+            rememberRemote("settings/global", info)
+            handledKeys += "settings/global"
+        }
+
         // Existing-book progress is the latency-sensitive path. Apply it before metadata/source
         // restoration so entering a book never waits behind unrelated EPUB downloads.
         if (initialMergeComplete) {
@@ -911,13 +919,6 @@ class CloudSyncEngine @Inject constructor(
                     rememberRemote("bookmarks/$uuid", info)
                     handledKeys += "bookmarks/$uuid"
                 }
-            }
-
-            // Restore personalization only after the five most recently read books are usable.
-            candidates["settings/global"]?.let { info ->
-                applyRemoteSettings(token, info)
-                rememberRemote("settings/global", info)
-                handledKeys += "settings/global"
             }
 
             // Put every other source-backed book on the shelf before restoring its secondary data.
@@ -1245,7 +1246,7 @@ class CloudSyncEngine @Inject constructor(
         companion object { fun from(value: BookmarkEntity) = BookMarkOwner(value.bookUuid) }
     }
 
-    private class AuthorizationRequiredException(message: String) : Exception(message)
+    internal class AuthorizationRequiredException(message: String) : Exception(message)
 
     private companion object {
         const val MAX_CONCURRENT_UPLOADS = 4
