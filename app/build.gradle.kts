@@ -40,6 +40,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             signingConfig = signingConfigs.findByName("release")
         }
@@ -47,6 +48,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    lint {
+        lintConfig = rootProject.file("lint.xml")
     }
 }
 

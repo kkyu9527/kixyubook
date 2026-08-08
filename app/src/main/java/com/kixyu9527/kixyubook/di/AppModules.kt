@@ -8,6 +8,7 @@ import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReadingStatsRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.AppUpdateRepository
+import com.kixyu9527.kixyubook.core.database.DatabaseMigrations
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
 import com.kixyu9527.kixyubook.core.database.LocalBookRepository
 import com.kixyu9527.kixyubook.core.database.LocalBackupRepository
@@ -33,7 +34,8 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): KixyuDatabase =
         Room.databaseBuilder(context, KixyuDatabase::class.java, "kixyu-books.db")
-            .fallbackToDestructiveMigration(dropAllTables = true)
+            .addMigrations(*DatabaseMigrations.supported)
+            .fallbackToDestructiveMigrationFrom(true, 1, 2, 3, 4, 5)
             .build()
 
     @Provides

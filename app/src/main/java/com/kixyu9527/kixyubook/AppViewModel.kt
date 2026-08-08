@@ -71,6 +71,5 @@ class AppViewModel @Inject constructor(
 
     override fun onCleared() {
         books.setAppAnimationActive(false)
-        super.onCleared()
     }
 }

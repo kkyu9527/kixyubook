@@ -803,6 +803,7 @@ fun KixyuActionDialog(
 }
 
 @Composable
+@Suppress("DEPRECATION") // Dialog windows still require the legacy soft-input resize flag.
 private fun KixyuDialogImeResizeEffect() {
     val view = LocalView.current
     DisposableEffect(view) {
@@ -810,7 +811,7 @@ private fun KixyuDialogImeResizeEffect() {
         val originalMode = window?.attributes?.softInputMode
         window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         onDispose {
-            if (originalMode != null) window?.setSoftInputMode(originalMode)
+            if (originalMode != null) window.setSoftInputMode(originalMode)
         }
     }
 }

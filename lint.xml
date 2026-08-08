@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- AGP 9.3's documented default is Gradle 9.5; do not chase an unverified newer wrapper. -->
+    <issue id="AndroidGradlePluginVersion">
+        <ignore path="gradle/wrapper/gradle-wrapper.properties" />
+    </issue>
+    <!-- 0.9.3 removed NavigationRail display APIs used by the adaptive HyperOS layout. -->
+    <issue id="NewerVersionAvailable">
+        <ignore regexp="top\.yukonga\.miuix\.kmp" />
+    </issue>
+</lint>

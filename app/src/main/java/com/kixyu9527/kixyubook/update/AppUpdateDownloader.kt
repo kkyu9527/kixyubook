@@ -5,11 +5,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.database.Cursor
-import android.net.Uri
 import android.os.Environment
 import android.provider.Settings
 import android.widget.Toast
+import androidx.core.content.edit
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import com.kixyu9527.kixyubook.BuildConfig
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -37,7 +38,7 @@ class AppUpdateDownloader @Inject constructor(
             ?.forEach(File::delete)
 
         val apk = File(directory, "$FILE_PREFIX${update.versionName.safeFileName()}.apk")
-        val request = DownloadManager.Request(Uri.parse(downloadUrl))
+        val request = DownloadManager.Request(downloadUrl.toUri())
             .setTitle("Kixyu Book ${update.versionName}")
             .setDescription("正在下载应用更新")
             .setMimeType(APK_MIME_TYPE)
@@ -47,12 +48,12 @@ class AppUpdateDownloader @Inject constructor(
             .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, apk.name)
 
         val id = downloadManager(context).enqueue(request)
-        preferences(context).edit()
-            .putLong(KEY_DOWNLOAD_ID, id)
-            .putString(KEY_APK_PATH, apk.absolutePath)
-            .putString(KEY_VERSION, update.versionName)
-            .putBoolean(KEY_INSTALL_LAUNCHED, false)
-            .apply()
+        preferences(context).edit {
+            putLong(KEY_DOWNLOAD_ID, id)
+            putString(KEY_APK_PATH, apk.absolutePath)
+            putString(KEY_VERSION, update.versionName)
+            putBoolean(KEY_INSTALL_LAUNCHED, false)
+        }
         Toast.makeText(context, "已在后台下载，完成后将打开安装页面", Toast.LENGTH_LONG).show()
         return true
     }
@@ -93,7 +94,7 @@ class AppUpdateDownloader @Inject constructor(
             } else {
                 val permissionIntent = Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:${context.packageName}"),
+                    "package:${context.packageName}".toUri(),
                 ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 runCatching { context.startActivity(permissionIntent) }
             }
@@ -114,9 +115,9 @@ class AppUpdateDownloader @Inject constructor(
             val installIntent = Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, APK_MIME_TYPE)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            prefs.edit().putBoolean(KEY_INSTALL_LAUNCHED, true).apply()
+            prefs.edit { putBoolean(KEY_INSTALL_LAUNCHED, true) }
             runCatching { context.startActivity(installIntent) }
-                .onFailure { prefs.edit().putBoolean(KEY_INSTALL_LAUNCHED, false).apply() }
+                .onFailure { prefs.edit { putBoolean(KEY_INSTALL_LAUNCHED, false) } }
         }
 
         private fun downloadSucceeded(context: Context, downloadId: Long): Boolean {
@@ -145,7 +146,7 @@ class AppUpdateDownloader @Inject constructor(
         private fun clearPendingDownload(context: Context) {
             val prefs = preferences(context)
             prefs.getString(KEY_APK_PATH, null)?.let(::File)?.takeIf(File::isFile)?.delete()
-            prefs.edit().clear().apply()
+            prefs.edit { clear() }
         }
 
         private fun isTrustedDownloadUrl(url: String): Boolean =
