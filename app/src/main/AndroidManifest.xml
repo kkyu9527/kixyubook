@@ -50,9 +50,15 @@
             android:exported="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density"
             android:resizeableActivity="true">
+            <!-- Let Android 15+ and compatible HyperOS system UI expose a second app window. -->
+            <property
+                android:name="android.window.PROPERTY_SUPPORTS_MULTI_INSTANCE_SYSTEM_UI"
+                android:value="true"
+                tools:targetApi="35" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.MULTIWINDOW_LAUNCHER" />
             </intent-filter>
         </activity>
         <receiver
