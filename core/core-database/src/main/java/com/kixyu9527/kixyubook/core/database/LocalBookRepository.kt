@@ -98,7 +98,10 @@ class LocalBookRepository @Inject constructor(
     }
 
     init {
-        importScope.launch { upgradeTxtParserDataIfNeeded() }
+        importScope.launch {
+            upgradeTxtParserDataIfNeeded()
+            upgradeEpubDirectoryDataIfNeeded()
+        }
     }
 
     override fun observeLibrary(): Flow<List<LibraryBook>> = combine(dao.observeBooks(), dao.observeAllProgress()) { books, progresses ->
@@ -632,6 +635,72 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
+    /** EPUB outlines are derived data. Add newly recognized publisher volume pages in place. */
+    private suspend fun upgradeEpubDirectoryDataIfNeeded() {
+        if (derivedDataVersions.getInt(KEY_EPUB_DIRECTORY_VERSION, 0) >= EPUB_DIRECTORY_VERSION) return
+        var inserted = 0
+        var updated = 0
+        var failures = 0
+        storageMutationMutex.withLock {
+            if (derivedDataVersions.getInt(KEY_EPUB_DIRECTORY_VERSION, 0) >= EPUB_DIRECTORY_VERSION) {
+                return@withLock
+            }
+            val parser = EpubBookParser()
+            dao.getAllBooks()
+                .asSequence()
+                .filter { it.format == BookFormat.EPUB.name && File(it.storagePath).isFile }
+                .forEach { book ->
+                    try {
+                        val outlines = parser.readChapterOutlines(File(book.storagePath))
+                        database.withTransaction {
+                            val existingBySourceIndex = dao.getChapters(book.uuid).associateBy(ChapterEntity::chapterIndex)
+                            outlines.forEach { outline ->
+                                val existing = existingBySourceIndex[outline.sourceIndex]
+                                if (existing == null) {
+                                    dao.insertChapter(
+                                        ChapterEntity(
+                                            bookUuid = book.uuid,
+                                            title = outline.title,
+                                            chapterIndex = outline.sourceIndex,
+                                            volumeTitle = outline.volumeTitle,
+                                            volumeIndex = outline.volumeIndex,
+                                            indexed = false,
+                                            chapterKey = stableChapterKey(book.uuid, outline.sourceIndex, outline.title),
+                                        ),
+                                    )
+                                    inserted++
+                                } else if (
+                                    existing.title != outline.title ||
+                                    existing.volumeTitle != outline.volumeTitle ||
+                                    existing.volumeIndex != outline.volumeIndex
+                                ) {
+                                    dao.updateChapterOutline(
+                                        existing.id,
+                                        outline.title,
+                                        outline.volumeTitle,
+                                        outline.volumeIndex,
+                                    )
+                                    updated++
+                                }
+                            }
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        failures++
+                    }
+                }
+            derivedDataVersions.edit { putInt(KEY_EPUB_DIRECTORY_VERSION, EPUB_DIRECTORY_VERSION) }
+        }
+        if (inserted > 0) scheduleEpubIndex()
+        DiagnosticLog.record(
+            Category.EPUB_PARSE,
+            "directory_upgrade_finished",
+            outcome = if (failures == 0) "success" else "partial",
+            details = mapOf("inserted" to inserted, "updated" to updated, "failures" to failures),
+        )
+    }
+
     override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) {
         dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" })
         syncMutations.record(SyncEntityType.BOOK, bookUuid)
@@ -763,10 +832,12 @@ class LocalBookRepository @Inject constructor(
         if (requested == 0) return@withContext
         var indexed = 0
         var preempted = 0
+        var activeChapterIndex: Int? = null
         try {
             while (true) {
                 val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name } ?: break
                 val target = dao.getUnindexedChapters(bookUuid).firstOrNull() ?: break
+                activeChapterIndex = target.chapterIndex
                 var parsed: DocumentChapter? = null
                 val completed = epubParseCoordinator.background {
                     parsed = backgroundEpubParser.readChapter(
@@ -781,15 +852,29 @@ class LocalBookRepository @Inject constructor(
                     continue
                 }
                 val chapter = parsed
-                if (chapter == null) {
-                    // Mark unreadable spine entries so one malformed publisher page cannot create
-                    // an infinite retry loop. The directory remains available and later chapters proceed.
-                    dao.markChapterIndexed(target.id, target.title)
-                } else {
-                    dao.replaceChapterIndex(target.id, chapter.title, chapter.paragraphs)
+                val chapterStillAvailable = chapterLoadMutex.withLock {
+                    // Parsing deliberately runs outside this lock so foreground reading can preempt it.
+                    // Re-read before writing because the reader may already have indexed the chapter,
+                    // or the user may have deleted/re-imported the book while parsing was in progress.
+                    val current = dao.getChapter(bookUuid, target.chapterIndex)
+                        ?: return@withLock false
+                    if (!current.indexed) {
+                        if (chapter == null) {
+                            // Mark unreadable spine entries so one malformed publisher page cannot create
+                            // an infinite retry loop. The directory remains available and later chapters proceed.
+                            dao.markChapterIndexed(current.id, current.title)
+                        } else {
+                            dao.replaceChapterIndex(current.id, chapter.title, chapter.paragraphs)
+                        }
+                    }
+                    true
+                }
+                if (!chapterStillAvailable) continue
+                if (chapter != null) {
                     epubChapterCache.write(bookUuid, book.contentHash, target.chapterIndex, chapter)
                 }
                 indexed++
+                activeChapterIndex = null
             }
             DiagnosticLog.record(
                 Category.EPUB_PARSE,
@@ -813,9 +898,11 @@ class LocalBookRepository @Inject constructor(
                 outcome = error::class.simpleName ?: "error",
                 details = mapOf(
                     "book" to initialBook.uuid.shortDiagnosticId(),
+                    "chapter" to activeChapterIndex,
                     "requested" to requested,
                     "indexed" to indexed,
                     "preempted" to preempted,
+                    "reason" to error.diagnosticReason(),
                 )
             )
             throw error
@@ -831,6 +918,13 @@ class LocalBookRepository @Inject constructor(
 }
 
 private data class ChapterCacheKey(val bookUuid: String, val chapterIndex: Int)
+
+private fun Throwable.diagnosticReason(): String =
+    generateSequence(this) { it.cause }
+        .mapNotNull { cause -> cause.message?.trim()?.takeIf(String::isNotEmpty) }
+        .firstOrNull()
+        ?: (this::class.qualifiedName ?: "未知错误")
+
 private data class ImportRegistration(
     val imports: List<RegisteredImport>,
     val duplicateCount: Int,
@@ -851,6 +945,8 @@ private const val IMPORT_INDEX_CONCURRENCY = 2
 private const val DERIVED_DATA_VERSION_PREFERENCES = "derived_data_versions"
 private const val KEY_TXT_PARSER_VERSION = "txt_parser_version"
 private const val TXT_PARSER_VERSION = 1
+private const val KEY_EPUB_DIRECTORY_VERSION = "epub_directory_version"
+private const val EPUB_DIRECTORY_VERSION = 2
 
 private fun String.normalizedEpubIdentityTitle(): String =
     trim().replace(Regex("[\\s　]+"), " ").lowercase(Locale.ROOT)
