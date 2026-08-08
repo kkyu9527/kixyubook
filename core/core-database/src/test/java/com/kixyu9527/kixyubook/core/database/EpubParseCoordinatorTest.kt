@@ -72,4 +72,15 @@ class EpubParseCoordinatorTest {
         coordinator.setReaderInteractionActive(false)
         assertTrue(withTimeout(1_000) { queuedBackground.await() })
     }
+
+    @Test
+    fun visibleReaderThrottlesButDoesNotPauseSilentIndexing() = runBlocking {
+        val coordinator = EpubParseCoordinator()
+        coordinator.setReaderSessionActive(true)
+
+        val queuedBackground = async { coordinator.background { } }
+        delay(80)
+        assertFalse(queuedBackground.isCompleted)
+        assertTrue(withTimeout(1_000) { queuedBackground.await() })
+    }
 }

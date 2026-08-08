@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.database.entity.BookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
 import kotlinx.coroutines.flow.StateFlow
@@ -136,6 +137,15 @@ internal fun keysForMutation(value: SyncOutboxEntity): List<String> =
         SyncEntityType.SESSION -> listOf("sessions/${value.entityId}")
         SyncEntityType.FONT -> listOf("fonts/${value.entityId}/metadata", "fonts/${value.entityId}/source")
     }
+
+/** A pending deletion always wins over an older cloud object, including priority reader pulls. */
+internal fun shouldPullPriorityRemote(
+    localMutation: SyncOutboxEntity?,
+    remoteModifiedAt: Long,
+): Boolean = localMutation == null || (
+    localMutation.operation != SyncMutationOperation.DELETE.name &&
+        localMutation.changedAt < remoteModifiedAt
+    )
 
 internal fun File.sha256(): String = inputStream().buffered().use { input ->
     val digest = MessageDigest.getInstance("SHA-256")

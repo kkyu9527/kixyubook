@@ -203,6 +203,7 @@ class ReaderPaginationCoordinator internal constructor(
                         elapsedMs = startedAt.elapsedMilliseconds(),
                         outcome = "disk_cache",
                         details = mapOf(
+                            "book" to key.bookUuid.take(8),
                             "chapter" to key.chapterId,
                             "pages" to restored.size,
                             "prefetch" to prefetch,
@@ -220,6 +221,7 @@ class ReaderPaginationCoordinator internal constructor(
                     elapsedMs = startedAt.elapsedMilliseconds(),
                     outcome = "success",
                     details = mapOf(
+                        "book" to key.bookUuid.take(8),
                         "chapter" to key.chapterId,
                         "paragraphs" to chapter.paragraphs.size,
                         "pages" to measured.size,
@@ -234,7 +236,11 @@ class ReaderPaginationCoordinator internal constructor(
                         "failed",
                         elapsedMs = startedAt.elapsedMilliseconds(),
                         outcome = throwable::class.java.simpleName,
-                        details = mapOf("chapter" to key.chapterId, "prefetch" to prefetch),
+                        details = mapOf(
+                            "book" to key.bookUuid.take(8),
+                            "chapter" to key.chapterId,
+                            "prefetch" to prefetch,
+                        ),
                     )
                 }
                 throw throwable

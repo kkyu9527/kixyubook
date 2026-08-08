@@ -301,7 +301,7 @@ class ReaderViewModel @Inject constructor(
                 "chapter_navigation_finished",
                 elapsedMs = SystemClock.elapsedRealtime() - startedAt,
                 outcome = "missing",
-                details = mapOf("chapter" to index),
+                details = mapOf("book" to bookUuid.take(8), "chapter" to index),
             )
             return false
         }
@@ -313,7 +313,11 @@ class ReaderViewModel @Inject constructor(
                 "chapter_navigation_finished",
                 elapsedMs = elapsedMs,
                 outcome = "success",
-                details = mapOf("chapter" to index, "prefetched" to (prefetched != null)),
+                details = mapOf(
+                    "book" to bookUuid.take(8),
+                    "chapter" to index,
+                    "prefetched" to (prefetched != null),
+                ),
             )
         }
         return true
@@ -654,6 +658,11 @@ class ReaderViewModel @Inject constructor(
         sessionTimer.setActive(active)
     }
 
+    /** Keeps indexing alive but rate-limits it while this reader is visible. */
+    fun setReaderVisible(visible: Boolean) {
+        books.setReaderSessionActive(visible)
+    }
+
     /**
      * A drag or animated page turn owns the frame budget. Keep already prepared neighbours, but
      * stop the remaining ten-chapter speculative queue until the pager settles. This mirrors the
@@ -743,6 +752,7 @@ class ReaderViewModel @Inject constructor(
         }
         chapterLoads.clear()
         criticalNeighborPublishJob?.cancel()
+        books.setReaderSessionActive(false)
         books.setReaderInteractionActive(false)
         cloudSync.releaseBook(bookUuid)
         books.releaseReaderMemory(bookUuid)

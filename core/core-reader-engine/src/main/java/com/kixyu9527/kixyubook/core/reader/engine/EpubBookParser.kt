@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
@@ -126,6 +127,7 @@ class EpubBookParser : BookParser {
                 details = mapOf("requested" to (sourceIndices?.size ?: "all"), "emitted" to emitted),
             )
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             DiagnosticLog.record(
                 Category.EPUB_PARSE,
                 "bulk_parse_finished",
@@ -142,10 +144,11 @@ class EpubBookParser : BookParser {
         file: File,
         chapterIndex: Int,
         expectedTitle: String? = null,
+        purpose: String = "interactive",
     ): DocumentChapter? {
         val startedAt = System.nanoTime()
         return try {
-            ZipFile(file).use { zip ->
+            val chapter = ZipFile(file).use { zip ->
                 val pkg = readPackage(file, zip)
                 if (chapterIndex !in pkg.spine.indices) return@use null
                 // The directory stores the exact source spine index. An empty cover/back-cover
@@ -157,26 +160,35 @@ class EpubBookParser : BookParser {
                         ?: "第 ${chapterIndex + 1} 章",
                     paragraphs = emptyList(),
                 )
-            }.also { chapter ->
+            }
+            currentCoroutineContext().ensureActive()
+            chapter.also {
                 DiagnosticLog.record(
                     Category.EPUB_PARSE,
                     "chapter_parse_finished",
                     elapsedMs = startedAt.elapsedMilliseconds(),
                     outcome = if (chapter == null) "missing" else "success",
                     details = mapOf(
+                        "book" to file.nameWithoutExtension.take(8),
                         "chapter" to chapterIndex,
+                        "purpose" to purpose,
                         "paragraphs" to chapter?.paragraphs?.size,
                         "images" to chapter?.images?.size,
                     ),
                 )
             }
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             DiagnosticLog.record(
                 Category.EPUB_PARSE,
                 "chapter_parse_finished",
                 elapsedMs = startedAt.elapsedMilliseconds(),
                 outcome = error::class.simpleName ?: "error",
-                details = mapOf("chapter" to chapterIndex),
+                details = mapOf(
+                    "book" to file.nameWithoutExtension.take(8),
+                    "chapter" to chapterIndex,
+                    "purpose" to purpose,
+                ),
             )
             throw error
         }

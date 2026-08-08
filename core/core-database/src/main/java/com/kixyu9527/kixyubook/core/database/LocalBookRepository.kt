@@ -64,6 +64,10 @@ class LocalBookRepository @Inject constructor(
     private val syncMutations: SyncMutationRecorder,
 ) : BookRepository {
     private val parsers = BookParserRegistry()
+    // Full-text indexing must never share mutable parser caches with an interactive page request.
+    // A blocking background XML parse may finish cooperatively after cancellation, while the
+    // reader proceeds immediately with this separate foreground parser instance.
+    private val backgroundEpubParser = EpubBookParser()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
     // reclamation. A partially evicted cache made otherwise identical directory jumps vary from
     // instant to a full ZIP/XHTML parse. noBackupFilesDir persists it without bloating backups.
@@ -348,15 +352,22 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun deleteBooks(bookUuids: Set<String>): Unit = withContext(Dispatchers.IO) {
         if (bookUuids.isEmpty()) return@withContext
+        val startedAt = SystemClock.elapsedRealtime()
         storageMutationMutex.withLock {
             bookUuids.mapNotNull(importIndexJobs::remove).forEach { job ->
                 job.cancelAndJoin()
             }
             val books = dao.getBooks(bookUuids)
+            val progressCount = bookUuids.count { uuid -> dao.getProgress(uuid) != null }
             database.withTransaction {
                 dao.deleteMetadataEdits(bookUuids)
                 dao.deleteBooks(bookUuids)
                 bookUuids.forEach { uuid ->
+                    // Progress and bookmarks are independent Drive objects. Deleting only the
+                    // book metadata leaves both objects available to restore stale state when an
+                    // EPUB with the same dc:identifier is imported again.
+                    syncMutations.record(SyncEntityType.BOOKMARKS, uuid, SyncMutationOperation.DELETE)
+                    syncMutations.record(SyncEntityType.PROGRESS, uuid, SyncMutationOperation.DELETE)
                     syncMutations.record(SyncEntityType.BOOK, uuid, SyncMutationOperation.DELETE)
                 }
             }
@@ -370,6 +381,17 @@ class LocalBookRepository @Inject constructor(
                 book.coverPath?.let(::File)?.delete()
             }
             pruneUnreferencedBookFiles()
+            DiagnosticLog.record(
+                Category.LIBRARY,
+                "books_deleted",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = "success",
+                details = buildMap {
+                    put("count", books.size)
+                    put("progressRecords", progressCount)
+                    books.singleOrNull()?.let { put("book", it.uuid.shortDiagnosticId()) }
+                },
+            )
         }
     }
 
@@ -397,7 +419,7 @@ class LocalBookRepository @Inject constructor(
                 source = if (diskCached != null) "epub_disk_cache" else "epub_parse"
                 val parsed = diskCached ?: epubParseCoordinator.interactive {
                         (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
-                            .readChapter(File(book.storagePath), chapterIndex, chapter.title)
+                            .readChapter(File(book.storagePath), chapterIndex, chapter.title, purpose = "reader")
                     }?.also { parsedChapter ->
                         epubChapterCache.write(bookUuid, book.contentHash, chapterIndex, parsedChapter)
                     }
@@ -424,6 +446,7 @@ class LocalBookRepository @Inject constructor(
                         outcome = "success",
                         details = mapOf(
                             "format" to (book?.format ?: "unknown"),
+                            "book" to bookUuid.shortDiagnosticId(),
                             "chapter" to chapterIndex,
                             "priority" to priority.name,
                             "source" to source,
@@ -457,6 +480,10 @@ class LocalBookRepository @Inject constructor(
 
     override fun setReaderInteractionActive(active: Boolean) {
         epubParseCoordinator.setReaderInteractionActive(active)
+    }
+
+    override fun setReaderSessionActive(active: Boolean) {
+        epubParseCoordinator.setReaderSessionActive(active)
     }
 
     override fun releaseReaderMemory(bookUuid: String) {
@@ -729,24 +756,69 @@ class LocalBookRepository @Inject constructor(
 
     /** Durable WorkManager entry point. Every completed chapter is an independent checkpoint. */
     suspend fun continueEpubIndex(bookUuid: String) = withContext(Dispatchers.IO) {
-        while (true) {
-            val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name } ?: return@withContext
-            val target = dao.getUnindexedChapters(bookUuid).firstOrNull() ?: return@withContext
-            var parsed: DocumentChapter? = null
-            val completed = epubParseCoordinator.background {
-                parsed = (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
-                    .readChapter(File(book.storagePath), target.chapterIndex, target.title)
+        val startedAt = SystemClock.elapsedRealtime()
+        val initialBook = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name }
+            ?: return@withContext
+        val requested = dao.getUnindexedChapters(bookUuid).size
+        if (requested == 0) return@withContext
+        var indexed = 0
+        var preempted = 0
+        try {
+            while (true) {
+                val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name } ?: break
+                val target = dao.getUnindexedChapters(bookUuid).firstOrNull() ?: break
+                var parsed: DocumentChapter? = null
+                val completed = epubParseCoordinator.background {
+                    parsed = backgroundEpubParser.readChapter(
+                        File(book.storagePath),
+                        target.chapterIndex,
+                        target.title,
+                        purpose = "index",
+                    )
+                }
+                if (!completed) {
+                    preempted++
+                    continue
+                }
+                val chapter = parsed
+                if (chapter == null) {
+                    // Mark unreadable spine entries so one malformed publisher page cannot create
+                    // an infinite retry loop. The directory remains available and later chapters proceed.
+                    dao.markChapterIndexed(target.id, target.title)
+                } else {
+                    dao.replaceChapterIndex(target.id, chapter.title, chapter.paragraphs)
+                    epubChapterCache.write(bookUuid, book.contentHash, target.chapterIndex, chapter)
+                }
+                indexed++
             }
-            if (!completed) continue
-            val chapter = parsed
-            if (chapter == null) {
-                // Mark unreadable spine entries so one malformed publisher page cannot create an
-                // infinite retry loop. The directory remains available and later chapters proceed.
-                dao.markChapterIndexed(target.id, target.title)
-                continue
-            }
-            dao.replaceChapterIndex(target.id, chapter.title, chapter.paragraphs)
-            epubChapterCache.write(bookUuid, book.contentHash, target.chapterIndex, chapter)
+            DiagnosticLog.record(
+                Category.EPUB_PARSE,
+                "background_index_finished",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = "success",
+                details = mapOf(
+                    "book" to initialBook.uuid.shortDiagnosticId(),
+                    "requested" to requested,
+                    "indexed" to indexed,
+                    "preempted" to preempted,
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            DiagnosticLog.record(
+                Category.EPUB_PARSE,
+                "background_index_finished",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = error::class.simpleName ?: "error",
+                details = mapOf(
+                    "book" to initialBook.uuid.shortDiagnosticId(),
+                    "requested" to requested,
+                    "indexed" to indexed,
+                    "preempted" to preempted,
+                )
+            )
+            throw error
         }
     }
 
@@ -782,6 +854,8 @@ private const val TXT_PARSER_VERSION = 1
 
 private fun String.normalizedEpubIdentityTitle(): String =
     trim().replace(Regex("[\\s　]+"), " ").lowercase(Locale.ROOT)
+
+private fun String.shortDiagnosticId(): String = take(8)
 
 private fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category)
 private fun ChapterEntity.toModel() = Chapter(

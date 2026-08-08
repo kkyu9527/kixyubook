@@ -92,5 +92,5 @@ object DiagnosticLog {
     private fun String.safeField(): String =
         replace(Regex("[\\r\\n|]+"), " ").take(MAX_FIELD_LENGTH)
 
-    enum class Category { SYNC, IMPORT, EPUB_PARSE, READER, PAGINATION }
+    enum class Category { LIBRARY, SYNC, IMPORT, EPUB_PARSE, READER, PAGINATION }
 }

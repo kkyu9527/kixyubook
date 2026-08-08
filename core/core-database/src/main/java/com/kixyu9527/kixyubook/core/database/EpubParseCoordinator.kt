@@ -3,14 +3,11 @@ package com.kixyu9527.kixyubook.core.database
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -25,16 +22,16 @@ import javax.inject.Singleton
  */
 @Singleton
 class EpubParseCoordinator @Inject constructor() {
-    private val parserMutex = Mutex()
     private val interactiveWaiters = AtomicInteger(0)
     private val readerInteractionActive = AtomicBoolean(false)
+    private val readerSessionActive = AtomicBoolean(false)
     private val appAnimationActive = AtomicBoolean(false)
     private val activeBackground = AtomicReference<Deferred<Unit>?>(null)
     private val backgroundDispatcher = Executors.newSingleThreadExecutor { task ->
         Thread({
             // android.jar throws in local JVM tests; production devices apply this scheduler hint.
             runCatching {
-                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
             }
             task.run()
         }, "epub-silent-index").apply { isDaemon = true }
@@ -42,6 +39,11 @@ class EpubParseCoordinator @Inject constructor() {
 
     fun setReaderInteractionActive(active: Boolean) {
         readerInteractionActive.set(active)
+        if (active) activeBackground.get()?.cancel()
+    }
+
+    fun setReaderSessionActive(active: Boolean) {
+        readerSessionActive.set(active)
         if (active) activeBackground.get()?.cancel()
     }
 
@@ -56,8 +58,10 @@ class EpubParseCoordinator @Inject constructor() {
     suspend fun <T> interactive(block: suspend () -> T): T {
         interactiveWaiters.incrementAndGet()
         try {
-            activeBackground.get()?.cancelAndJoin()
-            return parserMutex.withLock { block() }
+            // Background indexing owns a separate parser instance. Cancellation can therefore be
+            // cooperative without making a page turn wait for a blocking XML parse to unwind.
+            activeBackground.get()?.cancel()
+            return block()
         } finally {
             interactiveWaiters.decrementAndGet()
         }
@@ -68,13 +72,19 @@ class EpubParseCoordinator @Inject constructor() {
         while (interactiveWaiters.get() > 0 || backgroundPaused()) {
             delay(PRIORITY_POLL_MILLIS)
         }
-        val task = async {
-            parserMutex.withLock {
-                if (interactiveWaiters.get() > 0 || backgroundPaused()) {
-                    throw BackgroundPreempted()
-                }
-                withContext(backgroundDispatcher) { block() }
+        if (readerSessionActive.get()) {
+            // Keep indexing alive during long reading sessions, but leave an allocation/GC gap
+            // between XHTML chapters so it cannot continuously consume the frame budget.
+            delay(READER_VISIBLE_THROTTLE_MILLIS)
+            while (interactiveWaiters.get() > 0 || backgroundPaused()) {
+                delay(PRIORITY_POLL_MILLIS)
             }
+        }
+        val task = async {
+            if (interactiveWaiters.get() > 0 || backgroundPaused()) {
+                throw BackgroundPreempted()
+            }
+            withContext(backgroundDispatcher) { block() }
         }
         activeBackground.set(task)
         try {
@@ -92,5 +102,6 @@ class EpubParseCoordinator @Inject constructor() {
 
     private companion object {
         const val PRIORITY_POLL_MILLIS = 12L
+        const val READER_VISIBLE_THROTTLE_MILLIS = 250L
     }
 }

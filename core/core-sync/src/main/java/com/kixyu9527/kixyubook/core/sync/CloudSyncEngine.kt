@@ -331,9 +331,20 @@ class CloudSyncEngine @Inject constructor(
             val mutationBeforePull = syncDao.allPending().lastOrNull {
                 it.entityType == SyncEntityType.PROGRESS.name && it.entityId == bookUuid
             }
+            if (
+                pullRemote && remote != null &&
+                mutationBeforePull?.operation == SyncMutationOperation.DELETE.name
+            ) {
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "priority_pull_skipped",
+                    outcome = "local_delete",
+                    details = mapOf("entity" to "progress", "book" to bookUuid.take(8)),
+                )
+            }
 
             var cloudTime = Long.MIN_VALUE
-            if (pullRemote && remote != null) {
+            if (pullRemote && remote != null && shouldPullPriorityRemote(mutationBeforePull, remote.modifiedAt)) {
                 try {
                     withJsonDownload(token, requireNotNull(remote)) { json ->
                         cloudTime = json.optLong("updatedTime")
@@ -456,7 +467,17 @@ class CloudSyncEngine @Inject constructor(
         val localMutation = syncDao.allPending().lastOrNull {
             it.entityType == type.name && it.entityId == entityId
         }
-        if (localMutation != null && localMutation.changedAt >= remote.modifiedAt) return
+        if (!shouldPullPriorityRemote(localMutation, remote.modifiedAt)) {
+            if (localMutation?.operation == SyncMutationOperation.DELETE.name) {
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "priority_pull_skipped",
+                    outcome = "local_delete",
+                    details = mapOf("entity" to type.name.lowercase(), "book" to entityId.take(8)),
+                )
+            }
+            return
+        }
         try {
             withJsonDownload(token, remote) { json -> apply(json) }
         } catch (error: DriveHttpException) {

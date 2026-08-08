@@ -198,8 +198,12 @@ private fun LoadedReaderRoute(
     LaunchedEffect(readerResumed, state.loading, state.chapter) {
         viewModel.setReadingActive(readerResumed && !state.loading && state.chapter != null)
     }
+    LaunchedEffect(readerResumed) {
+        viewModel.setReaderVisible(readerResumed)
+    }
     DisposableEffect(viewModel) {
         onDispose {
+            viewModel.setReaderVisible(false)
             viewModel.setReadingActive(false)
             viewModel.finishSession()
         }

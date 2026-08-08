@@ -25,6 +25,8 @@ interface BookRepository {
     fun releaseReaderMemory(bookUuid: String) = Unit
     /** Temporarily yields background EPUB indexing to a visible reader gesture/animation. */
     fun setReaderInteractionActive(active: Boolean) = Unit
+    /** Pauses full-book EPUB indexing for the entire time a reader destination is visible. */
+    fun setReaderSessionActive(active: Boolean) = Unit
     /** Temporarily yields background EPUB indexing to an app-level navigation animation. */
     fun setAppAnimationActive(active: Boolean) = Unit
     fun observeProgress(bookUuid: String): Flow<ReadingProgress?>
