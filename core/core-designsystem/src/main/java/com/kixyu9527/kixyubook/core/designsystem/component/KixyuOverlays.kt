@@ -1,10 +1,12 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +29,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -49,17 +53,20 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import top.yukonga.miuix.kmp.basic.Button as MiuixButton
@@ -71,10 +78,11 @@ import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.Surface as MiuixSurface
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.anim.folmeSpring
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 object KixyuMotion {
     const val PageNavigationMillis = 320
@@ -83,6 +91,10 @@ object KixyuMotion {
     const val ReaderSearchEnterMillis = 280
     const val ReaderSearchExitMillis = 220
 }
+
+/** Matches the spring used by MIUIX 0.9.2 bottom sheets for edge-attached surfaces. */
+fun kixyuPopupSpring(): AnimationSpec<Float> =
+    folmeSpring(damping = 0.9f, response = 0.38f)
 
 /** Every platform dialog participates in the app's edge-to-edge contract. */
 val KixyuEdgeToEdgeDialogProperties = DialogProperties(
@@ -175,6 +187,7 @@ fun KixyuAdaptiveModal(
             onDismissRequest = onDismissRequest,
             properties = KixyuAdaptiveDialogProperties,
         ) {
+            KixyuDialogImeResizeEffect()
             BoxWithConstraints(
                 modifier = Modifier.fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -602,6 +615,7 @@ fun KixyuActionDialog(
             onDismissRequest = onDismissRequest,
             properties = KixyuAdaptiveDialogProperties,
         ) {
+            KixyuDialogImeResizeEffect()
             BoxWithConstraints(
                 modifier = Modifier.fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -609,8 +623,9 @@ fun KixyuActionDialog(
                 contentAlignment = Alignment.Center,
             ) {
                 val surfaceWidth = minOf(maxWidth, 600.dp)
+                val surfaceHeight = minOf(maxHeight, KixyuSize.adaptiveDialogMaxHeight)
                 KixyuPopupSurface(
-                    modifier = Modifier.width(surfaceWidth),
+                    modifier = Modifier.width(surfaceWidth).heightIn(max = surfaceHeight),
                     shadowElevation = KixyuSpacing.small,
                 ) {
                     Column(
@@ -623,10 +638,16 @@ fun KixyuActionDialog(
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 2,
                         )
-                        CompositionLocalProvider(
-                            LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant,
-                            content = content,
-                        )
+                        Box(
+                            Modifier.weight(1f, fill = false)
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            CompositionLocalProvider(
+                                LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant,
+                                content = content,
+                            )
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
@@ -666,17 +687,25 @@ fun KixyuActionDialog(
         return
     }
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
-        OverlayDialog(
+        // Form fields need a real dialog window so Android can resize that window for the IME.
+        // Rendering in the root Scaffold makes the system pan the whole activity to the focused
+        // field, producing a large empty band between the dialog and keyboard.
+        WindowDialog(
             show = show,
             title = title,
             onDismissRequest = onDismissRequest,
-            renderInRootScaffold = true,
         ) {
+            KixyuDialogImeResizeEffect()
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth()
+                    .heightIn(max = KixyuSize.adaptiveDialogMaxHeight),
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
             ) {
-                content()
+                Box(
+                    Modifier.weight(1f, fill = false)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) { content() }
                 if (alternativeLabel != null && onAlternative != null) {
                     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
                         Row(
@@ -711,9 +740,7 @@ fun KixyuActionDialog(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         dismissLabel?.let { MiuixTextButton(text = it, onClick = onDismissRequest) }
-                        MiuixButton(onClick = onConfirm, enabled = confirmEnabled) {
-                            MiuixText(confirmLabel, maxLines = 1)
-                        }
+                        KixyuButton(text = confirmLabel, onClick = onConfirm, enabled = confirmEnabled)
                     }
                 }
             }
@@ -723,7 +750,14 @@ fun KixyuActionDialog(
             onDismissRequest = onDismissRequest,
             properties = KixyuEdgeToEdgeDialogProperties,
             title = { Text(title, maxLines = 1) },
-            text = content,
+            text = {
+                KixyuDialogImeResizeEffect()
+                Box(
+                    Modifier.fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) { content() }
+            },
             confirmButton = {
                 if (alternativeLabel != null && onAlternative != null) {
                     Column(
@@ -756,7 +790,7 @@ fun KixyuActionDialog(
                         }
                     }
                 } else {
-                    TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmLabel) }
+                    KixyuButton(text = confirmLabel, onClick = onConfirm, enabled = confirmEnabled)
                 }
             },
             dismissButton = {
@@ -765,5 +799,18 @@ fun KixyuActionDialog(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun KixyuDialogImeResizeEffect() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.parent as? DialogWindowProvider)?.window
+        val originalMode = window?.attributes?.softInputMode
+        window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        onDispose {
+            if (originalMode != null) window?.setSoftInputMode(originalMode)
+        }
     }
 }

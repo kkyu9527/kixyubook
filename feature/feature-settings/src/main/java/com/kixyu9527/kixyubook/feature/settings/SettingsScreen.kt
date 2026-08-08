@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -69,6 +68,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
@@ -116,7 +116,6 @@ fun SettingsRoute(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val navigationContentPadding = LocalKixyuNavigationContentPadding.current
     val syncAccount = state.cloudSync.account
     val windowSizeClass = kixyuWindowSizeClass()
     val twoPane = windowSizeClass.supportsTwoPane && detailContent != null
@@ -174,7 +173,7 @@ fun SettingsRoute(
         KixyuSection(title = "数据") {
             KixyuSettingsRow(
                 title = "数据与备份",
-                supportingText = "导出或恢复书库、进度与个人设置",
+                supportingText = "本地导出恢复数据",
                 icon = Icons.Outlined.Backup,
                 selected = if (twoPane) selectedPane == SettingsPane.DATA_AND_BACKUP else null,
                 onClick = { openPane(SettingsPane.DATA_AND_BACKUP, onDataAndBackup) },
@@ -214,7 +213,7 @@ fun SettingsRoute(
                     item { preferenceSection() }
                     item { dataSection() }
                     item { aboutSection() }
-                    item { Spacer(Modifier.height(navigationContentPadding)) }
+                    item { KixyuBottomContentSpacer() }
                 }
                 Surface(
                     modifier = Modifier.weight(.64f).fillMaxSize()
@@ -240,8 +239,7 @@ fun SettingsRoute(
                 item { preferenceSection() }
                 item { dataSection() }
                 item { aboutSection() }
-                item { Spacer(Modifier.height(navigationContentPadding)) }
-                item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+                item { KixyuBottomContentSpacer() }
             }
         }
     }
@@ -524,8 +522,7 @@ fun CloudSyncRoute(
                 item { networkSection() }
                 item { accountActionsSection() }
             }
-            item { Spacer(Modifier.height(navigationContentPadding)) }
-            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+            item { KixyuBottomContentSpacer() }
         }
     }
 
@@ -653,7 +650,7 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
         )
         state.phase == CloudSyncPhase.AUTH_REQUIRED -> CloudSyncStatusUi(
             title = "需要重新授权",
-            detail = state.errorMessage ?: "请重新允许 Kixyu Book 访问应用专属空间",
+            detail = "进入应用后会自动恢复 Google Drive 连接",
             icon = Icons.Outlined.Cloud,
         )
         state.phase == CloudSyncPhase.SYNCING -> CloudSyncStatusUi(
@@ -823,7 +820,7 @@ fun ReadingSettingsRoute(
                     }
                 }
             }
-            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+            item { KixyuBottomContentSpacer() }
         }
     }
 }
@@ -877,7 +874,7 @@ fun AppearanceRoute(
                     )
                 }
             }
-            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+            item { KixyuBottomContentSpacer() }
         }
     }
 }
@@ -978,7 +975,7 @@ fun DataAndBackupRoute(
                     }
                 }
             }
-            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+            item { KixyuBottomContentSpacer() }
         }
     }
 
@@ -1141,7 +1138,7 @@ fun AboutRoute(
                     }
                 }
             }
-            item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+            item { KixyuBottomContentSpacer() }
         }
     }
 }
