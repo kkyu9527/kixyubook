@@ -82,6 +82,7 @@ import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
 import com.kixyu9527.kixyubook.feature.settings.DataAndBackupRoute
 import com.kixyu9527.kixyubook.feature.settings.AboutRoute
 import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogRoute
+import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogCategoryRoute
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
@@ -636,10 +637,28 @@ private fun KixyuNavHost(
                     )
                 }
                 composable(Routes.DIAGNOSTIC_LOG) {
-                    DiagnosticLogRoute(onBack = {
-                        prioritizeAnimation()
-                        navController.popBackStack()
-                    })
+                    DiagnosticLogRoute(
+                        onBack = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                        onOpenCategory = { category ->
+                            prioritizeAnimation()
+                            navController.navigate(Routes.diagnosticLogCategory(category))
+                        },
+                    )
+                }
+                composable(
+                    route = Routes.DIAGNOSTIC_LOG_CATEGORY,
+                    arguments = listOf(navArgument("category") { type = NavType.StringType }),
+                ) { entry ->
+                    DiagnosticLogCategoryRoute(
+                        categoryKey = entry.arguments?.getString("category").orEmpty(),
+                        onBack = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                    )
                 }
                 composable(
                     route = Routes.READER,

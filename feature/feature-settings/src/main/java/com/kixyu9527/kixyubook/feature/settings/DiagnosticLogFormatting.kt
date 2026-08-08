@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 
 internal data class ReadableDiagnosticEntry(
     val time: String,
+    val categoryKey: String,
     val category: String,
     val title: String,
     val description: String,
@@ -22,6 +23,7 @@ internal fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
     if (parts.size < 3) {
         return ReadableDiagnosticEntry(
             time = "时间未知",
+            categoryKey = "OTHER",
             category = "其他",
             title = "无法识别的日志记录",
             description = "这条记录使用了旧格式或内容不完整。",
@@ -47,7 +49,8 @@ internal fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
     }
     return ReadableDiagnosticEntry(
         time = deviceTime(parts[0]),
-        category = categoryLabel(categoryKey),
+        categoryKey = categoryKey,
+        category = diagnosticCategoryLabel(categoryKey),
         title = title,
         description = description,
         details = details,
@@ -82,7 +85,8 @@ private fun deviceTime(raw: String): String {
         .format(instant)
 }
 
-private fun categoryLabel(category: String): String = when (category) {
+internal fun diagnosticCategoryLabel(category: String): String = when (category) {
+    "LIBRARY" -> "书库"
     "SYNC" -> "云同步"
     "IMPORT" -> "书籍导入"
     "EPUB_PARSE" -> "EPUB 解析"
@@ -92,6 +96,7 @@ private fun categoryLabel(category: String): String = when (category) {
 }
 
 private fun eventDescription(event: String, outcome: String?): Pair<String, String> = when (event) {
+    "books_deleted" -> "书籍删除完成" to "书籍、本地进度、书签和派生缓存已经清理，并已登记云端删除。"
     "full_sync_started" -> "开始云同步" to "开始检查本机与 Google Drive 中的数据。"
     "full_sync_skipped" -> when (outcome) {
         "not_ready" -> "本次同步未执行" to "同步功能尚未准备完成，未开始传输数据。"
@@ -99,6 +104,7 @@ private fun eventDescription(event: String, outcome: String?): Pair<String, Stri
         else -> "本次同步已跳过" to "当前条件不满足，未执行云同步。"
     }
     "authorization_ready" -> "Google 授权可用" to "已取得有效授权，可以访问应用的云端数据。"
+    "priority_pull_skipped" -> "已忽略云端旧数据" to "本机已删除对应数据，优先同步不会将其重新恢复。"
     "remote_snapshot_loaded" -> "云端数据检查完成" to "已读取云端对象和本次发生变化的数据。"
     "conflicts_waiting" -> "发现同步冲突" to "本机和云端均有修改，需要等待用户选择。"
     "upload_queue_ready" -> "待上传数据已整理" to "已统计本次需要上传到云端的更改。"
@@ -110,9 +116,9 @@ private fun eventDescription(event: String, outcome: String?): Pair<String, Stri
     "documents_selected" -> "已选择导入文件" to "用户选择了准备加入书库的文件。"
     "documents_registered" -> "书籍导入登记完成" to "文件已复制并登记到书库，后续解析会在后台进行。"
     "background_index_finished" -> if (outcome == "success") {
-        "书籍后台解析完成" to "章节目录和阅读所需数据已经生成。"
+        "书籍后台索引完成" to "全文检索所需的章节数据已经在后台生成。"
     } else {
-        "书籍后台解析失败" to "书籍未能完成解析，相关临时数据会被清理。"
+        "书籍后台索引失败" to "后台生成全文检索数据时发生错误。"
     }
     "bulk_parse_finished" -> if (outcome == "success") {
         "EPUB 批量解析完成" to "指定范围内的 EPUB 章节已经解析完成。"
@@ -144,6 +150,7 @@ private fun readableOutcome(outcome: String): String = when (outcome) {
     "not_ready" -> "尚未准备完成"
     "conflict_waiting" -> "等待处理冲突"
     "user_action" -> "等待用户处理"
+    "local_delete" -> "本机已删除"
     "error" -> "失败"
     else -> "失败（$outcome）"
 }
@@ -179,6 +186,12 @@ private fun fieldLabel(key: String, category: String): String = when (key) {
     "changed" -> "云端变更数"
     "uploaded" -> "已上传项目数"
     "remoteChanged" -> "已处理云端变更"
+    "book" -> "书籍标识"
+    "purpose" -> "解析用途"
+    "progressRecords" -> "已删除进度"
+    "indexed" -> "完成索引章节"
+    "preempted" -> "向前台让路次数"
+    "entity" -> "数据类型"
     else -> key
 }
 
@@ -194,6 +207,17 @@ private fun readableValue(key: String, value: String): String = when (key) {
     "source" -> when (value) {
         "epub_disk_cache" -> "EPUB 磁盘缓存"
         "epub_parse" -> "实时解析 EPUB"
+        else -> value
+    }
+    "purpose" -> when (value) {
+        "index" -> "后台全文索引"
+        "reader" -> "前台阅读请求"
+        "interactive" -> "即时解析"
+        else -> value
+    }
+    "entity" -> when (value) {
+        "progress" -> "阅读进度"
+        "bookmarks" -> "书签"
         else -> value
     }
     "requested" -> if (value == "all") "全部" else value

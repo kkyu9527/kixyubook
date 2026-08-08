@@ -29,6 +29,7 @@ class DiagnosticLogFormattingTest {
         )
 
         assertEquals("2026-08-08 23:06:04.623", entry.time)
+        assertEquals("PAGINATION", entry.categoryKey)
         assertEquals("页面排版", entry.category)
         assertEquals("章节分页完成", entry.title)
         assertTrue(entry.details.contains("结果" to "成功"))
@@ -50,5 +51,19 @@ class DiagnosticLogFormattingTest {
         assertTrue(entry.details.contains("加载类型" to "后台预加载"))
         assertTrue(entry.details.contains("内容来源" to "EPUB 磁盘缓存"))
         assertTrue(entry.details.contains("段落数" to "47"))
+    }
+
+    @Test
+    fun backgroundIndexEntryKeepsBookContextAndExplainsPreemption() {
+        val entry = parseDiagnosticEntry(
+            "2026-08-08T15:06:04Z | EPUB_PARSE | background_index_finished | elapsedMs=12000 | " +
+                "outcome=success | book=123e4567 | requested=120 | indexed=120 | preempted=3",
+        )
+
+        assertEquals("EPUB_PARSE", entry.categoryKey)
+        assertEquals("书籍后台索引完成", entry.title)
+        assertTrue(entry.details.contains("书籍标识" to "123e4567"))
+        assertTrue(entry.details.contains("完成索引章节" to "120"))
+        assertTrue(entry.details.contains("向前台让路次数" to "3"))
     }
 }

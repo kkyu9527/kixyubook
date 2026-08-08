@@ -10,6 +10,8 @@ object Routes {
     const val DATA_AND_BACKUP = "data_and_backup"
     const val ABOUT = "about"
     const val DIAGNOSTIC_LOG = "diagnostic_log"
+    const val DIAGNOSTIC_LOG_CATEGORY = "diagnostic_log/{category}"
     const val READER = "reader/{bookUuid}"
+    fun diagnosticLogCategory(category: String) = "diagnostic_log/$category"
     fun reader(bookUuid: String) = "reader/$bookUuid"
 }

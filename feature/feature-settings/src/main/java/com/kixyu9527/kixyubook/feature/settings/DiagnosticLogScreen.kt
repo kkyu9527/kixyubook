@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.feature.settings
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,16 +18,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -42,12 +46,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
@@ -55,13 +63,44 @@ import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import kotlinx.coroutines.launch
 
 @Composable
-fun DiagnosticLogRoute(onBack: () -> Unit) {
+fun DiagnosticLogRoute(
+    onBack: () -> Unit,
+    onOpenCategory: (String) -> Unit,
+) = DiagnosticLogScreen(onBack = onBack, onOpenCategory = onOpenCategory)
+
+@Composable
+fun DiagnosticLogCategoryRoute(
+    categoryKey: String,
+    onBack: () -> Unit,
+) = DiagnosticLogScreen(onBack = onBack, categoryKey = categoryKey)
+
+@Composable
+private fun DiagnosticLogScreen(
+    onBack: () -> Unit,
+    categoryKey: String? = null,
+    onOpenCategory: (String) -> Unit = {},
+) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
     var rawLines by remember { mutableStateOf<List<String>?>(null) }
-    val newestLines = rawLines?.asReversed().orEmpty()
+    val newestEntries = remember(rawLines) {
+        rawLines.orEmpty().asReversed().map(::parseDiagnosticEntry)
+    }
+    val visibleEntries = remember(newestEntries, categoryKey) {
+        categoryKey?.let { key -> newestEntries.filter { it.categoryKey == key } } ?: newestEntries
+    }
+    val categorySummaries = remember(newestEntries) {
+        newestEntries.groupBy(ReadableDiagnosticEntry::categoryKey).map { (key, entries) ->
+            DiagnosticCategorySummary(
+                key = key,
+                label = entries.first().category,
+                count = entries.size,
+                latestTime = entries.first().time,
+            )
+        }
+    }
 
     LaunchedEffect(Unit) {
         rawLines = DiagnosticLog.snapshotLines()
@@ -112,7 +151,7 @@ fun DiagnosticLogRoute(onBack: () -> Unit) {
     }
 
     KixyuPageScaffold(
-        title = "日志详情",
+        title = categoryKey?.let(::diagnosticCategoryLabel) ?: "日志详情",
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
@@ -133,13 +172,13 @@ fun DiagnosticLogRoute(onBack: () -> Unit) {
                         KixyuPopupMenuItem(
                             label = "导出",
                             icon = Icons.Outlined.Share,
-                            enabled = newestLines.isNotEmpty(),
+                            enabled = newestEntries.isNotEmpty(),
                             onClick = ::exportLog,
                         ),
                         KixyuPopupMenuItem(
                             label = "清空",
                             icon = Icons.Outlined.DeleteOutline,
-                            enabled = newestLines.isNotEmpty(),
+                            enabled = newestEntries.isNotEmpty(),
                             onClick = ::clearLog,
                         ),
                     ),
@@ -165,7 +204,7 @@ fun DiagnosticLogRoute(onBack: () -> Unit) {
                 CircularProgressIndicator()
             }
 
-            newestLines.isEmpty() -> Column(
+            visibleEntries.isEmpty() -> Column(
                 modifier = Modifier.fillMaxSize()
                     .padding(innerPadding)
                     .consumeWindowInsets(innerPadding),
@@ -186,6 +225,50 @@ fun DiagnosticLogRoute(onBack: () -> Unit) {
                 )
             }
 
+            categoryKey == null -> LazyColumn(
+                modifier = Modifier.kixyuPageContentWidth()
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding),
+                contentPadding = PaddingValues(
+                    horizontal = KixyuSpacing.screenHorizontal,
+                    vertical = KixyuSpacing.screenVertical,
+                ),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+            ) {
+                item {
+                    KixyuSection(title = "日志分类") {
+                        categorySummaries.forEachIndexed { index, summary ->
+                            KixyuSettingsRow(
+                                title = summary.label,
+                                supportingText = "${summary.count} 条记录 · 最新 ${summary.latestTime}",
+                                onClick = { onOpenCategory(summary.key) },
+                                leading = {
+                                    Icon(
+                                        Icons.Outlined.Description,
+                                        null,
+                                        Modifier.size(KixyuSize.icon),
+                                    )
+                                },
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                    null,
+                                    Modifier.size(KixyuSize.icon),
+                                )
+                            }
+                            if (index < categorySummaries.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(
+                                        start = KixyuSpacing.rowHorizontal + KixyuSize.icon + KixyuSpacing.medium,
+                                    ),
+                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             else -> LazyColumn(
                 modifier = Modifier.kixyuPageContentWidth()
                     .padding(innerPadding)
@@ -196,9 +279,7 @@ fun DiagnosticLogRoute(onBack: () -> Unit) {
                 ),
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
             ) {
-                items(newestLines.size) { index ->
-                    val rawLine = newestLines[index]
-                    val entry = remember(rawLine) { parseDiagnosticEntry(rawLine) }
+                items(visibleEntries) { entry ->
                     SelectionContainer {
                         DiagnosticEntryCard(entry)
                     }
@@ -208,6 +289,13 @@ fun DiagnosticLogRoute(onBack: () -> Unit) {
     }
 }
 
+private data class DiagnosticCategorySummary(
+    val key: String,
+    val label: String,
+    val count: Int,
+    val latestTime: String,
+)
+
 @Composable
 private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
     Surface(
@@ -215,20 +303,35 @@ private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(Modifier.padding(horizontal = KixyuSpacing.rowHorizontal, vertical = KixyuSpacing.rowVertical)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = KixyuSpacing.rowHorizontal,
+                vertical = KixyuSpacing.medium,
+            ),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    entry.category,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Text(
+                        entry.category,
+                        modifier = Modifier.padding(
+                            horizontal = KixyuSpacing.small,
+                            vertical = KixyuSpacing.extraSmall,
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
                 Text(
                     entry.time,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -245,23 +348,55 @@ private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (entry.details.isNotEmpty()) {
-                Spacer(Modifier.size(KixyuSpacing.small))
-                entry.details.forEach { (label, value) ->
+                Spacer(Modifier.size(KixyuSpacing.medium))
+                DiagnosticDetailsTable(entry.details)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticDetailsTable(details: List<Pair<String, String>>) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+        BoxWithConstraints {
+            val labelWidth = if (maxWidth >= 480.dp) 144.dp else 112.dp
+            Column {
+                details.forEachIndexed { index, (label, value) ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = KixyuSpacing.extraSmall),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = KixyuSpacing.medium,
+                                vertical = KixyuSpacing.small,
+                            ),
                         verticalAlignment = Alignment.Top,
                     ) {
                         Text(
-                            label,
-                            modifier = Modifier.widthIn(min = KixyuSize.rowMinHeight),
-                            style = MaterialTheme.typography.labelMedium,
+                            text = label,
+                            modifier = Modifier.width(labelWidth),
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
                         )
+                        Spacer(Modifier.width(KixyuSpacing.medium))
                         Text(
-                            value,
+                            text = value,
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    if (index < details.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(
+                                start = KixyuSpacing.medium + labelWidth + KixyuSpacing.medium,
+                                end = KixyuSpacing.medium,
+                            ),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
                         )
                     }
                 }
