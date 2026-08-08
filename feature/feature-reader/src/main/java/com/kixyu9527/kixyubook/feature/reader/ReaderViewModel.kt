@@ -44,13 +44,7 @@ data class ReaderUiState(
     val loading: Boolean = true,
     val chapterLoading: Boolean = false,
     val pendingChapterTitle: String? = null,
-    val remoteProgressPrompt: RemoteProgressPrompt? = null,
     val error: String? = null,
-)
-
-data class RemoteProgressPrompt(
-    val progress: ReadingProgress,
-    val chapterTitle: String,
 )
 
 @HiltViewModel
@@ -84,7 +78,6 @@ class ReaderViewModel @Inject constructor(
     private var openingPosition = 0
     private var openingCharOffset = 0
     private var userMovedBeforePrioritySync = false
-    private var userHasReadSinceOpen = false
     private var deferredLocalProgress: ReadingProgress? = null
 
     init {
@@ -380,14 +373,6 @@ class ReaderViewModel @Inject constructor(
             targetCharOffset == state.currentCharOffset
         ) return
 
-        val chapterTitle = state.chapters[targetIndex].title
-        if (userHasReadSinceOpen) {
-            _uiState.update {
-                it.copy(remoteProgressPrompt = RemoteProgressPrompt(progress, chapterTitle))
-            }
-            return
-        }
-
         if (targetIndex == state.chapterIndex && state.chapter != null) {
             chapterNavigationJob?.cancel()
             pendingChapterIndex = null
@@ -425,22 +410,6 @@ class ReaderViewModel @Inject constructor(
         if (userMovedBeforePrioritySync && pending != null) {
             persistProgress(pending.copy(updatedTime = System.currentTimeMillis()))
         }
-    }
-
-    fun acceptRemoteProgress() {
-        val prompt = _uiState.value.remoteProgressPrompt ?: return
-        _uiState.update { it.copy(remoteProgressPrompt = null) }
-        val state = _uiState.value
-        val targetIndex = state.chapters.indexOfFirst { chapter ->
-            chapter.id == prompt.progress.chapterId ||
-                (prompt.progress.chapterKey.isNotBlank() && chapter.chapterKey == prompt.progress.chapterKey)
-        }
-        if (targetIndex < 0) return
-        navigateToChapter(
-            targetIndex,
-            prompt.progress.paragraphIndex.coerceAtLeast(0),
-            prompt.progress.charOffset.coerceAtLeast(0),
-        )
     }
 
     private fun chapterLoad(
@@ -562,7 +531,6 @@ class ReaderViewModel @Inject constructor(
             currentPosition = safePosition,
             currentCharOffset = safeCharOffset,
         )
-        if (moved) userHasReadSinceOpen = true
         if (!prioritySyncReady) {
             if (moved) {
                 userMovedBeforePrioritySync = true

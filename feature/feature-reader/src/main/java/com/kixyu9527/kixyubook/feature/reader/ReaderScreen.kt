@@ -9,6 +9,7 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,6 +30,8 @@ import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Toc
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
@@ -99,12 +102,12 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSafeTopPopup
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSearchField
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPopupSpring
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.CancellationException
@@ -224,7 +227,6 @@ private fun LoadedReaderRoute(
         selectSearchResult = viewModel::selectSearchResult,
         moveSearchResult = viewModel::moveSearchResult,
         clearSearch = viewModel::clearSearch,
-        acceptRemoteProgress = viewModel::acceptRemoteProgress,
         chapterRendered = viewModel::chapterRendered,
         setPageInteractionActive = viewModel::setPageInteractionActive,
         addFont = {
@@ -298,7 +300,6 @@ private fun ReaderScreen(
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
     clearSearch: () -> Unit,
-    acceptRemoteProgress: () -> Unit,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
     addFont: () -> Unit,
@@ -326,15 +327,23 @@ private fun ReaderScreen(
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val windowSizeClass = kixyuWindowSizeClass()
     val directoryAsSidePanel = windowSizeClass.supportsTwoPane
+    val directoryPanelVisible = directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY
+    val directoryPanelProgress = remember { Animatable(0f, visibilityThreshold = 0.0001f) }
+    var directoryPanelComposed by remember { mutableStateOf(false) }
+    LaunchedEffect(directoryPanelVisible) {
+        if (directoryPanelVisible) {
+            directoryPanelComposed = true
+            directoryPanelProgress.animateTo(1f, kixyuPopupSpring())
+        } else if (directoryPanelComposed) {
+            directoryPanelProgress.animateTo(0f, kixyuPopupSpring())
+            directoryPanelComposed = false
+        }
+    }
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val palette = readerPalette(state.settings, systemDark)
     val overlayVisible = controls || menu || toolsMenu || searchVisible ||
-        bookInfoVisible || sheet != null
-    val topSyncOverlayVisible = state.remoteProgressPrompt != null
-    // HyperOS can briefly report a zero top inset while immersive status bars are hidden. Keep
-    // only the transparent status bar visible for remote-progress confirmation so the prompt
-    // retains a stable cutout-safe anchor. Navigation-bar policy is unchanged.
-    val statusBarVisible = state.settings.showStatusBar || overlayVisible || topSyncOverlayVisible
+        bookInfoVisible || sheet != null || directoryPanelComposed
+    val statusBarVisible = state.settings.showStatusBar || overlayVisible
     val navigationBarVisible = !state.settings.hideNavigationBar || overlayVisible
     val systemBarDensity = LocalDensity.current
     val actualStatusBarVisible = WindowInsets.statusBars.getTop(systemBarDensity) > 0
@@ -640,35 +649,6 @@ private fun ReaderScreen(
                     }
                 }
             }
-            KixyuSafeTopPopup(
-                visible = state.remoteProgressPrompt != null,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .clickable(onClick = acceptRemoteProgress)
-                        .padding(
-                            horizontal = KixyuSpacing.medium,
-                            vertical = KixyuSpacing.small,
-                        ),
-                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = state.remoteProgressPrompt?.let {
-                            "其他设备读到${it.chapterTitle}，点击前往"
-                        }.orEmpty(),
-                        color = palette.body,
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
-                        contentDescription = null,
-                        tint = palette.accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
             ReaderControls(
                 visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
@@ -757,20 +737,23 @@ private fun ReaderScreen(
                 null -> Unit
             }
         }
-        AnimatedVisibility(
-            visible = directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY,
-            modifier = Modifier.fillMaxSize(),
-            enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
-            exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
-        ) {
+        if (directoryPanelVisible || directoryPanelComposed) {
+            val panelProgress = directoryPanelProgress.value
             Box(Modifier.fillMaxSize()) {
                 Box(
                     Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = .28f))
-                        .clickable(onClick = { sheet = null }),
+                        .background(
+                            Color.Black.copy(
+                                alpha = .28f * panelProgress * (1f - backProgress),
+                            ),
+                        )
+                        .clickable(
+                            enabled = directoryPanelVisible,
+                            onClick = { sheet = null },
+                        ),
                 )
                 Box(
-                    Modifier.align(Alignment.CenterEnd)
+                    Modifier.align(Alignment.CenterStart)
                         .windowInsetsPadding(WindowInsets.safeDrawing)
                         .padding(KixyuSpacing.medium),
                 ) {
@@ -779,7 +762,11 @@ private fun ReaderScreen(
                             .widthIn(min = 360.dp, max = 480.dp)
                             .fillMaxHeight()
                             .graphicsLayer {
-                                translationX = size.width * backProgress
+                                // MIUIX bottom sheets translate by their complete measured height.
+                                // Apply the same progress horizontally and preserve predictive back.
+                                translationX = -size.width * (
+                                    (1f - panelProgress) + backProgress * panelProgress
+                                )
                                 alpha = 1f - backProgress * .35f
                             },
                     ) {
@@ -869,21 +856,22 @@ private fun ReaderContent(
         WindowInsets.navigationBarsIgnoringVisibility.getBottom(this).toDp().value
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val safeViewportHeight = (maxHeight.value - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
+        val physicalViewportHeight = maxHeight.value
+        val safeViewportHeight = (physicalViewportHeight - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
         val twoPageSpread = maxWidth > maxHeight &&
             (maxWidth >= 840.dp || foldingFeature != null)
         val physicalHingeWidth = with(density) {
             foldingFeature?.bounds?.width()?.toDp() ?: 0.dp
         }
         val spreadGutter = maxOf(KixyuSize.readerSpreadGutter, physicalHingeWidth)
-        val pageViewportWidth = if (twoPageSpread) {
+        val pageViewportWidth = if (twoPageSpread && state.settings.pageMode != PageMode.SCROLL) {
             ((maxWidth - spreadGutter) / 2).value
         } else {
             maxWidth.value
         }
-        // Pagination is measured against one physical leaf. In a tablet landscape spread two
-        // leaves are rendered by one Pager item; portrait and narrow split-screen windows keep
-        // the phone layout. Very wide leaves still retain a bounded, readable line measure.
+        // Paged mode is measured against one physical leaf. Scroll mode always owns the complete
+        // viewport; tablet spreads render two leaves in one Pager item. Very wide text still
+        // retains a bounded, readable line measure.
         val adaptiveHorizontalMargin = maxOf(
             state.settings.margin,
             (pageViewportWidth - KixyuSize.readerTextMaxWidth.value) / 2f,
@@ -957,6 +945,7 @@ private fun ReaderContent(
                     { dismissControls(); moveChapterFromPage(state.chapterIndex, 1, false) },
                     state.chapterIndex > 0, state.chapterIndex < state.chapters.lastIndex,
                     topInsetDp, bottomInsetDp,
+                    fullPageViewportHeightDp = physicalViewportHeight,
                     epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
                     modifier = Modifier.fillMaxSize(),
                     highlightQuery = state.searchQuery,
@@ -967,14 +956,15 @@ private fun ReaderContent(
                 }
             }
         } else {
-            Box(
-                Modifier.fillMaxSize().padding(top = topInsetDp.dp, bottom = bottomInsetDp.dp),
-            ) {
+            Box(Modifier.fillMaxSize()) {
                 PagedReader(
                     state, chapter, spec, palette, savePosition, moveChapterFromPage,
                     middleTap, dismissControls, volumeTurns, paginationCoordinator, paginationMeasurer,
                     chapterRendered, setPageInteractionActive, resourcePriorityActive, twoPageSpread,
                     spreadGutter,
+                    topInsetDp,
+                    bottomInsetDp,
+                    physicalViewportHeight,
                 )
             }
         }
@@ -999,6 +989,9 @@ private fun PagedReader(
     resourcePriorityActive: Boolean,
     twoPageSpread: Boolean,
     spreadGutter: Dp,
+    topInsetDp: Float,
+    bottomInsetDp: Float,
+    physicalViewportHeightDp: Float,
 ) {
     var retainedPage by remember(
         spec,
@@ -1038,6 +1031,8 @@ private fun PagedReader(
                 showRegularChapterTitle = state.settings.showChapterTitle,
                 highlightQuery = state.searchQuery,
                 pageNumber = retained.pageNumber,
+                modifier = readerPageViewportModifier(retained.page, topInsetDp, bottomInsetDp),
+                fullPageViewportHeightDp = physicalViewportHeightDp,
             )
         } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             ReaderLoadingIndicator(palette)
@@ -1317,6 +1312,9 @@ private fun PagedReader(
                         selectionEnabled = item.page != null &&
                             !pager.isScrollInProgress && virtualPage == pager.settledPage,
                         onSelectionActiveChange = { active -> textSelectionActive = active },
+                        topInsetDp = topInsetDp,
+                        bottomInsetDp = bottomInsetDp,
+                        physicalViewportHeightDp = physicalViewportHeightDp,
                     )
                 }
                 if (index < spread.items.lastIndex) {
@@ -1340,6 +1338,9 @@ private fun ReaderPagerLeaf(
     middleTap: () -> Unit,
     selectionEnabled: Boolean,
     onSelectionActiveChange: (Boolean) -> Unit,
+    topInsetDp: Float,
+    bottomInsetDp: Float,
+    physicalViewportHeightDp: Float,
 ) {
     // A not-yet-paginated chapter is still a fully interactive lightweight page. Rendering a
     // spinner-only Box here discarded every tap that arrived after the first rapid turn.
@@ -1360,7 +1361,8 @@ private fun ReaderPagerLeaf(
             fontPath = state.fontPath,
             onTapFraction = { fraction -> if (fraction in .33f..67f) middleTap() },
             epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
-            modifier = Modifier.fillMaxSize(),
+            modifier = readerPageViewportModifier(renderedPage, topInsetDp, bottomInsetDp),
+            fullPageViewportHeightDp = physicalViewportHeightDp,
             showRegularChapterTitle = state.settings.showChapterTitle,
             highlightQuery = state.searchQuery,
             pageNumber = item.page?.let {
@@ -1371,6 +1373,17 @@ private fun ReaderPagerLeaf(
         )
     }
 }
+
+private fun readerPageViewportModifier(
+    page: ReaderPage,
+    topInsetDp: Float,
+    bottomInsetDp: Float,
+): Modifier = Modifier.fillMaxSize().then(
+    if (page.isFullPageImage) Modifier else Modifier.padding(
+        top = topInsetDp.dp,
+        bottom = bottomInsetDp.dp,
+    ),
+)
 
 /**
  * Page taps belong to the stable Pager node instead of page-local content. The current page can
@@ -2351,35 +2364,45 @@ private fun ReaderSettingsSheet(
         onConfirm = dismiss,
         dismissLabel = null,
     ) {
-        SelectionContainer {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-            ) {
-                Text(current.title, style = MaterialTheme.typography.titleLarge)
-                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
-                    Text(
-                        "作者",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(current.author, style = MaterialTheme.typography.bodyLarge)
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
-                    Text(
-                        "简介",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        current.description.ifBlank { "暂无简介" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (current.description.isBlank()) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
+        // This dialog intentionally owns its scroll state. A fixed-height Column only reports
+        // that fixed height to the parent even when Text draws beyond it, which made the overflow
+        // visible but unreachable. Keeping the viewport fixed and scrolling its measured content
+        // gives empty and long descriptions the same dialog size on phones and tablets.
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .height(300.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            SelectionContainer {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                ) {
+                    Text(current.title, style = MaterialTheme.typography.titleLarge)
+                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                        Text(
+                            "作者",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(current.author, style = MaterialTheme.typography.bodyLarge)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                        Text(
+                            "简介",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            current.description.ifBlank { "暂无简介" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (current.description.isBlank()) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
                 }
             }
         }

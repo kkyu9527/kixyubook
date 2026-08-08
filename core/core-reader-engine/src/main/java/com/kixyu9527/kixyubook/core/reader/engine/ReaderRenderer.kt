@@ -65,6 +65,7 @@ fun ReaderScrollRenderer(
     hasNext: Boolean,
     topInsetDp: Float,
     bottomInsetDp: Float,
+    fullPageViewportHeightDp: Float = spec.viewportHeightDp,
     epubPath: String? = null,
     modifier: Modifier = Modifier,
     highlightQuery: String = "",
@@ -102,7 +103,7 @@ fun ReaderScrollRenderer(
                             fullPageImage.intrinsicHeight,
                         ).sizeClass
                         Box(
-                            Modifier.fillMaxWidth().height(spec.viewportHeightDp.dp),
+                            Modifier.fillMaxWidth().height(fullPageViewportHeightDp.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             ReaderEpubImage(
@@ -111,7 +112,7 @@ fun ReaderScrollRenderer(
                                 altText = fullPageImage.text,
                                 layout = ReaderImageLayout(
                                     spec.viewportWidthDp,
-                                    spec.viewportHeightDp,
+                                    fullPageViewportHeightDp,
                                     sizeClass,
                                 ),
                                 placeholderColor = palette.secondary,
@@ -193,6 +194,8 @@ fun ReaderPageRenderer(
     pageNumber: String? = null,
     selectionEnabled: Boolean = true,
     onSelectionActiveChange: (Boolean) -> Unit = {},
+    fullPageViewportWidthDp: Float = spec.viewportWidthDp,
+    fullPageViewportHeightDp: Float = spec.viewportHeightDp,
 ) {
     val family = rememberReaderFont(fontPath)
     var selectionVersion by remember(page.chapterIndex, page.index) { mutableIntStateOf(0) }
@@ -230,6 +233,8 @@ fun ReaderPageRenderer(
                     onSelectionActiveChange(true)
                 }
             },
+            fullPageViewportWidthDp = fullPageViewportWidthDp,
+            fullPageViewportHeightDp = fullPageViewportHeightDp,
         )
     }
     if (selectionEnabled) {
@@ -254,6 +259,8 @@ private fun ReaderPageContent(
     pageNumber: String?,
     handleTap: (Float) -> Unit,
     onLongPress: () -> Unit,
+    fullPageViewportWidthDp: Float,
+    fullPageViewportHeightDp: Float,
 ) {
     val fullPageBlock = page.blocks.singleOrNull()?.takeIf { it.isFullPageImage }
     if (fullPageBlock != null) {
@@ -266,10 +273,10 @@ private fun ReaderPageContent(
                 resourcePath = fullPageBlock.resourcePath,
                 altText = fullPageBlock.fullText,
                 layout = ReaderImageLayout(
-                    spec.viewportWidthDp,
-                    spec.viewportHeightDp,
+                    fullPageViewportWidthDp,
+                    fullPageViewportHeightDp,
                     standardizedReaderImageLayout(
-                        spec.viewportWidthDp,
+                        fullPageViewportWidthDp,
                         fullPageBlock.intrinsicWidth,
                         fullPageBlock.intrinsicHeight,
                     ).sizeClass,
