@@ -16,6 +16,7 @@ internal data class ReadableDiagnosticEntry(
     val title: String,
     val description: String,
     val details: List<Pair<String, String>>,
+    val isFailure: Boolean,
 )
 
 internal fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
@@ -28,6 +29,7 @@ internal fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
             title = "无法识别的日志记录",
             description = "这条记录使用了旧格式或内容不完整。",
             details = listOf("原始内容" to rawLine),
+            isFailure = false,
         )
     }
 
@@ -54,6 +56,7 @@ internal fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
         title = title,
         description = description,
         details = details,
+        isFailure = isFailureOutcome(values["outcome"]),
     )
 }
 
@@ -155,6 +158,19 @@ private fun readableOutcome(outcome: String): String = when (outcome) {
     else -> "失败（$outcome）"
 }
 
+private fun isFailureOutcome(outcome: String?): Boolean = when (outcome) {
+    null,
+    "success",
+    "partial",
+    "disk_cache",
+    "not_ready",
+    "conflict_waiting",
+    "user_action",
+    "local_delete",
+    -> false
+    else -> true
+}
+
 private fun readableDuration(raw: String): String {
     val milliseconds = raw.toLongOrNull() ?: return "$raw 毫秒"
     return if (milliseconds < 1_000) {
@@ -191,6 +207,7 @@ private fun fieldLabel(key: String, category: String): String = when (key) {
     "progressRecords" -> "已删除进度"
     "indexed" -> "完成索引章节"
     "preempted" -> "向前台让路次数"
+    "reason" -> "错误原因"
     "entity" -> "数据类型"
     else -> key
 }

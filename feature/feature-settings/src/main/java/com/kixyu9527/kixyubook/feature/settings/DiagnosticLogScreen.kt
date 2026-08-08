@@ -298,6 +298,16 @@ private data class DiagnosticCategorySummary(
 
 @Composable
 private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
+    val badgeColor = if (entry.isFailure) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.primaryContainer
+    }
+    val badgeContentColor = if (entry.isFailure) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -316,7 +326,7 @@ private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
             ) {
                 Surface(
                     shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = badgeColor,
                 ) {
                     Text(
                         entry.category,
@@ -325,7 +335,7 @@ private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
                             vertical = KixyuSpacing.extraSmall,
                         ),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = badgeContentColor,
                         fontWeight = FontWeight.Medium,
                     )
                 }
@@ -339,7 +349,11 @@ private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
                 entry.title,
                 modifier = Modifier.padding(top = KixyuSpacing.small),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (entry.isFailure) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
             )
             Text(
                 entry.description,
@@ -349,14 +363,17 @@ private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
             )
             if (entry.details.isNotEmpty()) {
                 Spacer(Modifier.size(KixyuSpacing.medium))
-                DiagnosticDetailsTable(entry.details)
+                DiagnosticDetailsTable(entry.details, entry.isFailure)
             }
         }
     }
 }
 
 @Composable
-private fun DiagnosticDetailsTable(details: List<Pair<String, String>>) {
+private fun DiagnosticDetailsTable(
+    details: List<Pair<String, String>>,
+    isFailure: Boolean,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -387,7 +404,11 @@ private fun DiagnosticDetailsTable(details: List<Pair<String, String>>) {
                             text = value,
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = if (isFailure && label == "结果") {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
                         )
                     }
                     if (index < details.lastIndex) {

@@ -32,6 +32,7 @@ class DiagnosticLogFormattingTest {
         assertEquals("PAGINATION", entry.categoryKey)
         assertEquals("页面排版", entry.category)
         assertEquals("章节分页完成", entry.title)
+        assertEquals(false, entry.isFailure)
         assertTrue(entry.details.contains("结果" to "成功"))
         assertTrue(entry.details.contains("耗时" to "16 毫秒"))
         assertTrue(entry.details.contains("生成页数" to "10"))
@@ -65,5 +66,23 @@ class DiagnosticLogFormattingTest {
         assertTrue(entry.details.contains("书籍标识" to "123e4567"))
         assertTrue(entry.details.contains("完成索引章节" to "120"))
         assertTrue(entry.details.contains("向前台让路次数" to "3"))
+    }
+
+    @Test
+    fun backgroundIndexFailureIsMarkedAndExplainsConstraint() {
+        val entry = parseDiagnosticEntry(
+            "2026-08-08T15:06:04Z | EPUB_PARSE | background_index_finished | elapsedMs=150700 | " +
+                "outcome=SQLiteConstraintException | book=b5f236d6 | chapter=134 | requested=3058 | " +
+                "indexed=134 | preempted=53 | reason=UNIQUE constraint failed: paragraphs.chapterId, paragraphs.paragraphIndex",
+        )
+
+        assertTrue(entry.isFailure)
+        assertEquals("书籍后台索引失败", entry.title)
+        assertTrue(entry.details.contains("章节索引" to "134"))
+        assertTrue(
+            entry.details.contains(
+                "错误原因" to "UNIQUE constraint failed: paragraphs.chapterId, paragraphs.paragraphIndex",
+            ),
+        )
     }
 }
