@@ -96,7 +96,11 @@ class LocalBookRepository @Inject constructor(
     override fun observeLibrary(): Flow<List<LibraryBook>> = combine(dao.observeBooks(), dao.observeAllProgress()) { books, progresses ->
         val byBook = progresses.associateBy { it.bookUuid }
         books.map { LibraryBook(it.toModel(), byBook[it.uuid]?.toModel()) }
-            .sortedByDescending { it.book.createdTime }
+            // The shelf is ordered by the latest activity rather than a permanent mode: a new
+            // import starts at the top, and the next book the user reads naturally replaces it.
+            .sortedByDescending { item ->
+                maxOf(item.book.createdTime, item.progress?.updatedTime ?: 0L)
+            }
     }
 
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
