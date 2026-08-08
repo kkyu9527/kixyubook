@@ -24,9 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,7 +36,6 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.CircularProgressIndicator
@@ -98,6 +95,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
@@ -127,7 +125,6 @@ fun LibraryRoute(
         onOpenBook = onOpenBook,
         onDelete = viewModel::delete,
         onDeleteMany = viewModel::deleteBooks,
-        onReparse = viewModel::reparseTxt,
         onUpdateMetadata = viewModel::updateMetadata,
         onSetCategory = viewModel::setCategory,
         onDropDocuments = { uris, releasePermission ->
@@ -147,14 +144,12 @@ private fun LibraryScreen(
     onOpenBook: (String) -> Unit,
     onDelete: (String) -> Unit,
     onDeleteMany: (Set<String>) -> Unit,
-    onReparse: (String) -> Unit,
     onUpdateMetadata: (String, String, String, String) -> Unit,
     onSetCategory: (String, String) -> Unit,
     onDropDocuments: (List<String>, (() -> Unit)?) -> Unit,
 ) {
     var managingUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var deletingUuid by rememberSaveable { mutableStateOf<String?>(null) }
-    var reparsingUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var optionsExpanded by rememberSaveable { mutableStateOf(false) }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     val stringSetSaver = remember {
@@ -165,7 +160,6 @@ private fun LibraryScreen(
     var previewBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
     val managing = state.books.firstOrNull { it.book.uuid == managingUuid }
     val deleting = state.books.firstOrNull { it.book.uuid == deletingUuid }
-    val reparsing = state.books.firstOrNull { it.book.uuid == reparsingUuid }
     val visibleBookUuids = state.books.mapTo(linkedSetOf()) { it.book.uuid }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
     val expanded = kixyuWindowSizeClass().supportsTwoPane
@@ -347,8 +341,7 @@ private fun LibraryScreen(
                         onDelete = { deletingUuid = item.book.uuid },
                     )
                 }
-                item { Spacer(Modifier.height(navigationContentPadding)) }
-                item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+                item { KixyuBottomContentSpacer() }
             }
         }
     }
@@ -357,7 +350,6 @@ private fun LibraryScreen(
         BookManagementDialog(
             item = item,
             dismiss = { managingUuid = null },
-            reparse = { managingUuid = null; reparsingUuid = item.book.uuid },
             save = { title, author, description, category ->
                 onUpdateMetadata(item.book.uuid, title, author, description)
                 onSetCategory(item.book.uuid, category)
@@ -373,15 +365,6 @@ private fun LibraryScreen(
             confirmLabel = "删除",
             onConfirm = { onDelete(item.book.uuid); deletingUuid = null },
         ) { Text("书籍文件、阅读进度和统计也会一并删除。") }
-    }
-    reparsing?.let { item ->
-        KixyuActionDialog(
-            show = true,
-            title = "重新解析正文？",
-            onDismissRequest = { reparsingUuid = null },
-            confirmLabel = "重新解析",
-            onConfirm = { onReparse(item.book.uuid); reparsingUuid = null },
-        ) { Text("将按新的编码和章节规则重建目录。书籍信息、分类和可恢复的阅读位置会保留。") }
     }
     if (confirmingBatchDelete) {
         KixyuActionDialog(
@@ -606,7 +589,6 @@ private fun Set<String>.toggle(value: String): Set<String> =
 private fun BookManagementDialog(
     item: LibraryBook,
     dismiss: () -> Unit,
-    reparse: () -> Unit,
     save: (String, String, String, String) -> Unit,
 ) {
     var title by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.title) }
@@ -620,18 +602,21 @@ private fun BookManagementDialog(
         confirmLabel = "保存",
         onConfirm = { save(title, author, description, category) },
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-            OutlinedTextField(title, { title = it }, label = { Text("书名") }, singleLine = true)
-            OutlinedTextField(author, { author = it }, label = { Text("作者") }, singleLine = true)
-            OutlinedTextField(description, { description = it }, label = { Text("简介") }, minLines = 2, maxLines = 4)
-            OutlinedTextField(category, { category = it }, label = { Text("分类") }, singleLine = true)
-            if (item.book.format == com.kixyu9527.kixyubook.core.common.model.BookFormat.TXT) {
-                OutlinedButton(onClick = reparse, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.Refresh, null, Modifier.size(KixyuSize.iconSmall))
-                    Spacer(Modifier.size(KixyuSize.compactButtonIconGap))
-                    Text("重新解析正文", maxLines = 1)
-                }
-            }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+        ) {
+            OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text("书名") }, singleLine = true)
+            OutlinedTextField(author, { author = it }, modifier = Modifier.fillMaxWidth(), label = { Text("作者") }, singleLine = true)
+            OutlinedTextField(
+                description,
+                { description = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("简介") },
+                minLines = 3,
+                maxLines = 6,
+            )
+            OutlinedTextField(category, { category = it }, modifier = Modifier.fillMaxWidth(), label = { Text("分类") }, singleLine = true)
         }
     }
 }

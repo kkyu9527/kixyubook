@@ -44,6 +44,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.DigestInputStream
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
@@ -73,6 +74,9 @@ class LocalBookRepository @Inject constructor(
     private val importIndexJobs = ConcurrentHashMap<String, Job>()
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
     private val workManager by lazy(LazyThreadSafetyMode.NONE) { WorkManager.getInstance(context) }
+    private val derivedDataVersions by lazy(LazyThreadSafetyMode.NONE) {
+        context.getSharedPreferences(DERIVED_DATA_VERSION_PREFERENCES, Context.MODE_PRIVATE)
+    }
     // Keep only the decoded chapters needed by the active pager. EPUB chapters outside this
     // window remain in the binary disk cache and are cheap to hydrate without retaining a whole
     // reading session in the process heap.
@@ -85,10 +89,14 @@ class LocalBookRepository @Inject constructor(
             size > CHAPTER_CACHE_SIZE
     }
 
+    init {
+        importScope.launch { upgradeTxtParserDataIfNeeded() }
+    }
+
     override fun observeLibrary(): Flow<List<LibraryBook>> = combine(dao.observeBooks(), dao.observeAllProgress()) { books, progresses ->
         val byBook = progresses.associateBy { it.bookUuid }
         books.map { LibraryBook(it.toModel(), byBook[it.uuid]?.toModel()) }
-            .sortedWith(compareByDescending<LibraryBook> { it.progress?.updatedTime ?: 0L }.thenByDescending { it.book.createdTime })
+            .sortedByDescending { it.book.createdTime }
     }
 
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
@@ -136,11 +144,19 @@ class LocalBookRepository @Inject constructor(
                 val parser = parsers.parserFor(format)
                 val metadata = parser.readMetadata(temp, displayName)
                 val identity = metadata.identityHint?.let { runCatching { UUID.fromString(it).toString() }.getOrNull() }
-                val bookUuid = identity?.takeUnless { dao.bookExists(it) } ?: UUID.randomUUID().toString()
-                if (identity != null && dao.bookExists(identity)) {
+                val identityMatch = identity?.let { dao.getBook(it) }
+                if (
+                    format == BookFormat.EPUB &&
+                    identityMatch != null &&
+                    identityMatch.title.normalizedEpubIdentityTitle() == metadata.title.normalizedEpubIdentityTitle()
+                ) {
                     duplicates++
                     return@forEach
                 }
+                // EPUB authoring tools occasionally reuse dc:identifier for another title. Only
+                // keep that UUID when it is unused; an existing UUID is a duplicate only when the
+                // normalized title agrees too.
+                val bookUuid = identity?.takeIf { identityMatch == null } ?: UUID.randomUUID().toString()
                 val extension = if (format == BookFormat.EPUB) "epub" else "txt"
                 val stored = File(context.filesDir, "books/$bookUuid.$extension").also { it.parentFile?.mkdirs() }
                 storedFile = stored
@@ -519,6 +535,19 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
+    /** TXT chapters are derived data. Rebuild them once when parsing rules change. */
+    private suspend fun upgradeTxtParserDataIfNeeded() {
+        if (derivedDataVersions.getInt(KEY_TXT_PARSER_VERSION, 0) >= TXT_PARSER_VERSION) return
+        storageMutationMutex.withLock {
+            if (derivedDataVersions.getInt(KEY_TXT_PARSER_VERSION, 0) >= TXT_PARSER_VERSION) return@withLock
+            dao.getAllBooks()
+                .asSequence()
+                .filter { it.format == BookFormat.TXT.name && File(it.storagePath).isFile }
+                .forEach { reparseTxt(it.uuid) }
+            derivedDataVersions.edit().putInt(KEY_TXT_PARSER_VERSION, TXT_PARSER_VERSION).apply()
+        }
+    }
+
     override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) {
         dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" })
         syncMutations.record(SyncEntityType.BOOK, bookUuid)
@@ -689,6 +718,12 @@ private data class RegisteredImport(
 private const val CHAPTER_CACHE_SIZE = 6
 private const val IMPORT_CHAPTER_BATCH_SIZE = 32
 private const val IMPORT_INDEX_CONCURRENCY = 2
+private const val DERIVED_DATA_VERSION_PREFERENCES = "derived_data_versions"
+private const val KEY_TXT_PARSER_VERSION = "txt_parser_version"
+private const val TXT_PARSER_VERSION = 1
+
+private fun String.normalizedEpubIdentityTitle(): String =
+    trim().replace(Regex("[\\s　]+"), " ").lowercase(Locale.ROOT)
 
 private fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category)
 private fun ChapterEntity.toModel() = Chapter(

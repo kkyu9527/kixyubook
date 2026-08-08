@@ -86,10 +86,5 @@ class LibraryViewModel @Inject constructor(
         runCatching { repository.updateBookMetadata(bookUuid, title, author, description) }
             .onFailure { messages.send(it.message ?: "修改失败") }
     }
-    fun reparseTxt(bookUuid: String) = viewModelScope.launch {
-        repository.reparseTxt(bookUuid)
-            .onSuccess { messages.send("正文和目录已重新解析") }
-            .onFailure { messages.send(it.message ?: "重新解析失败") }
-    }
     fun setCategory(bookUuid: String, value: String) = viewModelScope.launch { repository.setCategory(bookUuid, value) }
 }
