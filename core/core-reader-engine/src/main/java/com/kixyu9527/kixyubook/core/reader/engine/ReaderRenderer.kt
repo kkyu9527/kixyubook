@@ -65,9 +65,9 @@ fun ReaderScrollRenderer(
     hasNext: Boolean,
     topInsetDp: Float,
     bottomInsetDp: Float,
+    modifier: Modifier = Modifier,
     fullPageViewportHeightDp: Float = spec.viewportHeightDp,
     epubPath: String? = null,
-    modifier: Modifier = Modifier,
     highlightQuery: String = "",
 ) {
     val family = rememberReaderFont(fontPath)
@@ -187,8 +187,8 @@ fun ReaderPageRenderer(
     palette: ReaderRenderPalette,
     fontPath: String?,
     onTapFraction: (Float) -> Unit,
-    epubPath: String? = null,
     modifier: Modifier = Modifier,
+    epubPath: String? = null,
     showRegularChapterTitle: Boolean = true,
     highlightQuery: String = "",
     pageNumber: String? = null,

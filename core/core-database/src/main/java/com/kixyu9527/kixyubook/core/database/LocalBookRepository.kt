@@ -1,8 +1,10 @@
 package com.kixyu9527.kixyubook.core.database
 
 import android.content.Context
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
+import androidx.core.content.edit
 import androidx.room.withTransaction
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -12,6 +14,8 @@ import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
@@ -106,13 +110,27 @@ class LocalBookRepository @Inject constructor(
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
 
     override suspend fun importDocuments(uriStrings: List<String>): ImportSummary = withContext(Dispatchers.IO) {
+        val startedAt = SystemClock.elapsedRealtime()
+        DiagnosticLog.record(Category.IMPORT, "documents_selected", details = mapOf("count" to uriStrings.size))
         val registration = storageMutationMutex.withLock {
             cleanupImportArtifacts()
             pruneUnreferencedBookFiles()
             registerDocuments(uriStrings)
         }
         registration.imports.forEach(::enqueueBackgroundIndex)
-        ImportSummary(registration.imports.size, registration.duplicateCount, registration.failures)
+        ImportSummary(registration.imports.size, registration.duplicateCount, registration.failures).also { summary ->
+            DiagnosticLog.record(
+                Category.IMPORT,
+                "documents_registered",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = if (summary.failures.isEmpty()) "success" else "partial",
+                details = mapOf(
+                    "imported" to summary.importedCount,
+                    "duplicates" to summary.duplicateCount,
+                    "failures" to summary.failures.size,
+                ),
+            )
+        }
     }
 
     /**
@@ -209,13 +227,29 @@ class LocalBookRepository @Inject constructor(
         }
         val job = importScope.launch(start = CoroutineStart.LAZY) {
             importIndexSemaphore.withPermit {
+                val startedAt = SystemClock.elapsedRealtime()
                 try {
-                    if (importStreamingChapters(book.bookUuid, book.source, book.parser) == 0) {
+                    val chapterCount = importStreamingChapters(book.bookUuid, book.source, book.parser)
+                    if (chapterCount == 0) {
                         error("未找到可阅读章节")
                     }
+                    DiagnosticLog.record(
+                        Category.IMPORT,
+                        "background_index_finished",
+                        elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                        outcome = "success",
+                        details = mapOf("format" to book.format.name, "chapters" to chapterCount),
+                    )
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
+                    DiagnosticLog.record(
+                        Category.IMPORT,
+                        "background_index_finished",
+                        elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                        outcome = error::class.simpleName ?: "error",
+                        details = mapOf("format" to book.format.name),
+                    )
                     removeIncompleteImport(book.bookUuid)
                     importEvents.emit("${book.displayName}：${error.message ?: "导入失败"}")
                 }
@@ -349,6 +383,7 @@ class LocalBookRepository @Inject constructor(
         chapterIndex: Int,
         priority: ChapterLoadPriority,
     ): ChapterContent? = withContext(Dispatchers.IO) {
+        val startedAt = SystemClock.elapsedRealtime()
         val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
         synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let { return@withContext it }
         chapterLoadMutex.withLock {
@@ -356,9 +391,11 @@ class LocalBookRepository @Inject constructor(
             val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
             val book = dao.getBook(bookUuid)
             var storedParagraphs = dao.getParagraphs(chapter.id)
+            var source = "database"
             val paragraphs = if (book?.format == BookFormat.EPUB.name) {
-                val parsed = epubChapterCache.read(bookUuid, book.contentHash, chapterIndex)
-                    ?: epubParseCoordinator.interactive {
+                val diskCached = epubChapterCache.read(bookUuid, book.contentHash, chapterIndex)
+                source = if (diskCached != null) "epub_disk_cache" else "epub_parse"
+                val parsed = diskCached ?: epubParseCoordinator.interactive {
                         (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
                             .readChapter(File(book.storagePath), chapterIndex, chapter.title)
                     }?.also { parsedChapter ->
@@ -378,6 +415,22 @@ class LocalBookRepository @Inject constructor(
             }
             ChapterContent(chapter.toModel(), paragraphs).also { content ->
                 synchronized(chapterCacheLock) { chapterCache[cacheKey] = content }
+                val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+                if (book?.format == BookFormat.EPUB.name || elapsedMs >= SLOW_CHAPTER_LOAD_MS) {
+                    DiagnosticLog.record(
+                        Category.READER,
+                        "chapter_loaded",
+                        elapsedMs = elapsedMs,
+                        outcome = "success",
+                        details = mapOf(
+                            "format" to (book?.format ?: "unknown"),
+                            "chapter" to chapterIndex,
+                            "priority" to priority.name,
+                            "source" to source,
+                            "paragraphs" to paragraphs.size,
+                        ),
+                    )
+                }
             }
         }
     }
@@ -548,7 +601,7 @@ class LocalBookRepository @Inject constructor(
                 .asSequence()
                 .filter { it.format == BookFormat.TXT.name && File(it.storagePath).isFile }
                 .forEach { reparseTxt(it.uuid) }
-            derivedDataVersions.edit().putInt(KEY_TXT_PARSER_VERSION, TXT_PARSER_VERSION).apply()
+            derivedDataVersions.edit { putInt(KEY_TXT_PARSER_VERSION, TXT_PARSER_VERSION) }
         }
     }
 
@@ -720,6 +773,7 @@ private data class RegisteredImport(
 )
 
 private const val CHAPTER_CACHE_SIZE = 6
+private const val SLOW_CHAPTER_LOAD_MS = 250L
 private const val IMPORT_CHAPTER_BATCH_SIZE = 32
 private const val IMPORT_INDEX_CONCURRENCY = 2
 private const val DERIVED_DATA_VERSION_PREFERENCES = "derived_data_versions"

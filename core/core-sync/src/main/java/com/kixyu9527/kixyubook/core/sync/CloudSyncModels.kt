@@ -4,7 +4,11 @@ import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import com.kixyu9527.kixyubook.core.database.entity.BookmarkEntity
+import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
+import java.security.MessageDigest
 
 data class SyncAccount(
     val subject: String,
@@ -79,3 +83,75 @@ interface CloudSyncManager {
     fun syncNow()
     suspend fun deleteCloudData(activity: Activity): Result<Unit>
 }
+
+internal data class LocalCloudObject(
+    val key: String,
+    val name: String,
+    val mimeType: String,
+    val file: File,
+    val temporary: Boolean = false,
+)
+
+internal data class RemoteSnapshot(
+    val known: MutableMap<String, DriveObject>,
+    val changed: MutableMap<String, DriveObject>,
+    val nextPageToken: String?,
+)
+
+internal data class PreparedInitialSnapshot(
+    val accountSubject: String,
+    val snapshot: RemoteSnapshot,
+    val createdAt: Long,
+)
+
+internal data class InitialRestorePlan(
+    val priorityBookUuids: List<String>,
+    val remainingBookUuids: List<String>,
+)
+
+internal fun planInitialRestore(
+    bookUuids: List<String>,
+    remote: Map<String, DriveObject>,
+    priorityLimit: Int = INITIAL_PRIORITY_BOOK_LIMIT,
+): InitialRestorePlan {
+    val distinctBookUuids = bookUuids.distinct()
+    val priority = distinctBookUuids
+        .mapNotNull { uuid -> remote["progress/$uuid"]?.let { uuid to it.modifiedAt } }
+        .sortedByDescending { (_, modifiedAt) -> modifiedAt }
+        .take(priorityLimit)
+        .map { it.first }
+    val prioritySet = priority.toHashSet()
+    return InitialRestorePlan(
+        priorityBookUuids = priority,
+        remainingBookUuids = distinctBookUuids.filterNot(prioritySet::contains),
+    )
+}
+
+internal fun keysForMutation(value: SyncOutboxEntity): List<String> =
+    when (SyncEntityType.valueOf(value.entityType)) {
+        SyncEntityType.BOOK -> listOf("books/${value.entityId}/metadata", "books/${value.entityId}/source")
+        SyncEntityType.PROGRESS -> listOf("progress/${value.entityId}")
+        SyncEntityType.BOOKMARKS -> listOf("bookmarks/${value.entityId}")
+        SyncEntityType.SETTINGS -> listOf("settings/global")
+        SyncEntityType.SESSION -> listOf("sessions/${value.entityId}")
+        SyncEntityType.FONT -> listOf("fonts/${value.entityId}/metadata", "fonts/${value.entityId}/source")
+    }
+
+internal fun File.sha256(): String = inputStream().buffered().use { input ->
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        digest.update(buffer, 0, count)
+    }
+    digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+internal data class BookMarkOwner(val bookUuid: String) {
+    companion object {
+        fun from(value: BookmarkEntity) = BookMarkOwner(value.bookUuid)
+    }
+}
+
+private const val INITIAL_PRIORITY_BOOK_LIMIT = 5

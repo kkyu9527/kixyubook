@@ -81,6 +81,7 @@ import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
 import com.kixyu9527.kixyubook.feature.settings.DataAndBackupRoute
 import com.kixyu9527.kixyubook.feature.settings.AboutRoute
+import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogRoute
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
@@ -535,7 +536,14 @@ private fun KixyuNavHost(
                                                 embedded = true,
                                             )
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.DATA_AND_BACKUP ->
-                                            DataAndBackupRoute(onBack = {}, embedded = true)
+                                            DataAndBackupRoute(
+                                                onBack = {},
+                                                onOpenDiagnosticLog = {
+                                                    prioritizeAnimation()
+                                                    navController.navigate(Routes.DIAGNOSTIC_LOG)
+                                                },
+                                                embedded = true,
+                                            )
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.ABOUT ->
                                             AboutRoute(
                                                 updateState = updateState,
@@ -587,10 +595,16 @@ private fun KixyuNavHost(
                     })
                 }
                 composable(Routes.DATA_AND_BACKUP) {
-                    DataAndBackupRoute(onBack = {
-                        prioritizeAnimation()
-                        navController.popBackStack()
-                    })
+                    DataAndBackupRoute(
+                        onBack = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                        onOpenDiagnosticLog = {
+                            prioritizeAnimation()
+                            navController.navigate(Routes.DIAGNOSTIC_LOG)
+                        },
+                    )
                 }
                 composable(Routes.ABOUT) {
                     AboutRoute(
@@ -620,6 +634,12 @@ private fun KixyuNavHost(
                             navController.popBackStack()
                         },
                     )
+                }
+                composable(Routes.DIAGNOSTIC_LOG) {
+                    DiagnosticLogRoute(onBack = {
+                        prioritizeAnimation()
+                        navController.popBackStack()
+                    })
                 }
                 composable(
                     route = Routes.READER,

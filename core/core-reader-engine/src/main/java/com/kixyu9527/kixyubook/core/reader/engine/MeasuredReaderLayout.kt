@@ -17,11 +17,13 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
@@ -191,16 +193,51 @@ class ReaderPaginationCoordinator internal constructor(
         inFlight[key]?.let { return@synchronized it.deferred }
         lateinit var deferred: Deferred<List<ReaderPage>>
         deferred = paginationScope.async(start = CoroutineStart.LAZY) {
+            val startedAt = System.nanoTime()
             try {
                 withContext(Dispatchers.IO) { diskCache?.read(key, chapter) }?.let { restored ->
                     synchronized(lock) { pages[key] = restored }
+                    DiagnosticLog.record(
+                        DiagnosticLog.Category.PAGINATION,
+                        "restore",
+                        elapsedMs = startedAt.elapsedMilliseconds(),
+                        outcome = "disk_cache",
+                        details = mapOf(
+                            "chapter" to key.chapterId,
+                            "pages" to restored.size,
+                            "prefetch" to prefetch,
+                        ),
+                    )
                     return@async restored
                 }
                 val measured = loader()
                 coroutineContext.ensureActive()
                 synchronized(lock) { pages[key] = measured }
                 diskCache?.let { cache -> cacheScope.launch { cache.write(key, measured) } }
+                DiagnosticLog.record(
+                    DiagnosticLog.Category.PAGINATION,
+                    "measure",
+                    elapsedMs = startedAt.elapsedMilliseconds(),
+                    outcome = "success",
+                    details = mapOf(
+                        "chapter" to key.chapterId,
+                        "paragraphs" to chapter.paragraphs.size,
+                        "pages" to measured.size,
+                        "prefetch" to prefetch,
+                    ),
+                )
                 measured
+            } catch (throwable: Throwable) {
+                if (throwable !is CancellationException) {
+                    DiagnosticLog.record(
+                        DiagnosticLog.Category.PAGINATION,
+                        "failed",
+                        elapsedMs = startedAt.elapsedMilliseconds(),
+                        outcome = throwable::class.java.simpleName,
+                        details = mapOf("chapter" to key.chapterId, "prefetch" to prefetch),
+                    )
+                }
+                throw throwable
             } finally {
                 synchronized(lock) {
                     if (inFlight[key]?.deferred === deferred) inFlight.remove(key)
@@ -225,6 +262,8 @@ class ReaderPaginationCoordinator internal constructor(
         val prefetch: Boolean,
     )
 }
+
+private fun Long.elapsedMilliseconds(): Long = (System.nanoTime() - this) / 1_000_000L
 
 private class MeasuredReaderPaginator(
     private val measurer: TextMeasurer,

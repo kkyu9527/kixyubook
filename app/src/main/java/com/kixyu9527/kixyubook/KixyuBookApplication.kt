@@ -5,6 +5,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.kixyu9527.kixyubook.core.common.repository.CloudSyncCoordinator
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -14,6 +15,7 @@ class KixyuBookApplication : Application(), DefaultLifecycleObserver {
 
     override fun onCreate() {
         super<Application>.onCreate()
+        DiagnosticLog.initialize(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
     }
 

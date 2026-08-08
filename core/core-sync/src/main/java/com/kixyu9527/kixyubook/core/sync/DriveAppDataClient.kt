@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.sync
 
 import android.content.Context
+import androidx.core.content.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -133,7 +134,7 @@ class DriveAppDataClient @Inject constructor(
                 connection.connect()
                 if (connection.responseCode == HTTP_RANGE_NOT_SATISFIABLE) {
                     partial.delete()
-                    uploadSessions.edit().remove("download.$downloadKey.etag").apply()
+                    uploadSessions.edit { remove("download.$downloadKey.etag") }
                     // Retry from byte zero. Reuse the normal backoff loop so a broken server does
                     // not turn an invalid range response into unbounded recursion.
                     throw DriveHttpException(
@@ -143,7 +144,7 @@ class DriveAppDataClient @Inject constructor(
                 }
                 ensureSuccess(connection)
                 connection.getHeaderField("ETag")?.let { etag ->
-                    uploadSessions.edit().putString("download.$downloadKey.etag", etag).apply()
+                    uploadSessions.edit { putString("download.$downloadKey.etag", etag) }
                 }
                 val append = offset > 0L && connection.responseCode == HttpURLConnection.HTTP_PARTIAL
                 connection.inputStream.use { input ->
@@ -157,7 +158,7 @@ class DriveAppDataClient @Inject constructor(
         }
         partial.copyTo(destination, overwrite = true)
         partial.delete()
-        uploadSessions.edit().remove("download.$downloadKey.etag").apply()
+        uploadSessions.edit { remove("download.$downloadKey.etag") }
     }
 
     suspend fun upload(
@@ -176,7 +177,10 @@ class DriveAppDataClient @Inject constructor(
         val method = if (existingFileId == null) "POST" else "PATCH"
         if (source.length() <= MULTIPART_UPLOAD_MAX_BYTES) {
             val sessionKey = objectKey.hashCode().toUInt().toString(16)
-            uploadSessions.edit().remove("$sessionKey.url").remove("$sessionKey.length").apply()
+            uploadSessions.edit {
+                remove("$sessionKey.url")
+                remove("$sessionKey.length")
+            }
             return uploadMultipart(token, method, existingFileId, mimeType, source, metadata)
         }
         val endpoint = if (existingFileId == null) {
@@ -190,29 +194,38 @@ class DriveAppDataClient @Inject constructor(
             ?.takeIf { storedLength == source.length() }
         val resumedSession = location != null
         if (location == null) {
-            uploadSessions.edit().remove("$sessionKey.url").remove("$sessionKey.length").apply()
+            uploadSessions.edit {
+                remove("$sessionKey.url")
+                remove("$sessionKey.length")
+            }
             location = createUploadSession(endpoint, method, token, mimeType, source.length(), metadata)
-            uploadSessions.edit()
-                .putString("$sessionKey.url", location)
-                .putLong("$sessionKey.length", source.length())
-                .apply()
+            uploadSessions.edit {
+                putString("$sessionKey.url", location)
+                putLong("$sessionKey.length", source.length())
+            }
         }
         return try {
             uploadChunks(location, token, mimeType, source, objectKey, initialOffset = if (resumedSession) null else 0L)
         } catch (error: DriveHttpException) {
             if (error.statusCode == 404 || error.statusCode == 410) {
-                uploadSessions.edit().remove("$sessionKey.url").remove("$sessionKey.length").apply()
+                uploadSessions.edit {
+                    remove("$sessionKey.url")
+                    remove("$sessionKey.length")
+                }
                 val replacement = createUploadSession(endpoint, method, token, mimeType, source.length(), metadata)
-                uploadSessions.edit()
-                    .putString("$sessionKey.url", replacement)
-                    .putLong("$sessionKey.length", source.length())
-                    .apply()
+                uploadSessions.edit {
+                    putString("$sessionKey.url", replacement)
+                    putLong("$sessionKey.length", source.length())
+                }
                 uploadChunks(replacement, token, mimeType, source, objectKey, initialOffset = 0L)
             } else {
                 throw error
             }
         }.also {
-            uploadSessions.edit().remove("$sessionKey.url").remove("$sessionKey.length").apply()
+            uploadSessions.edit {
+                remove("$sessionKey.url")
+                remove("$sessionKey.length")
+            }
         }
     }
 

@@ -3,4 +3,10 @@
     <external-files-path
         name="updates"
         path="Download/" />
+    <files-path
+        name="diagnostics"
+        path="diagnostics/" />
+    <cache-path
+        name="diagnostic_exports"
+        path="diagnostics/" />
 </paths>

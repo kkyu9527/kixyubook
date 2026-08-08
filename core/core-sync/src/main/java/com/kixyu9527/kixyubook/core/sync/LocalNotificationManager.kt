@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.sync
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.work.WorkManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -74,7 +76,7 @@ class LocalNotificationManager @Inject constructor(
     fun showSyncConflict(count: Int, fingerprint: String) {
         if (appInForeground || !canPostNotifications()) return
         if (preferences.getString(KEY_CONFLICT_FINGERPRINT, null) == fingerprint) return
-        preferences.edit().putString(KEY_CONFLICT_FINGERPRINT, fingerprint).apply()
+        preferences.edit { putString(KEY_CONFLICT_FINGERPRINT, fingerprint) }
         post(
             NOTIFICATION_SYNC_CONFLICT,
             NotificationCompat.Builder(context, CHANNEL_ACTION_REQUIRED)
@@ -92,7 +94,7 @@ class LocalNotificationManager @Inject constructor(
     }
 
     fun clearSyncConflict() {
-        preferences.edit().remove(KEY_CONFLICT_FINGERPRINT).apply()
+        preferences.edit { remove(KEY_CONFLICT_FINGERPRINT) }
         manager.cancel(NOTIFICATION_SYNC_CONFLICT)
     }
 
@@ -190,9 +192,21 @@ class LocalNotificationManager @Inject constructor(
         )
     }
 
+    @SuppressLint("MissingPermission")
     private fun post(id: Int, notification: Notification) {
         // OEM policy or a permission transition must never fail the underlying sync/backup work.
-        runCatching { manager.notify(id, notification) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        if (!manager.areNotificationsEnabled()) return
+        try {
+            manager.notify(id, notification)
+        } catch (_: SecurityException) {
+            // Permission or OEM notification policy changed between the check and posting.
+        }
     }
 
     private fun contentIntent(destination: String, requestCode: Int): PendingIntent {
@@ -209,7 +223,6 @@ class LocalNotificationManager @Inject constructor(
     }
 
     private fun createChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val systemManager = context.getSystemService(NotificationManager::class.java)
         systemManager.createNotificationChannels(
             listOf(

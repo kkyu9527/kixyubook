@@ -9,6 +9,7 @@ object Routes {
     const val CLOUD_SYNC = "cloud_sync"
     const val DATA_AND_BACKUP = "data_and_backup"
     const val ABOUT = "about"
+    const val DIAGNOSTIC_LOG = "diagnostic_log"
     const val READER = "reader/{bookUuid}"
     fun reader(bookUuid: String) = "reader/$bookUuid"
 }

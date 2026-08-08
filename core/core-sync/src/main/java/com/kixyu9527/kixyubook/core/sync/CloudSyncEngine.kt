@@ -1,9 +1,12 @@
 package com.kixyu9527.kixyubook.core.sync
 
+import android.os.SystemClock
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.room.withTransaction
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
@@ -29,55 +32,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.security.MessageDigest
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
-
-private data class LocalCloudObject(
-    val key: String,
-    val name: String,
-    val mimeType: String,
-    val file: File,
-    val temporary: Boolean = false,
-)
-
-private const val INITIAL_PRIORITY_BOOK_LIMIT = 5
-
-private data class RemoteSnapshot(
-    val known: MutableMap<String, DriveObject>,
-    val changed: MutableMap<String, DriveObject>,
-    val nextPageToken: String?,
-)
-
-private data class PreparedInitialSnapshot(
-    val accountSubject: String,
-    val snapshot: RemoteSnapshot,
-    val createdAt: Long,
-)
-
-internal data class InitialRestorePlan(
-    val priorityBookUuids: List<String>,
-    val remainingBookUuids: List<String>,
-)
-
-internal fun planInitialRestore(
-    bookUuids: List<String>,
-    remote: Map<String, DriveObject>,
-    priorityLimit: Int = INITIAL_PRIORITY_BOOK_LIMIT,
-): InitialRestorePlan {
-    val distinctBookUuids = bookUuids.distinct()
-    val priority = distinctBookUuids
-        .mapNotNull { uuid -> remote["progress/$uuid"]?.let { uuid to it.modifiedAt } }
-        .sortedByDescending { (_, modifiedAt) -> modifiedAt }
-        .take(priorityLimit)
-        .map { it.first }
-    val prioritySet = priority.toHashSet()
-    return InitialRestorePlan(
-        priorityBookUuids = priority,
-        remainingBookUuids = distinctBookUuids.filterNot(prioritySet::contains),
-    )
-}
 
 @Singleton
 class CloudSyncEngine @Inject constructor(
@@ -96,6 +53,19 @@ class CloudSyncEngine @Inject constructor(
     private val notifications: LocalNotificationManager,
 ) {
     private val syncMutex = Mutex()
+
+    private val remoteState = CloudRemoteStateApplier(
+        context = context,
+        database = database,
+        books = books,
+        fonts = fonts,
+        syncDao = syncDao,
+        bookRepository = bookRepository,
+        settingsRepository = settingsRepository,
+        preferences = preferences,
+        mutations = mutations,
+        drive = drive,
+    )
     private val preparedSnapshotLock = Any()
     private var preparedInitialSnapshot: PreparedInitialSnapshot? = null
 
@@ -179,16 +149,29 @@ class CloudSyncEngine @Inject constructor(
         preferredBookUuid: String? = null,
         onProgress: suspend (CloudSyncProgress) -> Unit = {},
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        val syncStartedAt = SystemClock.elapsedRealtime()
+        DiagnosticLog.record(Category.SYNC, "full_sync_started", details = mapOf("preferredBook" to (preferredBookUuid != null)))
         syncMutex.withLock { runCatching {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
+                DiagnosticLog.record(Category.SYNC, "full_sync_skipped", outcome = "not_ready")
                 return@runCatching
             }
-            if (persisted.conflicts.isNotEmpty()) return@runCatching
+            if (persisted.conflicts.isNotEmpty()) {
+                DiagnosticLog.record(Category.SYNC, "full_sync_skipped", outcome = "conflict_waiting", details = mapOf("count" to persisted.conflicts.size))
+                return@runCatching
+            }
             preferences.markRunning()
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+            DiagnosticLog.record(Category.SYNC, "authorization_ready")
             val snapshot = loadRemoteSnapshot(token, persisted)
+            DiagnosticLog.record(
+                Category.SYNC,
+                "remote_snapshot_loaded",
+                elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt,
+                details = mapOf("known" to snapshot.known.size, "changed" to snapshot.changed.size),
+            )
             var remote = snapshot.known
 
             applyRemoteTombstones(token, snapshot.changed)
@@ -206,6 +189,7 @@ class CloudSyncEngine @Inject constructor(
                 } else {
                     preferences.clearLocalConflictPreference()
                     preferences.setConflicts(conflicts)
+                    DiagnosticLog.record(Category.SYNC, "conflicts_waiting", outcome = "user_action", details = mapOf("count" to conflicts.size))
                     return@runCatching
                 }
             }
@@ -230,6 +214,7 @@ class CloudSyncEngine @Inject constructor(
                     }
                 }.thenBy { it.changedAt },
             )
+            DiagnosticLog.record(Category.SYNC, "upload_queue_ready", details = mapOf("count" to pending.size))
             var uploadedCount = 0
             if (pending.isNotEmpty()) {
                 onProgress(
@@ -289,14 +274,27 @@ class CloudSyncEngine @Inject constructor(
             flushUploadBatch()
             preferences.markSuccess(snapshot.nextPageToken ?: persisted.pageToken)
             notifications.clearAuthorizationFailure()
+            DiagnosticLog.record(
+                Category.SYNC,
+                "full_sync_finished",
+                elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt,
+                outcome = "success",
+                details = mapOf("uploaded" to uploadedCount, "remoteChanged" to snapshot.changed.size),
+            )
         }.onFailure { error ->
+            DiagnosticLog.record(
+                Category.SYNC,
+                "full_sync_finished",
+                elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt,
+                outcome = error::class.simpleName ?: "error",
+            )
             if (error is CancellationException) {
                 withContext(NonCancellable) { preferences.markInterrupted() }
                 throw error
             }
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
-                preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
+                preferences.markAuthRequired()
             } else {
                 preferences.markError(error.message ?: "同步失败")
             }
@@ -340,7 +338,7 @@ class CloudSyncEngine @Inject constructor(
                     withJsonDownload(token, requireNotNull(remote)) { json ->
                         cloudTime = json.optLong("updatedTime")
                         val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
-                        if (cloudTime > localTime && applyRemoteProgressJson(json)) {
+                        if (cloudTime > localTime && remoteState.applyProgressJson(json)) {
                             mutationBeforePull?.let { syncDao.removeOutbox(listOf(it.uuid)) }
                         }
                     }
@@ -352,7 +350,7 @@ class CloudSyncEngine @Inject constructor(
                         withJsonDownload(token, refreshed) { json ->
                             cloudTime = json.optLong("updatedTime")
                             val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
-                            if (cloudTime > localTime && applyRemoteProgressJson(json)) {
+                            if (cloudTime > localTime && remoteState.applyProgressJson(json)) {
                                 mutationBeforePull?.let { syncDao.removeOutbox(listOf(it.uuid)) }
                             }
                         }
@@ -372,7 +370,7 @@ class CloudSyncEngine @Inject constructor(
                     name = "bookmarks-$bookUuid.json",
                     type = SyncEntityType.BOOKMARKS,
                     entityId = bookUuid,
-                    apply = ::applyRemoteBookmarksJson,
+                    apply = remoteState::applyBookmarksJson,
                 )
                 pullPriorityJson(
                     token = token,
@@ -380,7 +378,7 @@ class CloudSyncEngine @Inject constructor(
                     name = "settings-global.json",
                     type = SyncEntityType.SETTINGS,
                     entityId = "global",
-                    apply = ::applyRemoteSettingsJson,
+                    apply = remoteState::applySettingsJson,
                 )
             }
 
@@ -421,7 +419,7 @@ class CloudSyncEngine @Inject constructor(
             }
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
-                preferences.markAuthRequired(error.message ?: "需要重新授权 Google Drive")
+                preferences.markAuthRequired()
             } else if (followedByFullSync) {
                 preferences.markError(error.message ?: "同步失败")
             }
@@ -848,7 +846,7 @@ class CloudSyncEngine @Inject constructor(
         // afterwards. Apply them before progress and book data during both initial and incremental
         // synchronization, not only during the first shelf rebuild.
         candidates["settings/global"]?.let { info ->
-            applyRemoteSettings(token, info)
+            remoteState.applySettings(token, info)
             rememberRemote("settings/global", info)
             handledKeys += "settings/global"
         }
@@ -860,7 +858,7 @@ class CloudSyncEngine @Inject constructor(
                 key.startsWith("progress/") &&
                     key.substringAfter("progress/") == preferredBookUuid
             }.forEach { (key, info) ->
-                applyRemoteProgress(token, info)
+                remoteState.applyProgress(token, info)
                 rememberRemote(key, info)
                 handledKeys += key
             }
@@ -889,7 +887,7 @@ class CloudSyncEngine @Inject constructor(
             )
         }
         suspend fun restoreBook(uuid: String) {
-            restoreRemoteBook(token, uuid, knownRemote)
+            remoteState.restoreBook(token, uuid, knownRemote)
             handledKeys += "books/$uuid/metadata"
             handledKeys += "books/$uuid/source"
             restoredBooks++
@@ -910,12 +908,12 @@ class CloudSyncEngine @Inject constructor(
             restorePlan.priorityBookUuids.forEach { uuid ->
                 restoreBook(uuid)
                 candidates["progress/$uuid"]?.let { info ->
-                    applyRemoteProgress(token, info)
+                    remoteState.applyProgress(token, info)
                     rememberRemote("progress/$uuid", info)
                     handledKeys += "progress/$uuid"
                 }
                 candidates["bookmarks/$uuid"]?.let { info ->
-                    applyRemoteBookmarks(token, info)
+                    remoteState.applyBookmarks(token, info)
                     rememberRemote("bookmarks/$uuid", info)
                     handledKeys += "bookmarks/$uuid"
                 }
@@ -936,7 +934,7 @@ class CloudSyncEngine @Inject constructor(
                 val sourceKey = "fonts/$uuid/source"
                 val metadata = knownRemote[metadataKey] ?: return@forEach
                 val source = knownRemote[sourceKey] ?: return@forEach
-                applyRemoteFont(token, metadata, source)
+                remoteState.applyFont(token, metadata, source)
                 rememberRemote(metadataKey, metadata)
                 rememberRemote(sourceKey, source)
                 handledKeys += metadataKey
@@ -946,163 +944,13 @@ class CloudSyncEngine @Inject constructor(
         candidates.forEach { (key, info) ->
             if (key in handledKeys) return@forEach
             when {
-                key.startsWith("progress/") -> applyRemoteProgress(token, info)
-                key.startsWith("bookmarks/") -> applyRemoteBookmarks(token, info)
-                key == "settings/global" -> applyRemoteSettings(token, info)
-                key.startsWith("sessions/") -> applyRemoteSession(token, info)
+                key.startsWith("progress/") -> remoteState.applyProgress(token, info)
+                key.startsWith("bookmarks/") -> remoteState.applyBookmarks(token, info)
+                key == "settings/global" -> remoteState.applySettings(token, info)
+                key.startsWith("sessions/") -> remoteState.applySession(token, info)
             }
             rememberRemote(key, info)
         }
-    }
-
-    private suspend fun restoreRemoteBook(
-        token: String,
-        uuid: String,
-        knownRemote: Map<String, DriveObject>,
-    ) {
-        val key = "books/$uuid/metadata"
-        val metadata = knownRemote[key] ?: return
-        val sourceInfo = knownRemote["books/$uuid/source"] ?: return
-        if (!books.bookExists(uuid)) {
-            val metaFile = tempFile("book-meta")
-            val sourceFile = tempFile("book-source")
-            try {
-                drive.download(token, metadata.id, metaFile)
-                drive.download(token, sourceInfo.id, sourceFile)
-                val book = parseBook(JSONObject(metaFile.readText()))
-                mutations.withoutRecording { bookRepository.restoreSyncedBook(book, sourceFile.absolutePath) }
-            } finally {
-                metaFile.delete()
-                sourceFile.delete()
-            }
-        } else {
-            val temp = tempFile("book-meta")
-            try {
-                drive.download(token, metadata.id, temp)
-                val book = parseBook(JSONObject(temp.readText()))
-                mutations.withoutRecording {
-                    bookRepository.updateBookMetadata(book.uuid, book.title, book.author, book.description)
-                    bookRepository.setCategory(book.uuid, book.category)
-                }
-            } finally {
-                temp.delete()
-            }
-        }
-        rememberRemote(key, metadata)
-        rememberRemote("books/$uuid/source", sourceInfo)
-    }
-
-    private suspend fun applyRemoteProgress(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        applyRemoteProgressJson(json)
-    }
-
-    private suspend fun applyRemoteProgressJson(json: JSONObject): Boolean {
-        val bookUuid = json.getString("bookUuid")
-        if (!books.bookExists(bookUuid)) return false
-        val chapterKey = json.optString("chapterKey")
-        val chapter = books.getChapterByKey(bookUuid, chapterKey)
-            ?: books.getChapter(bookUuid, json.optInt("chapterIndex"))
-            ?: return false
-        val remoteTime = json.optLong("updatedTime")
-        val local = books.getProgress(bookUuid)
-        if (local != null && local.updatedTime > remoteTime) return false
-        val remoteFraction = json.optDouble("progression").toFloat()
-        // A newer timestamp can represent a reread on another device. Never move the visible
-        // device backwards automatically; the current device's explicit movement is uploaded as
-        // a new latest state instead.
-        if (local != null && remoteFraction + PROGRESS_EPSILON < local.fraction) return false
-        mutations.withoutRecording {
-            bookRepository.saveProgress(
-                ReadingProgress(
-                    bookUuid = bookUuid,
-                    chapterId = chapter.id,
-                    position = json.optInt("paragraphIndex"),
-                    offset = json.optInt("charOffset"),
-                    updatedTime = remoteTime,
-                    fraction = remoteFraction,
-                    chapterKey = chapter.chapterKey,
-                    paragraphIndex = json.optInt("paragraphIndex"),
-                    charOffset = json.optInt("charOffset"),
-                    quoteAnchor = json.optString("quoteAnchor"),
-                ),
-            )
-        }
-        return true
-    }
-
-    private suspend fun applyRemoteBookmarks(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        applyRemoteBookmarksJson(json)
-    }
-
-    private suspend fun applyRemoteBookmarksJson(json: JSONObject) {
-        val bookUuid = json.getString("bookUuid")
-        if (!books.bookExists(bookUuid)) return
-        mutations.withoutRecording {
-            database.withTransaction {
-                books.deleteBookmarksForBook(bookUuid)
-                val items = json.optJSONArray("items") ?: JSONArray()
-                for (index in 0 until items.length()) {
-                    val value = items.getJSONObject(index)
-                    val chapter = books.getChapterByKey(bookUuid, value.optString("chapterKey"))
-                        ?: books.getChapter(bookUuid, value.optInt("chapterIndex"))
-                        ?: continue
-                    books.insertBookmark(
-                        BookmarkEntity(
-                            uuid = value.getString("uuid"),
-                            bookUuid = bookUuid,
-                            chapterId = chapter.id,
-                            position = value.optInt("paragraphIndex"),
-                            preview = value.optString("preview"),
-                            createdTime = value.optLong("createdTime"),
-                        ),
-                    )
-                }
-            }
-        }
-    }
-
-    private suspend fun applyRemoteSettings(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        applyRemoteSettingsJson(json)
-    }
-
-    private suspend fun applyRemoteSettingsJson(json: JSONObject) {
-        val remote = jsonToSettings(json.getJSONObject("reader"))
-        val goal = json.optInt("readingGoalMinutes", 30)
-        mutations.withoutRecording {
-            settingsRepository.update { remote }
-            settingsRepository.setReadingGoalMinutes(goal)
-        }
-    }
-
-    private suspend fun applyRemoteSession(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        val uuid = json.getString("uuid")
-        if (books.getSessionBySyncUuid(uuid) == null) {
-            books.insertSession(
-                ReadingSessionEntity(
-                    bookUuid = json.getString("bookUuid"),
-                    startedTime = json.optLong("startedTime"),
-                    durationMillis = json.optLong("durationMillis"),
-                    epochDay = json.optLong("epochDay"),
-                    syncUuid = uuid,
-                ),
-            )
-        }
-    }
-
-    private suspend fun applyRemoteFont(token: String, metadata: DriveObject, source: DriveObject) {
-        val uuid = metadata.objectKey.split('/').getOrNull(1) ?: return
-        if (fonts.getFont(uuid) != null || !preferences.current().syncFonts) return
-        val metaFile = tempFile("font-meta")
-        val sourceFile = File(context.filesDir, "fonts/$uuid.ttf")
-        try {
-            drive.download(token, metadata.id, metaFile)
-            drive.download(token, source.id, sourceFile)
-            val json = JSONObject(metaFile.readText())
-            fonts.insert(UserFontEntity(uuid, json.optString("name", "云端字体"), sourceFile.absolutePath, json.optLong("createdTime")))
-        } catch (error: Throwable) {
-            sourceFile.delete()
-            throw error
-        } finally { metaFile.delete() }
     }
 
     private suspend fun settingsJson(): JSONObject = JSONObject()
@@ -1111,83 +959,6 @@ class CloudSyncEngine @Inject constructor(
         .put("reader", settingsToJson(settingsRepository.settings.first()))
         .put("readingGoalMinutes", settingsRepository.readingGoalMinutes.first())
 
-    private fun bookMetadataJson(book: BookEntity) = JSONObject()
-        .put("schema", 1).put("uuid", book.uuid).put("title", book.title).put("author", book.author)
-        .put("description", book.description).put("format", book.format).put("createdTime", book.createdTime)
-        .put("contentHash", book.contentHash).put("category", book.category)
-
-    private fun progressJson(progress: ReadingProgressEntity, chapterKey: String) = JSONObject()
-        .put("schema", 1).put("bookUuid", progress.bookUuid).put("chapterKey", chapterKey)
-        .put("paragraphIndex", progress.paragraphIndex).put("charOffset", progress.charOffset)
-        .put("progression", progress.fraction).put("quoteAnchor", progress.quoteAnchor)
-        .put("updatedTime", progress.updatedTime)
-
-    private fun bookmarksJson(bookUuid: String, values: List<BookmarkRow>, chapters: Map<Long, ChapterEntity>): JSONObject = JSONObject()
-        .put("schema", 1)
-        .put("bookUuid", bookUuid)
-        .put("updatedAt", System.currentTimeMillis())
-        .put("items", JSONArray().apply { values.forEach { value ->
-            put(JSONObject().put("uuid", value.uuid).put("chapterKey", chapters[value.chapterId]?.chapterKey.orEmpty())
-                .put("chapterIndex", value.chapterIndex).put("paragraphIndex", value.position)
-                .put("preview", value.preview).put("createdTime", value.createdTime))
-        } })
-
-    private fun sessionJson(value: ReadingSessionEntity) = JSONObject()
-        .put("schema", 1).put("uuid", value.syncUuid).put("bookUuid", value.bookUuid)
-        .put("startedTime", value.startedTime).put("durationMillis", value.durationMillis).put("epochDay", value.epochDay)
-
-    private fun fontJson(value: UserFontEntity) = JSONObject()
-        .put("schema", 1).put("uuid", value.uuid).put("name", value.name).put("createdTime", value.createdTime)
-
-    private fun settingsToJson(value: ReaderSettings) = JSONObject()
-        .put("fontSize", value.fontSize).put("lineHeight", value.lineHeight).put("letterSpacing", value.letterSpacing)
-        .put("margin", value.margin).put("theme", value.theme.name).put("pageMode", value.pageMode.name)
-        .put("customThemeEnabled", value.customThemeEnabled).put("customDayTheme", customThemeJson(value.customDayTheme))
-        .put("customNightTheme", customThemeJson(value.customNightTheme)).put("fontUuid", value.fontUuid)
-        .put("appColorTheme", value.appColorTheme.name).put("appUiStyle", value.appUiStyle.name)
-        .put("showStatusBar", value.showStatusBar).put("hideNavigationBar", value.hideNavigationBar)
-        .put("showPageNumber", value.showPageNumber)
-        .put("volumeKeyPageTurn", value.volumeKeyPageTurn).put("keepScreenOn", value.keepScreenOn)
-        .put("showChapterTitle", value.showChapterTitle)
-
-    private fun jsonToSettings(value: JSONObject) = ReaderSettings(
-        fontSize = value.optDouble("fontSize", 19.0).toFloat(),
-        lineHeight = value.optDouble("lineHeight", 1.72).toFloat(),
-        letterSpacing = value.optDouble("letterSpacing", .01).toFloat(),
-        margin = value.optDouble("margin", 24.0).toFloat(),
-        theme = enumValue(value, "theme", ReaderTheme.SYSTEM),
-        pageMode = enumValue(value, "pageMode", PageMode.SCROLL),
-        customThemeEnabled = value.optBoolean("customThemeEnabled"),
-        customDayTheme = jsonToCustomTheme(value.optJSONObject("customDayTheme"), CustomReaderTheme()),
-        customNightTheme = jsonToCustomTheme(value.optJSONObject("customNightTheme"), ReaderSettings().customNightTheme),
-        fontUuid = value.optString("fontUuid").takeIf { it.isNotBlank() && it != "null" },
-        appColorTheme = enumValue(value, "appColorTheme", AppColorTheme.DEFAULT),
-        appUiStyle = enumValue(value, "appUiStyle", AppUiStyle.MATERIAL),
-        showStatusBar = value.optBoolean("showStatusBar", true),
-        hideNavigationBar = value.optBoolean("hideNavigationBar", true),
-        showPageNumber = value.optBoolean("showPageNumber", true),
-        volumeKeyPageTurn = value.optBoolean("volumeKeyPageTurn"),
-        keepScreenOn = value.optBoolean("keepScreenOn", true),
-        showChapterTitle = value.optBoolean("showChapterTitle", true),
-    )
-
-    private fun customThemeJson(value: CustomReaderTheme) = JSONObject()
-        .put("background", value.backgroundHex).put("body", value.bodyHex).put("title", value.titleHex).put("accent", value.accentHex)
-
-    private fun jsonToCustomTheme(value: JSONObject?, fallback: CustomReaderTheme) = value?.let {
-        CustomReaderTheme(it.optString("background", fallback.backgroundHex), it.optString("body", fallback.bodyHex),
-            it.optString("title", fallback.titleHex), it.optString("accent", fallback.accentHex))
-    } ?: fallback
-
-    private inline fun <reified T : Enum<T>> enumValue(json: JSONObject, key: String, fallback: T): T =
-        runCatching { enumValueOf<T>(json.optString(key)) }.getOrDefault(fallback)
-
-    private fun parseBook(json: JSONObject) = SyncedBook(
-        uuid = json.getString("uuid"), title = json.optString("title", "未命名书籍"),
-        author = json.optString("author", "未知作者"), description = json.optString("description"),
-        format = enumValue(json, "format", BookFormat.TXT), createdTime = json.optLong("createdTime"),
-        contentHash = json.getString("contentHash"), category = json.optString("category", "未分类"),
-    )
 
     private fun jsonObject(key: String, json: JSONObject): LocalCloudObject {
         val file = tempFile("payload").apply { writeText(json.toString()) }
@@ -1206,28 +977,8 @@ class CloudSyncEngine @Inject constructor(
         )
     }
 
-    private fun keysForMutation(value: SyncOutboxEntity): List<String> = when (SyncEntityType.valueOf(value.entityType)) {
-        SyncEntityType.BOOK -> listOf("books/${value.entityId}/metadata", "books/${value.entityId}/source")
-        SyncEntityType.PROGRESS -> listOf("progress/${value.entityId}")
-        SyncEntityType.BOOKMARKS -> listOf("bookmarks/${value.entityId}")
-        SyncEntityType.SETTINGS -> listOf("settings/global")
-        SyncEntityType.SESSION -> listOf("sessions/${value.entityId}")
-        SyncEntityType.FONT -> listOf("fonts/${value.entityId}/metadata", "fonts/${value.entityId}/source")
-    }
-
     private fun tempFile(prefix: String) = File(context.cacheDir, "cloud-sync/$prefix-${UUID.randomUUID()}")
         .also { it.parentFile?.mkdirs() }
-
-    private fun File.sha256(): String = inputStream().buffered().use { input ->
-        val digest = MessageDigest.getInstance("SHA-256")
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            digest.update(buffer, 0, count)
-        }
-        digest.digest().joinToString("") { "%02x".format(it) }
-    }
 
     private suspend fun shouldDeferLargePayload(mutation: SyncOutboxEntity): Boolean {
         val type = SyncEntityType.valueOf(mutation.entityType)
@@ -1242,16 +993,11 @@ class CloudSyncEngine @Inject constructor(
         return capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) != true
     }
 
-    private data class BookMarkOwner(val bookUuid: String) {
-        companion object { fun from(value: BookmarkEntity) = BookMarkOwner(value.bookUuid) }
-    }
-
     internal class AuthorizationRequiredException(message: String) : Exception(message)
 
     private companion object {
         const val MAX_CONCURRENT_UPLOADS = 4
         const val PREPARED_SNAPSHOT_MAX_AGE_MILLIS = 2 * 60_000L
         const val PERMANENT_TOMBSTONE_EXPIRY = Long.MAX_VALUE
-        const val PROGRESS_EPSILON = 0.000_001f
     }
 }

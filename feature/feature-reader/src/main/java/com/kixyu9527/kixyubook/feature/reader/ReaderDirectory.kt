@@ -1,0 +1,467 @@
+package com.kixyu9527.kixyubook.feature.reader
+
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.graphics.Color.parseColor
+import android.view.WindowManager
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Toc
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.ViewCompat
+import androidx.window.layout.FoldingFeature
+import androidx.window.layout.WindowInfoTracker
+import com.kixyu9527.kixyubook.core.common.model.*
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleControl
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuInteractivePopupSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSearchField
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPopupSpring
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
+import com.kixyu9527.kixyubook.core.reader.engine.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
+
+
+internal enum class DirectoryView { CHAPTERS, BOOKMARKS }
+
+@Composable
+internal fun DirectorySheet(
+    state: ReaderUiState,
+    selectChapter: (Int) -> Unit,
+    selectBookmark: (Bookmark) -> Unit,
+    deleteBookmark: (String) -> Unit,
+    expandedLayout: Boolean = false,
+) {
+    val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
+    var directoryView by rememberSaveable { mutableStateOf(DirectoryView.CHAPTERS) }
+    val bookmarkedChapterIds = remember(state.bookmarks) { state.bookmarks.mapTo(mutableSetOf(), Bookmark::chapterId) }
+    val currentIndex = state.chapterIndex.coerceIn(0, state.chapters.lastIndex.coerceAtLeast(0))
+    val currentVolume = state.chapters.getOrNull(currentIndex)?.volumeIndex
+    val expandedVolumes = remember(state.book?.uuid) {
+        mutableStateMapOf<Int, Boolean>().apply {
+            currentVolume?.let { this[it] = true }
+        }
+    }
+    val directoryRows = remember(state.chapters, expandedVolumes.toMap()) {
+        buildDirectoryRows(state.chapters, expandedVolumes)
+    }
+    val currentRowIndex = directoryRows.indexOfFirst { row ->
+        row is DirectoryRow.ChapterRow && row.index == currentIndex
+    }.coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = currentRowIndex)
+    LaunchedEffect(currentIndex, directoryView) {
+        if (directoryView == DirectoryView.CHAPTERS && state.chapters.isNotEmpty()) {
+            currentVolume?.let { expandedVolumes[it] = true }
+            val targetRows = buildDirectoryRows(state.chapters, expandedVolumes)
+            val target = targetRows.indexOfFirst { row ->
+                row is DirectoryRow.ChapterRow && row.index == currentIndex
+            }.coerceAtLeast(0)
+            if (targetRows.isNotEmpty()) listState.scrollToItem(target)
+        }
+    }
+    Column(if (expandedLayout) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = KixyuSpacing.large, end = KixyuSpacing.small),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (directoryView == DirectoryView.CHAPTERS) "目录 · ${state.chapters.size} 章" else "书签 · ${state.bookmarks.size}",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            KixyuIconButton(onClick = {
+                directoryView = if (directoryView == DirectoryView.CHAPTERS) DirectoryView.BOOKMARKS else DirectoryView.CHAPTERS
+            }) {
+                Icon(
+                    if (directoryView == DirectoryView.CHAPTERS) Icons.Outlined.Bookmarks else Icons.AutoMirrored.Outlined.Toc,
+                    if (directoryView == DirectoryView.CHAPTERS) "查看书签" else "查看目录",
+                )
+            }
+        }
+        AnimatedContent(
+            targetState = directoryView,
+            modifier = if (expandedLayout) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth(),
+            transitionSpec = {
+                if (targetState == DirectoryView.BOOKMARKS) {
+                    (slideInHorizontally(tween(KixyuMotion.ReaderPopupEnterMillis)) { it / 3 } +
+                        fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis))) togetherWith
+                        (slideOutHorizontally(tween(KixyuMotion.ReaderPopupExitMillis)) { -it / 3 } +
+                            fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)))
+                } else {
+                    (slideInHorizontally(tween(KixyuMotion.ReaderPopupEnterMillis)) { -it / 3 } +
+                        fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis))) togetherWith
+                        (slideOutHorizontally(tween(KixyuMotion.ReaderPopupExitMillis)) { it / 3 } +
+                            fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)))
+                }
+            },
+            label = "directoryBookmarks",
+        ) { view ->
+            if (view == DirectoryView.CHAPTERS) {
+                Box(
+                    if (expandedLayout) Modifier.fillMaxSize()
+                    else Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
+                ) {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.fillMaxWidth().padding(
+                            end = if (directoryRows.size >= FAST_SCROLLER_MIN_CHAPTERS) {
+                                KixyuSize.directoryFastScrollerWidth
+                            } else 0.dp,
+                        ),
+                        state = listState,
+                    ) {
+                        items(
+                            count = directoryRows.size,
+                            key = { rowIndex -> directoryRows[rowIndex].key },
+                        ) { rowIndex ->
+                            when (val row = directoryRows[rowIndex]) {
+                                is DirectoryRow.Volume -> {
+                                    val expanded = expandedVolumes[row.index] == true
+                                    val hasBookmark = row.chapterIds.any { it in bookmarkedChapterIds }
+                                    KixyuListRow(
+                                        title = row.title,
+                                        supportingText = "${row.chapterCount} 章",
+                                        highlighted = hasBookmark,
+                                        onClick = { expandedVolumes[row.index] = !expanded },
+                                        leading = {
+                                            Icon(
+                                                if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                                if (expanded) "收起" else "展开",
+                                            )
+                                        },
+                                        trailing = {
+                                            if (hasBookmark) Icon(Icons.Filled.Bookmark, "本卷有书签", tint = MaterialTheme.colorScheme.primary)
+                                        },
+                                        modifier = if (isMiuix) Modifier.padding(
+                                            horizontal = KixyuSpacing.medium,
+                                            vertical = KixyuSpacing.extraSmall,
+                                        ) else Modifier,
+                                    )
+                                }
+                                is DirectoryRow.ChapterRow -> {
+                                    val chapter = state.chapters[row.index]
+                                    val current = row.index == state.chapterIndex
+                                    val hasBookmark = chapter.id in bookmarkedChapterIds
+                                    KixyuListRow(
+                                        title = chapter.title,
+                                        selected = current,
+                                        highlighted = hasBookmark,
+                                        onClick = { selectChapter(row.index) },
+                                        leading = {
+                                            Box(Modifier.size(KixyuSize.icon), contentAlignment = Alignment.Center) {
+                                                if (current) Icon(
+                                                    Icons.Outlined.PlayArrow,
+                                                    null,
+                                                    Modifier.size(KixyuSize.icon),
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                )
+                                            }
+                                        },
+                                        trailing = {
+                                            if (hasBookmark) Icon(
+                                                Icons.Filled.Bookmark,
+                                                "本章有书签",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        },
+                                        modifier = if (isMiuix) Modifier.padding(
+                                            start = KixyuSpacing.extraLarge,
+                                            end = KixyuSpacing.medium,
+                                            top = KixyuSpacing.extraSmall,
+                                            bottom = KixyuSpacing.extraSmall,
+                                        ) else Modifier.padding(start = KixyuSpacing.large),
+                                    )
+                                }
+                            }
+                        }
+                        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+                    }
+                    if (directoryRows.size >= FAST_SCROLLER_MIN_CHAPTERS) {
+                        DirectoryFastScroller(
+                            itemCount = directoryRows.size,
+                            listState = listState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                        )
+                    }
+                }
+            } else if (state.bookmarks.isEmpty()) {
+                Box(
+                    if (expandedLayout) Modifier.fillMaxSize()
+                    else Modifier.fillMaxWidth().height(180.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("还没有书签", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn(
+                    if (expandedLayout) Modifier.fillMaxSize()
+                    else Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
+                ) {
+                    items(state.bookmarks, key = Bookmark::uuid) { bookmark ->
+                        KixyuListRow(
+                            title = bookmark.chapterTitle,
+                            supportingText = bookmark.preview.ifBlank { "第 ${bookmark.position + 1} 段" },
+                            onClick = { selectBookmark(bookmark) },
+                            leading = { Icon(Icons.Outlined.Bookmark, null) },
+                            trailing = {
+                                KixyuIconButton(onClick = { deleteBookmark(bookmark.uuid) }) {
+                                    Icon(Icons.Outlined.DeleteOutline, "删除书签")
+                                }
+                            },
+                            modifier = if (isMiuix) {
+                                Modifier.padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.extraSmall)
+                            } else Modifier,
+                        )
+                    }
+                    item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
+                }
+            }
+        }
+    }
+}
+
+internal sealed interface DirectoryRow {
+    val key: String
+
+    data class Volume(
+        val index: Int,
+        val title: String,
+        val chapterCount: Int,
+        val chapterIds: Set<Long>,
+    ) : DirectoryRow {
+        override val key = "volume:$index:$title:${chapterIds.minOrNull()}"
+    }
+
+    data class ChapterRow(val index: Int, val id: Long) : DirectoryRow {
+        override val key = "chapter:$id"
+    }
+}
+
+internal fun buildDirectoryRows(
+    chapters: List<Chapter>,
+    expandedVolumes: Map<Int, Boolean>,
+): List<DirectoryRow> {
+    if (chapters.none { !it.volumeTitle.isNullOrBlank() }) {
+        return chapters.mapIndexed { index, chapter -> DirectoryRow.ChapterRow(index, chapter.id) }
+    }
+    // Older indexes may contain a standalone spine entry for a volume cover in addition to
+    // the volume group read from NAV/NCX. Keep its source index intact, but do not render it
+    // as a second identically named directory row.
+    val normalizedVolumeTitles = chapters.mapNotNullTo(hashSetOf()) { chapter ->
+        chapter.volumeTitle?.normalizedDirectoryTitle()
+    }
+    return buildList {
+        var position = 0
+        while (position < chapters.size) {
+            val chapter = chapters[position]
+            val volumeIndex = chapter.volumeIndex
+            val volumeTitle = chapter.volumeTitle
+            if (volumeIndex == null || volumeTitle.isNullOrBlank()) {
+                if (chapter.title.normalizedDirectoryTitle() !in normalizedVolumeTitles) {
+                    add(DirectoryRow.ChapterRow(position, chapter.id))
+                }
+                position++
+                continue
+            }
+            val start = position
+            while (position < chapters.size && chapters[position].volumeIndex == volumeIndex) position++
+            val volumeChapters = chapters.subList(start, position)
+            add(
+                DirectoryRow.Volume(
+                    index = volumeIndex,
+                    title = volumeTitle,
+                    chapterCount = volumeChapters.size,
+                    chapterIds = volumeChapters.mapTo(hashSetOf(), Chapter::id),
+                ),
+            )
+            if (expandedVolumes[volumeIndex] == true) {
+                volumeChapters.forEachIndexed { offset, item ->
+                    add(DirectoryRow.ChapterRow(start + offset, item.id))
+                }
+            }
+        }
+    }
+}
+
+internal fun String.normalizedDirectoryTitle(): String =
+    trim().replace(Regex("[\\s　]+"), "").trim('：', ':', '-', '—')
+
+internal const val FAST_SCROLLER_MIN_CHAPTERS = 30
+
+@Composable
+internal fun DirectoryFastScroller(
+    itemCount: Int,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val thumbHeightPx = with(density) { KixyuSize.directoryFastScrollerThumbHeight.toPx() }
+    var trackHeightPx by remember { mutableFloatStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
+    var scrollJob by remember { mutableStateOf<Job?>(null) }
+    val listFraction by remember(itemCount, listState) {
+        derivedStateOf {
+            listState.firstVisibleItemIndex.toFloat() / (itemCount - 1).coerceAtLeast(1)
+        }
+    }
+
+    fun scrollToFraction(value: Float) {
+        dragFraction = value.coerceIn(0f, 1f)
+        val target = ((itemCount - 1) * dragFraction).roundToInt()
+        scrollJob?.cancel()
+        scrollJob = scope.launch { listState.scrollToItem(target) }
+    }
+
+    val visibleFraction = if (dragging) dragFraction else listFraction
+    val travelPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(0f)
+    Box(
+        modifier.width(KixyuSize.directoryFastScrollerWidth)
+            .onSizeChanged { trackHeightPx = it.height.toFloat() }
+            .pointerInput(itemCount, trackHeightPx) {
+                detectTapGestures { point ->
+                    val travel = (size.height - thumbHeightPx).coerceAtLeast(1f)
+                    scrollToFraction((point.y - thumbHeightPx / 2f) / travel)
+                }
+            },
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(
+            Modifier.align(Alignment.Center)
+                .fillMaxHeight()
+                .width(KixyuSize.directoryFastScrollerTrackWidth)
+                .background(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraLarge),
+        )
+        Surface(
+            modifier = Modifier
+                .offset { IntOffset(0, (travelPx * visibleFraction).roundToInt()) }
+                .size(
+                    KixyuSize.directoryFastScrollerThumbWidth,
+                    KixyuSize.directoryFastScrollerThumbHeight,
+                )
+                .draggable(
+                    orientation = Orientation.Vertical,
+                    state = rememberDraggableState { delta ->
+                        val travel = travelPx.coerceAtLeast(1f)
+                        scrollToFraction(dragFraction + delta / travel)
+                    },
+                    onDragStarted = {
+                        dragging = true
+                        dragFraction = listFraction
+                    },
+                    onDragStopped = { dragging = false },
+                ),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            tonalElevation = KixyuSpacing.extraSmall,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.DragHandle, "快速滚动目录", Modifier.size(KixyuSize.icon))
+            }
+        }
+    }
+}

@@ -4,6 +4,8 @@ import android.os.SystemClock
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.*
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
@@ -283,16 +285,37 @@ class ReaderViewModel @Inject constructor(
         charOffset: Int,
         persistProgress: Boolean,
     ): Boolean {
+        val startedAt = SystemClock.elapsedRealtime()
         val currentState = _uiState.value
         if (index == currentState.chapterIndex && currentState.chapter != null) return true
         if (currentState.chapters.getOrNull(index) == null) return false
         // Keep the current chapter rendered while the target is read. Removing the
         // reader from composition here left a blank screen when a search jump was slow
         // or its chapter index was not contiguous.
-        val readerChapter = currentState.prefetchedChapters[index]
+        val prefetched = currentState.prefetchedChapters[index]
+        val readerChapter = prefetched
             ?: chapterLoad(index, currentState.chapters, ChapterLoadPriority.USER).await()
-            ?: return false
+        if (readerChapter == null) {
+            DiagnosticLog.record(
+                Category.READER,
+                "chapter_navigation_finished",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = "missing",
+                details = mapOf("chapter" to index),
+            )
+            return false
+        }
         activateChapter(index, position, charOffset, readerChapter, persistProgress)
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+        if (prefetched == null || elapsedMs >= SLOW_NAVIGATION_MS) {
+            DiagnosticLog.record(
+                Category.READER,
+                "chapter_navigation_finished",
+                elapsedMs = elapsedMs,
+                outcome = "success",
+                details = mapOf("chapter" to index, "prefetched" to (prefetched != null)),
+            )
+        }
         return true
     }
 
@@ -723,7 +746,6 @@ class ReaderViewModel @Inject constructor(
         books.setReaderInteractionActive(false)
         cloudSync.releaseBook(bookUuid)
         books.releaseReaderMemory(bookUuid)
-        super.onCleared()
     }
 }
 
@@ -764,6 +786,7 @@ private const val CHAPTER_PREFETCH_RADIUS = 2
 // The renderer composes only the immediate previous/next chapter, but retaining a second decoded
 // pair gives one-page EPUB chapters enough runway for rapid consecutive boundary gestures.
 private const val RENDER_PREFETCH_RADIUS = 2
+private const val SLOW_NAVIGATION_MS = 150L
 
 internal fun shouldApplySyncedProgress(
     incomingUpdatedAt: Long,

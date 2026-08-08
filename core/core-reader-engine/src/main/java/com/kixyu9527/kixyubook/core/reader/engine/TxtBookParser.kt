@@ -175,32 +175,13 @@ class TxtBookParser : BookParser {
         // is an incomplete code point.
         decodeSample(sample, StandardCharsets.UTF_8)?.let { return StandardCharsets.UTF_8 }
 
-        val icuGuess = detectWithPlatformIcu(sample)
-        if (icuGuess != null && icuGuess.confidence >= ICU_DIRECT_CONFIDENCE &&
-            decodeSample(sample, icuGuess.charset) != null
-        ) return icuGuess.charset
-
         return LEGACY_CHARSETS.mapNotNull { candidate ->
             decodeSample(sample, candidate)?.let { decoded ->
-                val icuBoost = if (icuGuess?.charset?.name().equals(candidate.name(), ignoreCase = true)) {
-                    (icuGuess?.confidence ?: 0) * ICU_SCORE_MULTIPLIER
-                } else 0
                 val chinesePreference = if (candidate.name().equals("GB18030", true)) GB18030_TIE_BREAKER else 0
-                candidate to (readabilityScore(decoded) + icuBoost + chinesePreference)
+                candidate to (readabilityScore(decoded) + chinesePreference)
             }
         }.maxByOrNull { it.second }?.first ?: charset("GB18030")
     }
-
-    /** Uses Android's ICU detector in production and falls back cleanly in JVM tests. */
-    private fun detectWithPlatformIcu(bytes: ByteArray): IcuGuess? = runCatching {
-        val detectorClass = Class.forName("android.icu.text.CharsetDetector")
-        val detector = detectorClass.getDeclaredConstructor().newInstance()
-        detectorClass.getMethod("setText", ByteArray::class.java).invoke(detector, bytes)
-        val match = detectorClass.getMethod("detect").invoke(detector) ?: return@runCatching null
-        val name = match.javaClass.getMethod("getName").invoke(match) as String
-        val confidence = match.javaClass.getMethod("getConfidence").invoke(match) as Int
-        IcuGuess(Charset.forName(name), confidence)
-    }.getOrNull()
 
     private fun readabilityScore(text: String): Int {
         var score = 0
@@ -242,7 +223,6 @@ class TxtBookParser : BookParser {
         val excludedLines: Set<Int>,
     )
 
-    private data class IcuGuess(val charset: Charset, val confidence: Int)
 
     private companion object {
         const val MAX_FRONT_MATTER_LINES = 256
@@ -278,8 +258,6 @@ class TxtBookParser : BookParser {
             "起来", "可以", "已经", "但是", "因为", "所以", "如果", "不是", "就是", "还有", "看着",
             "我們", "他們", "一個", "這個", "沒有", "什麼", "說道", "時候", "知道", "已經", "但是",
         )
-        const val ICU_DIRECT_CONFIDENCE = 55
-        const val ICU_SCORE_MULTIPLIER = 20
         const val GB18030_TIE_BREAKER = 120
     }
 }

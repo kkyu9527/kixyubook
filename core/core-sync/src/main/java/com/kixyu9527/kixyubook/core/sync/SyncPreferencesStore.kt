@@ -160,7 +160,7 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(ERROR)
     }
 
-    suspend fun markAuthRequired(@Suppress("UNUSED_PARAMETER") message: String) = context.cloudSyncDataStore.edit {
+    suspend fun markAuthRequired() = context.cloudSyncDataStore.edit {
         it[PHASE] = CloudSyncPhase.AUTH_REQUIRED.name
         // Authorization is recovered silently on the next foreground pass. Never expose the
         // provider/HTTP exception as a user-facing sync error while that recovery is pending.

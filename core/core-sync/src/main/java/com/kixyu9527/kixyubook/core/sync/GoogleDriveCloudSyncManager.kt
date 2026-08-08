@@ -320,7 +320,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 }
             }
             is GoogleConnectResult.NeedsAuthorization -> Unit
-            is GoogleConnectResult.Failed -> preferences.markAuthRequired(result.message)
+            is GoogleConnectResult.Failed -> preferences.markAuthRequired()
         }
     }
 
@@ -362,7 +362,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                     error is CloudSyncEngine.AuthorizationRequiredException ||
                     (error is DriveHttpException && error.statusCode == 401)
                 ) {
-                    preferences.markAuthRequired("需要重新授权 Google Drive")
+                    preferences.markAuthRequired()
                 } else {
                     preferences.markError(error.message ?: "无法检查云端书库")
                 }
