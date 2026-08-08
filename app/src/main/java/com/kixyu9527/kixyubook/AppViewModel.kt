@@ -67,10 +67,6 @@ class AppViewModel @Inject constructor(
         books.setAppAnimationActive(active)
     }
 
-    fun onAppForeground() = cloudSync.onAppForeground()
-
-    fun onAppBackground() = cloudSync.onAppBackground()
-
     fun prioritizeBookSync(bookUuid: String) = cloudSync.prioritizeBook(bookUuid)
 
     override fun onCleared() {

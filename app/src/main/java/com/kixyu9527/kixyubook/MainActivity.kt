@@ -105,16 +105,6 @@ class MainActivity : ComponentActivity() {
         updateDownloader.resumePendingInstallIfPermitted()
     }
 
-    override fun onStart() {
-        super.onStart()
-        appViewModel.onAppForeground()
-    }
-
-    override fun onStop() {
-        if (!isChangingConfigurations) appViewModel.onAppBackground()
-        super.onStop()
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(Color.Transparent.toArgb(), Color.Transparent.toArgb()),
@@ -124,8 +114,9 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         super.onCreate(savedInstanceState)
-        // Mark the process visible before the eagerly-created sync state can emit an action-needed
-        // notification for a conflict that is already being shown inside this Activity.
+        // Suppress action-needed notifications while this new window is becoming visible. The
+        // process lifecycle owns the matching background transition so another visible window
+        // cannot be mistaken for the whole app going to the background.
         localNotifications.onAppForeground()
         notificationDestination.value = intent.getStringExtra(
             LocalNotificationManager.EXTRA_NOTIFICATION_DESTINATION,
