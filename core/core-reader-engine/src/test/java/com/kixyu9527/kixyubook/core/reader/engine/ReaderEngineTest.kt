@@ -555,11 +555,53 @@ class ReaderEngineTest {
 
         assertEquals(
             listOf(
+                DocumentChapterOutline(0, "第一卷 风起"),
                 DocumentChapterOutline(1, "第一章", "第一卷 风起", 0),
+                DocumentChapterOutline(2, "第二卷 云涌"),
                 DocumentChapterOutline(3, "第二章", "第二卷 云涌", 1),
             ),
             EpubBookParser().readChapterOutlines(epub),
         )
+    }
+
+    @Test fun epubChapterOutlinesRepairCoverPrefaceAndImageOnlyVolumePage() = runBlocking {
+        val epub = folder.newFile("semantic-outline.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry(
+                "OPS/book.opf",
+                """<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>目录修复</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="preface" href="Chapter001.xhtml" media-type="application/xhtml+xml"/><item id="volume" href="Chapter002.xhtml" media-type="application/xhtml+xml"/><item id="chapter" href="Chapter003.xhtml" media-type="application/xhtml+xml"/><item id="art" href="volume.png" media-type="image/png"/></manifest><spine><itemref idref="cover"/><itemref idref="preface"/><itemref idref="volume"/><itemref idref="chapter"/></spine></package>""",
+            )
+            entry(
+                "OPS/nav.xhtml",
+                """<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><a href="cover.xhtml">cover</a></li><li><a href="Chapter001.xhtml">Chapter001</a></li><li><span>第一卷 风起</span><ol><li><a href="Chapter003.xhtml">第一章 初见</a></li></ol></li></ol></nav></body></html>""",
+            )
+            entry("OPS/cover.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><p>封面页</p></body></html>""")
+            entry("OPS/Chapter001.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>序</h1><p>序言正文。</p></body></html>""")
+            entry("OPS/Chapter002.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="volume.png"/></body></html>""")
+            entry("OPS/Chapter003.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章 初见</h1><p>正文。</p></body></html>""")
+            val pngHeader = ByteArray(24).apply {
+                this[0] = 0x89.toByte(); this[1] = 0x50; this[2] = 0x4E; this[3] = 0x47
+                this[16] = 0; this[17] = 0; this[18] = 0x03; this[19] = 0x20
+                this[20] = 0; this[21] = 0; this[22] = 0x04; this[23] = 0xB0.toByte()
+            }
+            zip.putNextEntry(ZipEntry("OPS/volume.png")); zip.write(pngHeader); zip.closeEntry()
+        }
+
+        assertEquals(
+            listOf(
+                DocumentChapterOutline(0, "封面"),
+                DocumentChapterOutline(1, "序"),
+                DocumentChapterOutline(2, "第一卷 风起"),
+                DocumentChapterOutline(3, "第一章 初见", "第一卷 风起", 0),
+            ),
+            EpubBookParser().readChapterOutlines(epub),
+        )
+        assertEquals("第一卷 风起", EpubBookParser().readChapter(epub, 2, "第一卷 风起")?.title)
     }
 
     @Test fun epubParserNormalizesSemanticInlineStylesAndExternalCss() = runBlocking {

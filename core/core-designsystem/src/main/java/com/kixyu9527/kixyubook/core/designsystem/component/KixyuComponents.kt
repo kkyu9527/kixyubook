@@ -64,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.semantics.selected
@@ -341,20 +342,53 @@ fun KixyuListRow(
     leading: (@Composable () -> Unit)? = null,
     trailing: @Composable () -> Unit = {},
 ) {
+    val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val containerColor = when {
+        selected && isMiuix -> MaterialTheme.colorScheme.primary
         selected -> MaterialTheme.colorScheme.secondaryContainer
         highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
         else -> Color.Transparent
     }
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+    if (isMiuix) {
+        val selectedContentColor = MaterialTheme.colorScheme.onPrimary
+        val selectedSupportingColor = selectedContentColor.copy(alpha = .78f)
         MiuixBasicComponent(
             modifier = modifier.fillMaxWidth()
+                .clip(MaterialTheme.shapes.large)
                 .background(containerColor, MaterialTheme.shapes.large)
                 .heightIn(min = KixyuSize.rowMinHeight),
             title = title,
+            titleColor = if (selected) {
+                MiuixBasicComponentDefaults.titleColor(selectedContentColor)
+            } else {
+                MiuixBasicComponentDefaults.titleColor()
+            },
             summary = supportingText,
-            startAction = leading,
-            endActions = { trailing() },
+            summaryColor = if (selected) {
+                MiuixBasicComponentDefaults.summaryColor(selectedSupportingColor)
+            } else {
+                MiuixBasicComponentDefaults.summaryColor()
+            },
+            startAction = leading?.let { content ->
+                {
+                    CompositionLocalProvider(
+                        LocalContentColor provides if (selected) {
+                            selectedContentColor
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    ) { content() }
+                }
+            },
+            endActions = {
+                CompositionLocalProvider(
+                    LocalContentColor provides if (selected) {
+                        selectedContentColor
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                ) { trailing() }
+            },
             insideMargin = PaddingValues(
                 horizontal = KixyuSpacing.rowHorizontal,
                 vertical = KixyuSpacing.rowVertical,
@@ -374,7 +408,9 @@ fun KixyuListRow(
             leadingContent = leading,
             trailingContent = { trailing() },
             colors = ListItemDefaults.colors(containerColor = containerColor),
-            modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+            modifier = modifier.fillMaxWidth()
+                .clip(MaterialTheme.shapes.large)
+                .clickable(onClick = onClick),
         )
     }
 }

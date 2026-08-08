@@ -187,8 +187,38 @@ internal fun String.normalizedNavigationTitle(): String = singleLineBookHeading(
 
 internal fun String.fallbackChapterTitle(sourceIndex: Int): String {
     val stem = substringAfterLast('/').substringBeforeLast('.').replace('_', ' ').replace('-', ' ').trim()
-    return stem.takeIf { it.length in 2..80 && it.any(Char::isLetter) } ?: "第 ${sourceIndex + 1} 章"
+    return stem.semanticEpubSectionTitle()
+        ?: stem.takeIf {
+            it.length in 2..80 && it.any(Char::isLetter) && !it.isGenericEpubChapterTitle()
+        }
+        ?: "第 ${sourceIndex + 1} 章"
 }
+
+internal fun String.semanticEpubSectionTitle(): String? {
+    val normalized = trim().lowercase().replace(Regex("[\\s_.-]+"), "")
+    return when {
+        normalized in setOf("cover", "coverpage", "bookcover", "titlepage", "封面") -> "封面"
+        normalized in setOf("preface", "foreword", "prologue", "introduction", "xu", "序", "序章") ->
+            if (normalized == "prologue" || normalized == "序章") "序章" else "序"
+        normalized in setOf("toc", "contents", "tableofcontents", "目录") -> "目录"
+        else -> null
+    }
+}
+
+internal fun String.isGenericEpubChapterTitle(): Boolean {
+    val value = singleLineBookHeading()
+    return GENERIC_EPUB_TITLE.matches(value) || GENERATED_EPUB_TITLE.matches(value)
+}
+
+internal fun String.isMeaningfulShortEpubHeading(): Boolean {
+    val value = singleLineBookHeading()
+    return value.length in 2..80 || value.semanticEpubSectionTitle() != null
+}
+
+private val GENERIC_EPUB_TITLE = Regex(
+    "(?i)^(?:chapter|chap|ch|section|part|page|text|content)\\s*[-_]?\\s*\\d+[a-z]?$",
+)
+private val GENERATED_EPUB_TITLE = Regex("^第\\s*\\d+\\s*章$")
 
 internal fun ZipFile.findEntry(path: String): ZipEntry? = getEntry(path) ?: entries().asSequence()
     .firstOrNull { it.name.equals(path, ignoreCase = true) }

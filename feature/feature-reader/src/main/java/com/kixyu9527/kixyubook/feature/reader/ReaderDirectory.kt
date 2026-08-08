@@ -139,7 +139,15 @@ internal fun DirectorySheet(
     var directoryView by rememberSaveable { mutableStateOf(DirectoryView.CHAPTERS) }
     val bookmarkedChapterIds = remember(state.bookmarks) { state.bookmarks.mapTo(mutableSetOf(), Bookmark::chapterId) }
     val currentIndex = state.chapterIndex.coerceIn(0, state.chapters.lastIndex.coerceAtLeast(0))
-    val currentVolume = state.chapters.getOrNull(currentIndex)?.volumeIndex
+    val currentChapterId = state.chapters.getOrNull(currentIndex)?.id
+    val collapsedDirectoryRows = remember(state.chapters) {
+        buildDirectoryRows(state.chapters, emptyMap())
+    }
+    val currentVolume = remember(collapsedDirectoryRows, currentChapterId) {
+        collapsedDirectoryRows.filterIsInstance<DirectoryRow.Volume>()
+            .firstOrNull { currentChapterId in it.chapterIds }
+            ?.index
+    }
     val expandedVolumes = remember(state.book?.uuid) {
         mutableStateMapOf<Int, Boolean>().apply {
             currentVolume?.let { this[it] = true }
@@ -149,7 +157,10 @@ internal fun DirectorySheet(
         buildDirectoryRows(state.chapters, expandedVolumes)
     }
     val currentRowIndex = directoryRows.indexOfFirst { row ->
-        row is DirectoryRow.ChapterRow && row.index == currentIndex
+        when (row) {
+            is DirectoryRow.ChapterRow -> row.index == currentIndex
+            is DirectoryRow.Volume -> row.targetChapterIndex == currentIndex
+        }
     }.coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = currentRowIndex)
     LaunchedEffect(currentIndex, directoryView) {
@@ -157,7 +168,10 @@ internal fun DirectorySheet(
             currentVolume?.let { expandedVolumes[it] = true }
             val targetRows = buildDirectoryRows(state.chapters, expandedVolumes)
             val target = targetRows.indexOfFirst { row ->
-                row is DirectoryRow.ChapterRow && row.index == currentIndex
+                when (row) {
+                    is DirectoryRow.ChapterRow -> row.index == currentIndex
+                    is DirectoryRow.Volume -> row.targetChapterIndex == currentIndex
+                }
             }.coerceAtLeast(0)
             if (targetRows.isNotEmpty()) listState.scrollToItem(target)
         }
@@ -203,7 +217,7 @@ internal fun DirectorySheet(
             if (view == DirectoryView.CHAPTERS) {
                 Box(
                     if (expandedLayout) Modifier.fillMaxSize()
-                    else Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
+                    else Modifier.fillMaxWidth().height(KixyuSize.readerSheetMaxContent),
                 ) {
                     androidx.compose.foundation.lazy.LazyColumn(
                         modifier = Modifier.fillMaxWidth().padding(
@@ -221,24 +235,44 @@ internal fun DirectorySheet(
                                 is DirectoryRow.Volume -> {
                                     val expanded = expandedVolumes[row.index] == true
                                     val hasBookmark = row.chapterIds.any { it in bookmarkedChapterIds }
+                                    val current = row.hasOwnContent && row.targetChapterIndex == state.chapterIndex
                                     KixyuListRow(
                                         title = row.title,
-                                        supportingText = "${row.chapterCount} 章",
+                                        supportingText = if (row.chapterCount > 0) "${row.chapterCount} 章" else "卷内容",
+                                        selected = current,
                                         highlighted = hasBookmark,
-                                        onClick = { expandedVolumes[row.index] = !expanded },
+                                        onClick = { selectChapter(row.targetChapterIndex) },
                                         leading = {
-                                            Icon(
-                                                if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                                                if (expanded) "收起" else "展开",
-                                            )
+                                            KixyuIconButton(
+                                                onClick = { expandedVolumes[row.index] = !expanded },
+                                                modifier = Modifier.size(KixyuSize.readerControlButton),
+                                            ) {
+                                                Icon(
+                                                    if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                                    if (expanded) "收起${row.title}" else "展开${row.title}",
+                                                    tint = if (current && isMiuix) {
+                                                        MaterialTheme.colorScheme.onPrimary
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                                    },
+                                                )
+                                            }
                                         },
                                         trailing = {
-                                            if (hasBookmark) Icon(Icons.Filled.Bookmark, "本卷有书签", tint = MaterialTheme.colorScheme.primary)
+                                            if (hasBookmark) Icon(
+                                                Icons.Filled.Bookmark,
+                                                "本卷有书签",
+                                                tint = if (current && isMiuix) {
+                                                    MaterialTheme.colorScheme.onPrimary
+                                                } else {
+                                                    MaterialTheme.colorScheme.primary
+                                                },
+                                            )
                                         },
-                                        modifier = if (isMiuix) Modifier.padding(
+                                        modifier = if (isMiuix) Modifier.animateItem().padding(
                                             horizontal = KixyuSpacing.medium,
                                             vertical = KixyuSpacing.extraSmall,
-                                        ) else Modifier,
+                                        ) else Modifier.animateItem(),
                                     )
                                 }
                                 is DirectoryRow.ChapterRow -> {
@@ -256,7 +290,11 @@ internal fun DirectorySheet(
                                                     Icons.Outlined.PlayArrow,
                                                     null,
                                                     Modifier.size(KixyuSize.icon),
-                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    tint = if (isMiuix) {
+                                                        MaterialTheme.colorScheme.onPrimary
+                                                    } else {
+                                                        MaterialTheme.colorScheme.primary
+                                                    },
                                                 )
                                             }
                                         },
@@ -264,15 +302,19 @@ internal fun DirectorySheet(
                                             if (hasBookmark) Icon(
                                                 Icons.Filled.Bookmark,
                                                 "本章有书签",
-                                                tint = MaterialTheme.colorScheme.primary,
+                                                tint = if (current && isMiuix) {
+                                                    MaterialTheme.colorScheme.onPrimary
+                                                } else {
+                                                    MaterialTheme.colorScheme.primary
+                                                },
                                             )
                                         },
-                                        modifier = if (isMiuix) Modifier.padding(
+                                        modifier = if (isMiuix) Modifier.animateItem().padding(
                                             start = KixyuSpacing.extraLarge,
                                             end = KixyuSpacing.medium,
                                             top = KixyuSpacing.extraSmall,
                                             bottom = KixyuSpacing.extraSmall,
-                                        ) else Modifier.padding(start = KixyuSpacing.large),
+                                        ) else Modifier.animateItem().padding(start = KixyuSpacing.large),
                                     )
                                 }
                             }
@@ -290,7 +332,7 @@ internal fun DirectorySheet(
             } else if (state.bookmarks.isEmpty()) {
                 Box(
                     if (expandedLayout) Modifier.fillMaxSize()
-                    else Modifier.fillMaxWidth().height(180.dp),
+                    else Modifier.fillMaxWidth().height(KixyuSize.readerSheetMaxContent),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("还没有书签", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -298,7 +340,7 @@ internal fun DirectorySheet(
             } else {
                 androidx.compose.foundation.lazy.LazyColumn(
                     if (expandedLayout) Modifier.fillMaxSize()
-                    else Modifier.fillMaxWidth().heightIn(max = KixyuSize.readerSheetMaxContent),
+                    else Modifier.fillMaxWidth().height(KixyuSize.readerSheetMaxContent),
                 ) {
                     items(state.bookmarks, key = Bookmark::uuid) { bookmark ->
                         KixyuListRow(
@@ -331,8 +373,10 @@ internal sealed interface DirectoryRow {
         val title: String,
         val chapterCount: Int,
         val chapterIds: Set<Long>,
+        val targetChapterIndex: Int,
+        val hasOwnContent: Boolean,
     ) : DirectoryRow {
-        override val key = "volume:$index:$title:${chapterIds.minOrNull()}"
+        override val key = "volume:$index:$title:$targetChapterIndex"
     }
 
     data class ChapterRow(val index: Int, val id: Long) : DirectoryRow {
@@ -344,45 +388,112 @@ internal fun buildDirectoryRows(
     chapters: List<Chapter>,
     expandedVolumes: Map<Int, Boolean>,
 ): List<DirectoryRow> {
-    if (chapters.none { !it.volumeTitle.isNullOrBlank() }) {
+    val sections = buildVolumeSections(chapters)
+    if (sections.isEmpty()) {
         return chapters.mapIndexed { index, chapter -> DirectoryRow.ChapterRow(index, chapter.id) }
     }
-    // Older indexes may contain a standalone spine entry for a volume cover in addition to
-    // the volume group read from NAV/NCX. Keep its source index intact, but do not render it
-    // as a second identically named directory row.
-    val normalizedVolumeTitles = chapters.mapNotNullTo(hashSetOf()) { chapter ->
-        chapter.volumeTitle?.normalizedDirectoryTitle()
+    val sectionsByStart = sections.associateBy(VolumeSection::startIndex)
+    val hiddenStandaloneTargets = sections.mapNotNullTo(hashSetOf()) { section ->
+        section.targetChapterIndex.takeIf { it !in section.startIndex until section.endIndexExclusive }
     }
     return buildList {
         var position = 0
         while (position < chapters.size) {
-            val chapter = chapters[position]
-            val volumeIndex = chapter.volumeIndex
-            val volumeTitle = chapter.volumeTitle
-            if (volumeIndex == null || volumeTitle.isNullOrBlank()) {
-                if (chapter.title.normalizedDirectoryTitle() !in normalizedVolumeTitles) {
-                    add(DirectoryRow.ChapterRow(position, chapter.id))
+            val section = sectionsByStart[position]
+            if (section == null) {
+                if (position !in hiddenStandaloneTargets) {
+                    add(DirectoryRow.ChapterRow(position, chapters[position].id))
                 }
                 position++
                 continue
             }
-            val start = position
-            while (position < chapters.size && chapters[position].volumeIndex == volumeIndex) position++
-            val volumeChapters = chapters.subList(start, position)
             add(
                 DirectoryRow.Volume(
-                    index = volumeIndex,
-                    title = volumeTitle,
-                    chapterCount = volumeChapters.size,
-                    chapterIds = volumeChapters.mapTo(hashSetOf(), Chapter::id),
+                    index = section.volumeIndex,
+                    title = section.title,
+                    chapterCount = section.childChapterIndices.size,
+                    chapterIds = buildSet {
+                        section.chapterIndices.mapTo(this) { chapters[it].id }
+                        add(chapters[section.targetChapterIndex].id)
+                    },
+                    targetChapterIndex = section.targetChapterIndex,
+                    hasOwnContent = section.targetChapterIndex !in section.childChapterIndices,
                 ),
             )
-            if (expandedVolumes[volumeIndex] == true) {
-                volumeChapters.forEachIndexed { offset, item ->
-                    add(DirectoryRow.ChapterRow(start + offset, item.id))
+            if (expandedVolumes[section.volumeIndex] == true) {
+                section.childChapterIndices.forEach { chapterIndex ->
+                    add(DirectoryRow.ChapterRow(chapterIndex, chapters[chapterIndex].id))
                 }
             }
+            position = section.endIndexExclusive
         }
+    }
+}
+
+private data class VolumeSection(
+    val volumeIndex: Int,
+    val title: String,
+    val startIndex: Int,
+    val endIndexExclusive: Int,
+    val chapterIndices: List<Int>,
+    val childChapterIndices: List<Int>,
+    val targetChapterIndex: Int,
+)
+
+/**
+ * Builds display-only volume sections without changing the underlying reading order. A publisher
+ * supplied EPUB volume page, or TXT prose between a volume heading and its first chapter, becomes
+ * the row target. When no such page exists, the volume starts at its first child chapter.
+ */
+private fun buildVolumeSections(chapters: List<Chapter>): List<VolumeSection> = buildList {
+    var position = 0
+    var previousSectionEnd = 0
+    val claimedStandaloneTargets = hashSetOf<Int>()
+    while (position < chapters.size) {
+        val chapter = chapters[position]
+        val volumeIndex = chapter.volumeIndex
+        val volumeTitle = chapter.volumeTitle
+        if (volumeIndex == null || volumeTitle.isNullOrBlank()) {
+            position++
+            continue
+        }
+        val start = position
+        while (
+            position < chapters.size &&
+            chapters[position].volumeIndex == volumeIndex &&
+            chapters[position].volumeTitle == volumeTitle
+        ) {
+            position++
+        }
+        val end = position
+        val normalizedTitle = volumeTitle.normalizedDirectoryTitle()
+        val inlineOpening = start.takeIf {
+            chapters[it].title.normalizedDirectoryTitle() == normalizedTitle
+        }
+        val standaloneOpening = if (inlineOpening == null) {
+            (start - 1 downTo previousSectionEnd).firstOrNull { candidate ->
+                candidate !in claimedStandaloneTargets &&
+                    chapters[candidate].volumeIndex == null &&
+                    chapters[candidate].title.normalizedDirectoryTitle() == normalizedTitle
+            }
+        } else {
+            null
+        }
+        standaloneOpening?.let(claimedStandaloneTargets::add)
+        val target = inlineOpening ?: standaloneOpening ?: start
+        val chapterIndices = (start until end).toList()
+        add(
+            VolumeSection(
+                volumeIndex = volumeIndex,
+                title = volumeTitle,
+                startIndex = start,
+                endIndexExclusive = end,
+                chapterIndices = chapterIndices,
+                childChapterIndices = chapterIndices.filterNot { it == inlineOpening },
+                targetChapterIndex = target,
+            ),
+        )
+        previousSectionEnd = end
     }
 }
 

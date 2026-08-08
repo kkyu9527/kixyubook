@@ -75,7 +75,7 @@ class EpubBookParser : BookParser {
     fun readChapterOutlines(file: File): List<DocumentChapterOutline> = ZipFile(file).use { zip ->
         val pkg = readPackage(file, zip)
         val navigationEntries = readNavigationEntries(zip, pkg)
-        val candidates = pkg.spine.mapIndexedNotNull { sourceIndex, id ->
+        val rawCandidates = pkg.spine.mapIndexedNotNull { sourceIndex, id ->
             val item = pkg.manifest[id] ?: return@mapIndexedNotNull null
             val navigation = navigationEntries[item.path.normalizedArchivePath()]
             DocumentChapterOutline(
@@ -85,12 +85,32 @@ class EpubBookParser : BookParser {
                 volumeIndex = navigation?.volumeIndex,
             )
         }
-        val nestedVolumeTitles = navigationEntries.values
-            .mapNotNullTo(hashSetOf()) { it.volumeTitle?.normalizedNavigationTitle() }
+        val inferredVolumePages = hashSetOf<Int>()
+        val candidates = rawCandidates.mapIndexed { position, outline ->
+            val item = pkg.manifest[pkg.spine[outline.sourceIndex]] ?: return@mapIndexed outline
+            val semanticTitle = outline.title.semanticEpubSectionTitle()
+                ?: item.path.substringAfterLast('/').substringBeforeLast('.').semanticEpubSectionTitle()
+            if (semanticTitle != null) return@mapIndexed outline.copy(title = semanticTitle)
+            if (!outline.title.isGenericEpubChapterTitle()) return@mapIndexed outline
+
+            val nextOutline = rawCandidates.getOrNull(position + 1)
+            val previousVolume = rawCandidates.getOrNull(position - 1)?.volumeTitle
+            val nextVolume = nextOutline?.volumeTitle?.takeIf { volume ->
+                volume.isNotBlank() && volume != previousVolume
+            }
+            val shouldInspectBody = outline.sourceIndex < FRONT_MATTER_INSPECTION_LIMIT || nextVolume != null
+            val inspection = if (shouldInspectBody) {
+                runCatching { inspectSpineOutline(zip, pkg, outline.sourceIndex) }.getOrNull()
+            } else {
+                null
+            }
+            val inferredVolumeTitle = nextVolume?.takeIf { inspection?.isImageOnly == true }
+            if (inferredVolumeTitle != null) inferredVolumePages += outline.sourceIndex
+            outline.copy(title = inspection?.title ?: inferredVolumeTitle ?: item.path.fallbackChapterTitle(outline.sourceIndex))
+        }
         val navigated = candidates.filter { outline ->
             val item = pkg.manifest[pkg.spine[outline.sourceIndex]] ?: return@filter false
-            item.path.normalizedArchivePath() in navigationEntries &&
-                !(outline.volumeTitle == null && outline.title.normalizedNavigationTitle() in nestedVolumeTitles)
+            item.path.normalizedArchivePath() in navigationEntries || outline.sourceIndex in inferredVolumePages
         }
         // Prefer the official TOC when it describes a meaningful part of the spine. This omits
         // publisher-only cover/copyright containers while retaining a safe fallback for EPUBs
@@ -154,7 +174,15 @@ class EpubBookParser : BookParser {
                 // The directory stores the exact source spine index. An empty cover/back-cover
                 // page must remain empty; substituting a nearby readable spine item duplicates
                 // another chapter and breaks navigation identity.
-                readSpineChapter(zip, pkg, chapterIndex) ?: DocumentChapter(
+                readSpineChapter(zip, pkg, chapterIndex)?.let { parsed ->
+                    val stableExpectedTitle = expectedTitle?.singleLineBookHeading()
+                        ?.takeIf(String::isNotBlank)
+                    if (parsed.title.isGenericEpubChapterTitle() && stableExpectedTitle != null) {
+                        parsed.copy(title = stableExpectedTitle)
+                    } else {
+                        parsed
+                    }
+                } ?: DocumentChapter(
                     title = expectedTitle?.singleLineBookHeading()?.takeIf(String::isNotBlank)
                         ?: pkg.manifest[pkg.spine[chapterIndex]]?.path?.fallbackChapterTitle(chapterIndex)
                         ?: "第 ${chapterIndex + 1} 章",
@@ -204,9 +232,8 @@ class EpubBookParser : BookParser {
         if (content.blocks.isEmpty()) return null
         // XHTML headings can contain <br>, line separators or zero-width formatting characters.
         // Never let those leak back into the directory after lazy body indexing.
-        val heading = content.heading?.singleLineBookHeading()?.takeIf { it.length in 2..80 }
-        val fallback = item.path.substringAfterLast('/').substringBeforeLast('.')
-        val title = heading ?: fallback.ifBlank { "第 ${index + 1} 章" }
+        val heading = content.heading?.singleLineBookHeading()?.takeIf(String::isMeaningfulShortEpubHeading)
+        val title = heading ?: item.path.fallbackChapterTitle(index)
         var removedHeading = false
         val body = content.blocks.filterNot { block ->
             val duplicate = !removedHeading && heading != null && block is XhtmlBlock.Text &&
@@ -228,6 +255,32 @@ class EpubBookParser : BookParser {
             images
         }
         return DocumentChapter(title, paragraphs, presentedImages, styledParagraphs.map(StyledText::spans))
+    }
+
+    private fun inspectSpineOutline(
+        zip: ZipFile,
+        pkg: PackageDocument,
+        index: Int,
+    ): SpineOutlineInspection? {
+        val id = pkg.spine.getOrNull(index) ?: return null
+        val item = pkg.manifest[id] ?: return null
+        val entry = zip.findEntry(item.path) ?: return null
+        val content = zip.getInputStream(entry).use { input ->
+            readXhtml(input, zip, item.path, pkg.manifest.values)
+        }
+        val heading = content.heading?.singleLineBookHeading()
+            ?.takeIf(String::isMeaningfulShortEpubHeading)
+        val shortFrontMatter = content.blocks.asSequence()
+            .filterIsInstance<XhtmlBlock.Text>()
+            .map { it.value.text.singleLineBookHeading() }
+            .firstOrNull { it.semanticEpubSectionTitle() != null }
+            ?.semanticEpubSectionTitle()
+        val textBlocks = content.blocks.count { it is XhtmlBlock.Text }
+        val imageBlocks = content.blocks.count { it is XhtmlBlock.Image }
+        return SpineOutlineInspection(
+            title = heading ?: shortFrontMatter,
+            isImageOnly = textBlocks == 0 && imageBlocks == 1,
+        )
     }
 
     private fun readPackage(file: File, zip: ZipFile): PackageDocument {
@@ -897,6 +950,7 @@ class EpubBookParser : BookParser {
     private companion object {
         const val PACKAGE_INDEX_CACHE_SIZE = 4
         const val CSS_SOURCE_CACHE_SIZE = 48
+        const val FRONT_MATTER_INSPECTION_LIMIT = 16
         const val MAX_COVER_BYTES = 8 * 1024 * 1024
         const val MAX_CSS_BYTES = 1024 * 1024
         const val MAX_CSS_IMPORT_DEPTH = 4
@@ -933,5 +987,10 @@ class EpubBookParser : BookParser {
         val CSS_COVER_VALUE = Regex("(?:^|\\s|/)cover(?:$|\\s)", RegexOption.IGNORE_CASE)
     }
 }
+
+private data class SpineOutlineInspection(
+    val title: String?,
+    val isImageOnly: Boolean,
+)
 
 private fun Long.elapsedMilliseconds(): Long = (System.nanoTime() - this) / 1_000_000L
