@@ -1,10 +1,16 @@
 package com.kixyu9527.kixyubook.core.common.diagnostics
 
 import android.content.Context
+import android.database.sqlite.SQLiteConstraintException
+import android.database.sqlite.SQLiteException
 import android.util.Log
+import java.io.EOFException
 import java.io.File
+import java.io.FileNotFoundException
+import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.Executors
+import java.util.zip.ZipException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -89,8 +95,50 @@ object DiagnosticLog {
         file.writeBytes(bytes.copyOfRange((firstLineBreak + 1).coerceAtMost(bytes.size), bytes.size))
     }
 
-    private fun String.safeField(): String =
-        replace(Regex("[\\r\\n|]+"), " ").take(MAX_FIELD_LENGTH)
+    private fun String.safeField(): String = redactSensitiveValues()
+        .replace(Regex("[\\r\\n|]+"), " ")
+        .take(MAX_FIELD_LENGTH)
 
     enum class Category { LIBRARY, SYNC, IMPORT, EPUB_PARSE, READER, PAGINATION }
 }
+
+/** Stable, R8-independent description suitable for persisted diagnostic records. */
+data class DiagnosticFailure(
+    val outcome: String,
+    val reason: String,
+)
+
+fun Throwable.toDiagnosticFailure(): DiagnosticFailure {
+    val classification = when (this) {
+        is ZipException -> "invalid_archive" to "压缩文件结构损坏或不完整"
+        is EOFException -> "truncated_input" to "文件内容不完整"
+        is FileNotFoundException -> "missing_file" to "找不到需要读取的文件"
+        is SQLiteConstraintException -> "constraint_error" to "本地数据违反唯一性约束"
+        is SQLiteException -> "local_data_error" to "读取或保存本地数据失败"
+        is SecurityException -> "permission_error" to "没有完成此操作所需的访问权限"
+        is OutOfMemoryError -> "memory_error" to "处理内容时可用内存不足"
+        is IOException -> "io_error" to "读取或写入数据失败"
+        is IllegalArgumentException -> "invalid_data" to "输入数据不符合预期格式"
+        is IllegalStateException -> "invalid_state" to "当前数据状态不符合操作要求"
+        else -> "unexpected_error" to "发生未预期错误"
+    }
+    val message = generateSequence(this) { it.cause }
+        .mapNotNull { cause -> cause.message?.trim()?.takeIf(String::isNotEmpty) }
+        .firstOrNull()
+        ?.redactSensitiveValues()
+        ?.take(MAX_DIAGNOSTIC_REASON_LENGTH)
+    return DiagnosticFailure(
+        outcome = classification.first,
+        reason = message?.let { "${classification.second}：$it" } ?: classification.second,
+    )
+}
+
+private const val MAX_DIAGNOSTIC_REASON_LENGTH = 180
+private val credentialPattern = Regex(
+    "(?i)(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|bearer)(\\s*[:=]\\s*|\\s+)[^\\s,;]+",
+)
+private val emailPattern = Regex("(?i)[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
+
+private fun String.redactSensitiveValues(): String =
+    replace(credentialPattern) { match -> "${match.groupValues[1]}=<已隐藏>" }
+        .replace(emailPattern, "<账号已隐藏>")
