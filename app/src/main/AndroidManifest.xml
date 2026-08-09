@@ -48,7 +48,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|uiMode"
             android:resizeableActivity="true">
             <!-- Let Android 15+ and compatible HyperOS system UI expose a second app window. -->
             <property

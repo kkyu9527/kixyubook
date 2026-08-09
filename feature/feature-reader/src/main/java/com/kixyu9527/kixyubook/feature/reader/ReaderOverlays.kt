@@ -399,14 +399,22 @@ internal fun ReaderSettingsSheet(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
                 ) {
-                    Text(current.title, style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        current.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
                     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
                         Text(
                             "作者",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(current.author, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            current.author,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
                         Text(
