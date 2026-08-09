@@ -6,6 +6,7 @@ import android.content.Intent
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -173,8 +174,20 @@ class MainActivity : ComponentActivity() {
                 LocalNotificationManager.DESTINATION_DATA_BACKUP -> Routes.DATA_AND_BACKUP
                 else -> Routes.HOME
             }
-            if (navController.currentDestination?.route != route) {
-                navController.navigate(route) { launchSingleTop = true }
+            if (route == Routes.HOME) {
+                // HOME is the only top-level NavHost destination. Never push another HOME above
+                // Reader (HOME -> Reader -> HOME), otherwise Back would reveal the old reader.
+                if (navController.currentDestination?.route != Routes.HOME) {
+                    navController.popBackStack(Routes.HOME, inclusive = false)
+                }
+            } else if (navController.currentDestination?.route != route) {
+                // A notification opens a child of the top level, not a child of whichever screen
+                // happened to be visible. Clear Reader/other details before adding that child so
+                // its Back action always returns to HOME.
+                navController.navigate(route) {
+                    popUpTo(Routes.HOME) { inclusive = false }
+                    launchSingleTop = true
+                }
             }
             notificationDestination.value = null
         }
@@ -197,6 +210,7 @@ class MainActivity : ComponentActivity() {
                     onLoadReleaseNotes = appViewModel::loadCurrentReleaseNotes,
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
                     onPrioritizeBookSync = appViewModel::prioritizeBookSync,
+                    onExitApp = { finish() },
                 )
             }
         }
@@ -365,6 +379,7 @@ private fun KixyuNavHost(
     onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
     onPrioritizeBookSync: (String) -> Unit,
+    onExitApp: () -> Unit,
 ) {
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
@@ -385,6 +400,9 @@ private fun KixyuNavHost(
     var bookNavigationPending by remember { mutableStateOf(false) }
     var releaseNotesVisible by rememberSaveable { mutableStateOf(false) }
     val topLevelActive = route == null || route == Routes.HOME
+    // Home, Library and Settings are sibling pages inside the single HOME destination. At that
+    // level Back exits the task; it must never pop an accidentally restored detail/reader entry.
+    BackHandler(enabled = topLevelActive, onBack = onExitApp)
     val prioritizeAnimation: () -> Unit = {
         onAnimationPriorityChanged(true)
         animationPriorityJob?.cancel()
@@ -668,7 +686,11 @@ private fun KixyuNavHost(
                         initialSettings = initialReaderSettings,
                         onExit = {
                             prioritizeAnimation()
-                            navController.popBackStack()
+                            // Reader always belongs directly to the top level. Pop to that exact
+                            // parent instead of trusting an arbitrary historical stack entry.
+                            if (!navController.popBackStack(Routes.HOME, inclusive = false)) {
+                                onExitApp()
+                            }
                         },
                     )
                 }
