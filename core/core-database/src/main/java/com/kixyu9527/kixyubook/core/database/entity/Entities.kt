@@ -15,6 +15,7 @@ data class BookEntity(
     val createdTime: Long,
     val contentHash: String,
     val category: String,
+    @ColumnInfo(defaultValue = "0") val lastOpenedTime: Long = 0,
 )
 
 @Entity(

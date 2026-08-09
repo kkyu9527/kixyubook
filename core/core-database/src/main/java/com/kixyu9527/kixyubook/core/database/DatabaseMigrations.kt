@@ -82,5 +82,11 @@ object DatabaseMigrations {
         }
     }
 
-    val supported = arrayOf(MIGRATION_6_7)
+    val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE books ADD COLUMN lastOpenedTime INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    val supported = arrayOf(MIGRATION_6_7, MIGRATION_7_8)
 }

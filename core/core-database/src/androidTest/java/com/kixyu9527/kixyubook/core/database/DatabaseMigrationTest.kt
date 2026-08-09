@@ -67,6 +67,33 @@ class DatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate7To8_addsLocalBookOpenActivity() {
+        helper.createDatabase(TEST_DATABASE, 7).apply {
+            execSQL(
+                """
+                INSERT INTO books (
+                    uuid, title, author, description, coverPath, format, originalPath,
+                    storagePath, createdTime, contentHash, category
+                ) VALUES ('book-1', '测试书籍', '作者', '', NULL, 'TXT', '/source', '/stored', 1, 'hash-1', '未分类')
+                """.trimIndent(),
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            8,
+            true,
+            DatabaseMigrations.MIGRATION_7_8,
+        ).use { database ->
+            database.query("SELECT lastOpenedTime FROM books WHERE uuid = 'book-1'").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(0L, cursor.getLong(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "migration-test"
     }

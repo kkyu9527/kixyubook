@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 interface BookRepository {
     fun observeLibrary(): Flow<List<LibraryBook>>
     fun observeImportEvents(): Flow<String>
+    /** Immediately promotes a book in local activity ordering without changing reading progress. */
+    fun markBookOpened(bookUuid: String)
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
     /** Restores an immutable source blob while preserving its permanent book UUID. */
     suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean

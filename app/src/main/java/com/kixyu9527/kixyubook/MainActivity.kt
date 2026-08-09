@@ -73,6 +73,7 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
+import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.navigation.Routes
 import com.kixyu9527.kixyubook.feature.home.HomeRoute
 import com.kixyu9527.kixyubook.feature.library.LibraryRoute
@@ -101,6 +102,7 @@ class MainActivity : ComponentActivity() {
     private val appViewModel: AppViewModel by viewModels()
     @Inject lateinit var updateDownloader: AppUpdateDownloader
     @Inject lateinit var localNotifications: LocalNotificationManager
+    @Inject lateinit var bookRepository: BookRepository
     private val notificationDestination = MutableStateFlow<String?>(null)
 
     override fun onResume() {
@@ -210,6 +212,7 @@ class MainActivity : ComponentActivity() {
                     onLoadReleaseNotes = appViewModel::loadCurrentReleaseNotes,
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
                     onPrioritizeBookSync = appViewModel::prioritizeBookSync,
+                    onBookOpened = bookRepository::markBookOpened,
                     onExitApp = { finish() },
                 )
             }
@@ -379,6 +382,7 @@ private fun KixyuNavHost(
     onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
     onPrioritizeBookSync: (String) -> Unit,
+    onBookOpened: (String) -> Unit,
     onExitApp: () -> Unit,
 ) {
     val entry by navController.currentBackStackEntryAsState()
@@ -430,6 +434,7 @@ private fun KixyuNavHost(
     val openBook: (String) -> Unit = { bookUuid ->
         if (navController.currentDestination?.route == Routes.HOME && !bookNavigationPending) {
             bookNavigationPending = true
+            onBookOpened(bookUuid)
             onPrioritizeBookSync(bookUuid)
             // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
             // from a Compose frame callback. withFrameNanos resumed at the beginning of the next

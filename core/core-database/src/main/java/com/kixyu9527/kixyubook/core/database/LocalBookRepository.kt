@@ -16,6 +16,8 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticFailure
+import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
@@ -35,9 +37,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -51,6 +55,7 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -77,6 +82,8 @@ class LocalBookRepository @Inject constructor(
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val importIndexJobs = ConcurrentHashMap<String, Job>()
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    private val openedAtOverrides = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val openedAtClock = AtomicLong()
     private val workManager by lazy(LazyThreadSafetyMode.NONE) { WorkManager.getInstance(context) }
     private val derivedDataVersions by lazy(LazyThreadSafetyMode.NONE) {
         context.getSharedPreferences(DERIVED_DATA_VERSION_PREFERENCES, Context.MODE_PRIVATE)
@@ -112,17 +119,60 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
-    override fun observeLibrary(): Flow<List<LibraryBook>> = combine(dao.observeBooks(), dao.observeAllProgress()) { books, progresses ->
+    override fun observeLibrary(): Flow<List<LibraryBook>> = combine(
+        dao.observeBooks(),
+        dao.observeAllProgress(),
+        openedAtOverrides,
+    ) { books, progresses, openedAt ->
         val byBook = progresses.associateBy { it.bookUuid }
-        books.map { LibraryBook(it.toModel(), byBook[it.uuid]?.toModel()) }
-            // The shelf is ordered by the latest activity rather than a permanent mode: a new
-            // import starts at the top, and the next book the user reads naturally replaces it.
-            .sortedByDescending { item ->
-                maxOf(item.book.createdTime, item.progress?.updatedTime ?: 0L)
-            }
+        books.map { entity ->
+            val progress = byBook[entity.uuid]
+            LibraryBook(entity.toModel(), progress?.toModel()) to maxOf(
+                entity.createdTime,
+                entity.lastOpenedTime,
+                progress?.updatedTime ?: 0L,
+                openedAt[entity.uuid] ?: 0L,
+            )
+        }.sortedByDescending { (_, activityTime) -> activityTime }
+            .map { (book, _) -> book }
     }
 
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
+
+    override fun markBookOpened(bookUuid: String) {
+        val openedAt = openedAtClock.updateAndGet { previous ->
+            maxOf(previous + 1, System.currentTimeMillis())
+        }
+        // Publish before Room I/O so the shelf order changes in the same input dispatch as the
+        // tap. The durable column keeps that order after process recreation without pretending
+        // that the user's reading position changed or creating a cloud-sync conflict.
+        openedAtOverrides.update { it + (bookUuid to openedAt) }
+        importScope.launch {
+            runCatching { dao.markBookOpened(bookUuid, openedAt) }
+                .onSuccess { updated ->
+                    if (updated == 0) {
+                        openedAtOverrides.update { current ->
+                            if (current[bookUuid] == openedAt) current - bookUuid else current
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    openedAtOverrides.update { current ->
+                        if (current[bookUuid] == openedAt) current - bookUuid else current
+                    }
+                    val failure = error.toDiagnosticFailure()
+                    DiagnosticLog.record(
+                        Category.LIBRARY,
+                        "book_open_activity_failed",
+                        outcome = failure.outcome,
+                        details = mapOf(
+                            "book" to bookUuid.shortDiagnosticId(),
+                            "reason" to failure.reason,
+                        ),
+                    )
+                }
+        }
+    }
 
     override suspend fun importDocuments(uriStrings: List<String>): ImportSummary = withContext(Dispatchers.IO) {
         val startedAt = SystemClock.elapsedRealtime()
@@ -363,6 +413,7 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun deleteBooks(bookUuids: Set<String>): Unit = withContext(Dispatchers.IO) {
         if (bookUuids.isEmpty()) return@withContext
+        openedAtOverrides.update { current -> current - bookUuids }
         val startedAt = SystemClock.elapsedRealtime()
         storageMutationMutex.withLock {
             bookUuids.mapNotNull(importIndexJobs::remove).forEach { job ->

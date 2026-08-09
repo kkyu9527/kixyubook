@@ -63,6 +63,8 @@ interface BookDao {
 
     @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid") suspend fun updateBookMetadata(uuid: String, title: String, author: String, description: String): Int
     @Query("UPDATE books SET category = :category WHERE uuid = :uuid") suspend fun setCategory(uuid: String, category: String)
+    @Query("UPDATE books SET lastOpenedTime = MAX(lastOpenedTime, :openedAt) WHERE uuid = :uuid")
+    suspend fun markBookOpened(uuid: String, openedAt: Long): Int
     @Query("UPDATE chapters SET title = :title WHERE id = :chapterId") suspend fun updateChapterTitle(chapterId: Long, title: String)
     @Query("UPDATE chapters SET title = :title, volumeTitle = :volumeTitle, volumeIndex = :volumeIndex WHERE id = :chapterId")
     suspend fun updateChapterOutline(chapterId: Long, title: String, volumeTitle: String?, volumeIndex: Int?)

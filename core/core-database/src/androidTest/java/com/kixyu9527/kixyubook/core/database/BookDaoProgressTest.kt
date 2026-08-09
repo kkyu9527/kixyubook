@@ -56,6 +56,15 @@ class BookDaoProgressTest {
         assertEquals(200L, stored?.updatedTime)
     }
 
+    @Test
+    fun bookOpenActivity_isPersistedWithoutMovingBackwards() = runBlocking {
+        val dao = database.bookDao()
+        assertEquals(1, dao.markBookOpened("book-1", 200))
+        assertEquals(1, dao.markBookOpened("book-1", 100))
+
+        assertEquals(200L, dao.getBook("book-1")?.lastOpenedTime)
+    }
+
     private fun progress(position: Int, updatedTime: Long) = ReadingProgressEntity(
         bookUuid = "book-1",
         chapterId = 1,
