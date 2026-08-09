@@ -1,10 +1,13 @@
 package com.kixyu9527.kixyubook.update
 
+import android.content.Context
+import androidx.core.content.edit
 import com.kixyu9527.kixyubook.BuildConfig
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.common.repository.AppUpdateRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,11 +21,14 @@ import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
+class GitHubUpdateRepository @Inject constructor(
+    @param:ApplicationContext context: Context,
+) : AppUpdateRepository {
     private val mutableState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     override val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
     private val mutableReleaseNotesState = MutableStateFlow<ReleaseNotesState>(ReleaseNotesState.Idle)
@@ -30,11 +36,16 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
 
     private val checkMutex = Mutex()
     private val releaseNotesMutex = Mutex()
+    private val preferences = context.getSharedPreferences(UPDATE_PREFERENCES, Context.MODE_PRIVATE)
 
     override suspend fun checkForUpdates(manual: Boolean) {
         checkMutex.withLock {
+            if (!manual && !automaticCheckIsDue()) return@withLock
             mutableState.value = AppUpdateState.Checking
             val result = runCatching { fetchLatestRelease() }
+            if (result.isSuccess && !manual) {
+                preferences.edit { putLong(KEY_LAST_AUTOMATIC_CHECK_TIME, System.currentTimeMillis()) }
+            }
             mutableState.value = result.fold(
                 onSuccess = { release ->
                     when {
@@ -78,6 +89,12 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
 
     private fun manualResult(manual: Boolean): AppUpdateState =
         if (manual) AppUpdateState.UpToDate(BuildConfig.VERSION_NAME) else AppUpdateState.Idle
+
+    private fun automaticCheckIsDue(): Boolean {
+        val lastCheckTime = preferences.getLong(KEY_LAST_AUTOMATIC_CHECK_TIME, 0L)
+        val elapsedMillis = System.currentTimeMillis() - lastCheckTime
+        return lastCheckTime <= 0L || elapsedMillis < 0L || elapsedMillis >= AUTOMATIC_CHECK_INTERVAL_MILLIS
+    }
 
     private suspend fun fetchLatestRelease(): AppUpdateInfo? = withContext(Dispatchers.IO) {
         runCatching { fetchLatestReleaseFromApi() }
@@ -277,6 +294,9 @@ class GitHubUpdateRepository @Inject constructor() : AppUpdateRepository {
         const val EXPANDED_ASSETS_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/expanded_assets/"
         const val APK_DOWNLOAD_URL_PREFIX = "https://github.com/kkyu9527/kixyubook/releases/download/"
         const val NETWORK_TIMEOUT_MILLIS = 8_000
+        const val UPDATE_PREFERENCES = "app_update"
+        const val KEY_LAST_AUTOMATIC_CHECK_TIME = "last_automatic_check_time"
+        val AUTOMATIC_CHECK_INTERVAL_MILLIS = TimeUnit.HOURS.toMillis(24)
         val APK_ASSET_REGEX = Regex("href=\\\"(/kkyu9527/kixyubook/releases/download/[^\\\"]+\\.apk(?:\\?[^\\\"]*)?)\\\"")
     }
 }
