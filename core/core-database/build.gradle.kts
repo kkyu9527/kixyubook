@@ -18,6 +18,17 @@ androidComponents {
     }
 }
 
+android.testOptions.managedDevices {
+    localDevices {
+        register("pixel2Api35") {
+            device = "Pixel 2"
+            apiLevel = 35
+            systemImageSource = "aosp-atd"
+            testedAbi = "x86_64"
+        }
+    }
+}
+
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 dependencies {

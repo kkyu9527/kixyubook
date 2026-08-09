@@ -36,5 +36,5 @@ jobs:
 
       - name: Verify
         run: >-
-          ./gradlew testDebugUnitTest lintDebug assembleDebug
-          :core:core-database:assembleDebugAndroidTest --stacktrace
+          ./gradlew testDebugUnitTest lintDebug assembleDebug :app:assembleRelease
+          :core:core-database:pixel2Api35DebugAndroidTest --stacktrace

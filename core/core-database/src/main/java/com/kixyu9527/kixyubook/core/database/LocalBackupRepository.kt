@@ -110,6 +110,11 @@ class LocalBackupRepository @Inject constructor(
                                     if (read <= 0) break
                                     totalBytes += read
                                     require(totalBytes <= MAX_UNCOMPRESSED_BYTES) { "备份解压后体积异常" }
+                                    if (totalBytes % RESTORE_SPACE_CHECK_INTERVAL_BYTES < read) {
+                                        require(work.usableSpace >= RESTORE_WORKING_SPACE_RESERVE_BYTES) {
+                                            "设备存储空间不足，无法继续解压备份"
+                                        }
+                                    }
                                     output.write(buffer, 0, read)
                                 }
                             }
@@ -124,6 +129,7 @@ class LocalBackupRepository @Inject constructor(
                 val snapshot = File(extracted, DATABASE_ENTRY)
                 require(snapshot.isFile) { "备份缺少数据库" }
                 validateAndRebase(snapshot, File(extracted, "files"))
+                ensureRestoreInstallSpace(snapshot, File(extracted, "files"))
                 val bookCount = countBooks(snapshot)
                 installRestore(snapshot, File(extracted, "files"))
                 restoreSettings(properties)
@@ -137,7 +143,9 @@ class LocalBackupRepository @Inject constructor(
     private fun validateAndRebase(snapshot: File, assets: File) {
         SQLiteDatabase.openDatabase(snapshot.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             db.rawQuery("PRAGMA user_version", null).use { cursor ->
-                require(cursor.moveToFirst() && cursor.getInt(0) == DATABASE_VERSION) { "备份数据库版本不兼容" }
+                require(
+                    cursor.moveToFirst() && cursor.getInt(0) in SUPPORTED_BACKUP_DATABASE_VERSIONS,
+                ) { "备份数据库版本不兼容" }
             }
             db.rawQuery("SELECT uuid, format, coverPath FROM books", null).use { cursor ->
                 while (cursor.moveToNext()) {
@@ -158,6 +166,17 @@ class LocalBackupRepository @Inject constructor(
                     db.execSQL("UPDATE user_fonts SET filePath = ? WHERE uuid = ?", arrayOf(archived.livePath("fonts"), uuid))
                 }
             }
+        }
+    }
+
+    private fun ensureRestoreInstallSpace(snapshot: File, assets: File) {
+        val installBytes = snapshot.length() + assets.walkTopDown()
+            .filter(File::isFile)
+            .sumOf(File::length)
+        val requiredBytes = installBytes + RESTORE_WORKING_SPACE_RESERVE_BYTES
+        require(context.filesDir.usableSpace >= requiredBytes) {
+            val requiredMegabytes = (requiredBytes + BYTES_PER_MEBIBYTE - 1) / BYTES_PER_MEBIBYTE
+            "设备存储空间不足，恢复需要至少约 ${requiredMegabytes} MiB 可用空间"
         }
     }
 
@@ -284,7 +303,6 @@ class LocalBackupRepository @Inject constructor(
 
     private companion object {
         const val DATABASE_NAME = "kixyu-books.db"
-        const val DATABASE_VERSION = 6
         const val BACKUP_VERSION = 5
         const val MANIFEST_ENTRY = "manifest.properties"
         const val DATABASE_ENTRY = "database/kixyu-books.db"
@@ -293,6 +311,10 @@ class LocalBackupRepository @Inject constructor(
         const val RESTORE_WORK_PREFIX = "restore-"
         const val MAX_ENTRIES = 100_000
         const val MAX_UNCOMPRESSED_BYTES = 16L * 1024 * 1024 * 1024
+        const val BYTES_PER_MEBIBYTE = 1024L * 1024
+        const val RESTORE_WORKING_SPACE_RESERVE_BYTES = 16L * BYTES_PER_MEBIBYTE
+        const val RESTORE_SPACE_CHECK_INTERVAL_BYTES = 8L * BYTES_PER_MEBIBYTE
+        val SUPPORTED_BACKUP_DATABASE_VERSIONS = 6..KIXYU_DATABASE_VERSION
         val ASSET_DIRECTORIES = listOf("books", "covers", "fonts")
     }
 }
