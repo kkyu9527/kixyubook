@@ -27,7 +27,7 @@ import javax.inject.Singleton
 
 @Singleton
 class GitHubUpdateRepository @Inject constructor(
-    @param:ApplicationContext context: Context,
+    @ApplicationContext context: Context,
 ) : AppUpdateRepository {
     private val mutableState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     override val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
