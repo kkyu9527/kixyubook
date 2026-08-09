@@ -99,4 +99,93 @@ class DiagnosticLogFormattingTest {
             ),
         )
     }
+
+    @Test
+    fun diagnosticFilterCanShowOnlyFailuresWithinCategory() {
+        val success = parseDiagnosticEntry(
+            "2026-08-08T15:06:04Z | EPUB_PARSE | chapter_parse_finished | outcome=success",
+        )
+        val parseFailure = parseDiagnosticEntry(
+            "2026-08-08T15:06:05Z | EPUB_PARSE | chapter_parse_finished | outcome=error",
+        )
+        val syncFailure = parseDiagnosticEntry(
+            "2026-08-08T15:06:06Z | SYNC | full_sync_finished | outcome=error",
+        )
+
+        assertEquals(
+            listOf(parseFailure),
+            filterDiagnosticEntries(
+                listOf(success, parseFailure, syncFailure),
+                categoryKey = "EPUB_PARSE",
+                onlyFailures = true,
+            ),
+        )
+    }
+
+    @Test
+    fun cancelledSyncIsExplainedAsInterruptionAndExcludedFromFailures() {
+        val currentEntry = parseDiagnosticEntry(
+            "2026-08-09T12:44:43.586Z | SYNC | full_sync_finished | elapsedMs=8450 | " +
+                "outcome=interrupted | stage=remote_snapshot",
+        )
+        val legacyEntry = parseDiagnosticEntry(
+            "2026-08-09T09:41:45.428Z | SYNC | full_sync_finished | elapsedMs=15130 | outcome=kc1",
+        )
+        val olderLegacyEntry = parseDiagnosticEntry(
+            "2026-08-08T19:17:03.112Z | SYNC | full_sync_finished | elapsedMs=58810 | outcome=rb1",
+        )
+
+        assertEquals("云同步被系统中断", currentEntry.title)
+        assertEquals(false, currentEntry.isFailure)
+        assertTrue(currentEntry.details.contains("结果" to "被系统中断"))
+        assertTrue(currentEntry.details.contains("中断或失败阶段" to "检查云端变更"))
+        assertEquals("云同步被系统中断", legacyEntry.title)
+        assertEquals(false, legacyEntry.isFailure)
+        assertEquals("云同步被系统中断", olderLegacyEntry.title)
+        assertEquals(false, olderLegacyEntry.isFailure)
+    }
+
+    @Test
+    fun realSyncFailureShowsStableReadableDiagnosis() {
+        val entry = parseDiagnosticEntry(
+            "2026-08-09T12:44:43.586Z | SYNC | full_sync_finished | elapsedMs=8450 | " +
+                "outcome=drive_http_error | stage=uploading | statusCode=503 | " +
+                "reason=Google Drive 服务暂时不可用",
+        )
+
+        assertEquals("云同步失败", entry.title)
+        assertEquals(true, entry.isFailure)
+        assertTrue(entry.details.contains("结果" to "Google Drive 请求失败"))
+        assertTrue(entry.details.contains("中断或失败阶段" to "上传本机更改"))
+        assertTrue(entry.details.contains("HTTP 状态码" to "503"))
+        assertTrue(entry.details.contains("错误原因" to "Google Drive 服务暂时不可用"))
+    }
+
+    @Test
+    fun partialImportIsAnActionableFailureWithReadableCause() {
+        val entry = parseDiagnosticEntry(
+            "2026-08-09T12:44:43.586Z | IMPORT | documents_registered | elapsedMs=8450 | " +
+                "outcome=partial | run=abc | imported=2 | duplicates=1 | failures=1 | " +
+                "failureTypes=invalid_archive,io_error | firstFailureReason=压缩文件结构损坏或不完整",
+        )
+
+        assertEquals("书籍导入部分完成", entry.title)
+        assertEquals(true, entry.isFailure)
+        assertTrue(entry.details.contains("失败类型" to "压缩文件损坏、文件读写异常"))
+        assertTrue(entry.details.contains("首个失败原因" to "压缩文件结构损坏或不完整"))
+    }
+
+    @Test
+    fun chapterLoadFailureShowsSourceAndReason() {
+        val entry = parseDiagnosticEntry(
+            "2026-08-09T12:44:43.586Z | READER | chapter_loaded | elapsedMs=845 | " +
+                "outcome=local_data_error | book=12345678 | chapter=77 | priority=USER | " +
+                "source=database | reason=读取或保存本地数据失败",
+        )
+
+        assertEquals("章节内容加载失败", entry.title)
+        assertEquals(true, entry.isFailure)
+        assertTrue(entry.details.contains("内容来源" to "本地数据库"))
+        assertTrue(entry.details.contains("错误原因" to "读取或保存本地数据失败"))
+    }
 }

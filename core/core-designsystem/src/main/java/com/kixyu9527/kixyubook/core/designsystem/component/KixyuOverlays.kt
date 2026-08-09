@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -110,6 +112,7 @@ data class KixyuPopupMenuItem(
     val label: String,
     val icon: ImageVector,
     val enabled: Boolean = true,
+    val selected: Boolean = false,
     val onClick: () -> Unit,
 )
 
@@ -267,6 +270,15 @@ fun KixyuPopupMenu(
                             },
                             maxLines = 1,
                         )
+                        if (item.selected) {
+                            Spacer(Modifier.weight(1f))
+                            Icon(
+                                Icons.Outlined.Check,
+                                null,
+                                Modifier.size(KixyuSize.icon),
+                                tint = MiuixTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
             }
@@ -281,6 +293,11 @@ fun KixyuPopupMenu(
                 DropdownMenuItem(
                     text = { Text(item.label, maxLines = 1) },
                     leadingIcon = { Icon(item.icon, null) },
+                    trailingIcon = if (item.selected) {
+                        { Icon(Icons.Outlined.Check, null) }
+                    } else {
+                        null
+                    },
                     enabled = item.enabled,
                     onClick = item.onClick,
                 )

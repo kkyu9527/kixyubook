@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.database
 
 import com.kixyu9527.kixyubook.core.common.model.*
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticFailure
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParser
 import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapter
@@ -10,16 +11,11 @@ import java.util.Locale
 
 internal data class ChapterCacheKey(val bookUuid: String, val chapterIndex: Int)
 
-internal fun Throwable.diagnosticReason(): String =
-    generateSequence(this) { it.cause }
-        .mapNotNull { cause -> cause.message?.trim()?.takeIf(String::isNotEmpty) }
-        .firstOrNull()
-        ?: (this::class.qualifiedName ?: "未知错误")
-
 internal data class ImportRegistration(
     val imports: List<RegisteredImport>,
     val duplicateCount: Int,
     val failures: List<String>,
+    val failureDiagnostics: List<DiagnosticFailure>,
 )
 internal data class RegisteredImport(
     val bookUuid: String,

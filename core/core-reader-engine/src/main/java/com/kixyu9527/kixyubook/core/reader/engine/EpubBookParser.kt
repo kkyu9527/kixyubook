@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.reader.engine
 
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
+import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
@@ -148,12 +149,18 @@ class EpubBookParser : BookParser {
             )
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
+            val failure = error.toDiagnosticFailure()
             DiagnosticLog.record(
                 Category.EPUB_PARSE,
                 "bulk_parse_finished",
                 elapsedMs = startedAt.elapsedMilliseconds(),
-                outcome = error::class.simpleName ?: "error",
-                details = mapOf("emitted" to emitted),
+                outcome = failure.outcome,
+                details = mapOf(
+                    "book" to file.nameWithoutExtension.take(8),
+                    "requested" to (sourceIndices?.size ?: "all"),
+                    "emitted" to emitted,
+                    "reason" to failure.reason,
+                ),
             )
             throw error
         }
@@ -207,15 +214,17 @@ class EpubBookParser : BookParser {
             }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
+            val failure = error.toDiagnosticFailure()
             DiagnosticLog.record(
                 Category.EPUB_PARSE,
                 "chapter_parse_finished",
                 elapsedMs = startedAt.elapsedMilliseconds(),
-                outcome = error::class.simpleName ?: "error",
+                outcome = failure.outcome,
                 details = mapOf(
                     "book" to file.nameWithoutExtension.take(8),
                     "chapter" to chapterIndex,
                     "purpose" to purpose,
+                    "reason" to failure.reason,
                 ),
             )
             throw error

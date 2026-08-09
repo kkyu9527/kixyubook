@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,19 +67,35 @@ import kotlinx.coroutines.launch
 fun DiagnosticLogRoute(
     onBack: () -> Unit,
     onOpenCategory: (String) -> Unit,
-) = DiagnosticLogScreen(onBack = onBack, onOpenCategory = onOpenCategory)
+    onlyFailures: Boolean,
+    onOnlyFailuresChanged: (Boolean) -> Unit,
+) = DiagnosticLogScreen(
+    onBack = onBack,
+    onOpenCategory = onOpenCategory,
+    onlyFailures = onlyFailures,
+    onOnlyFailuresChanged = onOnlyFailuresChanged,
+)
 
 @Composable
 fun DiagnosticLogCategoryRoute(
     categoryKey: String,
     onBack: () -> Unit,
-) = DiagnosticLogScreen(onBack = onBack, categoryKey = categoryKey)
+    onlyFailures: Boolean,
+    onOnlyFailuresChanged: (Boolean) -> Unit,
+) = DiagnosticLogScreen(
+    onBack = onBack,
+    categoryKey = categoryKey,
+    onlyFailures = onlyFailures,
+    onOnlyFailuresChanged = onOnlyFailuresChanged,
+)
 
 @Composable
 private fun DiagnosticLogScreen(
     onBack: () -> Unit,
     categoryKey: String? = null,
     onOpenCategory: (String) -> Unit = {},
+    onlyFailures: Boolean,
+    onOnlyFailuresChanged: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -88,11 +105,14 @@ private fun DiagnosticLogScreen(
     val newestEntries = remember(rawLines) {
         rawLines.orEmpty().asReversed().map(::parseDiagnosticEntry)
     }
-    val visibleEntries = remember(newestEntries, categoryKey) {
-        categoryKey?.let { key -> newestEntries.filter { it.categoryKey == key } } ?: newestEntries
+    val filteredEntries = remember(newestEntries, onlyFailures) {
+        filterDiagnosticEntries(newestEntries, onlyFailures = onlyFailures)
     }
-    val categorySummaries = remember(newestEntries) {
-        newestEntries.groupBy(ReadableDiagnosticEntry::categoryKey).map { (key, entries) ->
+    val visibleEntries = remember(filteredEntries, categoryKey) {
+        filterDiagnosticEntries(filteredEntries, categoryKey = categoryKey)
+    }
+    val categorySummaries = remember(filteredEntries) {
+        filteredEntries.groupBy(ReadableDiagnosticEntry::categoryKey).map { (key, entries) ->
             DiagnosticCategorySummary(
                 key = key,
                 label = entries.first().category,
@@ -170,6 +190,16 @@ private fun DiagnosticLogScreen(
                     alignEnd = true,
                     items = listOf(
                         KixyuPopupMenuItem(
+                            label = "仅显示异常",
+                            icon = Icons.Outlined.ErrorOutline,
+                            enabled = newestEntries.isNotEmpty(),
+                            selected = onlyFailures,
+                            onClick = {
+                                onOnlyFailuresChanged(!onlyFailures)
+                                menuExpanded = false
+                            },
+                        ),
+                        KixyuPopupMenuItem(
                             label = "导出",
                             icon = Icons.Outlined.Share,
                             enabled = newestEntries.isNotEmpty(),
@@ -218,7 +248,7 @@ private fun DiagnosticLogScreen(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "暂无诊断日志",
+                    if (onlyFailures) "暂无异常日志" else "暂无诊断日志",
                     modifier = Modifier.padding(top = KixyuSpacing.medium),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -403,6 +403,7 @@ private fun KixyuNavHost(
     var animationPriorityJob by remember { mutableStateOf<Job?>(null) }
     var bookNavigationPending by remember { mutableStateOf(false) }
     var releaseNotesVisible by rememberSaveable { mutableStateOf(false) }
+    var diagnosticOnlyFailures by rememberSaveable { mutableStateOf(false) }
     val topLevelActive = route == null || route == Routes.HOME
     // Home, Library and Settings are sibling pages inside the single HOME destination. At that
     // level Back exits the task; it must never pop an accidentally restored detail/reader entry.
@@ -661,6 +662,8 @@ private fun KixyuNavHost(
                 }
                 composable(Routes.DIAGNOSTIC_LOG) {
                     DiagnosticLogRoute(
+                        onlyFailures = diagnosticOnlyFailures,
+                        onOnlyFailuresChanged = { diagnosticOnlyFailures = it },
                         onBack = {
                             prioritizeAnimation()
                             navController.popBackStack()
@@ -677,6 +680,8 @@ private fun KixyuNavHost(
                 ) { entry ->
                     DiagnosticLogCategoryRoute(
                         categoryKey = entry.arguments?.getString("category").orEmpty(),
+                        onlyFailures = diagnosticOnlyFailures,
+                        onOnlyFailuresChanged = { diagnosticOnlyFailures = it },
                         onBack = {
                             prioritizeAnimation()
                             navController.popBackStack()

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
+import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 import kotlin.math.ceil
@@ -231,15 +232,18 @@ class ReaderPaginationCoordinator internal constructor(
                 measured
             } catch (throwable: Throwable) {
                 if (throwable !is CancellationException) {
+                    val failure = throwable.toDiagnosticFailure()
                     DiagnosticLog.record(
                         DiagnosticLog.Category.PAGINATION,
                         "failed",
                         elapsedMs = startedAt.elapsedMilliseconds(),
-                        outcome = throwable::class.java.simpleName,
+                        outcome = failure.outcome,
                         details = mapOf(
                             "book" to key.bookUuid.take(8),
                             "chapter" to key.chapterId,
+                            "paragraphs" to chapter.paragraphs.size,
                             "prefetch" to prefetch,
+                            "reason" to failure.reason,
                         ),
                     )
                 }

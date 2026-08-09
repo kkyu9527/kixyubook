@@ -177,32 +177,56 @@ class CloudSyncEngine @Inject constructor(
         onProgress: suspend (CloudSyncProgress) -> Unit = {},
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val syncStartedAt = SystemClock.elapsedRealtime()
-        DiagnosticLog.record(Category.SYNC, "full_sync_started", details = mapOf("preferredBook" to (preferredBookUuid != null)))
+        val syncRun = syncStartedAt.toString(36)
+        var syncStage = FullSyncStage.PREPARING
+        DiagnosticLog.record(
+            Category.SYNC,
+            "full_sync_started",
+            details = mapOf("run" to syncRun, "preferredBook" to (preferredBookUuid != null)),
+        )
         syncMutex.withLock { runCatching {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
-                DiagnosticLog.record(Category.SYNC, "full_sync_skipped", outcome = "not_ready")
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "full_sync_skipped",
+                    outcome = "not_ready",
+                    details = mapOf("run" to syncRun),
+                )
                 return@runCatching
             }
             if (persisted.conflicts.isNotEmpty()) {
-                DiagnosticLog.record(Category.SYNC, "full_sync_skipped", outcome = "conflict_waiting", details = mapOf("count" to persisted.conflicts.size))
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "full_sync_skipped",
+                    outcome = "conflict_waiting",
+                    details = mapOf("run" to syncRun, "count" to persisted.conflicts.size),
+                )
                 return@runCatching
             }
             preferences.markRunning()
+            syncStage = FullSyncStage.AUTHORIZATION
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
-            DiagnosticLog.record(Category.SYNC, "authorization_ready")
+            DiagnosticLog.record(Category.SYNC, "authorization_ready", details = mapOf("run" to syncRun))
+            syncStage = FullSyncStage.REMOTE_SNAPSHOT
             val snapshot = loadRemoteSnapshot(token, persisted)
             DiagnosticLog.record(
                 Category.SYNC,
                 "remote_snapshot_loaded",
                 elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt,
-                details = mapOf("known" to snapshot.known.size, "changed" to snapshot.changed.size),
+                details = mapOf(
+                    "run" to syncRun,
+                    "known" to snapshot.known.size,
+                    "changed" to snapshot.changed.size,
+                ),
             )
             var remote = snapshot.known
 
+            syncStage = FullSyncStage.APPLYING_REMOTE
             pullPipeline.applyRemoteTombstones(token, snapshot.changed)
             resolveDirtyProgress(token, remote)
+            syncStage = FullSyncStage.CONFLICT_CHECK
             val conflicts = findProvenConflicts(remote)
             if (conflicts.isNotEmpty()) {
                 val preferLocal = shouldPreferLocalConflicts(
@@ -216,10 +240,16 @@ class CloudSyncEngine @Inject constructor(
                 } else {
                     preferences.clearLocalConflictPreference()
                     preferences.setConflicts(conflicts)
-                    DiagnosticLog.record(Category.SYNC, "conflicts_waiting", outcome = "user_action", details = mapOf("count" to conflicts.size))
+                    DiagnosticLog.record(
+                        Category.SYNC,
+                        "conflicts_waiting",
+                        outcome = "user_action",
+                        details = mapOf("run" to syncRun, "count" to conflicts.size),
+                    )
                     return@runCatching
                 }
             }
+            syncStage = FullSyncStage.DOWNLOADING
             pullPipeline.applyRemoteChanges(
                 token = token,
                 changedRemote = snapshot.changed,
@@ -229,6 +259,7 @@ class CloudSyncEngine @Inject constructor(
                 onProgress = onProgress,
             )
 
+            syncStage = FullSyncStage.PREPARING_UPLOADS
             if (!persisted.initialMergeComplete) seedInitialOutbox()
             val pending = syncDao.pending().sortedWith(
                 compareBy<SyncOutboxEntity> {
@@ -241,7 +272,11 @@ class CloudSyncEngine @Inject constructor(
                     }
                 }.thenBy { it.changedAt },
             )
-            DiagnosticLog.record(Category.SYNC, "upload_queue_ready", details = mapOf("count" to pending.size))
+            DiagnosticLog.record(
+                Category.SYNC,
+                "upload_queue_ready",
+                details = mapOf("run" to syncRun, "count" to pending.size),
+            )
             var uploadedCount = 0
             if (pending.isNotEmpty()) {
                 onProgress(
@@ -253,6 +288,7 @@ class CloudSyncEngine @Inject constructor(
                     ),
                 )
             }
+            syncStage = FullSyncStage.UPLOADING
             val uploadBatch = mutableListOf<SyncOutboxEntity>()
             suspend fun flushUploadBatch() {
                 if (uploadBatch.isEmpty()) return
@@ -299,6 +335,7 @@ class CloudSyncEngine @Inject constructor(
                 }
             }
             flushUploadBatch()
+            syncStage = FullSyncStage.FINALIZING
             preferences.markSuccess(snapshot.nextPageToken ?: persisted.pageToken)
             notifications.clearAuthorizationFailure()
             DiagnosticLog.record(
@@ -306,19 +343,37 @@ class CloudSyncEngine @Inject constructor(
                 "full_sync_finished",
                 elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt,
                 outcome = "success",
-                details = mapOf("uploaded" to uploadedCount, "remoteChanged" to snapshot.changed.size),
+                details = mapOf(
+                    "run" to syncRun,
+                    "uploaded" to uploadedCount,
+                    "remoteChanged" to snapshot.changed.size,
+                ),
             )
         }.onFailure { error ->
+            if (error is CancellationException) {
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "full_sync_finished",
+                    elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt,
+                    outcome = "interrupted",
+                    details = mapOf("run" to syncRun, "stage" to syncStage.logValue),
+                )
+                withContext(NonCancellable) { preferences.markInterrupted() }
+                throw error
+            }
+            val failure = error.toSyncFailureDiagnostic()
             DiagnosticLog.record(
                 Category.SYNC,
                 "full_sync_finished",
                 elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt,
-                outcome = error::class.simpleName ?: "error",
+                outcome = failure.outcome,
+                details = buildMap {
+                    put("run", syncRun)
+                    put("stage", syncStage.logValue)
+                    failure.statusCode?.let { put("statusCode", it) }
+                    put("reason", failure.reason)
+                },
             )
-            if (error is CancellationException) {
-                withContext(NonCancellable) { preferences.markInterrupted() }
-                throw error
-            }
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired()
@@ -326,6 +381,59 @@ class CloudSyncEngine @Inject constructor(
                 preferences.markError(error.message ?: "同步失败")
             }
         } }
+    }
+
+    private enum class FullSyncStage(val logValue: String) {
+        PREPARING("preparing"),
+        AUTHORIZATION("authorization"),
+        REMOTE_SNAPSHOT("remote_snapshot"),
+        APPLYING_REMOTE("applying_remote"),
+        CONFLICT_CHECK("conflict_check"),
+        DOWNLOADING("downloading"),
+        PREPARING_UPLOADS("preparing_uploads"),
+        UPLOADING("uploading"),
+        FINALIZING("finalizing"),
+    }
+
+    private data class SyncFailureDiagnostic(
+        val outcome: String,
+        val reason: String,
+        val statusCode: Int? = null,
+    )
+
+    private fun Throwable.toSyncFailureDiagnostic(): SyncFailureDiagnostic = when (this) {
+        is AuthorizationRequiredException -> SyncFailureDiagnostic(
+            outcome = "authorization_required",
+            reason = "Google Drive 授权已失效",
+        )
+        is DriveHttpException -> SyncFailureDiagnostic(
+            outcome = "drive_http_error",
+            reason = when (statusCode) {
+                401 -> "Google Drive 授权已失效"
+                403 -> "Google Drive 拒绝了本次访问"
+                404 -> "Google Drive 中的同步对象不存在"
+                429 -> "Google Drive 请求过于频繁"
+                in 500..599 -> "Google Drive 服务暂时不可用"
+                else -> "Google Drive 请求失败"
+            },
+            statusCode = statusCode,
+        )
+        is java.io.IOException -> SyncFailureDiagnostic(
+            outcome = "network_error",
+            reason = "网络连接在同步过程中不可用",
+        )
+        is android.database.sqlite.SQLiteException -> SyncFailureDiagnostic(
+            outcome = "local_data_error",
+            reason = "读取或保存本地同步数据失败",
+        )
+        is org.json.JSONException -> SyncFailureDiagnostic(
+            outcome = "cloud_data_error",
+            reason = "云端同步数据格式无法识别",
+        )
+        else -> SyncFailureDiagnostic(
+            outcome = "unexpected_error",
+            reason = "同步过程中发生未预期错误",
+        )
     }
 
     /**
@@ -338,6 +446,9 @@ class CloudSyncEngine @Inject constructor(
         followedByFullSync: Boolean = false,
         pullRemote: Boolean = true,
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        val priorityStartedAt = SystemClock.elapsedRealtime()
+        var priorityStage = "preparing"
+        var diagnosticBookUuid = preferredBookUuid
         syncMutex.withLock { runCatching {
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
@@ -347,13 +458,16 @@ class CloudSyncEngine @Inject constructor(
             val bookUuid = preferredBookUuid
                 ?: books.getAllProgress().maxByOrNull(ReadingProgressEntity::updatedTime)?.bookUuid
                 ?: return@runCatching
+            diagnosticBookUuid = bookUuid
             if (!books.bookExists(bookUuid)) return@runCatching
             // This priority stage is intentionally silent. The following FULL worker owns the
             // persisted global phase; otherwise a cancelled/delayed continuation can leave the
             // app displaying SYNCING after this quick stage has already finished.
+            priorityStage = "authorization"
             val token = accountClient.accessToken()
                 ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
             val key = "progress/$bookUuid"
+            priorityStage = "remote_snapshot"
             var remote = findRemoteObject(token, key, "progress-$bookUuid.json")
             val mutationBeforePull = syncDao.allPending().lastOrNull {
                 it.entityType == SyncEntityType.PROGRESS.name && it.entityId == bookUuid
@@ -372,6 +486,7 @@ class CloudSyncEngine @Inject constructor(
 
             var cloudTime = Long.MIN_VALUE
             if (pullRemote && remote != null && shouldPullPriorityRemote(mutationBeforePull, remote.modifiedAt)) {
+                priorityStage = "downloading"
                 try {
                     withJsonDownload(token, requireNotNull(remote)) { json ->
                         cloudTime = json.optLong("updatedTime")
@@ -400,6 +515,7 @@ class CloudSyncEngine @Inject constructor(
             }
 
             if (pullRemote) {
+                priorityStage = "downloading"
                 // Bookmarks and reader settings join the initial reader pull. Progress writes made
                 // afterwards only upload their coalesced JSON and avoid three redundant Drive reads.
                 pullPriorityJson(
@@ -427,6 +543,7 @@ class CloudSyncEngine @Inject constructor(
             }
             val localProgress = books.getProgress(bookUuid)
             if (mutation != null && localProgress != null && localProgress.updatedTime >= cloudTime) {
+                priorityStage = "uploading"
                 val local = payloads.materialize(mutation, includeLargePayload = false).singleOrNull()
                 if (local != null) {
                     try {
@@ -455,6 +572,20 @@ class CloudSyncEngine @Inject constructor(
                 }
                 throw error
             }
+            val failure = error.toSyncFailureDiagnostic()
+            DiagnosticLog.record(
+                Category.SYNC,
+                "priority_sync_failed",
+                elapsedMs = SystemClock.elapsedRealtime() - priorityStartedAt,
+                outcome = failure.outcome,
+                details = buildMap {
+                    put("stage", priorityStage)
+                    put("followedByFullSync", followedByFullSync)
+                    diagnosticBookUuid?.let { put("book", it.take(8)) }
+                    failure.statusCode?.let { put("statusCode", it) }
+                    put("reason", failure.reason)
+                },
+            )
             if (error is AuthorizationRequiredException || (error is DriveHttpException && error.statusCode == 401)) {
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired()

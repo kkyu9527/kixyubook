@@ -176,7 +176,12 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun importDocuments(uriStrings: List<String>): ImportSummary = withContext(Dispatchers.IO) {
         val startedAt = SystemClock.elapsedRealtime()
-        DiagnosticLog.record(Category.IMPORT, "documents_selected", details = mapOf("count" to uriStrings.size))
+        val importRun = startedAt.toString(36)
+        DiagnosticLog.record(
+            Category.IMPORT,
+            "documents_selected",
+            details = mapOf("run" to importRun, "count" to uriStrings.size),
+        )
         val registration = storageMutationMutex.withLock {
             cleanupImportArtifacts()
             pruneUnreferencedBookFiles()
@@ -193,6 +198,13 @@ class LocalBookRepository @Inject constructor(
                     "imported" to summary.importedCount,
                     "duplicates" to summary.duplicateCount,
                     "failures" to summary.failures.size,
+                    "run" to importRun,
+                    "failureTypes" to registration.failureDiagnostics
+                        .map(DiagnosticFailure::outcome)
+                        .distinct()
+                        .joinToString(",")
+                        .takeIf(String::isNotEmpty),
+                    "firstFailureReason" to registration.failureDiagnostics.firstOrNull()?.reason,
                 ),
             )
         }
@@ -207,6 +219,7 @@ class LocalBookRepository @Inject constructor(
         val imports = mutableListOf<RegisteredImport>()
         var duplicates = 0
         val failures = mutableListOf<String>()
+        val failureDiagnostics = mutableListOf<DiagnosticFailure>()
         val importDir = File(context.cacheDir, "imports").apply { mkdirs() }
         uriStrings.distinct().forEach { rawUri ->
             val uri = rawUri.toUri()
@@ -277,12 +290,13 @@ class LocalBookRepository @Inject constructor(
                 storedFile?.delete()
                 coverFile?.delete()
                 failures += "$displayName：${error.message ?: "导入失败"}"
+                failureDiagnostics += error.toDiagnosticFailure()
             } finally {
                 temp.delete()
             }
         }
         importDir.delete()
-        return ImportRegistration(imports, duplicates, failures)
+        return ImportRegistration(imports, duplicates, failures, failureDiagnostics)
     }
 
     private fun enqueueBackgroundIndex(book: RegisteredImport) {
@@ -308,12 +322,17 @@ class LocalBookRepository @Inject constructor(
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
+                    val failure = error.toDiagnosticFailure()
                     DiagnosticLog.record(
                         Category.IMPORT,
                         "background_index_finished",
                         elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                        outcome = error::class.simpleName ?: "error",
-                        details = mapOf("format" to book.format.name),
+                        outcome = failure.outcome,
+                        details = mapOf(
+                            "format" to book.format.name,
+                            "book" to book.bookUuid.shortDiagnosticId(),
+                            "reason" to failure.reason,
+                        ),
                     )
                     removeIncompleteImport(book.bookUuid)
                     importEvents.emit("${book.displayName}：${error.message ?: "导入失败"}")
@@ -468,6 +487,8 @@ class LocalBookRepository @Inject constructor(
         priority: ChapterLoadPriority,
     ): ChapterContent? = withContext(Dispatchers.IO) {
         val startedAt = SystemClock.elapsedRealtime()
+        var diagnosticSource = "unknown"
+        try {
         val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
         synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let { return@withContext it }
         chapterLoadMutex.withLock {
@@ -476,9 +497,11 @@ class LocalBookRepository @Inject constructor(
             val book = dao.getBook(bookUuid)
             var storedParagraphs = dao.getParagraphs(chapter.id)
             var source = "database"
+            diagnosticSource = source
             val paragraphs = if (book?.format == BookFormat.EPUB.name) {
                 val diskCached = epubChapterCache.read(bookUuid, book.contentHash, chapterIndex)
                 source = if (diskCached != null) "epub_disk_cache" else "epub_parse"
+                diagnosticSource = source
                 val parsed = diskCached ?: epubParseCoordinator.interactive {
                         (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
                             .readChapter(File(book.storagePath), chapterIndex, chapter.title, purpose = "reader")
@@ -517,6 +540,25 @@ class LocalBookRepository @Inject constructor(
                     )
                 }
             }
+        }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            val failure = error.toDiagnosticFailure()
+            DiagnosticLog.record(
+                Category.READER,
+                "chapter_loaded",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = failure.outcome,
+                details = mapOf(
+                    "book" to bookUuid.shortDiagnosticId(),
+                    "chapter" to chapterIndex,
+                    "priority" to priority.name,
+                    "source" to diagnosticSource,
+                    "reason" to failure.reason,
+                ),
+            )
+            throw error
         }
     }
 

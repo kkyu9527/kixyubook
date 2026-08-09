@@ -6,6 +6,8 @@ import androidx.core.content.edit
 import androidx.room.withTransaction
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticFailure
+import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.singleLineBookHeading
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
@@ -41,6 +43,8 @@ internal class EpubIndexCoordinator(
         var inserted = 0
         var updated = 0
         var failures = 0
+        var firstFailure: DiagnosticFailure? = null
+        var firstFailedBook: String? = null
         storageMutationMutex.withLock {
             if (derivedDataVersions.getInt(KEY_EPUB_DIRECTORY_VERSION, 0) >= EPUB_DIRECTORY_VERSION) {
                 return@withLock
@@ -86,8 +90,12 @@ internal class EpubIndexCoordinator(
                         }
                     } catch (error: CancellationException) {
                         throw error
-                    } catch (_: Exception) {
+                    } catch (error: Exception) {
                         failures++
+                        if (firstFailure == null) {
+                            firstFailure = error.toDiagnosticFailure()
+                            firstFailedBook = book.uuid.shortIndexDiagnosticId()
+                        }
                     }
                 }
             derivedDataVersions.edit { putInt(KEY_EPUB_DIRECTORY_VERSION, EPUB_DIRECTORY_VERSION) }
@@ -97,7 +105,14 @@ internal class EpubIndexCoordinator(
             Category.EPUB_PARSE,
             "directory_upgrade_finished",
             outcome = if (failures == 0) "success" else "partial",
-            details = mapOf("inserted" to inserted, "updated" to updated, "failures" to failures),
+            details = mapOf(
+                "inserted" to inserted,
+                "updated" to updated,
+                "failures" to failures,
+                "firstFailedBook" to firstFailedBook,
+                "failureType" to firstFailure?.outcome,
+                "firstFailureReason" to firstFailure?.reason,
+            ),
         )
     }
 
@@ -194,18 +209,19 @@ internal class EpubIndexCoordinator(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
+            val failure = error.toDiagnosticFailure()
             DiagnosticLog.record(
                 Category.EPUB_PARSE,
                 "background_index_finished",
                 elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                outcome = error::class.simpleName ?: "error",
+                outcome = failure.outcome,
                 details = mapOf(
                     "book" to initialBook.uuid.shortIndexDiagnosticId(),
                     "chapter" to activeChapterIndex,
                     "requested" to requested,
                     "indexed" to indexed,
                     "preempted" to preempted,
-                    "reason" to error.indexDiagnosticReason(),
+                    "reason" to failure.reason,
                 )
             )
             throw error
@@ -223,12 +239,6 @@ private const val KEY_EPUB_DIRECTORY_VERSION = "epub_directory_version"
 private const val EPUB_DIRECTORY_VERSION = 2
 
 private fun String.shortIndexDiagnosticId(): String = take(8)
-
-private fun Throwable.indexDiagnosticReason(): String =
-    generateSequence(this) { it.cause }
-        .mapNotNull { cause -> cause.message?.trim()?.takeIf(String::isNotEmpty) }
-        .firstOrNull()
-        ?: (this::class.qualifiedName ?: "未知错误")
 
 private fun stableIndexChapterKey(bookUuid: String, index: Int, title: String): String {
     val input = "$bookUuid|$index|${title.singleLineBookHeading().lowercase()}"
