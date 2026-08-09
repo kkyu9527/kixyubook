@@ -118,6 +118,11 @@ private fun eventDescription(event: String, outcome: String?): Pair<String, Stri
     }
     "documents_selected" -> "已选择导入文件" to "用户选择了准备加入书库的文件。"
     "documents_registered" -> "书籍导入登记完成" to "文件已复制并登记到书库，后续解析会在后台进行。"
+    "directory_upgrade_finished" -> if (outcome == "success") {
+        "EPUB 目录更新完成" to "已根据新版解析规则自动补齐并更新已导入书籍的目录信息。"
+    } else {
+        "EPUB 目录部分更新" to "部分书籍的目录信息未能更新，可结合处理失败数量继续排查。"
+    }
     "background_index_finished" -> if (outcome == "success") {
         "书籍后台索引完成" to "全文检索所需的章节数据已经在后台生成。"
     } else {
@@ -195,7 +200,9 @@ private fun fieldLabel(key: String, category: String): String = when (key) {
     "count" -> "数量"
     "imported" -> "导入成功"
     "duplicates" -> "重复文件"
-    "failures" -> "导入失败"
+    "failures" -> if (category == "IMPORT") "导入失败" else "处理失败"
+    "inserted" -> "新增目录项"
+    "updated" -> "更新目录项"
     "chapters" -> "章节数"
     "preferredBook" -> "优先同步当前书籍"
     "known" -> "云端对象数"

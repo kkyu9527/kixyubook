@@ -69,6 +69,20 @@ class DiagnosticLogFormattingTest {
     }
 
     @Test
+    fun directoryUpgradeEntryHasReadableDescriptionAndCounts() {
+        val entry = parseDiagnosticEntry(
+            "2026-08-09T03:21:15.807Z | EPUB_PARSE | directory_upgrade_finished | " +
+                "outcome=success | inserted=74 | updated=12 | failures=0",
+        )
+
+        assertEquals("EPUB 目录更新完成", entry.title)
+        assertEquals("已根据新版解析规则自动补齐并更新已导入书籍的目录信息。", entry.description)
+        assertTrue(entry.details.contains("新增目录项" to "74"))
+        assertTrue(entry.details.contains("更新目录项" to "12"))
+        assertTrue(entry.details.contains("处理失败" to "0"))
+    }
+
+    @Test
     fun backgroundIndexFailureIsMarkedAndExplainsConstraint() {
         val entry = parseDiagnosticEntry(
             "2026-08-08T15:06:04Z | EPUB_PARSE | background_index_finished | elapsedMs=150700 | " +
