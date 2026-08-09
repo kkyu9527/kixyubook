@@ -45,6 +45,18 @@ interface BookDao {
     @Insert suspend fun insertChapters(chapters: List<ChapterEntity>): List<Long>
     @Insert suspend fun insertParagraphs(paragraphs: List<ParagraphEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveProgress(progress: ReadingProgressEntity)
+    @Query("SELECT updatedTime FROM reading_progress WHERE bookUuid = :bookUuid")
+    suspend fun getProgressUpdatedTime(bookUuid: String): Long?
+
+    /** Serializes progress writes and prevents a delayed older coroutine from replacing the latest page. */
+    @Transaction
+    suspend fun saveProgressIfNewer(progress: ReadingProgressEntity): Boolean {
+        val storedUpdatedTime = getProgressUpdatedTime(progress.bookUuid)
+        if (storedUpdatedTime != null && storedUpdatedTime >= progress.updatedTime) return false
+        saveProgress(progress)
+        return true
+    }
+
     @Insert suspend fun insertMetadataEdit(edit: MetadataEditEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSession(session: ReadingSessionEntity): Long
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertBookmark(bookmark: BookmarkEntity): Long

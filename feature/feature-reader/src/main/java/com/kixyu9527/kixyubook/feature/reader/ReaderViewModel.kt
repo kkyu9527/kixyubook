@@ -545,7 +545,7 @@ class ReaderViewModel @Inject constructor(
             chapter.id,
             safePosition,
             offset = safeCharOffset,
-            updatedTime = System.currentTimeMillis(),
+            updatedTime = nextProgressUpdatedAt(System.currentTimeMillis(), latestLocalProgressWriteAt),
             fraction = total,
             paragraphIndex = safePosition,
             charOffset = safeCharOffset,
@@ -562,6 +562,11 @@ class ReaderViewModel @Inject constructor(
             if (moved) {
                 userMovedBeforePrioritySync = true
                 deferredLocalProgress = progress
+                // User movement is durable immediately. Keeping it only in this ViewModel loses
+                // the latest chapter when the destination is popped before the priority pull
+                // completes. The deferred copy is retained so the active reader wins again after
+                // that pull, while the DAO rejects any delayed older write.
+                persistProgress(progress)
             }
             return
         }
@@ -803,3 +808,10 @@ internal fun shouldApplySyncedProgress(
     acceptedUpdatedAt: Long,
     latestLocalWriteAt: Long,
 ): Boolean = incomingUpdatedAt > acceptedUpdatedAt && incomingUpdatedAt > latestLocalWriteAt
+
+internal fun nextProgressUpdatedAt(currentTime: Long, latestLocalWriteAt: Long): Long =
+    if (latestLocalWriteAt >= currentTime && latestLocalWriteAt < Long.MAX_VALUE) {
+        latestLocalWriteAt + 1
+    } else {
+        currentTime
+    }

@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -59,5 +60,11 @@ class ReaderCloudProgressTest {
         assertTrue(hasReaderMovedFromOpening(12, 40, 20, 12, 41, 0))
         assertTrue(hasReaderMovedFromOpening(12, 40, 20, 13, 0, 0))
         assertTrue(hasReaderMovedFromOpening(12, 40, 20, 12, 40, 21))
+    }
+
+    @Test
+    fun `local progress timestamps stay strictly ordered within one millisecond`() {
+        assertEquals(501L, nextProgressUpdatedAt(currentTime = 500L, latestLocalWriteAt = 500L))
+        assertEquals(700L, nextProgressUpdatedAt(currentTime = 700L, latestLocalWriteAt = 501L))
     }
 }

@@ -511,7 +511,7 @@ class LocalBookRepository @Inject constructor(
     override fun observeProgress(bookUuid: String) = dao.observeProgress(bookUuid).map { it?.toModel() }
     override suspend fun saveProgress(progress: ReadingProgress) = withContext(Dispatchers.IO) {
         val chapter = dao.getChapters(progress.bookUuid).firstOrNull { it.id == progress.chapterId }
-        dao.saveProgress(
+        val saved = dao.saveProgressIfNewer(
             ReadingProgressEntity(
                 bookUuid = progress.bookUuid,
                 chapterId = progress.chapterId,
@@ -525,7 +525,7 @@ class LocalBookRepository @Inject constructor(
                 quoteAnchor = progress.quoteAnchor,
             ),
         )
-        syncMutations.record(SyncEntityType.PROGRESS, progress.bookUuid)
+        if (saved) syncMutations.record(SyncEntityType.PROGRESS, progress.bookUuid)
     }
 
     override suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = withContext(Dispatchers.IO) {
