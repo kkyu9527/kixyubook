@@ -64,10 +64,6 @@ class LocalBookRepository @Inject constructor(
     private val syncMutations: SyncMutationRecorder,
 ) : BookRepository {
     private val parsers = BookParserRegistry()
-    // Full-text indexing must never share mutable parser caches with an interactive page request.
-    // A blocking background XML parse may finish cooperatively after cancellation, while the
-    // reader proceeds immediately with this separate foreground parser instance.
-    private val backgroundEpubParser = EpubBookParser()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
     // reclamation. A partially evicted cache made otherwise identical directory jumps vary from
     // instant to a full ZIP/XHTML parse. noBackupFilesDir persists it without bloating backups.
@@ -85,6 +81,18 @@ class LocalBookRepository @Inject constructor(
     private val derivedDataVersions by lazy(LazyThreadSafetyMode.NONE) {
         context.getSharedPreferences(DERIVED_DATA_VERSION_PREFERENCES, Context.MODE_PRIVATE)
     }
+    private val epubIndex by lazy(LazyThreadSafetyMode.NONE) {
+        EpubIndexCoordinator(
+            database = database,
+            dao = dao,
+            parseCoordinator = epubParseCoordinator,
+            chapterCache = epubChapterCache,
+            chapterLoadMutex = chapterLoadMutex,
+            storageMutationMutex = storageMutationMutex,
+            derivedDataVersions = derivedDataVersions,
+            scheduleIndex = ::scheduleEpubIndex,
+        )
+    }
     // Keep only the decoded chapters needed by the active pager. EPUB chapters outside this
     // window remain in the binary disk cache and are cheap to hydrate without retaining a whole
     // reading session in the process heap.
@@ -100,7 +108,7 @@ class LocalBookRepository @Inject constructor(
     init {
         importScope.launch {
             upgradeTxtParserDataIfNeeded()
-            upgradeEpubDirectoryDataIfNeeded()
+            epubIndex.upgradeDirectoryDataIfNeeded()
         }
     }
 
@@ -202,7 +210,7 @@ class LocalBookRepository @Inject constructor(
                 )
                 insertedUuid = bookUuid
                 val outlines = if (format == BookFormat.EPUB) {
-                    registerEpubDirectory(bookUuid, stored, parser as EpubBookParser)
+                    epubIndex.registerDirectory(bookUuid, stored, parser as EpubBookParser)
                         .also { if (it.isEmpty()) error("未找到可阅读章节") }
                 } else {
                     emptyList()
@@ -337,7 +345,7 @@ class LocalBookRepository @Inject constructor(
                         ),
                     )
                     if (book.format == BookFormat.EPUB) {
-                        registerEpubDirectory(book.uuid, stored, parser as EpubBookParser)
+                        epubIndex.registerDirectory(book.uuid, stored, parser as EpubBookParser)
                         scheduleEpubIndex()
                     } else {
                         enqueueBackgroundIndex(RegisteredImport(book.uuid, book.title, book.format, stored, parser))
@@ -635,72 +643,6 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
-    /** EPUB outlines are derived data. Add newly recognized publisher volume pages in place. */
-    private suspend fun upgradeEpubDirectoryDataIfNeeded() {
-        if (derivedDataVersions.getInt(KEY_EPUB_DIRECTORY_VERSION, 0) >= EPUB_DIRECTORY_VERSION) return
-        var inserted = 0
-        var updated = 0
-        var failures = 0
-        storageMutationMutex.withLock {
-            if (derivedDataVersions.getInt(KEY_EPUB_DIRECTORY_VERSION, 0) >= EPUB_DIRECTORY_VERSION) {
-                return@withLock
-            }
-            val parser = EpubBookParser()
-            dao.getAllBooks()
-                .asSequence()
-                .filter { it.format == BookFormat.EPUB.name && File(it.storagePath).isFile }
-                .forEach { book ->
-                    try {
-                        val outlines = parser.readChapterOutlines(File(book.storagePath))
-                        database.withTransaction {
-                            val existingBySourceIndex = dao.getChapters(book.uuid).associateBy(ChapterEntity::chapterIndex)
-                            outlines.forEach { outline ->
-                                val existing = existingBySourceIndex[outline.sourceIndex]
-                                if (existing == null) {
-                                    dao.insertChapter(
-                                        ChapterEntity(
-                                            bookUuid = book.uuid,
-                                            title = outline.title,
-                                            chapterIndex = outline.sourceIndex,
-                                            volumeTitle = outline.volumeTitle,
-                                            volumeIndex = outline.volumeIndex,
-                                            indexed = false,
-                                            chapterKey = stableChapterKey(book.uuid, outline.sourceIndex, outline.title),
-                                        ),
-                                    )
-                                    inserted++
-                                } else if (
-                                    existing.title != outline.title ||
-                                    existing.volumeTitle != outline.volumeTitle ||
-                                    existing.volumeIndex != outline.volumeIndex
-                                ) {
-                                    dao.updateChapterOutline(
-                                        existing.id,
-                                        outline.title,
-                                        outline.volumeTitle,
-                                        outline.volumeIndex,
-                                    )
-                                    updated++
-                                }
-                            }
-                        }
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (_: Exception) {
-                        failures++
-                    }
-                }
-            derivedDataVersions.edit { putInt(KEY_EPUB_DIRECTORY_VERSION, EPUB_DIRECTORY_VERSION) }
-        }
-        if (inserted > 0) scheduleEpubIndex()
-        DiagnosticLog.record(
-            Category.EPUB_PARSE,
-            "directory_upgrade_finished",
-            outcome = if (failures == 0) "success" else "partial",
-            details = mapOf("inserted" to inserted, "updated" to updated, "failures" to failures),
-        )
-    }
-
     override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) {
         dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" })
         syncMutations.record(SyncEntityType.BOOK, bookUuid)
@@ -798,279 +740,7 @@ class LocalBookRepository @Inject constructor(
         epubChapterCache.retainBooks(books.mapTo(hashSetOf(), BookEntity::uuid))
     }
 
-    private suspend fun registerEpubDirectory(
-        bookUuid: String,
-        source: File,
-        parser: EpubBookParser,
-    ): List<DocumentChapterOutline> {
-        val outlines = parser.readChapterOutlines(source)
-        if (outlines.isEmpty()) return emptyList()
-        database.withTransaction {
-            dao.insertChapters(
-                outlines.map { outline ->
-                    ChapterEntity(
-                        bookUuid = bookUuid,
-                        title = outline.title,
-                        chapterIndex = outline.sourceIndex,
-                        volumeTitle = outline.volumeTitle,
-                        volumeIndex = outline.volumeIndex,
-                        indexed = false,
-                        chapterKey = stableChapterKey(bookUuid, outline.sourceIndex, outline.title),
-                    )
-                },
-            )
-        }
-        return outlines
-    }
+    suspend fun continueEpubIndex(bookUuid: String) = epubIndex.continueIndex(bookUuid)
 
-    /** Durable WorkManager entry point. Every completed chapter is an independent checkpoint. */
-    suspend fun continueEpubIndex(bookUuid: String) = withContext(Dispatchers.IO) {
-        val startedAt = SystemClock.elapsedRealtime()
-        val initialBook = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name }
-            ?: return@withContext
-        val requested = dao.getUnindexedChapters(bookUuid).size
-        if (requested == 0) return@withContext
-        var indexed = 0
-        var preempted = 0
-        var activeChapterIndex: Int? = null
-        try {
-            while (true) {
-                val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name } ?: break
-                val target = dao.getUnindexedChapters(bookUuid).firstOrNull() ?: break
-                activeChapterIndex = target.chapterIndex
-                var parsed: DocumentChapter? = null
-                val completed = epubParseCoordinator.background {
-                    parsed = backgroundEpubParser.readChapter(
-                        File(book.storagePath),
-                        target.chapterIndex,
-                        target.title,
-                        purpose = "index",
-                    )
-                }
-                if (!completed) {
-                    preempted++
-                    continue
-                }
-                val chapter = parsed
-                val chapterStillAvailable = chapterLoadMutex.withLock {
-                    // Parsing deliberately runs outside this lock so foreground reading can preempt it.
-                    // Re-read before writing because the reader may already have indexed the chapter,
-                    // or the user may have deleted/re-imported the book while parsing was in progress.
-                    val current = dao.getChapter(bookUuid, target.chapterIndex)
-                        ?: return@withLock false
-                    if (!current.indexed) {
-                        if (chapter == null) {
-                            // Mark unreadable spine entries so one malformed publisher page cannot create
-                            // an infinite retry loop. The directory remains available and later chapters proceed.
-                            dao.markChapterIndexed(current.id, current.title)
-                        } else {
-                            dao.replaceChapterIndex(current.id, chapter.title, chapter.paragraphs)
-                        }
-                    }
-                    true
-                }
-                if (!chapterStillAvailable) continue
-                if (chapter != null) {
-                    epubChapterCache.write(bookUuid, book.contentHash, target.chapterIndex, chapter)
-                }
-                indexed++
-                activeChapterIndex = null
-            }
-            DiagnosticLog.record(
-                Category.EPUB_PARSE,
-                "background_index_finished",
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                outcome = "success",
-                details = mapOf(
-                    "book" to initialBook.uuid.shortDiagnosticId(),
-                    "requested" to requested,
-                    "indexed" to indexed,
-                    "preempted" to preempted,
-                ),
-            )
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            DiagnosticLog.record(
-                Category.EPUB_PARSE,
-                "background_index_finished",
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                outcome = error::class.simpleName ?: "error",
-                details = mapOf(
-                    "book" to initialBook.uuid.shortDiagnosticId(),
-                    "chapter" to activeChapterIndex,
-                    "requested" to requested,
-                    "indexed" to indexed,
-                    "preempted" to preempted,
-                    "reason" to error.diagnosticReason(),
-                )
-            )
-            throw error
-        }
-    }
-
-    suspend fun continueAllEpubIndexes() = withContext(Dispatchers.IO) {
-        while (true) {
-            val nextBook = dao.getBooksPendingEpubIndex().firstOrNull() ?: return@withContext
-            continueEpubIndex(nextBook)
-        }
-    }
-}
-
-private data class ChapterCacheKey(val bookUuid: String, val chapterIndex: Int)
-
-private fun Throwable.diagnosticReason(): String =
-    generateSequence(this) { it.cause }
-        .mapNotNull { cause -> cause.message?.trim()?.takeIf(String::isNotEmpty) }
-        .firstOrNull()
-        ?: (this::class.qualifiedName ?: "未知错误")
-
-private data class ImportRegistration(
-    val imports: List<RegisteredImport>,
-    val duplicateCount: Int,
-    val failures: List<String>,
-)
-private data class RegisteredImport(
-    val bookUuid: String,
-    val displayName: String,
-    val format: BookFormat,
-    val source: File,
-    val parser: BookParser,
-)
-
-private const val CHAPTER_CACHE_SIZE = 6
-private const val SLOW_CHAPTER_LOAD_MS = 250L
-private const val IMPORT_CHAPTER_BATCH_SIZE = 32
-private const val IMPORT_INDEX_CONCURRENCY = 2
-private const val DERIVED_DATA_VERSION_PREFERENCES = "derived_data_versions"
-private const val KEY_TXT_PARSER_VERSION = "txt_parser_version"
-private const val TXT_PARSER_VERSION = 1
-private const val KEY_EPUB_DIRECTORY_VERSION = "epub_directory_version"
-private const val EPUB_DIRECTORY_VERSION = 2
-
-private fun String.normalizedEpubIdentityTitle(): String =
-    trim().replace(Regex("[\\s　]+"), " ").lowercase(Locale.ROOT)
-
-private fun String.shortDiagnosticId(): String = take(8)
-
-private fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category)
-private fun ChapterEntity.toModel() = Chapter(
-    id,
-    bookUuid,
-    title.singleLineBookHeading(),
-    chapterIndex,
-    volumeTitle?.singleLineBookHeading(),
-    volumeIndex,
-    chapterKey,
-)
-private fun ReadingProgressEntity.toModel() = ReadingProgress(
-    bookUuid, chapterId, position, offset, updatedTime, fraction,
-    chapterKey, paragraphIndex, charOffset, quoteAnchor,
-)
-
-private fun stableChapterKey(bookUuid: String, index: Int, title: String): String {
-    val input = "$bookUuid|$index|${title.singleLineBookHeading().lowercase()}"
-    return MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
-        .take(16).joinToString("") { "%02x".format(it) }
-}
-private fun BookmarkRow.toModel() = Bookmark(
-    uuid,
-    bookUuid,
-    chapterId,
-    chapterTitle.singleLineBookHeading(),
-    chapterIndex,
-    position,
-    preview,
-    createdTime,
-)
-private fun BookSearchResultRow.toModel() = BookSearchResult(
-    chapterId,
-    chapterTitle.singleLineBookHeading(),
-    chapterIndex,
-    paragraphIndex,
-    text,
-)
-
-/**
- * EPUB image nodes are rehydrated from the immutable source archive when a
- * chapter is opened. Text keeps its persisted indices, so existing progress,
- * bookmarks and search results remain stable without duplicating image bytes.
- */
-private fun DocumentChapter.toReaderParagraphs(
-    chapterId: Long,
-    persisted: List<ParagraphEntity>,
-): List<Paragraph> {
-    if (images.isEmpty()) return paragraphs.mapIndexed { index, text ->
-        val stored = persisted.getOrNull(index)
-        Paragraph(
-            stored?.id ?: index.toLong(),
-            chapterId,
-            stored?.paragraphIndex ?: index,
-            text,
-            spans = paragraphSpans.getOrNull(index).orEmpty(),
-        )
-    }
-    val imagesByIndex = images.groupBy { it.contentIndex }
-    val contentCount = paragraphs.size + images.size
-    var textIndex = 0
-    return buildList {
-        repeat(contentCount) { contentIndex ->
-            val contentImages = imagesByIndex[contentIndex]
-            if (!contentImages.isNullOrEmpty()) {
-                contentImages.forEachIndexed { imageOffset, image ->
-                    val position = persisted.getOrNull((textIndex - 1).coerceAtLeast(0))?.paragraphIndex
-                        ?: persisted.getOrNull(textIndex)?.paragraphIndex
-                        ?: textIndex.coerceAtLeast(0)
-                    add(
-                        Paragraph(
-                            id = Long.MIN_VALUE + contentIndex * 16L + imageOffset,
-                            chapterId = chapterId,
-                            index = position,
-                            text = image.altText,
-                            kind = ParagraphKind.IMAGE,
-                            resourcePath = image.resourcePath,
-                            mediaType = image.mediaType,
-                            intrinsicWidth = image.intrinsicWidth,
-                            intrinsicHeight = image.intrinsicHeight,
-                            isFullPageImage = image.isFullPage,
-                            cropImageToFill = image.cropToFill,
-                        ),
-                    )
-                }
-            } else {
-                val text = paragraphs.getOrNull(textIndex) ?: return@repeat
-                val stored = persisted.getOrNull(textIndex)
-                add(
-                    Paragraph(
-                        stored?.id ?: textIndex.toLong(),
-                        chapterId,
-                        stored?.paragraphIndex ?: textIndex,
-                        text,
-                        spans = paragraphSpans.getOrNull(textIndex).orEmpty(),
-                    ),
-                )
-                textIndex++
-            }
-        }
-        while (textIndex < paragraphs.size) {
-            val stored = persisted.getOrNull(textIndex)
-            add(
-                Paragraph(
-                    stored?.id ?: textIndex.toLong(),
-                    chapterId,
-                    stored?.paragraphIndex ?: textIndex,
-                    paragraphs[textIndex],
-                    spans = paragraphSpans.getOrNull(textIndex).orEmpty(),
-                ),
-            )
-            textIndex++
-        }
-    }
-}
-
-private fun File.pruneTo(retainedPaths: Set<String>) {
-    listFiles().orEmpty().forEach { entry ->
-        if (!entry.isFile || entry.absolutePath !in retainedPaths) entry.deleteRecursively()
-    }
-    delete()
+    suspend fun continueAllEpubIndexes() = epubIndex.continueAll()
 }

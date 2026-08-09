@@ -66,6 +66,33 @@ class CloudSyncEngine @Inject constructor(
         mutations = mutations,
         drive = drive,
     )
+    private val payloads = CloudSyncPayloadFactory(
+        context = context,
+        books = books,
+        fonts = fonts,
+        settingsRepository = settingsRepository,
+        preferences = preferences,
+    )
+    private val pushPipeline = CloudSyncPushPipeline(
+        context = context,
+        books = books,
+        fonts = fonts,
+        syncDao = syncDao,
+        preferences = preferences,
+        drive = drive,
+        payloads = payloads,
+    )
+    private val pullPipeline = CloudSyncPullPipeline(
+        context = context,
+        books = books,
+        syncDao = syncDao,
+        bookRepository = bookRepository,
+        fontRepository = fontRepository,
+        mutations = mutations,
+        drive = drive,
+        remoteState = remoteState,
+        payloads = payloads,
+    )
     private val preparedSnapshotLock = Any()
     private var preparedInitialSnapshot: PreparedInitialSnapshot? = null
 
@@ -174,7 +201,7 @@ class CloudSyncEngine @Inject constructor(
             )
             var remote = snapshot.known
 
-            applyRemoteTombstones(token, snapshot.changed)
+            pullPipeline.applyRemoteTombstones(token, snapshot.changed)
             resolveDirtyProgress(token, remote)
             val conflicts = findProvenConflicts(remote)
             if (conflicts.isNotEmpty()) {
@@ -193,7 +220,7 @@ class CloudSyncEngine @Inject constructor(
                     return@runCatching
                 }
             }
-            applyRemoteChanges(
+            pullPipeline.applyRemoteChanges(
                 token = token,
                 changedRemote = snapshot.changed,
                 knownRemote = remote,
@@ -233,7 +260,7 @@ class CloudSyncEngine @Inject constructor(
                 val knownRemote = remote.toMap()
                 val uploaded = coroutineScope {
                     uploadBatch.map { mutation ->
-                        async { pushMutation(token, mutation, knownRemote) }
+                        async { pushPipeline.pushMutation(token, mutation, knownRemote) }
                     }.awaitAll().flatten()
                 }
                 uploaded.forEach { (key, value) -> remote[key] = value }
@@ -252,7 +279,7 @@ class CloudSyncEngine @Inject constructor(
                 if (mutation.operation == SyncMutationOperation.DELETE.name) {
                     flushUploadBatch()
                     try {
-                        remote = pushDeletion(token, mutation, remote)
+                        remote = pushPipeline.pushDeletion(token, mutation, remote)
                         uploadedCount++
                         onProgress(
                             CloudSyncProgress(
@@ -400,7 +427,7 @@ class CloudSyncEngine @Inject constructor(
             }
             val localProgress = books.getProgress(bookUuid)
             if (mutation != null && localProgress != null && localProgress.updatedTime >= cloudTime) {
-                val local = materialize(mutation, includeLargePayload = false).singleOrNull()
+                val local = payloads.materialize(mutation, includeLargePayload = false).singleOrNull()
                 if (local != null) {
                     try {
                         val uploaded = drive.upload(
@@ -656,336 +683,6 @@ class CloudSyncEngine @Inject constructor(
         }
     }
 
-    private suspend fun materialize(
-        mutation: SyncOutboxEntity,
-        includeLargePayload: Boolean,
-    ): List<LocalCloudObject> = when (
-        SyncEntityType.valueOf(mutation.entityType)
-    ) {
-        SyncEntityType.BOOK -> books.getBook(mutation.entityId)?.let { book ->
-            buildList {
-                add(jsonObject("books/${book.uuid}/metadata", bookMetadataJson(book)))
-                if (preferences.current().syncOriginalFiles && includeLargePayload) {
-                    val source = File(book.storagePath)
-                    if (source.isFile) add(
-                        LocalCloudObject(
-                            key = "books/${book.uuid}/source",
-                            name = "book-${book.uuid}.${book.format.lowercase()}",
-                            mimeType = if (book.format == BookFormat.EPUB.name) "application/epub+zip" else "text/plain",
-                            file = source,
-                        ),
-                    )
-                }
-            }
-        }.orEmpty()
-        SyncEntityType.PROGRESS -> books.getProgress(mutation.entityId)?.let { progress ->
-            val chapterKey = progress.chapterKey.ifBlank {
-                books.getChapters(progress.bookUuid).firstOrNull { it.id == progress.chapterId }?.chapterKey.orEmpty()
-            }
-            listOf(jsonObject("progress/${progress.bookUuid}", progressJson(progress, chapterKey)))
-        }.orEmpty()
-        SyncEntityType.BOOKMARKS -> {
-            val chapters = books.getChapters(mutation.entityId).associateBy { it.id }
-            val values = books.getBookmarks(mutation.entityId)
-            listOf(jsonObject("bookmarks/${mutation.entityId}", bookmarksJson(mutation.entityId, values, chapters)))
-        }
-        SyncEntityType.SETTINGS -> listOf(jsonObject("settings/global", settingsJson()))
-        SyncEntityType.SESSION -> books.getSessionBySyncUuid(mutation.entityId)?.let {
-            listOf(jsonObject("sessions/${it.syncUuid}", sessionJson(it)))
-        }.orEmpty()
-        SyncEntityType.FONT -> if (preferences.current().syncFonts && includeLargePayload) {
-            fonts.getFont(mutation.entityId)?.let { font ->
-                listOf(
-                    jsonObject("fonts/${font.uuid}/metadata", fontJson(font)),
-                    LocalCloudObject(
-                        key = "fonts/${font.uuid}/source",
-                        name = "font-${font.uuid}.${File(font.filePath).extension.ifBlank { "ttf" }}",
-                        mimeType = "application/octet-stream",
-                        file = File(font.filePath),
-                    ),
-                )
-            }.orEmpty()
-        } else emptyList()
-    }
-
-    private suspend fun pushMutation(
-        token: String,
-        mutation: SyncOutboxEntity,
-        knownRemote: Map<String, DriveObject>,
-    ): List<Pair<String, DriveObject>> = try {
-        val deferredLargePayload = shouldDeferLargePayload(mutation)
-        val uploadedObjects = mutableListOf<Pair<String, DriveObject>>()
-        materialize(mutation, includeLargePayload = !deferredLargePayload).forEach { local ->
-            try {
-                val hash = local.file.sha256()
-                val known = knownRemote[local.key]
-                val baseline = syncDao.objectState(local.key)
-                val alreadySynced = baseline != null &&
-                    known != null &&
-                    baseline.localHash == hash &&
-                    known.id == baseline.driveFileId &&
-                    known.version == baseline.remoteVersion
-                if (!alreadySynced) {
-                    val uploaded = drive.upload(
-                        token = token,
-                        name = local.name,
-                        objectKey = local.key,
-                        mimeType = local.mimeType,
-                        source = local.file,
-                        existingFileId = known?.id,
-                    )
-                    uploadedObjects += local.key to uploaded
-                    syncDao.upsertObjectState(
-                        SyncObjectStateEntity(
-                            objectKey = local.key,
-                            driveFileId = uploaded.id,
-                            localHash = hash,
-                            localChangedAt = mutation.changedAt,
-                            remoteModifiedAt = uploaded.modifiedAt,
-                            remoteVersion = uploaded.version,
-                        ),
-                    )
-                }
-            } finally {
-                if (local.temporary) local.file.delete()
-            }
-        }
-        if (!deferredLargePayload) syncDao.removeOutbox(listOf(mutation.uuid))
-        uploadedObjects
-    } catch (error: Throwable) {
-        if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
-        throw error
-    }
-
-    private suspend fun pushDeletion(
-        token: String,
-        mutation: SyncOutboxEntity,
-        currentRemote: MutableMap<String, DriveObject>,
-    ): MutableMap<String, DriveObject> {
-        val prefix = when (SyncEntityType.valueOf(mutation.entityType)) {
-            SyncEntityType.BOOK -> "books/${mutation.entityId}/"
-            SyncEntityType.FONT -> "fonts/${mutation.entityId}/"
-            SyncEntityType.PROGRESS -> "progress/${mutation.entityId}"
-            SyncEntityType.BOOKMARKS -> "bookmarks/${mutation.entityId}"
-            SyncEntityType.SESSION -> "sessions/${mutation.entityId}"
-            SyncEntityType.SETTINGS -> "settings/global"
-        }
-        currentRemote.filterKeys { it == prefix || it.startsWith(prefix) }.forEach { (key, file) ->
-            drive.delete(token, file.id)
-            currentRemote.remove(key)
-            syncDao.removeObjectState(key)
-        }
-        val now = System.currentTimeMillis()
-        val expiresAt = PERMANENT_TOMBSTONE_EXPIRY
-        val tombstoneKey = "tombstones/${mutation.entityType.lowercase()}/${mutation.entityId}"
-        val tombstone = jsonObject(
-            tombstoneKey,
-            JSONObject()
-                .put("type", mutation.entityType)
-                .put("entityId", mutation.entityId)
-                .put("deletedAt", now)
-                .put("deviceId", mutation.deviceId)
-                .put("expiresAt", expiresAt),
-        )
-        val uploaded = try {
-            drive.upload(token, tombstone.name, tombstone.key, tombstone.mimeType, tombstone.file, currentRemote[tombstoneKey]?.id)
-        } finally {
-            tombstone.file.delete()
-        }
-        currentRemote[tombstoneKey] = uploaded
-        syncDao.upsertTombstone(SyncTombstoneEntity(tombstoneKey, now, mutation.deviceId, expiresAt))
-        syncDao.removeOutbox(listOf(mutation.uuid))
-        return currentRemote
-    }
-
-    private suspend fun applyRemoteTombstones(token: String, remote: MutableMap<String, DriveObject>) {
-        remote.filterKeys { it.startsWith("tombstones/") }.forEach { (key, objectInfo) ->
-            val temp = tempFile("tombstone")
-            try {
-                drive.download(token, objectInfo.id, temp)
-                val json = JSONObject(temp.readText())
-                // Keep the field for compatibility with already released clients, but use the
-                // largest Long value so old versions never garbage-collect a permanent deletion.
-                // Legacy 30-day tombstones are upgraded as soon as a current client sees them.
-                if (json.optLong("expiresAt") != PERMANENT_TOMBSTONE_EXPIRY) {
-                    json.put("expiresAt", PERMANENT_TOMBSTONE_EXPIRY)
-                    val normalized = jsonObject(key, json)
-                    try {
-                        remote[key] = drive.upload(
-                            token = token,
-                            name = normalized.name,
-                            objectKey = normalized.key,
-                            mimeType = normalized.mimeType,
-                            source = normalized.file,
-                            existingFileId = objectInfo.id,
-                        )
-                    } finally {
-                        normalized.file.delete()
-                    }
-                }
-                val type = runCatching { SyncEntityType.valueOf(json.getString("type")) }.getOrNull() ?: return@forEach
-                val id = json.getString("entityId")
-                mutations.withoutRecording {
-                    when (type) {
-                        SyncEntityType.BOOK -> if (books.bookExists(id)) bookRepository.deleteBook(id)
-                        SyncEntityType.FONT -> fontRepository.deleteFont(id)
-                        else -> Unit
-                    }
-                }
-                syncDao.removeOutbox(type.name, id)
-                syncDao.upsertTombstone(
-                    SyncTombstoneEntity(
-                        objectKey = key,
-                        deletedAt = json.optLong("deletedAt"),
-                        deviceId = json.optString("deviceId"),
-                        expiresAt = PERMANENT_TOMBSTONE_EXPIRY,
-                    ),
-                )
-            } finally {
-                temp.delete()
-            }
-        }
-    }
-
-    private suspend fun applyRemoteChanges(
-        token: String,
-        changedRemote: Map<String, DriveObject>,
-        knownRemote: Map<String, DriveObject>,
-        initialMergeComplete: Boolean,
-        preferredBookUuid: String?,
-        onProgress: suspend (CloudSyncProgress) -> Unit,
-    ) {
-        val dirty = syncDao.pending().flatMap(::keysForMutation).toSet()
-        val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
-        val handledKeys = mutableSetOf<String>()
-        val candidates = changedRemote.filter { (key, value) ->
-            !key.startsWith("tombstones/") && key !in dirty &&
-                (!initialMergeComplete || value.modifiedAt > (localStates[key]?.remoteModifiedAt ?: 0))
-        }
-
-        // Configuration changes affect the presentation and behavior of everything restored
-        // afterwards. Apply them before progress and book data during both initial and incremental
-        // synchronization, not only during the first shelf rebuild.
-        candidates["settings/global"]?.let { info ->
-            remoteState.applySettings(token, info)
-            rememberRemote("settings/global", info)
-            handledKeys += "settings/global"
-        }
-
-        // Existing-book progress is the latency-sensitive path. Apply it before metadata/source
-        // restoration so entering a book never waits behind unrelated EPUB downloads.
-        if (initialMergeComplete) {
-            candidates.filterKeys { key ->
-                key.startsWith("progress/") &&
-                    key.substringAfter("progress/") == preferredBookUuid
-            }.forEach { (key, info) ->
-                remoteState.applyProgress(token, info)
-                rememberRemote(key, info)
-                handledKeys += key
-            }
-        }
-
-        // Treat metadata + source as one logical book. They are uploaded sequentially and may
-        // therefore arrive in two Drive change pages; either half must complete the restoration.
-        val changedBookUuids = candidates.keys.asSequence()
-            .filter { it.startsWith("books/") }
-            .mapNotNull { it.split('/').getOrNull(1) }
-            .distinct()
-            .filter { uuid ->
-                "books/$uuid/metadata" !in dirty && "books/$uuid/source" !in dirty
-            }
-            .toList()
-
-        var restoredBooks = 0
-        if (changedBookUuids.isNotEmpty()) {
-            onProgress(
-                CloudSyncProgress(
-                    title = if (initialMergeComplete) "正在下载书籍" else "正在恢复云端书库",
-                    text = "已恢复 0/${changedBookUuids.size} 本",
-                    completed = 0,
-                    total = changedBookUuids.size,
-                ),
-            )
-        }
-        suspend fun restoreBook(uuid: String) {
-            remoteState.restoreBook(token, uuid, knownRemote)
-            handledKeys += "books/$uuid/metadata"
-            handledKeys += "books/$uuid/source"
-            restoredBooks++
-            onProgress(
-                CloudSyncProgress(
-                    title = if (initialMergeComplete) "正在下载书籍" else "正在恢复云端书库",
-                    text = "已恢复 $restoredBooks/${changedBookUuids.size} 本",
-                    completed = restoredBooks,
-                    total = changedBookUuids.size,
-                ),
-            )
-        }
-
-        if (initialMergeComplete) {
-            changedBookUuids.forEach { restoreBook(it) }
-        } else {
-            val restorePlan = planInitialRestore(changedBookUuids, knownRemote)
-            restorePlan.priorityBookUuids.forEach { uuid ->
-                restoreBook(uuid)
-                candidates["progress/$uuid"]?.let { info ->
-                    remoteState.applyProgress(token, info)
-                    rememberRemote("progress/$uuid", info)
-                    handledKeys += "progress/$uuid"
-                }
-                candidates["bookmarks/$uuid"]?.let { info ->
-                    remoteState.applyBookmarks(token, info)
-                    rememberRemote("bookmarks/$uuid", info)
-                    handledKeys += "bookmarks/$uuid"
-                }
-            }
-
-            // Put every other source-backed book on the shelf before restoring its secondary data.
-            restorePlan.remainingBookUuids.forEach { restoreBook(it) }
-        }
-
-        // A font is represented by two Drive objects. Apply the pair once even when both objects
-        // occur in the same change page; the previous per-key loop imported every font twice.
-        candidates.keys.asSequence()
-            .filter { it.startsWith("fonts/") }
-            .mapNotNull { it.split('/').getOrNull(1) }
-            .distinct()
-            .forEach { uuid ->
-                val metadataKey = "fonts/$uuid/metadata"
-                val sourceKey = "fonts/$uuid/source"
-                val metadata = knownRemote[metadataKey] ?: return@forEach
-                val source = knownRemote[sourceKey] ?: return@forEach
-                remoteState.applyFont(token, metadata, source)
-                rememberRemote(metadataKey, metadata)
-                rememberRemote(sourceKey, source)
-                handledKeys += metadataKey
-                handledKeys += sourceKey
-            }
-
-        candidates.forEach { (key, info) ->
-            if (key in handledKeys) return@forEach
-            when {
-                key.startsWith("progress/") -> remoteState.applyProgress(token, info)
-                key.startsWith("bookmarks/") -> remoteState.applyBookmarks(token, info)
-                key == "settings/global" -> remoteState.applySettings(token, info)
-                key.startsWith("sessions/") -> remoteState.applySession(token, info)
-            }
-            rememberRemote(key, info)
-        }
-    }
-
-    private suspend fun settingsJson(): JSONObject = JSONObject()
-        .put("schema", 1)
-        .put("updatedAt", System.currentTimeMillis())
-        .put("reader", settingsToJson(settingsRepository.settings.first()))
-        .put("readingGoalMinutes", settingsRepository.readingGoalMinutes.first())
-
-
-    private fun jsonObject(key: String, json: JSONObject): LocalCloudObject {
-        val file = tempFile("payload").apply { writeText(json.toString()) }
-        return LocalCloudObject(key, "${key.replace('/', '-')}.json", "application/json", file, true)
-    }
-
     private suspend fun withJsonDownload(token: String, info: DriveObject, block: suspend (JSONObject) -> Unit) {
         val file = tempFile("json")
         try { drive.download(token, info.id, file); block(JSONObject(file.readText())) } finally { file.delete() }
@@ -1000,19 +697,6 @@ class CloudSyncEngine @Inject constructor(
 
     private fun tempFile(prefix: String) = File(context.cacheDir, "cloud-sync/$prefix-${UUID.randomUUID()}")
         .also { it.parentFile?.mkdirs() }
-
-    private suspend fun shouldDeferLargePayload(mutation: SyncOutboxEntity): Boolean {
-        val type = SyncEntityType.valueOf(mutation.entityType)
-        val hasLargePayload = when (type) {
-            SyncEntityType.BOOK -> preferences.current().syncOriginalFiles && books.getBook(mutation.entityId)?.storagePath?.let(::File)?.isFile == true
-            SyncEntityType.FONT -> preferences.current().syncFonts && fonts.getFont(mutation.entityId)?.filePath?.let(::File)?.isFile == true
-            else -> false
-        }
-        if (!hasLargePayload || !preferences.current().wifiOnlyForLargeFiles) return false
-        val manager = context.getSystemService(ConnectivityManager::class.java)
-        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork)
-        return capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) != true
-    }
 
     internal class AuthorizationRequiredException(message: String) : Exception(message)
 
