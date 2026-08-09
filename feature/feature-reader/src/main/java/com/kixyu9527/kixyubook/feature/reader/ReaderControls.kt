@@ -43,6 +43,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -165,11 +166,13 @@ internal fun ReaderControls(
                         .padding(top = KixyuSize.readerTopControlInset)
                         .height(KixyuSize.readerBookTitleHeight)
                         .widthIn(max = KixyuSize.readerBookTitleMaxWidth)
-                        .clickable(onClick = onBookInfo)
                         .then(controlsBackModifier),
                 ) {
                     Box(
-                        Modifier.fillMaxHeight().padding(horizontal = KixyuSpacing.small),
+                        Modifier.fillMaxHeight()
+                            .clip(MaterialTheme.shapes.extraLarge)
+                            .clickable(onClick = onBookInfo)
+                            .padding(horizontal = KixyuSpacing.small),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(

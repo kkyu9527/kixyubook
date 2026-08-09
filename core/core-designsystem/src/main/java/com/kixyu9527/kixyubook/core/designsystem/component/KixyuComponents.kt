@@ -228,6 +228,9 @@ fun KixyuSettingsRow(
     } else {
         modifier.semantics { this.selected = isSelected }
     }).fillMaxWidth()
+        // Keep both Material ripple and MIUIX press feedback inside the same rounded row shape.
+        // A rounded background alone does not clip an interaction indication added afterwards.
+        .clip(MaterialTheme.shapes.medium)
         .background(containerColor, MaterialTheme.shapes.medium)
         .heightIn(min = KixyuSize.rowMinHeight)
     val leadingContent: (@Composable () -> Unit)? = leading ?: icon?.let { image ->
