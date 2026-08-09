@@ -34,7 +34,18 @@ jobs:
       - name: Ensure Gradle wrapper is executable
         run: chmod +x gradlew
 
-      - name: Verify
+      - name: Verify JVM tests, lint, and builds
         run: >-
           ./gradlew testDebugUnitTest lintDebug assembleDebug :app:assembleRelease
-          :core:core-database:pixel2Api35DebugAndroidTest --stacktrace
+          --stacktrace
+
+      - name: Enable KVM for Android emulator
+        run: |
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+
+      - name: Verify database backup on managed device
+        run: >-
+          ./gradlew :core:core-database:pixel2Api35DebugAndroidTest
+          -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+          --stacktrace
