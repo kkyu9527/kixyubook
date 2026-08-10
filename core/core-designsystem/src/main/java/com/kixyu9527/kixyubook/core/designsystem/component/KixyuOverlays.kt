@@ -586,24 +586,47 @@ fun KixyuSnackbarHost(
             modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
             shadowElevation = KixyuSpacing.extraSmall,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(
-                    horizontal = KixyuSpacing.large,
-                    vertical = KixyuSpacing.medium,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = data.visuals.message,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                data.visuals.actionLabel?.let { actionLabel ->
-                    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
-                        MiuixTextButton(text = actionLabel, onClick = data::performAction)
-                    } else {
+            val hasAction = data.visuals.withDismissAction || data.visuals.actionLabel != null
+            if (LocalAppUiStyle.current == AppUiStyle.MIUIX && hasAction) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(
+                        horizontal = KixyuSpacing.large,
+                        vertical = KixyuSpacing.medium,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                ) {
+                    Text(
+                        text = data.visuals.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    KixyuMiuixWideActionButtons(
+                        primaryLabel = data.visuals.actionLabel,
+                        onPrimary = data::performAction,
+                        secondaryLabel = "关闭".takeIf { data.visuals.withDismissAction },
+                        onSecondary = data::dismiss,
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(
+                        horizontal = KixyuSpacing.large,
+                        vertical = KixyuSpacing.medium,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = data.visuals.message,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (data.visuals.withDismissAction) {
+                        TextButton(onClick = data::dismiss) { Text("关闭") }
+                    }
+                    data.visuals.actionLabel?.let { actionLabel ->
                         TextButton(onClick = data::performAction) { Text(actionLabel) }
                     }
                 }
@@ -626,6 +649,8 @@ fun KixyuActionDialog(
     dismissLabel: String? = "取消",
     content: @Composable () -> Unit,
 ) {
+    val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
+    val resolvedAlternativeLabel = alternativeLabel.takeIf { onAlternative != null }
     if (kixyuWindowWidthClass() != KixyuWindowWidthClass.COMPACT) {
         if (!show) return
         Dialog(
@@ -665,37 +690,58 @@ fun KixyuActionDialog(
                                 content = content,
                             )
                         }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (alternativeLabel != null && onAlternative != null) {
-                                dismissLabel?.let {
-                                    KixyuTextButton(text = it, onClick = onDismissRequest)
-                                }
-                                Spacer(Modifier.weight(1f))
-                                KixyuSecondaryButton(
-                                    text = alternativeLabel,
-                                    onClick = onAlternative,
-                                    enabled = alternativeEnabled,
-                                    modifier = Modifier.widthIn(min = 140.dp),
-                                )
-                            } else {
-                                dismissLabel?.let {
-                                    KixyuSecondaryButton(
-                                        text = it,
-                                        onClick = onDismissRequest,
-                                        modifier = Modifier.widthIn(min = 112.dp),
-                                    )
-                                }
-                            }
-                            KixyuButton(
-                                text = confirmLabel,
-                                onClick = onConfirm,
-                                enabled = confirmEnabled,
-                                modifier = Modifier.widthIn(min = 112.dp),
+                        if (isMiuix) {
+                            KixyuMiuixWideActionButtons(
+                                primaryLabel = confirmLabel,
+                                onPrimary = onConfirm,
+                                primaryEnabled = confirmEnabled,
+                                secondaryLabel = resolvedAlternativeLabel ?: dismissLabel,
+                                onSecondary = onAlternative ?: onDismissRequest,
+                                secondaryEnabled = if (resolvedAlternativeLabel != null) {
+                                    alternativeEnabled
+                                } else {
+                                    true
+                                },
+                                tertiaryLabel = dismissLabel.takeIf { resolvedAlternativeLabel != null },
+                                onTertiary = onDismissRequest,
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
                             )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(
+                                    KixyuSpacing.small,
+                                    Alignment.End,
+                                ),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (alternativeLabel != null && onAlternative != null) {
+                                    dismissLabel?.let {
+                                        KixyuTextButton(text = it, onClick = onDismissRequest)
+                                    }
+                                    Spacer(Modifier.weight(1f))
+                                    KixyuSecondaryButton(
+                                        text = alternativeLabel,
+                                        onClick = onAlternative,
+                                        enabled = alternativeEnabled,
+                                        modifier = Modifier.widthIn(min = 140.dp),
+                                    )
+                                } else {
+                                    dismissLabel?.let {
+                                        KixyuSecondaryButton(
+                                            text = it,
+                                            onClick = onDismissRequest,
+                                            modifier = Modifier.widthIn(min = 112.dp),
+                                        )
+                                    }
+                                }
+                                KixyuButton(
+                                    text = confirmLabel,
+                                    onClick = onConfirm,
+                                    enabled = confirmEnabled,
+                                    modifier = Modifier.widthIn(min = 112.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -703,7 +749,7 @@ fun KixyuActionDialog(
         }
         return
     }
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+    if (isMiuix) {
         // Form fields need a real dialog window so Android can resize that window for the IME.
         // Rendering in the root Scaffold makes the system pan the whole activity to the focused
         // field, producing a large empty band between the dialog and keyboard.
@@ -723,43 +769,17 @@ fun KixyuActionDialog(
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState()),
                 ) { content() }
-                if (alternativeLabel != null && onAlternative != null) {
-                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                        ) {
-                            KixyuSecondaryButton(
-                                text = alternativeLabel,
-                                onClick = onAlternative,
-                                enabled = alternativeEnabled,
-                                modifier = Modifier.weight(1f),
-                            )
-                            KixyuButton(
-                                text = confirmLabel,
-                                onClick = onConfirm,
-                                enabled = confirmEnabled,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        dismissLabel?.let {
-                            MiuixTextButton(
-                                text = it,
-                                onClick = onDismissRequest,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small, Alignment.End),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        dismissLabel?.let { MiuixTextButton(text = it, onClick = onDismissRequest) }
-                        KixyuButton(text = confirmLabel, onClick = onConfirm, enabled = confirmEnabled)
-                    }
-                }
+                KixyuMiuixWideActionButtons(
+                    primaryLabel = confirmLabel,
+                    onPrimary = onConfirm,
+                    primaryEnabled = confirmEnabled,
+                    secondaryLabel = resolvedAlternativeLabel ?: dismissLabel,
+                    onSecondary = onAlternative ?: onDismissRequest,
+                    secondaryEnabled = if (resolvedAlternativeLabel != null) alternativeEnabled else true,
+                    tertiaryLabel = dismissLabel.takeIf { resolvedAlternativeLabel != null },
+                    onTertiary = onDismissRequest,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                )
             }
         }
     } else if (show) {
@@ -816,6 +836,64 @@ fun KixyuActionDialog(
                 }
             },
         )
+    }
+}
+
+/**
+ * HyperOS-style popup actions: wide, equal buttons inside the popup, with a bounded action group
+ * so tablet and unfolded layouts do not stretch controls across the whole window.
+ */
+@Composable
+private fun KixyuMiuixWideActionButtons(
+    primaryLabel: String?,
+    onPrimary: () -> Unit,
+    modifier: Modifier = Modifier,
+    primaryEnabled: Boolean = true,
+    secondaryLabel: String? = null,
+    onSecondary: () -> Unit = {},
+    secondaryEnabled: Boolean = true,
+    tertiaryLabel: String? = null,
+    onTertiary: () -> Unit = {},
+) {
+    Column(
+        modifier = modifier.widthIn(max = 520.dp).fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+    ) {
+        if (primaryLabel != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+            ) {
+                secondaryLabel?.let {
+                    KixyuSecondaryButton(
+                        text = it,
+                        onClick = onSecondary,
+                        enabled = secondaryEnabled,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                KixyuButton(
+                    text = primaryLabel,
+                    onClick = onPrimary,
+                    enabled = primaryEnabled,
+                    modifier = if (secondaryLabel != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
+                )
+            }
+        } else if (secondaryLabel != null) {
+            KixyuSecondaryButton(
+                text = secondaryLabel,
+                onClick = onSecondary,
+                enabled = secondaryEnabled,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        tertiaryLabel?.let {
+            KixyuSecondaryButton(
+                text = it,
+                onClick = onTertiary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
