@@ -22,6 +22,8 @@ data class LibraryUiState(
     val categories: List<String> = listOf("全部"),
 )
 
+data class BookExportEvent(val uriString: String)
+
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val repository: BookRepository,
@@ -30,6 +32,8 @@ class LibraryViewModel @Inject constructor(
     private val category = MutableStateFlow("全部")
     private val messages = Channel<String>(Channel.BUFFERED)
     val messageEvents = messages.receiveAsFlow()
+    private val exports = Channel<BookExportEvent>(Channel.BUFFERED)
+    val exportEvents = exports.receiveAsFlow()
 
     init {
         viewModelScope.launch {
@@ -76,6 +80,12 @@ class LibraryViewModel @Inject constructor(
         } finally {
             onComplete()
         }
+    }
+
+    fun export(bookUuid: String, uriString: String) = viewModelScope.launch {
+        repository.exportBook(bookUuid, uriString)
+            .onSuccess { exports.send(BookExportEvent(uriString)) }
+            .onFailure { messages.send(it.message ?: "书籍导出失败") }
     }
 
     fun delete(bookUuid: String) = viewModelScope.launch { repository.deleteBook(bookUuid) }

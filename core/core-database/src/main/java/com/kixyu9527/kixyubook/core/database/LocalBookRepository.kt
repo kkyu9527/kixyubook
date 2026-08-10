@@ -55,7 +55,6 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -83,7 +82,7 @@ class LocalBookRepository @Inject constructor(
     private val importIndexJobs = ConcurrentHashMap<String, Job>()
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
     private val openedAtOverrides = MutableStateFlow<Map<String, Long>>(emptyMap())
-    private val openedAtClock = AtomicLong()
+    private val activityClock = LibraryActivityClock()
     private val workManager by lazy(LazyThreadSafetyMode.NONE) { WorkManager.getInstance(context) }
     private val derivedDataVersions by lazy(LazyThreadSafetyMode.NONE) {
         context.getSharedPreferences(DERIVED_DATA_VERSION_PREFERENCES, Context.MODE_PRIVATE)
@@ -125,7 +124,7 @@ class LocalBookRepository @Inject constructor(
         openedAtOverrides,
     ) { books, progresses, openedAt ->
         val byBook = progresses.associateBy { it.bookUuid }
-        books.map { entity ->
+        val booksWithActivity = books.map { entity ->
             val progress = byBook[entity.uuid]
             LibraryBook(entity.toModel(), progress?.toModel()) to maxOf(
                 entity.createdTime,
@@ -133,16 +132,19 @@ class LocalBookRepository @Inject constructor(
                 progress?.updatedTime ?: 0L,
                 openedAt[entity.uuid] ?: 0L,
             )
-        }.sortedByDescending { (_, activityTime) -> activityTime }
+        }
+        // Synced progress and imported metadata can legitimately carry a timestamp newer than
+        // this device's wall clock. Seed the local ordering clock from the complete library so a
+        // plain open/close is always newer than every existing activity, even without a page turn.
+        activityClock.observe(booksWithActivity.maxOfOrNull { (_, activityTime) -> activityTime } ?: 0L)
+        booksWithActivity.sortedByDescending { (_, activityTime) -> activityTime }
             .map { (book, _) -> book }
     }
 
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
 
     override fun markBookOpened(bookUuid: String) {
-        val openedAt = openedAtClock.updateAndGet { previous ->
-            maxOf(previous + 1, System.currentTimeMillis())
-        }
+        val openedAt = activityClock.next()
         // Publish before Room I/O so the shelf order changes in the same input dispatch as the
         // tap. The durable column keeps that order after process recreation without pretending
         // that the user's reading position changed or creating a cloud-sync conflict.
@@ -205,6 +207,39 @@ class LocalBookRepository @Inject constructor(
                         .joinToString(",")
                         .takeIf(String::isNotEmpty),
                     "firstFailureReason" to registration.failureDiagnostics.firstOrNull()?.reason,
+                ),
+            )
+        }
+    }
+
+    override suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val startedAt = SystemClock.elapsedRealtime()
+        runCatching {
+            val book = dao.getBook(bookUuid) ?: error("书籍不存在或已被删除")
+            val source = File(book.storagePath)
+            require(source.isFile) { "书籍源文件不存在" }
+            val destination = uriString.toUri()
+            context.contentResolver.openOutputStream(destination, "w")?.use { output ->
+                source.inputStream().buffered().use { input -> input.copyTo(output) }
+            } ?: error("无法写入所选位置")
+            Unit
+        }.onSuccess {
+            DiagnosticLog.record(
+                Category.LIBRARY,
+                "book_exported",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                details = mapOf("book" to bookUuid.shortDiagnosticId()),
+            )
+        }.onFailure { error ->
+            val failure = error.toDiagnosticFailure()
+            DiagnosticLog.record(
+                Category.LIBRARY,
+                "book_export_failed",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = failure.outcome,
+                details = mapOf(
+                    "book" to bookUuid.shortDiagnosticId(),
+                    "reason" to failure.reason,
                 ),
             )
         }

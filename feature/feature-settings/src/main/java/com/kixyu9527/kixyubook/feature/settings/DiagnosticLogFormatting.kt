@@ -109,6 +109,8 @@ internal fun diagnosticCategoryLabel(category: String): String = when (category)
 private fun eventDescription(event: String, outcome: String?, category: String): Pair<String, String> = when (event) {
     "book_open_activity_failed" ->
         "最近打开时间保存失败" to "书架已即时调整顺序，但持久化最近打开时间时发生错误。"
+    "book_exported" -> "书籍导出完成" to "原始书籍文件已经复制到用户选择的位置。"
+    "book_export_failed" -> "书籍导出失败" to "复制原始书籍文件时发生错误，可结合错误原因和书籍标识排查。"
     "books_deleted" -> "书籍删除完成" to "书籍、本地进度、书签和派生缓存已经清理，并已登记云端删除。"
     "full_sync_started" -> "开始云同步" to "开始检查本机与 Google Drive 中的数据。"
     "full_sync_skipped" -> when (outcome) {

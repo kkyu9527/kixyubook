@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.ClipDescription
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -35,6 +38,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
@@ -53,6 +57,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -89,6 +95,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
+import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
@@ -108,14 +115,60 @@ import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
 @Composable
 fun LibraryRoute(
     onOpenBook: (String) -> Unit,
+    externalImportRequestId: Long? = null,
+    externalImportUris: List<String> = emptyList(),
+    onExternalImportConsumed: (Long) -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.import(uris.map { it.toString() })
     }
+    var pendingExportBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    val exportTxt = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val bookUuid = pendingExportBookUuid
+        pendingExportBookUuid = null
+        if (uri != null && bookUuid != null) viewModel.export(bookUuid, uri.toString())
+    }
+    val exportEpub = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/epub+zip"),
+    ) { uri ->
+        val bookUuid = pendingExportBookUuid
+        pendingExportBookUuid = null
+        if (uri != null && bookUuid != null) viewModel.export(bookUuid, uri.toString())
+    }
+    val beginExport: (LibraryBook) -> Unit = { item ->
+        pendingExportBookUuid = item.book.uuid
+        val fileName = exportFileName(item)
+        when (item.book.format) {
+            BookFormat.EPUB -> exportEpub.launch(fileName)
+            else -> exportTxt.launch(fileName)
+        }
+    }
+    LaunchedEffect(externalImportRequestId) {
+        val requestId = externalImportRequestId ?: return@LaunchedEffect
+        if (externalImportUris.isEmpty()) {
+            onExternalImportConsumed(requestId)
+        } else {
+            viewModel.import(externalImportUris) { onExternalImportConsumed(requestId) }
+        }
+    }
     LaunchedEffect(Unit) { viewModel.messageEvents.collect { if (it.isNotBlank()) snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) {
+        viewModel.exportEvents.collect { event ->
+            val result = snackbar.showSnackbar(
+                message = "书籍已导出",
+                actionLabel = "查看",
+                withDismissAction = true,
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed && !openExportLocation(context, event.uriString)) {
+                snackbar.showSnackbar("系统无法打开导出位置")
+            }
+        }
+    }
     LibraryScreen(
         state = state,
         snackbar = snackbar,
@@ -125,6 +178,7 @@ fun LibraryRoute(
         onOpenBook = onOpenBook,
         onDelete = viewModel::delete,
         onDeleteMany = viewModel::deleteBooks,
+        onExport = beginExport,
         onUpdateMetadata = viewModel::updateMetadata,
         onSetCategory = viewModel::setCategory,
         onDropDocuments = { uris, releasePermission ->
@@ -144,6 +198,7 @@ private fun LibraryScreen(
     onOpenBook: (String) -> Unit,
     onDelete: (String) -> Unit,
     onDeleteMany: (Set<String>) -> Unit,
+    onExport: (LibraryBook) -> Unit,
     onUpdateMetadata: (String, String, String, String) -> Unit,
     onSetCategory: (String, String) -> Unit,
     onDropDocuments: (List<String>, (() -> Unit)?) -> Unit,
@@ -299,6 +354,7 @@ private fun LibraryScreen(
                                 },
                                 onSelectionChange = { selectedBookUuids = selectedBookUuids.toggle(item.book.uuid) },
                                 onManage = { managingUuid = item.book.uuid },
+                                onExport = { onExport(item) },
                                 onDelete = { deletingUuid = item.book.uuid },
                             )
                         }
@@ -308,6 +364,7 @@ private fun LibraryScreen(
                     item = state.books.firstOrNull { it.book.uuid == previewBookUuid },
                     onOpen = onOpenBook,
                     onManage = { managingUuid = it },
+                    onExport = { book -> onExport(book) },
                     onDelete = { deletingUuid = it },
                     modifier = Modifier.weight(.42f).fillMaxSize(),
                 )
@@ -338,6 +395,7 @@ private fun LibraryScreen(
                         },
                         onSelectionChange = { selectedBookUuids = selectedBookUuids.toggle(item.book.uuid) },
                         onManage = { managingUuid = item.book.uuid },
+                        onExport = { onExport(item) },
                         onDelete = { deletingUuid = item.book.uuid },
                     )
                 }
@@ -430,6 +488,7 @@ private fun LibraryBookDetailPane(
     item: LibraryBook?,
     onOpen: (String) -> Unit,
     onManage: (String) -> Unit,
+    onExport: (LibraryBook) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -487,6 +546,9 @@ private fun LibraryBookDetailPane(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+                    OutlinedButton(onClick = { onExport(item) }, modifier = Modifier.weight(1f)) {
+                        Text("导出", maxLines = 1)
+                    }
                     OutlinedButton(onClick = { onManage(item.book.uuid) }, modifier = Modifier.weight(1f)) {
                         Text("管理", maxLines = 1)
                     }
@@ -507,6 +569,7 @@ private fun LibraryBookRow(
     onOpen: () -> Unit,
     onSelectionChange: () -> Unit,
     onManage: () -> Unit,
+    onExport: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -572,6 +635,11 @@ private fun LibraryBookRow(
                         onClick = { menuExpanded = false; onManage() },
                     )
                     DropdownMenuItem(
+                        text = { Text("导出", maxLines = 1) },
+                        leadingIcon = { Icon(Icons.Outlined.FileUpload, null, Modifier.size(KixyuSize.icon)) },
+                        onClick = { menuExpanded = false; onExport() },
+                    )
+                    DropdownMenuItem(
                         text = { Text("删除", maxLines = 1) },
                         leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(KixyuSize.icon)) },
                         onClick = { menuExpanded = false; onDelete() },
@@ -584,6 +652,60 @@ private fun LibraryBookRow(
 
 private fun Set<String>.toggle(value: String): Set<String> =
     if (value in this) this - value else this + value
+
+internal fun exportFileName(item: LibraryBook): String {
+    val extension = item.book.format.name.lowercase()
+    val withoutExistingExtension = item.book.title.trim().replace(
+        Regex("\\.${Regex.escape(extension)}$", RegexOption.IGNORE_CASE),
+        "",
+    )
+    val safeTitle = withoutExistingExtension
+        .replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
+        .trim(' ', '.')
+        .take(120)
+        .ifBlank { "未命名书籍" }
+    return "$safeTitle.$extension"
+}
+
+internal fun openExportLocation(context: Context, uriString: String): Boolean {
+    val uri = Uri.parse(uriString)
+    val parentUri = exportedDocumentParent(context, uri)
+    if (parentUri != null) {
+        val directoryIntent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(parentUri, DocumentsContract.Document.MIME_TYPE_DIR)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (context.tryStartActivity(directoryIntent)) return true
+    }
+    val fileIntent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, context.contentResolver.getType(uri) ?: "application/octet-stream")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    return context.tryStartActivity(fileIntent)
+}
+
+private fun exportedDocumentParent(context: Context, uri: Uri): Uri? {
+    if (!DocumentsContract.isDocumentUri(context, uri)) return null
+    val authority = uri.authority ?: return null
+    val parentId = runCatching {
+        DocumentsContract.findDocumentPath(context.contentResolver, uri)
+            ?.path
+            ?.dropLast(1)
+            ?.lastOrNull()
+    }.getOrNull() ?: if (authority == "com.android.externalstorage.documents") {
+        // ExternalStorageProvider uses volume:path document IDs. Other providers are opaque and
+        // must not be guessed by splitting their IDs.
+        runCatching {
+            DocumentsContract.getDocumentId(uri).substringBeforeLast('/', missingDelimiterValue = "")
+                .takeIf(String::isNotBlank)
+        }.getOrNull()
+    } else {
+        null
+    }
+    return parentId?.let { DocumentsContract.buildDocumentUri(authority, it) }
+}
+
+private fun Context.tryStartActivity(intent: Intent): Boolean = runCatching {
+    startActivity(intent)
+}.isSuccess
 
 @Composable
 private fun BookManagementDialog(

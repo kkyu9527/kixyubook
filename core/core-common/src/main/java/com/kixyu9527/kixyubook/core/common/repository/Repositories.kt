@@ -10,6 +10,8 @@ interface BookRepository {
     /** Immediately promotes a book in local activity ordering without changing reading progress. */
     fun markBookOpened(bookUuid: String)
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
+    /** Copies the immutable source book to a user-selected document destination. */
+    suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit>
     /** Restores an immutable source blob while preserving its permanent book UUID. */
     suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean
     suspend fun deleteBook(bookUuid: String)

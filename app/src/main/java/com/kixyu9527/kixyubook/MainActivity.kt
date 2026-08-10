@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook
 import android.os.Bundle
 import android.os.Build
 import android.content.Intent
+import android.net.Uri
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -48,6 +49,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.core.content.IntentCompat
 import androidx.navigation.NavType
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
@@ -104,6 +106,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var localNotifications: LocalNotificationManager
     @Inject lateinit var bookRepository: BookRepository
     private val notificationDestination = MutableStateFlow<String?>(null)
+    private val externalBookImport = MutableStateFlow<ExternalBookImportRequest?>(null)
+    private var externalImportSequence = 0L
 
     override fun onResume() {
         super.onResume()
@@ -126,6 +130,7 @@ class MainActivity : ComponentActivity() {
         notificationDestination.value = intent.getStringExtra(
             LocalNotificationManager.EXTRA_NOTIFICATION_DESTINATION,
         )
+        if (savedInstanceState == null) enqueueExternalBookImport(intent)
         // Select the target display mode before Compose produces its first frame. Changing the
         // window mode from a DisposableEffect after the initial draw can trigger an avoidable
         // relayout and a visible 60 -> 120 Hz hitch during cold start.
@@ -158,6 +163,40 @@ class MainActivity : ComponentActivity() {
         notificationDestination.value = intent.getStringExtra(
             LocalNotificationManager.EXTRA_NOTIFICATION_DESTINATION,
         )
+        enqueueExternalBookImport(intent)
+    }
+
+    private fun enqueueExternalBookImport(intent: Intent) {
+        val receivedUris = when (intent.action) {
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+            Intent.ACTION_SEND -> buildList {
+                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let(::add)
+                addClipDataUris(intent)
+            }
+            Intent.ACTION_SEND_MULTIPLE -> buildList {
+                IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                    ?.let(::addAll)
+                addClipDataUris(intent)
+            }
+            else -> return
+        }.distinct()
+        val supportedUris = receivedUris.filter { uri ->
+            val displayPath = uri.lastPathSegment.orEmpty()
+            intent.type in setOf("text/plain", "application/epub+zip") ||
+                displayPath.endsWith(".txt", ignoreCase = true) ||
+                displayPath.endsWith(".epub", ignoreCase = true)
+        }
+        if (supportedUris.isEmpty()) return
+        externalImportSequence += 1
+        externalBookImport.value = ExternalBookImportRequest(
+            externalImportSequence,
+            supportedUris.map(Uri::toString),
+        )
+    }
+
+    private fun MutableList<Uri>.addClipDataUris(intent: Intent) {
+        val clipData = intent.clipData ?: return
+        repeat(clipData.itemCount) { index -> clipData.getItemAt(index).uri?.let(::add) }
     }
 
     @Composable
@@ -169,6 +208,7 @@ class MainActivity : ComponentActivity() {
     ) {
         val navController = rememberNavController()
         val pendingNotificationDestination by notificationDestination.collectAsState()
+        val pendingExternalBookImport by externalBookImport.collectAsState()
         LaunchedEffect(pendingNotificationDestination) {
             val destination = pendingNotificationDestination ?: return@LaunchedEffect
             val route = when (destination) {
@@ -200,6 +240,7 @@ class MainActivity : ComponentActivity() {
         val latestSettings = rememberUpdatedState(settings)
         val latestUpdateState = rememberUpdatedState(updateState)
         val latestReleaseNotesState = rememberUpdatedState(releaseNotesState)
+        val latestExternalBookImport = rememberUpdatedState(pendingExternalBookImport)
         val appContent = remember {
             movableContentOf {
                 KixyuNavHost(
@@ -213,6 +254,11 @@ class MainActivity : ComponentActivity() {
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
                     onPrioritizeBookSync = appViewModel::prioritizeBookSync,
                     onBookOpened = bookRepository::markBookOpened,
+                    externalImportRequestId = latestExternalBookImport.value?.id,
+                    externalImportUris = latestExternalBookImport.value?.uris.orEmpty(),
+                    onExternalImportConsumed = { requestId ->
+                        if (externalBookImport.value?.id == requestId) externalBookImport.value = null
+                    },
                     onExitApp = { finish() },
                 )
             }
@@ -371,6 +417,8 @@ class MainActivity : ComponentActivity() {
 
 private data class TopDestination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
+private data class ExternalBookImportRequest(val id: Long, val uris: List<String>)
+
 @Composable
 private fun KixyuNavHost(
     navController: NavHostController,
@@ -383,6 +431,9 @@ private fun KixyuNavHost(
     onAnimationPriorityChanged: (Boolean) -> Unit,
     onPrioritizeBookSync: (String) -> Unit,
     onBookOpened: (String) -> Unit,
+    externalImportRequestId: Long?,
+    externalImportUris: List<String>,
+    onExternalImportConsumed: (Long) -> Unit,
     onExitApp: () -> Unit,
 ) {
     val entry by navController.currentBackStackEntryAsState()
@@ -402,8 +453,19 @@ private fun KixyuNavHost(
     var pageAnimation by remember { mutableStateOf<Job?>(null) }
     var animationPriorityJob by remember { mutableStateOf<Job?>(null) }
     var bookNavigationPending by remember { mutableStateOf(false) }
+    var bookReorderAfterReaderExitJob by remember { mutableStateOf<Job?>(null) }
     var releaseNotesVisible by rememberSaveable { mutableStateOf(false) }
     var diagnosticOnlyFailures by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(externalImportRequestId) {
+        if (externalImportRequestId == null) return@LaunchedEffect
+        if (navController.currentDestination?.route != Routes.HOME) {
+            navController.popBackStack(Routes.HOME, inclusive = false)
+        }
+        val libraryPage = top.indexOfFirst { it.route == Routes.LIBRARY }
+        if (libraryPage >= 0 && pagerState.currentPage != libraryPage) {
+            pagerState.scrollToPage(libraryPage)
+        }
+    }
     val topLevelActive = route == null || route == Routes.HOME
     // Home, Library and Settings are sibling pages inside the single HOME destination. At that
     // level Back exits the task; it must never pop an accidentally restored detail/reader entry.
@@ -428,6 +490,7 @@ private fun KixyuNavHost(
     DisposableEffect(Unit) {
         onDispose {
             animationPriorityJob?.cancel()
+            bookReorderAfterReaderExitJob?.cancel()
             onAnimationPriorityChanged(false)
         }
     }
@@ -435,7 +498,6 @@ private fun KixyuNavHost(
     val openBook: (String) -> Unit = { bookUuid ->
         if (navController.currentDestination?.route == Routes.HOME && !bookNavigationPending) {
             bookNavigationPending = true
-            onBookOpened(bookUuid)
             onPrioritizeBookSync(bookUuid)
             // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
             // from a Compose frame callback. withFrameNanos resumed at the beginning of the next
@@ -526,7 +588,12 @@ private fun KixyuNavHost(
                     ) { page ->
                         when (top[page].route) {
                             Routes.HOME -> HomeRoute(onOpenBook = openBook)
-                            Routes.LIBRARY -> LibraryRoute(onOpenBook = openBook)
+                            Routes.LIBRARY -> LibraryRoute(
+                                onOpenBook = openBook,
+                                externalImportRequestId = externalImportRequestId,
+                                externalImportUris = externalImportUris,
+                                onExternalImportConsumed = onExternalImportConsumed,
+                            )
                             Routes.SETTINGS -> SettingsRoute(
                                 currentVersion = BuildConfig.VERSION_NAME,
                                 onAppearance = {
@@ -691,14 +758,28 @@ private fun KixyuNavHost(
                 composable(
                     route = Routes.READER,
                     arguments = listOf(navArgument("bookUuid") { type = NavType.StringType }),
-                ) {
+                ) { entry ->
+                    val bookUuid = entry.arguments?.getString("bookUuid").orEmpty()
                     ReaderRoute(
                         initialSettings = initialReaderSettings,
                         onExit = {
                             prioritizeAnimation()
                             // Reader always belongs directly to the top level. Pop to that exact
                             // parent instead of trusting an arbitrary historical stack entry.
-                            if (!navController.popBackStack(Routes.HOME, inclusive = false)) {
+                            if (navController.popBackStack(Routes.HOME, inclusive = false)) {
+                                bookUuid.takeIf(String::isNotBlank)?.let { exitedBookUuid ->
+                                    bookReorderAfterReaderExitJob?.cancel()
+                                    bookReorderAfterReaderExitJob = scope.launch {
+                                        // Use the very same duration as the reader's pop transition:
+                                        // the shelf order changes as soon as the return animation ends,
+                                        // without waiting for another route recomposition or frame.
+                                        kotlinx.coroutines.delay(
+                                            KixyuMotion.PageNavigationMillis.toLong(),
+                                        )
+                                        onBookOpened(exitedBookUuid)
+                                    }
+                                }
+                            } else {
                                 onExitApp()
                             }
                         },
