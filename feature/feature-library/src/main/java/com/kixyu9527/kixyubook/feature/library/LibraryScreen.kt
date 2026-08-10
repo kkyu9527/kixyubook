@@ -92,6 +92,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
@@ -668,7 +669,7 @@ internal fun exportFileName(item: LibraryBook): String {
 }
 
 internal fun openExportLocation(context: Context, uriString: String): Boolean {
-    val uri = Uri.parse(uriString)
+    val uri = uriString.toUri()
     val parentUri = exportedDocumentParent(context, uri)
     if (parentUri != null) {
         val directoryIntent = Intent(Intent.ACTION_VIEW)

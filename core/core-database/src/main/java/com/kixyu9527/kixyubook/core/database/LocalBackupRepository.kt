@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.database
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.os.storage.StorageManager
 import androidx.core.net.toUri
 import com.kixyu9527.kixyubook.core.common.model.PageMode
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -111,7 +112,7 @@ class LocalBackupRepository @Inject constructor(
                                     totalBytes += read
                                     require(totalBytes <= MAX_UNCOMPRESSED_BYTES) { "备份解压后体积异常" }
                                     if (totalBytes % RESTORE_SPACE_CHECK_INTERVAL_BYTES < read) {
-                                        require(work.usableSpace >= RESTORE_WORKING_SPACE_RESERVE_BYTES) {
+                                        require(allocatableBytes(work) >= RESTORE_WORKING_SPACE_RESERVE_BYTES) {
                                             "设备存储空间不足，无法继续解压备份"
                                         }
                                     }
@@ -174,10 +175,15 @@ class LocalBackupRepository @Inject constructor(
             .filter(File::isFile)
             .sumOf(File::length)
         val requiredBytes = installBytes + RESTORE_WORKING_SPACE_RESERVE_BYTES
-        require(context.filesDir.usableSpace >= requiredBytes) {
+        require(allocatableBytes(context.filesDir) >= requiredBytes) {
             val requiredMegabytes = (requiredBytes + BYTES_PER_MEBIBYTE - 1) / BYTES_PER_MEBIBYTE
             "设备存储空间不足，恢复需要至少约 ${requiredMegabytes} MiB 可用空间"
         }
+    }
+
+    private fun allocatableBytes(path: File): Long {
+        val storageManager = context.getSystemService(StorageManager::class.java)
+        return storageManager.getAllocatableBytes(storageManager.getUuidForPath(path))
     }
 
     private fun installRestore(snapshot: File, assets: File) {
