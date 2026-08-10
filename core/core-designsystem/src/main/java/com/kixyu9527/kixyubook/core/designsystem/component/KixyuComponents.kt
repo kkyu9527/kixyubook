@@ -115,6 +115,7 @@ object KixyuSize {
     val icon = 20.dp
     val rowMinHeight = 52.dp
     val colorSwatch = 24.dp
+    val accountAvatar = 56.dp
     val progressHeight = 4.dp
     val compactButtonIconGap = 6.dp
     val searchCorner = 16.dp

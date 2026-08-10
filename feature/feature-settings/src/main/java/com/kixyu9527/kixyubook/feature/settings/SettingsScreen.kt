@@ -9,8 +9,10 @@ import android.os.Build
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
@@ -36,14 +39,13 @@ import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -58,8 +60,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
@@ -71,7 +77,6 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleContro
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
@@ -98,9 +103,13 @@ import java.util.Locale
 import kotlin.system.exitProcess
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
+import com.kixyu9527.kixyubook.core.sync.SyncAccount
 import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
 import com.kixyu9527.kixyubook.core.sync.BackupOperationType
 import kotlinx.coroutines.launch
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 
 enum class SettingsPane { CLOUD_SYNC, READING, APPEARANCE, DATA_AND_BACKUP, ABOUT }
 
@@ -276,48 +285,38 @@ fun CloudSyncRoute(
         if (state.cloudSync.initialSyncDecision != null) conflictDeferred = false
     }
 
-    val accountSection: @Composable () -> Unit = {
-        KixyuSection(title = "账号") {
-            if (syncAccount == null) {
-                KixyuSettingsRow(
-                    title = "使用 Google 账号登录",
-                    supportingText = "登录成功后自动同步书籍、进度与设置",
-                    icon = Icons.Outlined.Cloud,
-                )
-                KixyuDivider()
-                Row(Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal)) {
-                    KixyuButton(
-                        text = "选择 Google 账号",
-                        onClick = {
-                            requestNotificationPermission(false) {
-                                activity?.let(viewModel::connectGoogle)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = activity != null,
-                    )
+    val overviewSection: @Composable () -> Unit = {
+        CloudSyncOverviewCard(
+            state = state.cloudSync,
+            account = syncAccount,
+            onConnect = {
+                requestNotificationPermission(false) {
+                    activity?.let(viewModel::connectGoogle)
                 }
-            } else {
-                KixyuSettingsRow(
-                    title = syncAccount.displayName,
-                    supportingText = syncAccount.email,
-                    icon = Icons.Outlined.CloudDone,
-                ) {
-                    Text(
-                        when {
-                            state.cloudSync.initialSyncDecision != null -> "待处理"
-                            state.cloudSync.inspectingInitialSync -> "检查中"
-                            state.cloudSync.enabled -> "已连接"
-                            else -> "已暂停"
-                        },
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                    )
+            },
+            connectEnabled = activity != null,
+            onSyncAction = {
+                if (state.cloudSync.initialSyncDecision != null) {
+                    conflictDeferred = false
+                } else if (state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED) {
+                    activity?.let(viewModel::connectGoogle)
+                } else {
+                    viewModel.syncNow()
                 }
-                KixyuDivider()
+            },
+        )
+    }
+    val syncBehaviorSection: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+            CloudSyncSectionHeader(
+                title = "同步方式",
+                detail = "控制同步发生的时机与网络",
+            )
+            KixyuSection {
                 KixyuSettingsRow(
                     title = "自动同步",
-                    supportingText = "书库发生变化后在后台增量同步",
+                    supportingText = "有变更时在后台安静地增量同步",
+                    icon = Icons.Outlined.CloudSync,
                     onClick = {
                         if (state.cloudSync.initialSyncDecision != null) {
                             conflictDeferred = false
@@ -340,147 +339,108 @@ fun CloudSyncRoute(
                             !state.cloudSync.inspectingInitialSync,
                     )
                 }
-            }
-        }
-    }
-    val statusSection: @Composable () -> Unit = {
-        val status = cloudSyncStatus(state.cloudSync)
-        KixyuSection(title = "同步状态") {
-            KixyuSettingsRow(
-                title = status.title,
-                supportingText = status.detail,
-                icon = status.icon,
-            )
-            KixyuDivider()
-            Row(Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal)) {
-                KixyuButton(
-                    text = when {
-                        state.cloudSync.initialSyncDecision != null -> "处理同步冲突"
-                        state.cloudSync.inspectingInitialSync -> "正在检查云端…"
-                        state.cloudSync.phase == CloudSyncPhase.AUTHORIZING -> "正在授权…"
-                        state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED -> "重新授权"
-                        state.cloudSync.phase == CloudSyncPhase.SYNCING -> "正在同步…"
-                        !state.cloudSync.enabled -> "同步已暂停"
-                        else -> "重新同步"
-                    },
+                KixyuDivider()
+                KixyuSettingsRow(
+                    title = "仅通过 Wi-Fi 同步大文件",
+                    supportingText = "避免书籍和字体使用移动数据",
+                    icon = Icons.Outlined.Wifi,
                     onClick = {
-                        if (state.cloudSync.initialSyncDecision != null) {
-                            conflictDeferred = false
-                        } else if (state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED) {
-                            activity?.let(viewModel::connectGoogle)
-                        } else {
-                            viewModel.syncNow()
-                        }
+                        viewModel.setWifiOnlyForLargeFiles(!state.cloudSync.wifiOnlyForLargeFiles)
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.cloudSync.inspectingInitialSync &&
-                        state.cloudSync.phase !in setOf(
-                            CloudSyncPhase.AUTHORIZING,
-                            CloudSyncPhase.SYNCING,
-                        ) && (
-                            state.cloudSync.enabled ||
-                                state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED ||
-                                state.cloudSync.initialSyncDecision != null
-                            ),
-                )
+                ) {
+                    KixyuSwitch(
+                        checked = state.cloudSync.wifiOnlyForLargeFiles,
+                        onCheckedChange = viewModel::setWifiOnlyForLargeFiles,
+                    )
+                }
             }
         }
     }
-    val contentSection: @Composable () -> Unit = {
-        KixyuSection(title = "同步内容") {
-            KixyuSettingsRow(
-                title = "书籍与阅读数据",
-                supportingText = "书籍信息、进度、统计、书签和设置",
-                icon = Icons.Outlined.CheckCircle,
-            ) {
-                Text(
-                    "始终同步",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
-            }
-            KixyuDivider()
-            KixyuSettingsRow(
-                title = "原始书籍文件",
-                supportingText = "同步 TXT / EPUB，供其他设备完整恢复",
-                onClick = {
-                    val enabled = !state.cloudSync.syncOriginalFiles
-                    if (enabled) requestNotificationPermission(false) {
-                        viewModel.setSyncOriginalFiles(true)
-                    } else viewModel.setSyncOriginalFiles(false)
-                },
-            ) {
-                KixyuSwitch(
-                    checked = state.cloudSync.syncOriginalFiles,
-                    onCheckedChange = { enabled ->
+    val syncContentSection: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+            CloudSyncSectionHeader(
+                title = "附加内容",
+                detail = "阅读数据始终同步",
+            )
+            KixyuSection {
+                KixyuSettingsRow(
+                    title = "原始书籍文件",
+                    supportingText = "同步 TXT / EPUB，供其他设备完整恢复",
+                    icon = Icons.Outlined.Backup,
+                    onClick = {
+                        val enabled = !state.cloudSync.syncOriginalFiles
                         if (enabled) requestNotificationPermission(false) {
                             viewModel.setSyncOriginalFiles(true)
                         } else viewModel.setSyncOriginalFiles(false)
                     },
-                )
-            }
-            KixyuDivider()
-            KixyuSettingsRow(
-                title = "用户字体",
-                supportingText = "同步已导入的 TTF / OTF",
-                onClick = {
-                    val enabled = !state.cloudSync.syncFonts
-                    if (enabled) requestNotificationPermission(false) {
-                        viewModel.setSyncFonts(true)
-                    } else viewModel.setSyncFonts(false)
-                },
-            ) {
-                KixyuSwitch(
-                    checked = state.cloudSync.syncFonts,
-                    onCheckedChange = { enabled ->
+                ) {
+                    KixyuSwitch(
+                        checked = state.cloudSync.syncOriginalFiles,
+                        onCheckedChange = { enabled ->
+                            if (enabled) requestNotificationPermission(false) {
+                                viewModel.setSyncOriginalFiles(true)
+                            } else viewModel.setSyncOriginalFiles(false)
+                        },
+                    )
+                }
+                KixyuDivider()
+                KixyuSettingsRow(
+                    title = "用户字体",
+                    supportingText = "同步已导入的 TTF / OTF",
+                    icon = Icons.Outlined.Tune,
+                    onClick = {
+                        val enabled = !state.cloudSync.syncFonts
                         if (enabled) requestNotificationPermission(false) {
                             viewModel.setSyncFonts(true)
                         } else viewModel.setSyncFonts(false)
                     },
-                )
+                ) {
+                    KixyuSwitch(
+                        checked = state.cloudSync.syncFonts,
+                        onCheckedChange = { enabled ->
+                            if (enabled) requestNotificationPermission(false) {
+                                viewModel.setSyncFonts(true)
+                            } else viewModel.setSyncFonts(false)
+                        },
+                    )
+                }
             }
         }
     }
-    val networkSection: @Composable () -> Unit = {
-        KixyuSection(title = "网络") {
-            KixyuDropdownRow(
-                title = "大文件同步网络",
-                selected = if (state.cloudSync.wifiOnlyForLargeFiles) {
-                    LargeFileNetwork.WIFI_ONLY
-                } else {
-                    LargeFileNetwork.ANY_NETWORK
-                },
-                options = LargeFileNetwork.entries,
-                optionLabel = LargeFileNetwork::label,
-                icon = Icons.Outlined.Wifi,
-                onSelected = { option ->
-                    viewModel.setWifiOnlyForLargeFiles(option == LargeFileNetwork.WIFI_ONLY)
-                },
-            )
-            KixyuDivider()
-            KixyuSettingsRow(
-                title = "Google Drive 应用专属空间",
-                supportingText = "增量同步，仅 Kixyu Book 可以访问",
-                icon = Icons.Outlined.Storage,
-            )
+    val syncPreferencesSection: @Composable () -> Unit = {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (maxWidth >= 700.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Box(Modifier.weight(1f)) { syncBehaviorSection() }
+                    Box(Modifier.weight(1f)) { syncContentSection() }
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap)) {
+                    syncBehaviorSection()
+                    syncContentSection()
+                }
+            }
         }
     }
     val accountActionsSection: @Composable () -> Unit = {
-        KixyuSection(title = "账号操作") {
-            Row(
+        KixyuSection(title = "账号管理") {
+            Column(
                 modifier = Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal),
-                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
             ) {
-                KixyuTextButton(
-                    text = "退出账号",
+                KixyuSecondaryButton(
+                    text = "断开 Google 账号",
                     onClick = viewModel::disconnectGoogle,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 KixyuTextButton(
-                    text = "删除云端数据",
+                    text = "删除 Google Drive 中的同步数据",
                     onClick = { confirmDelete = true },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -516,11 +476,9 @@ fun CloudSyncRoute(
             ),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
-            item { accountSection() }
+            item { overviewSection() }
             if (syncAccount != null) {
-                item { statusSection() }
-                item { contentSection() }
-                item { networkSection() }
+                item { syncPreferencesSection() }
                 item { accountActionsSection() }
             }
             item { KixyuBottomContentSpacer() }
@@ -569,16 +527,263 @@ fun CloudSyncRoute(
 
 }
 
+@Composable
+private fun CloudSyncOverviewCard(
+    state: CloudSyncState,
+    account: SyncAccount?,
+    onConnect: () -> Unit,
+    connectEnabled: Boolean,
+    onSyncAction: () -> Unit,
+) {
+    KixyuSection {
+        if (account == null) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(KixyuSpacing.extraLarge),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+            ) {
+                Surface(
+                    modifier = Modifier.size(64.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Outlined.CloudDone,
+                            null,
+                            modifier = Modifier.size(30.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                ) {
+                    Text(
+                        "在每台设备继续阅读",
+                        style = MaterialTheme.typography.titleLarge,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        "同步书库、阅读进度、书签和个性化设置",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                KixyuButton(
+                    text = "连接 Google Drive",
+                    onClick = onConnect,
+                    enabled = connectEnabled,
+                    modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(),
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.Info,
+                        null,
+                        modifier = Modifier.size(KixyuSize.iconSmall),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "仅使用 Kixyu Book 的 Google Drive 应用专属空间",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+            return@KixyuSection
+        }
+
+        val status = cloudSyncStatus(state)
+        val statusContainerColor = when (status.tone) {
+            CloudSyncStatusTone.ACTIVE,
+            CloudSyncStatusTone.SUCCESS -> MaterialTheme.colorScheme.primaryContainer
+            CloudSyncStatusTone.ATTENTION -> MaterialTheme.colorScheme.tertiaryContainer
+            CloudSyncStatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer
+            CloudSyncStatusTone.MUTED -> MaterialTheme.colorScheme.surfaceContainerHighest
+        }
+        val statusContentColor = when (status.tone) {
+            CloudSyncStatusTone.ACTIVE,
+            CloudSyncStatusTone.SUCCESS -> MaterialTheme.colorScheme.onPrimaryContainer
+            CloudSyncStatusTone.ATTENTION -> MaterialTheme.colorScheme.onTertiaryContainer
+            CloudSyncStatusTone.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+            CloudSyncStatusTone.MUTED -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(KixyuSpacing.large),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+            ) {
+                GoogleAccountAvatar(account)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                ) {
+                    Text(account.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        account.email,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Cloud,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "Google Drive",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().animateContentSize(),
+                shape = MaterialTheme.shapes.large,
+                color = statusContainerColor,
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(KixyuSpacing.large),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            status.icon,
+                            null,
+                            modifier = Modifier.size(26.dp),
+                            tint = statusContentColor,
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                        ) {
+                            Text(
+                                status.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = statusContentColor,
+                            )
+                            Text(
+                                status.detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = statusContentColor.copy(alpha = .78f),
+                            )
+                        }
+                    }
+                    if (status.busy) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
+                            color = statusContentColor,
+                            trackColor = statusContentColor.copy(alpha = .16f),
+                        )
+                    }
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.CloudDone,
+                    null,
+                    modifier = Modifier.size(KixyuSize.iconSmall),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "阅读数据已纳入同步",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(
+                        "书库、进度、书签、统计与阅读设置",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            KixyuButton(
+                text = cloudSyncActionLabel(state),
+                onClick = onSyncAction,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = cloudSyncActionEnabled(state),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CloudSyncSectionHeader(title: String, detail: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = KixyuSpacing.extraSmall),
+        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+        )
+        Text(
+            detail,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}
+
+private fun cloudSyncActionLabel(state: CloudSyncState): String = when {
+    state.initialSyncDecision != null -> "处理同步冲突"
+    state.inspectingInitialSync -> "正在检查云端…"
+    state.phase == CloudSyncPhase.AUTHORIZING -> "正在授权…"
+    state.phase == CloudSyncPhase.AUTH_REQUIRED -> "重新授权"
+    state.phase == CloudSyncPhase.SYNCING -> "正在同步…"
+    !state.enabled -> "同步已暂停"
+    state.phase == CloudSyncPhase.ERROR -> "重试同步"
+    else -> "立即同步"
+}
+
+private fun cloudSyncActionEnabled(state: CloudSyncState): Boolean =
+    !state.inspectingInitialSync &&
+        state.phase !in setOf(CloudSyncPhase.AUTHORIZING, CloudSyncPhase.SYNCING) &&
+        (state.enabled || state.phase == CloudSyncPhase.AUTH_REQUIRED || state.initialSyncDecision != null)
+
+private enum class CloudSyncStatusTone { ACTIVE, SUCCESS, ATTENTION, ERROR, MUTED }
+
 private data class CloudSyncStatusUi(
     val title: String,
     val detail: String,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val tone: CloudSyncStatusTone,
+    val busy: Boolean = false,
 )
-
-private enum class LargeFileNetwork {
-    WIFI_ONLY,
-    ANY_NETWORK,
-}
 
 /** Requests notification permission only after a related user action, never at app launch. */
 @Composable
@@ -618,9 +823,33 @@ internal fun rememberNotificationPermissionAction(): (Boolean, () -> Unit) -> Un
     }
 }
 
-private fun LargeFileNetwork.label(): String = when (this) {
-    LargeFileNetwork.WIFI_ONLY -> "仅 Wi-Fi"
-    LargeFileNetwork.ANY_NETWORK -> "Wi-Fi 和移动数据"
+@Composable
+private fun GoogleAccountAvatar(account: SyncAccount) {
+    val context = LocalContext.current
+    Surface(
+        modifier = Modifier.size(KixyuSize.accountAvatar).clip(CircleShape),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                account.displayName.trim().firstOrNull()?.uppercase() ?: "G",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            account.avatarUrl?.let { avatarUrl ->
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(avatarUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "${account.displayName}的账号头像",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                )
+            }
+        }
+    }
 }
 
 private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
@@ -633,51 +862,64 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
             title = "等待处理同步冲突",
             detail = "${conflict.conflicts.size} 项内容在本机和云端都已修改",
             icon = Icons.Outlined.CloudSync,
+            tone = CloudSyncStatusTone.ATTENTION,
         )
         state.inspectingInitialSync -> CloudSyncStatusUi(
             title = "正在检查云端书库",
             detail = "正在识别本机与云端数据",
             icon = Icons.Outlined.CloudSync,
+            tone = CloudSyncStatusTone.ACTIVE,
+            busy = true,
         )
         !state.enabled -> CloudSyncStatusUi(
             title = "同步已暂停",
             detail = lastSync?.let { "上次同步于 $it" } ?: "开启自动同步后开始上传数据",
             icon = Icons.Outlined.Cloud,
+            tone = CloudSyncStatusTone.MUTED,
         )
         state.phase == CloudSyncPhase.AUTHORIZING -> CloudSyncStatusUi(
             title = "正在连接 Google Drive",
             detail = "正在确认账号与访问权限",
             icon = Icons.Outlined.CloudSync,
+            tone = CloudSyncStatusTone.ACTIVE,
+            busy = true,
         )
         state.phase == CloudSyncPhase.AUTH_REQUIRED -> CloudSyncStatusUi(
             title = "需要重新授权",
             detail = "进入应用后会自动恢复 Google Drive 连接",
             icon = Icons.Outlined.Cloud,
+            tone = CloudSyncStatusTone.ATTENTION,
         )
         state.phase == CloudSyncPhase.SYNCING -> CloudSyncStatusUi(
             title = "正在同步",
             detail = if (state.pendingCount > 0) "${state.pendingCount} 项本地变更等待完成" else "正在检查云端变更",
             icon = Icons.Outlined.CloudSync,
+            tone = CloudSyncStatusTone.ACTIVE,
+            busy = true,
         )
         state.phase == CloudSyncPhase.ERROR -> CloudSyncStatusUi(
             title = "同步遇到问题",
             detail = state.errorMessage ?: "请检查网络后重试",
             icon = Icons.Outlined.Cloud,
+            tone = CloudSyncStatusTone.ERROR,
         )
         state.pendingCount > 0 -> CloudSyncStatusUi(
             title = "等待同步",
             detail = "${state.pendingCount} 项本地变更等待上传",
             icon = Icons.Outlined.CloudSync,
+            tone = CloudSyncStatusTone.ATTENTION,
         )
         lastSync != null -> CloudSyncStatusUi(
             title = "所有数据均已同步",
             detail = "上次同步于 $lastSync",
             icon = Icons.Outlined.CloudDone,
+            tone = CloudSyncStatusTone.SUCCESS,
         )
         else -> CloudSyncStatusUi(
             title = "等待首次同步",
             detail = "连接网络后将自动开始",
             icon = Icons.Outlined.CloudSync,
+            tone = CloudSyncStatusTone.ACTIVE,
         )
     }
 }
