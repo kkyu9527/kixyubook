@@ -31,7 +31,6 @@ class LocalBackupRepositoryTest {
         context.deleteDatabase(DATABASE_NAME)
         listOf("books", "covers", "fonts").forEach { File(context.filesDir, it).deleteRecursively() }
         database = Room.databaseBuilder(context, KixyuDatabase::class.java, DATABASE_NAME)
-            .addMigrations(*DatabaseMigrations.supported)
             .build()
         backupFile = File(context.cacheDir, "round-trip.kixyubackup").apply { delete() }
     }

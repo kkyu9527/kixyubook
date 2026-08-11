@@ -19548,7 +19548,6 @@ SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->access$getEpubCha
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->access$getEpubParseCoordinator$p(Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository;)Lcom/kixyu9527/kixyubook/core/database/EpubParseCoordinator;
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->access$getParsers$p(Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository;)Lcom/kixyu9527/kixyubook/core/reader/engine/BookParserRegistry;
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->continueAllEpubIndexes(Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->continueEpubIndex(Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->getChapter(Ljava/lang/String;ILcom/kixyu9527/kixyubook/core/common/model/ChapterLoadPriority;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->observeImportEvents()Lkotlinx/coroutines/flow/Flow;
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository;->observeLibrary()Lkotlinx/coroutines/flow/Flow;
@@ -19567,18 +19566,6 @@ Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueAllEpubIndexe
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueAllEpubIndexes$2;-><init>(Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository;Lkotlin/coroutines/Continuation;)V
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueAllEpubIndexes$2;->create(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueAllEpubIndexes$2;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;
-Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2;-><init>(Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository;Ljava/lang/String;Lkotlin/coroutines/Continuation;)V
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2;->create(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2;->invoke(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2;->invoke(Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;
-Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2$completed$1;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2$completed$1;-><init>(Lkotlin/jvm/internal/Ref$ObjectRef;Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository;Lcom/kixyu9527/kixyubook/core/database/entity/BookEntity;Lcom/kixyu9527/kixyubook/core/database/entity/ChapterEntity;Lkotlin/coroutines/Continuation;)V
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2$completed$1;->create(Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2$completed$1;->invoke(Ljava/lang/Object;)Ljava/lang/Object;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2$completed$1;->invoke(Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
-SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$continueEpubIndex$2$completed$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;
 Lcom/kixyu9527/kixyubook/core/database/LocalBookRepository$getChapter$2;
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$getChapter$2;-><init>(Ljava/lang/String;ILcom/kixyu9527/kixyubook/core/database/LocalBookRepository;Lkotlin/coroutines/Continuation;)V
 SPLcom/kixyu9527/kixyubook/core/database/LocalBookRepository$getChapter$2;->create(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;

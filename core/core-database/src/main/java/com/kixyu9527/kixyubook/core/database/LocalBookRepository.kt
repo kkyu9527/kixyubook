@@ -23,10 +23,8 @@ import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
 import com.kixyu9527.kixyubook.core.reader.engine.BookParser
 import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapter
-import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapterOutline
 import com.kixyu9527.kixyubook.core.reader.engine.EpubBookParser
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderPaginationCacheMaintenance
-import com.kixyu9527.kixyubook.core.reader.engine.TxtBookParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -52,7 +50,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.DigestInputStream
 import java.security.MessageDigest
-import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
@@ -867,8 +864,6 @@ class LocalBookRepository @Inject constructor(
         File(context.filesDir, "covers").pruneTo(books.mapNotNullTo(hashSetOf()) { it.coverPath?.let(::File)?.absolutePath })
         epubChapterCache.retainBooks(books.mapTo(hashSetOf(), BookEntity::uuid))
     }
-
-    suspend fun continueEpubIndex(bookUuid: String) = epubIndex.continueIndex(bookUuid)
 
     suspend fun continueAllEpubIndexes() = epubIndex.continueAll()
 }

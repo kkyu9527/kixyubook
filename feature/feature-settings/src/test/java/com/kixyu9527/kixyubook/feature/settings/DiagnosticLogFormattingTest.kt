@@ -128,21 +128,10 @@ class DiagnosticLogFormattingTest {
             "2026-08-09T12:44:43.586Z | SYNC | full_sync_finished | elapsedMs=8450 | " +
                 "outcome=interrupted | stage=remote_snapshot",
         )
-        val legacyEntry = parseDiagnosticEntry(
-            "2026-08-09T09:41:45.428Z | SYNC | full_sync_finished | elapsedMs=15130 | outcome=kc1",
-        )
-        val olderLegacyEntry = parseDiagnosticEntry(
-            "2026-08-08T19:17:03.112Z | SYNC | full_sync_finished | elapsedMs=58810 | outcome=rb1",
-        )
-
         assertEquals("云同步被系统中断", currentEntry.title)
         assertEquals(false, currentEntry.isFailure)
         assertTrue(currentEntry.details.contains("结果" to "被系统中断"))
         assertTrue(currentEntry.details.contains("中断或失败阶段" to "检查云端变更"))
-        assertEquals("云同步被系统中断", legacyEntry.title)
-        assertEquals(false, legacyEntry.isFailure)
-        assertEquals("云同步被系统中断", olderLegacyEntry.title)
-        assertEquals(false, olderLegacyEntry.isFailure)
     }
 
     @Test

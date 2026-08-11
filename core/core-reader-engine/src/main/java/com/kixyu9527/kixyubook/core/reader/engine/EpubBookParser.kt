@@ -4,15 +4,10 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
-import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
-import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
-import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 import com.kixyu9527.kixyubook.core.common.model.singleLineBookHeading
 import org.w3c.dom.Element
-import org.w3c.dom.Node
 import java.io.File
 import java.nio.charset.StandardCharsets
-import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.CancellationException

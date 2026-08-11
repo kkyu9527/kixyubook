@@ -32,10 +32,10 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             pageMode = values[PAGE_MODE]?.let { runCatching { PageMode.valueOf(it) }.getOrNull() } ?: PageMode.SCROLL,
             customThemeEnabled = values[CUSTOM_THEME_ENABLED] ?: (storedTheme == "CUSTOM"),
             customDayTheme = CustomReaderTheme(
-                values[CUSTOM_DAY_BACKGROUND] ?: values[LEGACY_CUSTOM_BACKGROUND] ?: "#F7F4EC",
-                values[CUSTOM_DAY_BODY] ?: values[LEGACY_CUSTOM_BODY] ?: "#292722",
-                values[CUSTOM_DAY_TITLE] ?: values[LEGACY_CUSTOM_TITLE] ?: "#171713",
-                values[CUSTOM_DAY_ACCENT] ?: values[LEGACY_CUSTOM_ACCENT] ?: "#52655A",
+                values[CUSTOM_DAY_BACKGROUND] ?: "#F7F4EC",
+                values[CUSTOM_DAY_BODY] ?: "#292722",
+                values[CUSTOM_DAY_TITLE] ?: "#171713",
+                values[CUSTOM_DAY_ACCENT] ?: "#52655A",
             ),
             customNightTheme = CustomReaderTheme(
                 values[CUSTOM_NIGHT_BACKGROUND] ?: "#11120F",
@@ -104,10 +104,6 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val CUSTOM_NIGHT_BODY = stringPreferencesKey("custom_night_body")
         val CUSTOM_NIGHT_TITLE = stringPreferencesKey("custom_night_title")
         val CUSTOM_NIGHT_ACCENT = stringPreferencesKey("custom_night_accent")
-        val LEGACY_CUSTOM_BACKGROUND = stringPreferencesKey("custom_background")
-        val LEGACY_CUSTOM_BODY = stringPreferencesKey("custom_body")
-        val LEGACY_CUSTOM_TITLE = stringPreferencesKey("custom_title")
-        val LEGACY_CUSTOM_ACCENT = stringPreferencesKey("custom_accent")
         val FONT_UUID = stringPreferencesKey("font_uuid"); val READING_GOAL = intPreferencesKey("reading_goal")
         val APP_COLOR_THEME = stringPreferencesKey("app_color_theme")
         val APP_UI_STYLE = stringPreferencesKey("app_ui_style")

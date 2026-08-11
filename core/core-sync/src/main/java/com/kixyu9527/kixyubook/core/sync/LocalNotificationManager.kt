@@ -267,8 +267,6 @@ class LocalNotificationManager @Inject constructor(
                 },
             ),
         )
-        systemManager.deleteNotificationChannel(LEGACY_CHANNEL_ACTION_REQUIRED)
-        systemManager.deleteNotificationChannel(LEGACY_CHANNEL_REMINDERS)
     }
 
     companion object {
@@ -288,8 +286,6 @@ class LocalNotificationManager @Inject constructor(
         private const val CHANNEL_ACTION_REQUIRED = "action_required_v2"
         private const val CHANNEL_TASK_RESULTS = "task_results_v1"
         private const val CHANNEL_REMINDERS = "reading_reminders_v2"
-        private const val LEGACY_CHANNEL_ACTION_REQUIRED = "action_required"
-        private const val LEGACY_CHANNEL_REMINDERS = "reading_reminders"
         private const val PREFERENCES_NAME = "notification_state"
         private const val KEY_CONFLICT_FINGERPRINT = "conflict_fingerprint"
     }

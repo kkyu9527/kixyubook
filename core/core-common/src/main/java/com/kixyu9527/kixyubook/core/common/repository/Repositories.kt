@@ -84,13 +84,6 @@ interface BackupRepository {
     suspend fun restoreFrom(uriString: String): Result<BackupResult>
 }
 
-/** All contributors participate in full-device restoration, including original books and user assets. */
-interface BackupContributor {
-    val key: String
-    suspend fun export(): ByteArray
-    suspend fun restore(payload: ByteArray)
-}
-
 interface AppUpdateRepository {
     val state: StateFlow<AppUpdateState>
     val releaseNotesState: StateFlow<ReleaseNotesState>

@@ -35,7 +35,7 @@ internal fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
             categoryKey = "OTHER",
             category = "其他",
             title = "无法识别的日志记录",
-            description = "这条记录使用了旧格式或内容不完整。",
+            description = "这条记录内容不完整或已经损坏。",
             details = listOf("原始内容" to rawLine),
             isFailure = false,
         )
@@ -191,8 +191,6 @@ private fun readableOutcome(outcome: String): String = when (outcome) {
     "user_action" -> "等待用户处理"
     "local_delete" -> "本机已删除"
     "interrupted",
-    "kc1",
-    "rb1",
     "CancellationException",
     "JobCancellationException",
     -> "被系统中断"
@@ -235,8 +233,6 @@ private fun isFailureOutcome(outcome: String?): Boolean = when (outcome) {
     "user_action",
     "local_delete",
     "interrupted",
-    "kc1",
-    "rb1",
     "CancellationException",
     "JobCancellationException",
     -> false
@@ -351,7 +347,5 @@ private fun readableValue(key: String, value: String): String = when (key) {
 
 private fun isInterruptedSyncOutcome(outcome: String?): Boolean =
     outcome == "interrupted" ||
-        outcome == "kc1" ||
-        outcome == "rb1" ||
         outcome == "CancellationException" ||
         outcome == "JobCancellationException"

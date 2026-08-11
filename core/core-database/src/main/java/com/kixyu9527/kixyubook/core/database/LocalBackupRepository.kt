@@ -5,7 +5,6 @@ import android.database.sqlite.SQLiteDatabase
 import android.os.storage.StorageManager
 import androidx.core.net.toUri
 import com.kixyu9527.kixyubook.core.common.model.PageMode
-import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.repository.BackupRepository
 import com.kixyu9527.kixyubook.core.common.repository.BackupResult
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository

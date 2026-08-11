@@ -46,17 +46,26 @@ Kixyu Book 是一款 local-first Android 小说阅读器，专注 TXT、EPUB、�
 
 - 通过 Android Storage Access Framework 批量导入本地书籍
 - 使用永久 UUID 标识书籍，并通过内容 Hash 避免重复导入
-- 搜索、分类、批量删除、最近阅读和阅读进度
+- 列表与网格布局、搜索、分类、批量管理和阅读进度
+- 最近打开、导入时间、书名与自定义拖动排序
+- 支持隐藏分类及独立隐藏书架；隐藏书籍不会出现在首页的继续阅读中
 - TXT 多编码识别
 - EPUB metadata、目录、XHTML、图片和统一语义样式
+
+### 首页
+
+- 独立阅读仪表盘
+- 继续阅读、最近阅读、每日目标和阅读统计集中呈现
+- 手机、平板与折叠屏根据可用窗口宽度自适应排布
 
 ### 数据与同步
 
 - 自动保存阅读位置和阅读时长
 - 完整手动导出与恢复，包括原始书籍文件
 - 可选 Google Drive 应用专属空间增量同步
-- 支持同步书籍、进度、统计、书签、设置、字体和原始文件
-- 冲突数据以更新时间较新的版本为准，不保留已经删除的数据
+- 支持同步书籍、进度、统计、书签、阅读与书架设置、阅读提醒、字体和原始文件
+- 无法自动合并的书籍信息、书签或设置冲突由用户选择本机或云端版本
+- 删除记录采用永久墓碑，避免已删除数据被其他设备重新恢复
 
 ### Android 体验
 
@@ -97,12 +106,12 @@ kixyubook/
 │  ├─ core-designsystem/       # Material 3 / MIUIX 组件、主题与自适应尺寸
 │  ├─ core-navigation/         # 路由定义
 │  ├─ core-database/           # Room、导入、索引、统计与手动备份
-│  ├─ core-datastore/          # 阅读与外观设置
+│  ├─ core-datastore/          # 阅读、外观与书架偏好设置
 │  ├─ core-reader-engine/      # Parser、Document Model、Layout 与 Pagination
 │  └─ core-sync/               # Google 身份、Drive appData 与增量同步
 ├─ feature/
-│  ├─ feature-home/            # 继续阅读、最近阅读与统计
-│  ├─ feature-library/         # 书库、搜索、分类、导入与批量删除
+│  ├─ feature-home/            # 阅读仪表盘、继续阅读、目标与统计
+│  ├─ feature-library/         # 书架、布局、排序、分类、隐藏与批量管理
 │  ├─ feature-reader/          # 阅读器、目录、书签、搜索与阅读设置
 │  └─ feature-settings/        # 外观、阅读、备份、同步与更新设置
 ├─ baselineprofile/            # 启动、进入阅读器与翻页的 Baseline Profile
@@ -171,9 +180,6 @@ keyPassword=your-key-password
 ```
 
 Profile 任务会在目标设备上安装和卸载测试 APK，建议使用专用设备或 Emulator。
-
-> [!WARNING]
-> 当前开发分支不保留旧数据库迁移链。数据结构不兼容时会重建本地数据库，测试新构建前请先导出重要数据。
 
 ## 参与贡献
 
