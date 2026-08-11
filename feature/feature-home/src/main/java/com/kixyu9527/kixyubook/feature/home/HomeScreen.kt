@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Schedule
@@ -108,8 +110,105 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
                     }
                 }
             }
-            item { WeeklyReadingCard(state.stats.recentDays) }
+            if (state.recent.isNotEmpty()) {
+                item { RecentReadingSection(state.recent, onOpenBook, expanded) }
+            }
+            item { WeeklyReadingCard(state.stats.recentDays, state.stats.goalMinutes) }
             item { KixyuBottomContentSpacer() }
+        }
+    }
+}
+
+@Composable
+private fun RecentReadingSection(
+    items: List<LibraryBook>,
+    open: (String) -> Unit,
+    expanded: Boolean,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+        Text("最近阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        if (expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+            ) {
+                items.forEach { item ->
+                    RecentReadingCard(
+                        item = item,
+                        open = open,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+            ) {
+                items(items, key = { it.book.uuid }) { item ->
+                    RecentReadingCard(
+                        item = item,
+                        open = open,
+                        modifier = Modifier.width(252.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentReadingCard(
+    item: LibraryBook,
+    open: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .height(116.dp)
+            .semantics { contentDescription = "打开最近阅读：${item.book.title}" }
+            .clickable { open(item.book.uuid) },
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            modifier = Modifier.padding(KixyuSpacing.medium),
+            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BookCover(
+                title = item.book.title,
+                coverPath = item.book.coverPath,
+                modifier = Modifier.size(56.dp, 84.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+            ) {
+                Text(
+                    item.book.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    item.book.author,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val progress = item.progress?.fraction?.coerceIn(0f, 1f) ?: 0f
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
+                )
+                Text(
+                    "已读 ${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -224,7 +323,7 @@ private fun StatItem(icon: androidx.compose.ui.graphics.vector.ImageVector, valu
 }
 
 @Composable
-private fun WeeklyReadingCard(days: List<DailyReading>) {
+private fun WeeklyReadingCard(days: List<DailyReading>, goalMinutes: Int) {
     val normalizedDays = if (days.size == 7) days else {
         val today = LocalDate.now().toEpochDay()
         (6L downTo 0L).map { DailyReading(today - it, 0L) }
@@ -241,8 +340,21 @@ private fun WeeklyReadingCard(days: List<DailyReading>) {
                 modifier = Modifier.padding(KixyuSpacing.large),
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
             ) {
-                val weeklyMinutes = TimeUnit.MILLISECONDS.toMinutes(normalizedDays.sumOf(DailyReading::durationMillis))
+                val weeklyMillis = normalizedDays.sumOf(DailyReading::durationMillis)
+                val weeklyMinutes = TimeUnit.MILLISECONDS.toMinutes(weeklyMillis)
+                val activeDays = normalizedDays.count { it.durationMillis > 0L }
+                val goalMillis = TimeUnit.MINUTES.toMillis(goalMinutes.toLong())
+                val goalDays = normalizedDays.count { it.durationMillis >= goalMillis }
+                val averageMinutes = TimeUnit.MILLISECONDS.toMinutes(weeklyMillis / normalizedDays.size)
                 Text("7 天共阅读 $weeklyMinutes 分钟", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    WeeklyMetric("$activeDays 天", "有阅读")
+                    WeeklyMetric("$goalDays 天", "完成目标")
+                    WeeklyMetric("$averageMinutes 分钟", "日均")
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth().height(112.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -254,6 +366,14 @@ private fun WeeklyReadingCard(days: List<DailyReading>) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WeeklyMetric(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.labelLarge)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

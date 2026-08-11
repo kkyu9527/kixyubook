@@ -10,11 +10,28 @@ import org.junit.Test
 
 class ContinueReadingSelectionTest {
     @Test
-    fun hiddenBooksAreNeverSelectedForContinueReading() {
-        val library = listOf(book("hidden", "私密"), book("visible", "小说"))
+    fun continueReadingSelectsFirstProgressedVisibleBook() {
+        val library = listOf(book("first", "小说"), book("second", "小说"))
 
-        assertEquals("visible", selectContinueReadingBook(library, setOf("私密"))?.book?.uuid)
-        assertNull(selectContinueReadingBook(listOf(library.first()), setOf("私密")))
+        assertEquals("first", selectContinueReadingBook(library)?.book?.uuid)
+        assertNull(selectContinueReadingBook(library.map { it.copy(progress = null) }))
+    }
+
+    @Test
+    fun recentReadingExcludesCurrentBook() {
+        val library = listOf(
+            book("current", "小说"),
+            book("recent-1", "小说"),
+            book("recent-2", "小说"),
+        )
+
+        assertEquals(
+            listOf("recent-1", "recent-2"),
+            selectRecentReadingBooks(
+                library = library,
+                currentBookUuid = "current",
+            ).map { it.book.uuid },
+        )
     }
 
     private fun book(uuid: String, category: String) = LibraryBook(
