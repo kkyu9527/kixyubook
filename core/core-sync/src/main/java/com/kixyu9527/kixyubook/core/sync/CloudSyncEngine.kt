@@ -11,6 +11,7 @@ import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
@@ -46,6 +47,7 @@ class CloudSyncEngine @Inject constructor(
     private val bookRepository: BookRepository,
     private val fontRepository: FontRepository,
     private val settingsRepository: ReaderSettingsRepository,
+    private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
@@ -62,6 +64,7 @@ class CloudSyncEngine @Inject constructor(
         syncDao = syncDao,
         bookRepository = bookRepository,
         settingsRepository = settingsRepository,
+        libraryPreferencesRepository = libraryPreferencesRepository,
         preferences = preferences,
         mutations = mutations,
         drive = drive,
@@ -71,6 +74,7 @@ class CloudSyncEngine @Inject constructor(
         books = books,
         fonts = fonts,
         settingsRepository = settingsRepository,
+        libraryPreferencesRepository = libraryPreferencesRepository,
         preferences = preferences,
     )
     private val pushPipeline = CloudSyncPushPipeline(

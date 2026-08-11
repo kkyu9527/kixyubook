@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.core.sync
 import android.content.Context
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
@@ -17,6 +18,7 @@ internal class CloudSyncPayloadFactory(
     private val books: BookDao,
     private val fonts: FontDao,
     private val settingsRepository: ReaderSettingsRepository,
+    private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val preferences: SyncPreferencesStore,
 ) {
     suspend fun materialize(
@@ -72,10 +74,11 @@ internal class CloudSyncPayloadFactory(
     }
 
     private suspend fun settingsJson(): JSONObject = JSONObject()
-        .put("schema", 1)
+        .put("schema", 2)
         .put("updatedAt", System.currentTimeMillis())
         .put("reader", settingsToJson(settingsRepository.settings.first()))
         .put("readingGoalMinutes", settingsRepository.readingGoalMinutes.first())
+        .put("library", libraryPreferencesToJson(libraryPreferencesRepository.preferences.first()))
 
 
     fun jsonObject(key: String, json: JSONObject): LocalCloudObject {

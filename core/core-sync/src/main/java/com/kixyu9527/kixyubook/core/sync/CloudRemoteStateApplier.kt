@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import com.kixyu9527.kixyubook.core.common.model.ReadingProgress
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
@@ -27,6 +28,7 @@ internal class CloudRemoteStateApplier(
     private val syncDao: SyncDao,
     private val bookRepository: BookRepository,
     private val settingsRepository: ReaderSettingsRepository,
+    private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
@@ -142,6 +144,9 @@ internal class CloudRemoteStateApplier(
         mutations.withoutRecording {
             settingsRepository.update { remote }
             settingsRepository.setReadingGoalMinutes(goal)
+            json.optJSONObject("library")?.let { library ->
+                libraryPreferencesRepository.replace(jsonToLibraryPreferences(library))
+            }
         }
     }
 

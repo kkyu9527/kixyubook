@@ -98,6 +98,23 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     showChapterTitle = value.optBoolean("showChapterTitle", true),
 )
 
+internal fun libraryPreferencesToJson(value: LibraryPreferences) = JSONObject()
+    .put("sortMode", value.sortMode.name)
+    .put("layoutMode", value.layoutMode.name)
+    .put("customOrder", JSONArray(value.customOrder))
+    .put("hiddenCategories", JSONArray(value.hiddenCategories.toList()))
+
+internal fun jsonToLibraryPreferences(value: JSONObject) = LibraryPreferences(
+    sortMode = enumValue(value, "sortMode", LibrarySortMode.RECENT),
+    layoutMode = enumValue(value, "layoutMode", LibraryLayoutMode.LIST),
+    customOrder = value.optJSONArray("customOrder").toStringList(),
+    hiddenCategories = value.optJSONArray("hiddenCategories").toStringList().toSet(),
+)
+
+private fun JSONArray?.toStringList(): List<String> = if (this == null) emptyList() else buildList {
+    repeat(length()) { index -> optString(index).takeIf(String::isNotBlank)?.let(::add) }
+}
+
 internal fun customThemeJson(value: CustomReaderTheme) = JSONObject()
     .put("background", value.backgroundHex).put("body", value.bodyHex).put("title", value.titleHex).put("accent", value.accentHex)
 
