@@ -58,6 +58,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
@@ -451,13 +452,14 @@ fun KixyuTextButton(
 @Composable
 fun KixyuPopupSurface(
     modifier: Modifier = Modifier,
+    shape: Shape = MaterialTheme.shapes.extraLarge,
     shadowElevation: Dp = KixyuSpacing.extraSmall,
     content: @Composable () -> Unit,
 ) {
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixSurface(
             modifier = modifier,
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = shape,
             color = MiuixTheme.colorScheme.surfaceContainer,
             shadowElevation = shadowElevation,
         ) {
@@ -469,7 +471,7 @@ fun KixyuPopupSurface(
     } else {
         androidx.compose.material3.Surface(
             modifier = modifier,
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = shape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = KixyuSpacing.extraSmall,
             shadowElevation = shadowElevation,
