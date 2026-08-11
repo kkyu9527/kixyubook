@@ -54,6 +54,22 @@ class DriveAppDataClient @Inject constructor(
     @ApplicationContext context: Context,
 ) {
     private val uploadSessions = context.getSharedPreferences("drive_resumable_uploads", Context.MODE_PRIVATE)
+
+    suspend fun storageQuota(token: String): DriveStorageQuota {
+        val fields = "storageQuota(limit,usage,usageInDrive,usageInDriveTrash)"
+        val quota = requestJson(
+            method = "GET",
+            url = "$DRIVE_API/about?fields=${encode(fields)}",
+            token = token,
+        ).getJSONObject("storageQuota")
+        return DriveStorageQuota(
+            usageBytes = quota.longString("usage"),
+            limitBytes = quota.optString("limit").takeIf(String::isNotBlank)?.toLongOrNull(),
+            usageInDriveBytes = quota.longString("usageInDrive"),
+            usageInDriveTrashBytes = quota.longString("usageInDriveTrash"),
+        )
+    }
+
     suspend fun findByObjectKey(token: String, objectKey: String): DriveObject? {
         val escapedKey = objectKey.replace("\\", "\\\\").replace("'", "\\'")
         val query = buildList {
@@ -467,6 +483,9 @@ class DriveAppDataClient @Inject constructor(
             md5 = optString("md5Checksum").takeIf(String::isNotBlank),
         )
     }
+
+    private fun JSONObject.longString(name: String): Long =
+        optString(name).toLongOrNull()?.coerceAtLeast(0L) ?: 0L
 
     private inline fun JSONArray.forEachObject(block: (JSONObject) -> Unit) {
         for (index in 0 until length()) block(getJSONObject(index))

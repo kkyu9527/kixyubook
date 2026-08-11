@@ -18,6 +18,33 @@ data class SyncAccount(
     val avatarUrl: String?,
 )
 
+data class DriveStorageQuota(
+    /** Total Google account storage used by Drive, Gmail, and Google Photos. */
+    val usageBytes: Long,
+    val limitBytes: Long?,
+    val usageInDriveBytes: Long,
+    val usageInDriveTrashBytes: Long,
+) {
+    val remainingBytes: Long?
+        get() = limitBytes?.let { (it - usageBytes).coerceAtLeast(0L) }
+
+    val usedFraction: Float?
+        get() = limitBytes
+            ?.takeIf { it > 0L }
+            ?.let { (usageBytes.toDouble() / it.toDouble()).coerceIn(0.0, 1.0).toFloat() }
+
+    val isNearlyFull: Boolean
+        get() = limitBytes?.takeIf { it > 0L }?.let { limit ->
+            usageBytes.toDouble() / limit.toDouble() >= STORAGE_WARNING_FRACTION
+        } == true
+}
+
+data class DriveStorageQuotaState(
+    val quota: DriveStorageQuota? = null,
+    val refreshing: Boolean = false,
+    val errorMessage: String? = null,
+)
+
 enum class CloudSyncPhase { IDLE, AUTHORIZING, SYNCING, SUCCESS, AUTH_REQUIRED, ERROR }
 
 data class InitialSyncDecision(
@@ -56,6 +83,7 @@ data class CloudSyncState(
     val errorMessage: String? = null,
     val initialSyncDecision: InitialSyncDecision? = null,
     val inspectingInitialSync: Boolean = false,
+    val storageQuota: DriveStorageQuotaState = DriveStorageQuotaState(),
 )
 
 data class CloudSyncProgress(
@@ -74,6 +102,7 @@ sealed interface GoogleConnectResult {
 interface CloudSyncManager {
     val state: StateFlow<CloudSyncState>
     suspend fun connect(activity: Activity): GoogleConnectResult
+    suspend fun switchAccount(activity: Activity): GoogleConnectResult
     suspend fun finishAuthorization(activity: Activity, resultData: Intent?): GoogleConnectResult
     suspend fun disconnect()
     suspend fun setEnabled(enabled: Boolean)
@@ -82,6 +111,7 @@ interface CloudSyncManager {
     suspend fun setWifiOnlyForLargeFiles(enabled: Boolean)
     suspend fun resolveInitialSync(choice: InitialSyncChoice): Result<Unit>
     fun syncNow()
+    fun refreshStorageQuota(force: Boolean = false)
     suspend fun deleteCloudData(activity: Activity): Result<Unit>
 }
 
@@ -165,3 +195,4 @@ internal data class BookMarkOwner(val bookUuid: String) {
 }
 
 private const val INITIAL_PRIORITY_BOOK_LIMIT = 5
+private const val STORAGE_WARNING_FRACTION = 0.9

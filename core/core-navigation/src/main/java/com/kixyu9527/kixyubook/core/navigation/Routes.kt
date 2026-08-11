@@ -8,6 +8,7 @@ object Routes {
     const val APPEARANCE = "appearance"
     const val READING_SETTINGS = "reading_settings"
     const val CLOUD_SYNC = "cloud_sync"
+    const val GOOGLE_ACCOUNT = "cloud_sync/google_account"
     const val DATA_AND_BACKUP = "data_and_backup"
     const val ABOUT = "about"
     const val DIAGNOSTIC_LOG = "diagnostic_log"

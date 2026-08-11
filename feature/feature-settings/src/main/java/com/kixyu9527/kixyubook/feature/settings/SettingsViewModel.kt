@@ -119,6 +119,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun connectGoogle(activity: Activity) = viewModelScope.launch { handleConnectResult(cloudSync.connect(activity)) }
+    fun switchGoogleAccount(activity: Activity) = viewModelScope.launch {
+        handleConnectResult(cloudSync.switchAccount(activity))
+    }
     fun finishGoogleAuthorization(activity: Activity, resultData: Intent?) = viewModelScope.launch {
         handleConnectResult(cloudSync.finishAuthorization(activity, resultData))
     }
@@ -131,6 +134,7 @@ class SettingsViewModel @Inject constructor(
             .onFailure { _messages.emit(it.message ?: "同步冲突处理失败") }
     }
     fun syncNow() = cloudSync.syncNow()
+    fun refreshGoogleDriveStorage(force: Boolean = false) = cloudSync.refreshStorageQuota(force)
     fun disconnectGoogle() = viewModelScope.launch { cloudSync.disconnect() }
     fun deleteCloudData(activity: Activity) = viewModelScope.launch {
         cloudSync.deleteCloudData(activity)

@@ -36,9 +36,17 @@ class GoogleAccountClient @Inject constructor(
 
     suspend fun connect(activity: Activity): GoogleConnectResult = authorize(activity)
 
-    suspend fun authorize(activity: Activity): GoogleConnectResult = runCatching {
+    suspend fun switchAccount(activity: Activity): GoogleConnectResult = authorize(
+        activity = activity,
+        selectAccount = true,
+    )
+
+    suspend fun authorize(
+        activity: Activity,
+        selectAccount: Boolean = false,
+    ): GoogleConnectResult = runCatching {
         val result = Identity.getAuthorizationClient(activity)
-            .authorize(authorizationRequest())
+            .authorize(authorizationRequest(selectAccount))
             .await()
         consumeAuthorizationResult(result)
     }.getOrElse { GoogleConnectResult.Failed(it.authorizationMessage()) }
@@ -99,9 +107,13 @@ class GoogleAccountClient @Inject constructor(
         preferences.clearAccount()
     }
 
-    private fun authorizationRequest() = AuthorizationRequest.builder()
-        .setRequestedScopes(requestedScopes())
-        .build()
+    private fun authorizationRequest(selectAccount: Boolean = false) =
+        AuthorizationRequest.builder()
+            .setRequestedScopes(requestedScopes())
+            .apply {
+                if (selectAccount) setPrompt(AuthorizationRequest.Prompt.SELECT_ACCOUNT)
+            }
+            .build()
 
     private fun requestedScopes() = listOf(
         Scope(DRIVE_APPDATA_SCOPE),

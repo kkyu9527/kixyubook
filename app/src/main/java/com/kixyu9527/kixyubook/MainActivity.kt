@@ -67,6 +67,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageEnterTransition
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageExitTransition
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -81,6 +83,7 @@ import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
+import com.kixyu9527.kixyubook.feature.settings.GoogleAccountRoute
 import com.kixyu9527.kixyubook.feature.settings.DataAndBackupRoute
 import com.kixyu9527.kixyubook.feature.settings.AboutRoute
 import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogRoute
@@ -556,21 +559,13 @@ private fun KixyuNavHost(
                 navController,
                 Routes.HOME,
                 modifier = Modifier.fillMaxSize(),
-                enterTransition = {
-                    slideInHorizontally(
-                        tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing),
-                    ) { width -> width }
-                },
+                enterTransition = { kixyuDetailPageEnterTransition() },
                 // Secondary destinations are a new surface above the current page. Keeping the
                 // source stationary avoids translating two complete Compose trees at once and
                 // preserves the visual hierarchy of a stacked detail page.
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },
-                popExitTransition = {
-                    slideOutHorizontally(
-                        tween(KixyuMotion.PageNavigationMillis, easing = FastOutSlowInEasing),
-                    ) { width -> width }
-                },
+                popExitTransition = { kixyuDetailPageExitTransition() },
             ) {
                 composable(Routes.HOME) {
                     HorizontalPager(
@@ -624,7 +619,16 @@ private fun KixyuNavHost(
                                 detailContent = { pane ->
                                     when (pane) {
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.CLOUD_SYNC ->
-                                            CloudSyncRoute(onBack = {}, embedded = true)
+                                            CloudSyncRoute(
+                                                onBack = {},
+                                                onGoogleAccount = {
+                                                    prioritizeAnimation()
+                                                    navController.navigate(Routes.GOOGLE_ACCOUNT) {
+                                                        launchSingleTop = true
+                                                    }
+                                                },
+                                                embedded = true,
+                                            )
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.READING ->
                                             ReadingSettingsRoute(onBack = {}, embedded = true)
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.APPEARANCE ->
@@ -696,7 +700,21 @@ private fun KixyuNavHost(
                     })
                 }
                 composable(Routes.CLOUD_SYNC) {
-                    CloudSyncRoute(onBack = {
+                    CloudSyncRoute(
+                        onBack = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                        onGoogleAccount = {
+                            prioritizeAnimation()
+                            navController.navigate(Routes.GOOGLE_ACCOUNT) {
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
+                composable(Routes.GOOGLE_ACCOUNT) {
+                    GoogleAccountRoute(onBack = {
                         prioritizeAnimation()
                         navController.popBackStack()
                     })

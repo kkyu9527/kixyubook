@@ -33,14 +33,23 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     private val preferences: SyncPreferencesStore,
     private val syncDao: SyncDao,
     private val accounts: GoogleAccountClient,
+    private val drive: DriveAppDataClient,
     private val engine: CloudSyncEngine,
     private val scheduler: CloudSyncScheduler,
     private val notifications: LocalNotificationManager,
 ) : CloudSyncManager, CloudSyncCoordinator {
+    @Volatile private var accountSwitchPending = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val initialSyncDecision = MutableStateFlow<InitialSyncDecision?>(null)
     private val inspectingInitialSync = MutableStateFlow(false)
     private val initialSyncMutex = Mutex()
+    private data class AccountStorageQuota(
+        val accountSubject: String? = null,
+        val state: DriveStorageQuotaState = DriveStorageQuotaState(),
+        val refreshedAt: Long = 0L,
+    )
+    private val storageQuota = MutableStateFlow(AccountStorageQuota())
+    private var storageQuotaJob: Job? = null
     private val _priorityBookSync = MutableStateFlow(PriorityBookSyncState())
     override val priorityBookSync = _priorityBookSync
     private var priorityBookJob: Job? = null
@@ -52,7 +61,8 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         syncDao.observePendingCount(),
         initialSyncDecision,
         inspectingInitialSync,
-    ) { persisted, pending, decision, inspecting ->
+        storageQuota,
+    ) { persisted, pending, decision, inspecting, storage ->
         CloudSyncState(
             account = persisted.account,
             enabled = persisted.enabled,
@@ -71,11 +81,27 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 )
             },
             inspectingInitialSync = inspecting,
+            storageQuota = storage.state.takeIf {
+                storage.accountSubject == persisted.account?.subject
+            } ?: DriveStorageQuotaState(),
         )
     }.stateIn(scope, SharingStarted.Eagerly, CloudSyncState())
 
     init {
         scope.launch { clearStaleSyncPhase() }
+        scope.launch {
+            preferences.state
+                .map { it.account?.subject to it.lastSyncTime }
+                .distinctUntilChanged()
+                .collect { (accountSubject, _) ->
+                    if (accountSubject == null) {
+                        storageQuotaJob?.cancel()
+                        storageQuota.value = AccountStorageQuota()
+                    } else {
+                        refreshStorageQuota()
+                    }
+                }
+        }
         scope.launch {
             state.map { it.initialSyncDecision?.conflicts.orEmpty() }
                 .distinctUntilChanged()
@@ -102,9 +128,22 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         return accounts.connect(activity).also { handleAuthorizationResult(it) }
     }
 
+    override suspend fun switchAccount(activity: Activity): GoogleConnectResult {
+        accountSwitchPending = true
+        preferences.markAuthorizing()
+        return accounts.switchAccount(activity).also { result ->
+            handleAuthorizationResult(result, preserveAccountOnFailure = true)
+            if (result !is GoogleConnectResult.NeedsAuthorization) accountSwitchPending = false
+        }
+    }
+
     override suspend fun finishAuthorization(activity: Activity, resultData: Intent?): GoogleConnectResult {
         preferences.markAuthorizing()
-        return accounts.finishAuthorization(activity, resultData).also { handleAuthorizationResult(it) }
+        val preserveAccountOnFailure = accountSwitchPending
+        return accounts.finishAuthorization(activity, resultData).also { result ->
+            handleAuthorizationResult(result, preserveAccountOnFailure)
+            if (result !is GoogleConnectResult.NeedsAuthorization) accountSwitchPending = false
+        }
     }
 
     override suspend fun disconnect() {
@@ -173,6 +212,55 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     }
 
     override fun syncNow() = scheduler.requestImmediate()
+
+    override fun refreshStorageQuota(force: Boolean) {
+        if (storageQuotaJob?.isActive == true) return
+        storageQuotaJob = scope.launch(Dispatchers.IO) {
+            val persisted = preferences.current()
+            val accountSubject = persisted.account?.subject ?: return@launch
+            val previous = storageQuota.value.takeIf { it.accountSubject == accountSubject }
+            val now = System.currentTimeMillis()
+            if (
+                !force &&
+                previous?.state?.quota != null &&
+                previous.state.errorMessage == null &&
+                previous.refreshedAt >= now - STORAGE_QUOTA_CACHE_MILLIS
+            ) return@launch
+            storageQuota.value = AccountStorageQuota(
+                accountSubject = accountSubject,
+                state = DriveStorageQuotaState(
+                    quota = previous?.state?.quota,
+                    refreshing = true,
+                ),
+                refreshedAt = previous?.refreshedAt ?: 0L,
+            )
+            try {
+                val token = accounts.accessToken()
+                    ?: error("需要重新授权 Google Drive")
+                val quota = drive.storageQuota(token)
+                if (preferences.current().account?.subject == accountSubject) {
+                    storageQuota.value = AccountStorageQuota(
+                        accountSubject = accountSubject,
+                        state = DriveStorageQuotaState(quota = quota),
+                        refreshedAt = System.currentTimeMillis(),
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                if (preferences.current().account?.subject == accountSubject) {
+                    storageQuota.value = AccountStorageQuota(
+                        accountSubject = accountSubject,
+                        state = DriveStorageQuotaState(
+                            quota = previous?.state?.quota,
+                            errorMessage = "暂时无法获取云空间",
+                        ),
+                        refreshedAt = previous?.refreshedAt ?: 0L,
+                    )
+                }
+            }
+        }
+    }
 
     override fun onAppForeground() {
         notifications.onAppForeground()
@@ -302,12 +390,18 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         engine.deleteAllCloudData(token)
         preferences.setEnabled(false)
         scheduler.cancel()
+        storageQuota.value = storageQuota.value.copy(refreshedAt = 0L)
+        refreshStorageQuota(force = true)
     }
 
-    private suspend fun handleAuthorizationResult(result: GoogleConnectResult) {
+    private suspend fun handleAuthorizationResult(
+        result: GoogleConnectResult,
+        preserveAccountOnFailure: Boolean = false,
+    ) {
         when (result) {
             GoogleConnectResult.Connected -> {
                 notifications.clearAuthorizationFailure()
+                refreshStorageQuota(force = true)
                 val persisted = preferences.current()
                 if (persisted.initialSyncApproved) {
                     // Explicit sign-in means syncing should be active. This also repairs an older
@@ -320,7 +414,13 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 }
             }
             is GoogleConnectResult.NeedsAuthorization -> Unit
-            is GoogleConnectResult.Failed -> preferences.markAuthRequired()
+            is GoogleConnectResult.Failed -> {
+                if (preserveAccountOnFailure && preferences.current().account != null) {
+                    preferences.markIdle()
+                } else {
+                    preferences.markAuthRequired()
+                }
+            }
         }
     }
 
@@ -396,6 +496,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         const val LOCAL_CONFLICT_PREFERENCE_MILLIS = 5 * 60_000L
         const val FOREGROUND_REMOTE_CHECK_INTERVAL_MILLIS = 5 * 60_000L
         const val PRIORITY_WRITE_COALESCE_MILLIS = 600L
+        const val STORAGE_QUOTA_CACHE_MILLIS = 60_000L
     }
 }
 
