@@ -96,6 +96,8 @@ object KixyuSize {
     val iconSmall = 18.dp
     val icon = 20.dp
     val rowMinHeight = 52.dp
+    val contextMenuItemHeight = 44.dp
+    val contextMenuWidth = 144.dp
     val colorSwatch = 24.dp
     val accountAvatar = 56.dp
     val progressHeight = 4.dp
@@ -195,6 +197,7 @@ fun KixyuSettingsRow(
     modifier: Modifier = Modifier,
     supportingText: String? = null,
     icon: ImageVector? = null,
+    contentColor: Color? = null,
     selected: Boolean? = null,
     onClick: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
@@ -208,6 +211,9 @@ fun KixyuSettingsRow(
     }
     val selectedContentColor = MaterialTheme.colorScheme.onPrimary
     val selectedSupportingColor = selectedContentColor.copy(alpha = .78f)
+    val rowContentColor = contentColor ?: MaterialTheme.colorScheme.onSurface
+    val rowSupportingColor = contentColor?.copy(alpha = .78f)
+        ?: MaterialTheme.colorScheme.onSurfaceVariant
     val rowModifier = (if (selected == null) {
         modifier
     } else {
@@ -227,7 +233,7 @@ fun KixyuSettingsRow(
                 tint = if (isSelected) {
                     selectedContentColor
                 } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
+                    contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
         }
@@ -238,12 +244,16 @@ fun KixyuSettingsRow(
             title = title,
             titleColor = if (isSelected) {
                 MiuixBasicComponentDefaults.titleColor(selectedContentColor)
+            } else if (contentColor != null) {
+                MiuixBasicComponentDefaults.titleColor(rowContentColor)
             } else {
                 MiuixBasicComponentDefaults.titleColor()
             },
             summary = supportingText,
             summaryColor = if (isSelected) {
                 MiuixBasicComponentDefaults.summaryColor(selectedSupportingColor)
+            } else if (contentColor != null) {
+                MiuixBasicComponentDefaults.summaryColor(rowSupportingColor)
             } else {
                 MiuixBasicComponentDefaults.summaryColor()
             },
@@ -253,7 +263,7 @@ fun KixyuSettingsRow(
                     LocalContentColor provides if (isSelected) {
                         selectedContentColor
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 ) {
                     trailing()
@@ -286,7 +296,7 @@ fun KixyuSettingsRow(
                 color = if (isSelected) {
                     selectedContentColor
                 } else {
-                    MaterialTheme.colorScheme.onSurface
+                    rowContentColor
                 },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -298,7 +308,7 @@ fun KixyuSettingsRow(
                     color = if (isSelected) {
                         selectedSupportingColor
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        rowSupportingColor
                     },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -310,7 +320,7 @@ fun KixyuSettingsRow(
             LocalContentColor provides if (isSelected) {
                 selectedContentColor
             } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
+                contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant
             },
         ) {
             trailing()
@@ -644,6 +654,7 @@ fun KixyuNavigationBar(
                 if (appUiStyle == AppUiStyle.MIUIX) {
                     MiuixNavigationBar(
                         modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
                         showDivider = false,
                         defaultWindowInsetsPadding = false,
                     ) {

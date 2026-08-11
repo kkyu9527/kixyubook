@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -126,6 +125,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
@@ -1232,13 +1232,14 @@ private fun BookActionPopupMenu(
         ),
     ) {
         KixyuPopupSurface(
-            modifier = Modifier.width(IntrinsicSize.Max),
+            modifier = Modifier.width(KixyuSize.contextMenuWidth),
             shape = MaterialTheme.shapes.large,
             shadowElevation = KixyuSpacing.medium,
         ) {
-            Column(Modifier.padding(vertical = KixyuSpacing.extraSmall)) {
+            Column(Modifier.padding(vertical = 2.dp)) {
                 BookActionPopupMenuItem("管理", Icons.Outlined.Edit, onManage)
                 BookActionPopupMenuItem("导出", Icons.Outlined.FileUpload, onExport)
+                KixyuDivider()
                 BookActionPopupMenuItem("删除", Icons.Outlined.DeleteOutline, onDelete, destructive = true)
             }
         }
@@ -1256,14 +1257,19 @@ private fun BookActionPopupMenuItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = KixyuSize.contextMenuItemHeight)
             .clickable(onClick = onClick)
-            .padding(horizontal = KixyuSpacing.large),
+            .padding(horizontal = KixyuSpacing.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, Modifier.size(KixyuSize.icon), tint = contentColor)
-        Spacer(Modifier.width(KixyuSpacing.medium))
-        Text(label, maxLines = 1, color = contentColor)
+        Icon(icon, null, Modifier.size(KixyuSize.iconSmall), tint = contentColor)
+        Spacer(Modifier.width(KixyuSpacing.small))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            color = contentColor,
+        )
     }
 }
 
