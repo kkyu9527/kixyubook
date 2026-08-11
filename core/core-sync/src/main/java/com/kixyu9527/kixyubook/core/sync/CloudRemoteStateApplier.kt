@@ -29,6 +29,7 @@ internal class CloudRemoteStateApplier(
     private val bookRepository: BookRepository,
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
+    private val readingReminders: ReadingReminderScheduler,
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
@@ -146,6 +147,9 @@ internal class CloudRemoteStateApplier(
             settingsRepository.setReadingGoalMinutes(goal)
             json.optJSONObject("library")?.let { library ->
                 libraryPreferencesRepository.replace(jsonToLibraryPreferences(library))
+            }
+            json.optJSONObject("readingReminder")?.let { reminder ->
+                readingReminders.replace(jsonToReadingReminder(reminder))
             }
         }
     }

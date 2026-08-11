@@ -1,41 +1,11 @@
 package com.kixyu9527.kixyubook.core.sync
 
-import android.os.SystemClock
-import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import androidx.room.withTransaction
 import com.kixyu9527.kixyubook.core.common.model.*
-import com.kixyu9527.kixyubook.core.common.repository.BookRepository
-import com.kixyu9527.kixyubook.core.common.repository.FontRepository
-import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
-import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
-import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
-import com.kixyu9527.kixyubook.core.database.KixyuDatabase
-import com.kixyu9527.kixyubook.core.database.dao.BookDao
-import com.kixyu9527.kixyubook.core.database.dao.FontDao
-import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.entity.*
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import java.security.MessageDigest
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
 
 internal fun bookMetadataJson(book: BookEntity) = JSONObject()
@@ -109,6 +79,17 @@ internal fun jsonToLibraryPreferences(value: JSONObject) = LibraryPreferences(
     layoutMode = enumValue(value, "layoutMode", LibraryLayoutMode.LIST),
     customOrder = value.optJSONArray("customOrder").toStringList(),
     hiddenCategories = value.optJSONArray("hiddenCategories").toStringList().toSet(),
+)
+
+internal fun readingReminderToJson(value: ReadingReminderSettings) = JSONObject()
+    .put("enabled", value.enabled)
+    .put("hour", value.hour)
+    .put("minute", value.minute)
+
+internal fun jsonToReadingReminder(value: JSONObject) = ReadingReminderSettings(
+    enabled = value.optBoolean("enabled"),
+    hour = value.optInt("hour", 20).coerceIn(0, 23),
+    minute = value.optInt("minute", 0).coerceIn(0, 59),
 )
 
 private fun JSONArray?.toStringList(): List<String> = if (this == null) emptyList() else buildList {

@@ -10,6 +10,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReadingStatsRepository
 import dagger.hilt.EntryPoint
@@ -60,6 +62,14 @@ class NotificationPreferencesStore @Inject constructor(
         }
     }
 
+    suspend fun replace(settings: ReadingReminderSettings) {
+        context.notificationSettingsDataStore.edit {
+            it[REMINDER_ENABLED] = settings.enabled
+            it[REMINDER_HOUR] = settings.hour.coerceIn(0, 23)
+            it[REMINDER_MINUTE] = settings.minute.coerceIn(0, 59)
+        }
+    }
+
     private companion object {
         val REMINDER_ENABLED = booleanPreferencesKey("reading_reminder_enabled")
         val REMINDER_HOUR = intPreferencesKey("reading_reminder_hour")
@@ -71,6 +81,7 @@ class NotificationPreferencesStore @Inject constructor(
 class ReadingReminderScheduler @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val preferences: NotificationPreferencesStore,
+    private val syncMutations: SyncMutationRecorder,
 ) {
     private val workManager by lazy { WorkManager.getInstance(context) }
     val settings: Flow<ReadingReminderSettings> = preferences.readingReminder
@@ -79,12 +90,21 @@ class ReadingReminderScheduler @Inject constructor(
         preferences.setEnabled(enabled)
         if (enabled) schedule(preferences.current(), ExistingWorkPolicy.REPLACE)
         else workManager.cancelUniqueWork(WORK_NAME)
+        recordChange()
     }
 
     suspend fun setTime(hour: Int, minute: Int) {
         preferences.setTime(hour, minute)
         val updated = preferences.current()
         if (updated.enabled) schedule(updated, ExistingWorkPolicy.REPLACE)
+        recordChange()
+    }
+
+    suspend fun replace(settings: ReadingReminderSettings) {
+        preferences.replace(settings)
+        if (settings.enabled) schedule(preferences.current(), ExistingWorkPolicy.REPLACE)
+        else workManager.cancelUniqueWork(WORK_NAME)
+        recordChange()
     }
 
     suspend fun ensureScheduled() {
@@ -108,6 +128,8 @@ class ReadingReminderScheduler @Inject constructor(
             .build()
         workManager.enqueueUniqueWork(WORK_NAME, policy, request)
     }
+
+    private suspend fun recordChange() = syncMutations.record(SyncEntityType.SETTINGS, "global")
 
     private companion object {
         const val WORK_NAME = "daily-reading-reminder"

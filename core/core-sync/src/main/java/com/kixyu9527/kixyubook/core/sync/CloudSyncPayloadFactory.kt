@@ -19,6 +19,7 @@ internal class CloudSyncPayloadFactory(
     private val fonts: FontDao,
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
+    private val readingReminders: ReadingReminderScheduler,
     private val preferences: SyncPreferencesStore,
 ) {
     suspend fun materialize(
@@ -74,11 +75,12 @@ internal class CloudSyncPayloadFactory(
     }
 
     private suspend fun settingsJson(): JSONObject = JSONObject()
-        .put("schema", 2)
+        .put("schema", 3)
         .put("updatedAt", System.currentTimeMillis())
         .put("reader", settingsToJson(settingsRepository.settings.first()))
         .put("readingGoalMinutes", settingsRepository.readingGoalMinutes.first())
         .put("library", libraryPreferencesToJson(libraryPreferencesRepository.preferences.first()))
+        .put("readingReminder", readingReminderToJson(readingReminders.settings.first()))
 
 
     fun jsonObject(key: String, json: JSONObject): LocalCloudObject {

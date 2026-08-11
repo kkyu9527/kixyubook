@@ -21,7 +21,6 @@ internal class CloudSyncPullPipeline(
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
     private val remoteState: CloudRemoteStateApplier,
-    private val payloads: CloudSyncPayloadFactory,
 ) {
     suspend fun applyRemoteTombstones(token: String, remote: MutableMap<String, DriveObject>) {
         remote.filterKeys { it.startsWith("tombstones/") }.forEach { (key, objectInfo) ->
@@ -29,25 +28,6 @@ internal class CloudSyncPullPipeline(
             try {
                 drive.download(token, objectInfo.id, temp)
                 val json = JSONObject(temp.readText())
-                // Keep the field for compatibility with already released clients, but use the
-                // largest Long value so old versions never garbage-collect a permanent deletion.
-                // Legacy 30-day tombstones are upgraded as soon as a current client sees them.
-                if (json.optLong("expiresAt") != PERMANENT_TOMBSTONE_EXPIRY) {
-                    json.put("expiresAt", PERMANENT_TOMBSTONE_EXPIRY)
-                    val normalized = payloads.jsonObject(key, json)
-                    try {
-                        remote[key] = drive.upload(
-                            token = token,
-                            name = normalized.name,
-                            objectKey = normalized.key,
-                            mimeType = normalized.mimeType,
-                            source = normalized.file,
-                            existingFileId = objectInfo.id,
-                        )
-                    } finally {
-                        normalized.file.delete()
-                    }
-                }
                 val type = runCatching { SyncEntityType.valueOf(json.getString("type")) }.getOrNull() ?: return@forEach
                 val id = json.getString("entityId")
                 mutations.withoutRecording {

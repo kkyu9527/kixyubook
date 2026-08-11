@@ -2,9 +2,6 @@ package com.kixyu9527.kixyubook.core.sync
 
 import android.os.SystemClock
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import androidx.room.withTransaction
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.model.*
@@ -26,11 +23,9 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -48,6 +43,7 @@ class CloudSyncEngine @Inject constructor(
     private val fontRepository: FontRepository,
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
+    private val readingReminders: ReadingReminderScheduler,
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
@@ -65,6 +61,7 @@ class CloudSyncEngine @Inject constructor(
         bookRepository = bookRepository,
         settingsRepository = settingsRepository,
         libraryPreferencesRepository = libraryPreferencesRepository,
+        readingReminders = readingReminders,
         preferences = preferences,
         mutations = mutations,
         drive = drive,
@@ -75,6 +72,7 @@ class CloudSyncEngine @Inject constructor(
         fonts = fonts,
         settingsRepository = settingsRepository,
         libraryPreferencesRepository = libraryPreferencesRepository,
+        readingReminders = readingReminders,
         preferences = preferences,
     )
     private val pushPipeline = CloudSyncPushPipeline(
@@ -95,7 +93,6 @@ class CloudSyncEngine @Inject constructor(
         mutations = mutations,
         drive = drive,
         remoteState = remoteState,
-        payloads = payloads,
     )
     private val preparedSnapshotLock = Any()
     private var preparedInitialSnapshot: PreparedInitialSnapshot? = null
@@ -809,10 +806,7 @@ class CloudSyncEngine @Inject constructor(
         books.getAllBookmarkEntities().map(BookMarkOwner::from).map(BookMarkOwner::bookUuid).distinct()
             .forEach { mutations.record(SyncEntityType.BOOKMARKS, it) }
         mutations.record(SyncEntityType.SETTINGS, "global")
-        books.getAllSessions().forEach { session ->
-            val syncUuid = session.syncUuid.ifBlank { "legacy-${session.id}" }
-            mutations.record(SyncEntityType.SESSION, syncUuid)
-        }
+        books.getAllSessions().forEach { mutations.record(SyncEntityType.SESSION, it.syncUuid) }
         if (preferences.current().syncFonts) {
             fonts.getAllFonts().forEach { mutations.record(SyncEntityType.FONT, it.uuid) }
         }

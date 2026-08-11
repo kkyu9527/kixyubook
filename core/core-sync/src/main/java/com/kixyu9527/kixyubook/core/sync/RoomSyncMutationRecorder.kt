@@ -5,11 +5,14 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 
 @Singleton
 class RoomSyncMutationRecorder @Inject constructor(
@@ -18,10 +21,9 @@ class RoomSyncMutationRecorder @Inject constructor(
     private val scheduler: CloudSyncScheduler,
 ) : SyncMutationRecorder {
     private val logicalClock = AtomicLong()
-    private val suppression = AtomicInteger()
 
     override suspend fun record(type: SyncEntityType, entityId: String, operation: SyncMutationOperation) {
-        if (suppression.get() > 0) return
+        if (isSyncMutationRecordingSuppressed()) return
         val now = System.currentTimeMillis()
         dao.upsertOutbox(
             SyncOutboxEntity(
@@ -37,8 +39,17 @@ class RoomSyncMutationRecorder @Inject constructor(
         if (preferences.current().enabled) scheduler.requestDebounced(type, entityId)
     }
 
-    suspend fun <T> withoutRecording(block: suspend () -> T): T {
-        suppression.incrementAndGet()
-        return try { block() } finally { suppression.decrementAndGet() }
-    }
+    suspend fun <T> withoutRecording(block: suspend () -> T): T =
+        withoutSyncMutationRecording(block)
 }
+
+internal suspend fun isSyncMutationRecordingSuppressed(): Boolean =
+    coroutineContext[MutationRecordingSuppressedKey] != null
+
+internal suspend fun <T> withoutSyncMutationRecording(block: suspend () -> T): T =
+    withContext(MutationRecordingSuppressed) { block() }
+
+private object MutationRecordingSuppressedKey : CoroutineContext.Key<MutationRecordingSuppressed>
+
+private object MutationRecordingSuppressed :
+    AbstractCoroutineContextElement(MutationRecordingSuppressedKey)
