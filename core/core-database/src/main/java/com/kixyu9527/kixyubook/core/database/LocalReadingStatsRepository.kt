@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.database
 
 import com.kixyu9527.kixyubook.core.common.model.ReadingStats
+import com.kixyu9527.kixyubook.core.common.model.DailyReading
 import com.kixyu9527.kixyubook.core.common.repository.ReadingStatsRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
@@ -22,6 +23,8 @@ class LocalReadingStatsRepository @Inject constructor(
     override fun observeStats() = dao.observeSessions().map { sessions ->
         val today = LocalDate.now().toEpochDay()
         val todaySessions = sessions.filter { it.epochDay == today }
+        val durationByDay = sessions.groupingBy { it.epochDay }
+            .fold(0L) { duration, session -> duration + session.durationMillis }
         val days = sessions.map { it.epochDay }.distinct().sortedDescending()
         var streak = 0
         var expected = today
@@ -33,6 +36,10 @@ class LocalReadingStatsRepository @Inject constructor(
             todayMillis = todaySessions.sumOf { it.durationMillis },
             totalMillis = sessions.sumOf { it.durationMillis },
             streakDays = streak,
+            recentDays = (6L downTo 0L).map { daysAgo ->
+                val epochDay = today - daysAgo
+                DailyReading(epochDay, durationByDay[epochDay] ?: 0L)
+            },
         )
     }
 

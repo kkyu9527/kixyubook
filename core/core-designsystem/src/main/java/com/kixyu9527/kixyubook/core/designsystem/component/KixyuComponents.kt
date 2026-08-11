@@ -123,6 +123,8 @@ object KixyuSize {
     val libraryCoverHeight = 88.dp
     val libraryDetailCoverWidth = 128.dp
     val libraryDetailCoverHeight = 180.dp
+    const val libraryCategorySelectorWidthFraction = 0.4f
+    val libraryCategoryMenuMaxHeight = 320.dp
     val continueCoverWidth = 84.dp
     val continueCoverHeight = 118.dp
     val recentCoverWidth = 46.dp

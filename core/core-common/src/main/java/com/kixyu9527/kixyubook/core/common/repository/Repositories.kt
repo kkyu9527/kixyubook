@@ -51,6 +51,15 @@ interface ReaderSettingsRepository {
     suspend fun setReadingGoalMinutes(minutes: Int)
 }
 
+interface LibraryPreferencesRepository {
+    val preferences: Flow<LibraryPreferences>
+    suspend fun setSortMode(mode: LibrarySortMode)
+    suspend fun setLayoutMode(mode: LibraryLayoutMode)
+    suspend fun setCustomOrder(bookUuids: List<String>)
+    suspend fun setCategoryHidden(category: String, hidden: Boolean)
+    suspend fun replace(preferences: LibraryPreferences)
+}
+
 interface ReadingStatsRepository {
     fun observeStats(): Flow<ReadingStats>
     suspend fun recordSession(bookUuid: String, durationMillis: Long)

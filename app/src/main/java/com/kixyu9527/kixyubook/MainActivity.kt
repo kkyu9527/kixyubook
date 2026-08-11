@@ -34,7 +34,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -440,7 +440,7 @@ private fun KixyuNavHost(
     val route = entry?.destination?.route
     val top = remember {
         listOf(
-            TopDestination(Routes.HOME, "首页", Icons.Outlined.Home),
+            TopDestination(Routes.HOME, "阅读", Icons.Outlined.AutoStories),
             TopDestination(Routes.LIBRARY, "书库", Icons.AutoMirrored.Outlined.LibraryBooks),
             TopDestination(Routes.SETTINGS, "设置", Icons.Outlined.Settings),
         )
@@ -496,14 +496,15 @@ private fun KixyuNavHost(
     }
 
     val openBook: (String) -> Unit = { bookUuid ->
-        if (navController.currentDestination?.route == Routes.HOME && !bookNavigationPending) {
+        val sourceRoute = navController.currentDestination?.route
+        if (sourceRoute in setOf(Routes.HOME, Routes.HIDDEN_LIBRARY) && !bookNavigationPending) {
             bookNavigationPending = true
             onPrioritizeBookSync(bookUuid)
             // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
             // from a Compose frame callback. withFrameNanos resumed at the beginning of the next
             // VSYNC and placed destination creation directly inside that frame's 8.3 ms budget.
             view.post {
-                if (navController.currentDestination?.route == Routes.HOME) {
+                if (navController.currentDestination?.route == sourceRoute) {
                     prioritizeAnimation()
                     navController.navigate(Routes.reader(bookUuid))
                 }
@@ -590,6 +591,12 @@ private fun KixyuNavHost(
                             Routes.HOME -> HomeRoute(onOpenBook = openBook)
                             Routes.LIBRARY -> LibraryRoute(
                                 onOpenBook = openBook,
+                                onOpenHiddenLibrary = {
+                                    prioritizeAnimation()
+                                    navController.navigate(Routes.HIDDEN_LIBRARY) {
+                                        launchSingleTop = true
+                                    }
+                                },
                                 externalImportRequestId = externalImportRequestId,
                                 externalImportUris = externalImportUris,
                                 onExternalImportConsumed = onExternalImportConsumed,
@@ -667,6 +674,16 @@ private fun KixyuNavHost(
                             )
                         }
                     }
+                }
+                composable(Routes.HIDDEN_LIBRARY) {
+                    LibraryRoute(
+                        onOpenBook = openBook,
+                        hiddenOnly = true,
+                        onBack = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                    )
                 }
                 composable(Routes.APPEARANCE) {
                     com.kixyu9527.kixyubook.feature.settings.AppearanceRoute(onBack = {
@@ -764,9 +781,16 @@ private fun KixyuNavHost(
                         initialSettings = initialReaderSettings,
                         onExit = {
                             prioritizeAnimation()
-                            // Reader always belongs directly to the top level. Pop to that exact
-                            // parent instead of trusting an arbitrary historical stack entry.
-                            if (navController.popBackStack(Routes.HOME, inclusive = false)) {
+                            val returnToHiddenLibrary = navController.previousBackStackEntry
+                                ?.destination?.route == Routes.HIDDEN_LIBRARY
+                            val returned = if (returnToHiddenLibrary) {
+                                navController.popBackStack()
+                            } else {
+                                // Normal reader entry belongs directly to the top level. Pop to that
+                                // exact parent instead of trusting an arbitrary historical entry.
+                                navController.popBackStack(Routes.HOME, inclusive = false)
+                            }
+                            if (returned) {
                                 bookUuid.takeIf(String::isNotBlank)?.let { exitedBookUuid ->
                                     bookReorderAfterReaderExitJob?.cancel()
                                     bookReorderAfterReaderExitJob = scope.launch {

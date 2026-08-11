@@ -185,6 +185,30 @@ data class ReadingStats(
     val totalMillis: Long = 0,
     val streakDays: Int = 0,
     val goalMinutes: Int = 30,
+    val recentDays: List<DailyReading> = emptyList(),
+)
+
+data class DailyReading(
+    val epochDay: Long,
+    val durationMillis: Long,
+)
+
+enum class LibrarySortMode {
+    RECENT,
+    IMPORTED,
+    TITLE,
+    AUTHOR,
+    PROGRESS,
+    CUSTOM,
+}
+
+enum class LibraryLayoutMode { LIST, GRID }
+
+data class LibraryPreferences(
+    val sortMode: LibrarySortMode = LibrarySortMode.RECENT,
+    val layoutMode: LibraryLayoutMode = LibraryLayoutMode.LIST,
+    val customOrder: List<String> = emptyList(),
+    val hiddenCategories: Set<String> = emptySet(),
 )
 
 data class UserFont(val uuid: String, val name: String, val filePath: String, val createdTime: Long)

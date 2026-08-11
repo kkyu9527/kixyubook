@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.core.navigation
 object Routes {
     const val HOME = "home"
     const val LIBRARY = "library"
+    const val HIDDEN_LIBRARY = "hidden_library"
     const val SETTINGS = "settings"
     const val APPEARANCE = "appearance"
     const val READING_SETTINGS = "reading_settings"
