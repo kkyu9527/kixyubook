@@ -11,6 +11,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
+import com.kixyu9527.kixyubook.core.common.repository.CompleteLibraryRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
@@ -63,7 +64,7 @@ class LocalBookRepository @Inject constructor(
     private val dao: BookDao,
     private val epubParseCoordinator: EpubParseCoordinator,
     private val syncMutations: SyncMutationRecorder,
-) : BookRepository {
+) : BookRepository, CompleteLibraryRepository {
     private val parsers = BookParserRegistry()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
     // reclamation. A partially evicted cache made otherwise identical directory jumps vary from
@@ -115,7 +116,7 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
-    override fun observeLibrary(): Flow<List<LibraryBook>> = combine(
+    override fun observeCompleteLibrary(): Flow<List<LibraryBook>> = combine(
         dao.observeBooks(),
         dao.observeAllProgress(),
         openedAtOverrides,

@@ -7,6 +7,8 @@ import com.kixyu9527.kixyubook.core.common.model.LibraryPreferences
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
+import com.kixyu9527.kixyubook.core.common.repository.LibraryCatalog
+import com.kixyu9527.kixyubook.core.common.repository.LibraryCatalogRepository
 import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
@@ -41,12 +43,13 @@ data class BookExportEvent(val uriString: String)
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val repository: BookRepository,
+    catalogRepository: LibraryCatalogRepository,
     private val preferencesRepository: LibraryPreferencesRepository,
 ) : ViewModel() {
     private val query = MutableStateFlow("")
     private val category = MutableStateFlow("全部")
-    private val library = repository.observeLibrary()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val catalog = catalogRepository.catalog
+        .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryCatalog())
     private val preferences = preferencesRepository.preferences
         .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryPreferences())
     private val customOrderOverride = MutableStateFlow<List<String>?>(null)
@@ -67,40 +70,51 @@ class LibraryViewModel @Inject constructor(
 
     private val displayOptions = combine(query, category) { search, selectedCategory -> search to selectedCategory }
 
-    val uiState = combine(library, effectivePreferences, displayOptions) { books, libraryPreferences, display ->
-        libraryState(books, libraryPreferences, display.first, display.second, hiddenOnly = false)
+    val uiState = combine(catalog, effectivePreferences, displayOptions) { currentCatalog, libraryPreferences, display ->
+        libraryState(
+            books = currentCatalog.visibleBooks,
+            catalog = currentCatalog,
+            libraryPreferences = libraryPreferences,
+            search = display.first,
+            selectedCategory = display.second,
+            hiddenOnly = false,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
-    val hiddenUiState = combine(library, effectivePreferences, displayOptions) { books, libraryPreferences, display ->
-        libraryState(books, libraryPreferences, display.first, display.second, hiddenOnly = true)
+    val hiddenUiState = combine(catalog, effectivePreferences, displayOptions) { currentCatalog, libraryPreferences, display ->
+        libraryState(
+            books = currentCatalog.hiddenBooks,
+            catalog = currentCatalog,
+            libraryPreferences = libraryPreferences,
+            search = display.first,
+            selectedCategory = display.second,
+            hiddenOnly = true,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState(hiddenOnly = true))
 
     private fun libraryState(
         books: List<LibraryBook>,
+        catalog: LibraryCatalog,
         libraryPreferences: LibraryPreferences,
         search: String,
         selectedCategory: String,
         hiddenOnly: Boolean,
     ): LibraryUiState {
-        val allCategories = books.map { it.book.category }.distinct().sorted()
-        val visibleCategories = allCategories.filter { category ->
-            (category in libraryPreferences.hiddenCategories) == hiddenOnly
-        }
+        val visibleCategories = books.map { it.book.category }.distinct().sorted()
         val effectiveCategory = selectedCategory.takeUnless {
             it != "全部" && it !in visibleCategories
         } ?: "全部"
         val sortedBooks = sortLibraryBooks(books, libraryPreferences)
         return LibraryUiState(
             books = sortedBooks.filter {
-                ((it.book.category in libraryPreferences.hiddenCategories) == hiddenOnly) &&
-                    (effectiveCategory == "全部" || it.book.category == effectiveCategory) &&
+                (effectiveCategory == "全部" || it.book.category == effectiveCategory) &&
                     (search.isBlank() || it.book.title.contains(search, true) || it.book.author.contains(search, true))
             },
             query = search,
             category = effectiveCategory,
             categories = listOf("全部") + visibleCategories,
-            allCategories = allCategories,
-            hiddenCategories = libraryPreferences.hiddenCategories,
+            allCategories = catalog.allCategories,
+            hiddenCategories = catalog.hiddenCategories,
             sortMode = libraryPreferences.sortMode,
             layoutMode = libraryPreferences.layoutMode,
             hiddenOnly = hiddenOnly,
@@ -112,7 +126,7 @@ class LibraryViewModel @Inject constructor(
     fun setSortMode(mode: LibrarySortMode) = viewModelScope.launch {
         if (mode != LibrarySortMode.CUSTOM) customOrderOverride.value = null
         if (mode == LibrarySortMode.CUSTOM && preferences.value.customOrder.isEmpty()) {
-            preferencesRepository.setCustomOrder(library.value.map { it.book.uuid })
+            preferencesRepository.setCustomOrder(catalog.value.allBooks.map { it.book.uuid })
         }
         preferencesRepository.setSortMode(mode)
     }
@@ -123,7 +137,7 @@ class LibraryViewModel @Inject constructor(
     fun moveBook(bookUuid: String, targetUuid: String) {
         if (bookUuid == targetUuid) return
         val order = sortLibraryBooks(
-            library.value,
+            catalog.value.allBooks,
             effectivePreferences.value.copy(sortMode = LibrarySortMode.CUSTOM),
         ).mapTo(mutableListOf()) { it.book.uuid }
         val fromIndex = order.indexOf(bookUuid)

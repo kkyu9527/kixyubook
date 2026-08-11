@@ -5,7 +5,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 interface BookRepository {
-    fun observeLibrary(): Flow<List<LibraryBook>>
     fun observeImportEvents(): Flow<String>
     /** Immediately promotes a book in local activity ordering without changing reading progress. */
     fun markBookOpened(bookUuid: String)
@@ -44,6 +43,17 @@ interface BookRepository {
     suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult>
 }
 
+/** Raw complete-library access for visibility partitioning and internal maintenance only. */
+interface CompleteLibraryRepository {
+    /**
+     * Observes every stored book, including books in hidden categories.
+     *
+     * Feature UI must use [LibraryCatalogRepository] so hidden books cannot accidentally leak
+     * into normal shelves, recent reading, or search results.
+     */
+    fun observeCompleteLibrary(): Flow<List<LibraryBook>>
+}
+
 interface ReaderSettingsRepository {
     val settings: Flow<ReaderSettings>
     suspend fun update(transform: (ReaderSettings) -> ReaderSettings)
@@ -58,6 +68,43 @@ interface LibraryPreferencesRepository {
     suspend fun setCustomOrder(bookUuids: List<String>)
     suspend fun setCategoryHidden(category: String, hidden: Boolean)
     suspend fun replace(preferences: LibraryPreferences)
+}
+
+data class LibraryCatalog(
+    val allBooks: List<LibraryBook> = emptyList(),
+    val visibleBooks: List<LibraryBook> = emptyList(),
+    val hiddenBooks: List<LibraryBook> = emptyList(),
+    val allCategories: List<String> = emptyList(),
+    val hiddenCategories: Set<String> = emptySet(),
+)
+
+/**
+ * The single UI-facing visibility boundary for the library.
+ *
+ * Normal destinations consume [observeVisibleLibrary], while the dedicated hidden shelf consumes
+ * [observeHiddenLibrary]. Complete data remains available only through
+ * [CompleteLibraryRepository] for storage, sync, backup, and maintenance work.
+ */
+interface LibraryCatalogRepository {
+    val catalog: Flow<LibraryCatalog>
+    fun observeVisibleLibrary(): Flow<List<LibraryBook>>
+    fun observeHiddenLibrary(): Flow<List<LibraryBook>>
+}
+
+fun partitionLibraryCatalog(
+    books: List<LibraryBook>,
+    preferences: LibraryPreferences,
+): LibraryCatalog {
+    val (hiddenBooks, visibleBooks) = books.partition {
+        it.book.category in preferences.hiddenCategories
+    }
+    return LibraryCatalog(
+        allBooks = books,
+        visibleBooks = visibleBooks,
+        hiddenBooks = hiddenBooks,
+        allCategories = books.map { it.book.category }.distinct().sorted(),
+        hiddenCategories = preferences.hiddenCategories,
+    )
 }
 
 interface ReadingStatsRepository {
