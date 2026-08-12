@@ -36,6 +36,27 @@ internal fun sessionJson(value: ReadingSessionEntity) = JSONObject()
 internal fun fontJson(value: UserFontEntity) = JSONObject()
     .put("schema", 1).put("uuid", value.uuid).put("name", value.name).put("createdTime", value.createdTime)
 
+internal fun correctionJson(value: TextCorrectionEntity) = JSONObject()
+    .put("schema", 1).put("uuid", value.uuid).put("bookUuid", value.bookUuid)
+    .put("sourceContentHash", value.sourceContentHash).put("chapterKey", value.chapterKey)
+    .put("chapterIndex", value.chapterIndex).put("paragraphIndex", value.paragraphIndex)
+    .put("startOffset", value.startOffset).put("endOffset", value.endOffset)
+    .put("exactText", value.exactText).put("prefixText", value.prefixText).put("suffixText", value.suffixText)
+    .put("replacementText", value.replacementText).put("status", value.status)
+    .put("createdTime", value.createdTime).put("updatedTime", value.updatedTime).put("deviceId", value.deviceId)
+
+internal fun parseCorrection(json: JSONObject) = TextCorrection(
+    uuid = json.getString("uuid"), bookUuid = json.getString("bookUuid"),
+    sourceContentHash = json.optString("sourceContentHash"), chapterKey = json.optString("chapterKey"),
+    chapterIndex = json.optInt("chapterIndex"), paragraphIndex = json.optInt("paragraphIndex"),
+    startOffset = json.optInt("startOffset"), endOffset = json.optInt("endOffset"),
+    exactText = json.optString("exactText"), prefixText = json.optString("prefixText"),
+    suffixText = json.optString("suffixText"), replacementText = json.optString("replacementText"),
+    status = enumValue(json, "status", TextCorrectionStatus.UNRESOLVED),
+    createdTime = json.optLong("createdTime"), updatedTime = json.optLong("updatedTime"),
+    deviceId = json.optString("deviceId"),
+)
+
 internal fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("fontSize", value.fontSize).put("lineHeight", value.lineHeight).put("letterSpacing", value.letterSpacing)
     .put("margin", value.margin).put("theme", value.theme.name).put("pageMode", value.pageMode.name)

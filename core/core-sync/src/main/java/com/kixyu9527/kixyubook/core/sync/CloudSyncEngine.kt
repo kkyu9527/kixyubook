@@ -11,10 +11,12 @@ import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
+import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
+import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -39,10 +41,12 @@ class CloudSyncEngine @Inject constructor(
     private val books: BookDao,
     private val fonts: FontDao,
     private val syncDao: SyncDao,
+    private val correctionDao: TextCorrectionDao,
     private val bookRepository: BookRepository,
     private val fontRepository: FontRepository,
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
+    private val textCorrectionRepository: TextCorrectionRepository,
     private val readingReminders: ReadingReminderScheduler,
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
@@ -61,6 +65,7 @@ class CloudSyncEngine @Inject constructor(
         bookRepository = bookRepository,
         settingsRepository = settingsRepository,
         libraryPreferencesRepository = libraryPreferencesRepository,
+        textCorrectionRepository = textCorrectionRepository,
         readingReminders = readingReminders,
         preferences = preferences,
         mutations = mutations,
@@ -70,6 +75,7 @@ class CloudSyncEngine @Inject constructor(
         context = context,
         books = books,
         fonts = fonts,
+        corrections = correctionDao,
         settingsRepository = settingsRepository,
         libraryPreferencesRepository = libraryPreferencesRepository,
         readingReminders = readingReminders,
@@ -90,6 +96,7 @@ class CloudSyncEngine @Inject constructor(
         syncDao = syncDao,
         bookRepository = bookRepository,
         fontRepository = fontRepository,
+        textCorrectionRepository = textCorrectionRepository,
         mutations = mutations,
         drive = drive,
         remoteState = remoteState,
@@ -792,6 +799,7 @@ class CloudSyncEngine @Inject constructor(
         SyncEntityType.BOOK -> "books/$entityId/metadata"
         SyncEntityType.BOOKMARKS -> "bookmarks/$entityId"
         SyncEntityType.SETTINGS -> "settings/global"
+        SyncEntityType.CORRECTION -> "corrections/$entityId"
         // Progress is resolved automatically by updatedTime, sessions are additive,
         // and source/font objects are immutable for a stable UUID.
         SyncEntityType.PROGRESS,
@@ -810,6 +818,7 @@ class CloudSyncEngine @Inject constructor(
         if (preferences.current().syncFonts) {
             fonts.getAllFonts().forEach { mutations.record(SyncEntityType.FONT, it.uuid) }
         }
+        correctionDao.getAll().forEach { mutations.record(SyncEntityType.CORRECTION, it.uuid) }
     }
 
     private suspend fun withJsonDownload(token: String, info: DriveObject, block: suspend (JSONObject) -> Unit) {

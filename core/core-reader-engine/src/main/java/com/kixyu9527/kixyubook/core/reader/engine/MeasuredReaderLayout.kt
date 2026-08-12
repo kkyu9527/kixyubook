@@ -61,11 +61,18 @@ fun rememberMeasuredReaderPages(
     // Imported fonts use immutable app-private paths. Avoid filesystem stat calls in the reader's
     // first composition; the path itself is a stable cache identity.
     val fontIdentity = fontPath
+    // Corrections change effective text while the immutable source hash stays the same. Include
+    // the effective chapter text in the cache identity so stale page boundaries can never be
+    // reused after a correction, regardless of layout or screen size.
+    val effectiveTextRevision = remember(chapter) {
+        chapter.paragraphs.fold(1) { hash, paragraph -> 31 * hash + paragraph.text.hashCode() }
+    }
     val cacheKey = remember(
         chapter.id,
         chapter.bookUuid,
         chapter.title,
         contentHash,
+        effectiveTextRevision,
         spec,
         fontIdentity,
         showRegularChapterTitle,
@@ -75,7 +82,7 @@ fun rememberMeasuredReaderPages(
     ) {
         PaginationCacheKey(
             bookUuid = chapter.bookUuid,
-            contentHash = contentHash,
+            contentHash = "$contentHash-$effectiveTextRevision",
             chapterId = chapter.id,
             chapterTitle = chapter.title,
             spec = spec,

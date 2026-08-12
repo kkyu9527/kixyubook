@@ -132,6 +132,33 @@ data class BookSearchResult(
     val text: String,
 )
 
+enum class TextCorrectionStatus { ACTIVE, UNRESOLVED, CONFLICT }
+
+/**
+ * A user-owned correction anchored to immutable, normalized source text.
+ *
+ * Offsets are UTF-16 offsets in the original paragraph. They never depend on font, margins,
+ * screen size, pagination, or a previously corrected display string.
+ */
+data class TextCorrection(
+    val uuid: String,
+    val bookUuid: String,
+    val sourceContentHash: String,
+    val chapterKey: String,
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val startOffset: Int,
+    val endOffset: Int,
+    val exactText: String,
+    val prefixText: String,
+    val suffixText: String,
+    val replacementText: String,
+    val status: TextCorrectionStatus = TextCorrectionStatus.ACTIVE,
+    val createdTime: Long,
+    val updatedTime: Long,
+    val deviceId: String = "",
+)
+
 data class LibraryBook(val book: Book, val progress: ReadingProgress?)
 
 enum class ReaderTheme { SYSTEM, DAY, NIGHT }

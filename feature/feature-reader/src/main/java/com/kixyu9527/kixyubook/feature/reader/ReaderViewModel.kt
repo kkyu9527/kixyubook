@@ -39,6 +39,7 @@ data class ReaderUiState(
     val fontPath: String? = null,
     val availableFonts: List<UserFont> = emptyList(),
     val bookmarks: List<Bookmark> = emptyList(),
+    val corrections: List<TextCorrection> = emptyList(),
     val searchQuery: String = "",
     val searchResults: List<BookSearchResult> = emptyList(),
     val selectedSearchIndex: Int = -1,
@@ -57,6 +58,7 @@ class ReaderViewModel @Inject constructor(
     private val fonts: FontRepository,
     private val stats: ReadingStatsRepository,
     private val cloudSync: CloudSyncCoordinator,
+    private val textCorrections: TextCorrectionRepository,
 ) : ViewModel() {
     private val bookUuid: String = checkNotNull(savedStateHandle["bookUuid"])
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -122,6 +124,11 @@ class ReaderViewModel @Inject constructor(
             launch {
                 books.observeBookmarks(bookUuid).collect { bookmarks ->
                     _uiState.update { it.copy(bookmarks = bookmarks) }
+                }
+            }
+            launch {
+                textCorrections.observeBookCorrections(bookUuid).collectLatest { corrections ->
+                    applyCorrectionSnapshot(corrections)
                 }
             }
             launch {
@@ -217,6 +224,114 @@ class ReaderViewModel @Inject constructor(
             index = index.coerceIn(0, _uiState.value.chapters.lastIndex),
             position = 0,
         )
+    }
+
+    fun saveParagraphCorrection(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        displayedText: String,
+        replacementText: String,
+    ) {
+        val state = _uiState.value
+        val chapterPosition = state.chapters.indexOfFirst { it.index == chapterIndex }
+        val chapter = state.chapters.getOrNull(chapterPosition) ?: return
+        val existing = state.corrections.firstOrNull {
+            it.chapterKey == chapter.chapterKey &&
+                it.paragraphIndex == paragraphIndex && it.status != TextCorrectionStatus.UNRESOLVED
+        }
+        viewModelScope.launch {
+            if (existing != null) {
+                textCorrections.updateCorrection(existing.uuid, replacementText)
+            } else {
+                textCorrections.createParagraphCorrection(
+                    bookUuid = bookUuid,
+                    chapterKey = chapter.chapterKey,
+                    chapterIndex = chapter.index,
+                    paragraphIndex = paragraphIndex,
+                    originalText = displayedText,
+                    replacementText = replacementText,
+                )
+            }
+        }
+    }
+
+    fun deleteCorrection(uuid: String) {
+        viewModelScope.launch {
+            textCorrections.deleteCorrection(uuid)
+        }
+    }
+
+    /**
+     * Corrections can change from the editor, the management destination, or cloud sync. Keep
+     * this observer as the single cache-invalidation path so every source immediately restores
+     * the immutable chapter text (or applies its new overlay) without reopening the reader.
+     */
+    private suspend fun applyCorrectionSnapshot(corrections: List<TextCorrection>) {
+        val snapshot = _uiState.value
+        val affectedPositions = changedCorrectionChapterPositions(
+            previous = snapshot.corrections,
+            current = corrections,
+            chapters = snapshot.chapters,
+        )
+        _uiState.update { state ->
+            state.copy(
+                corrections = corrections,
+                prefetchedChapters = state.prefetchedChapters - affectedPositions,
+            )
+        }
+        if (affectedPositions.isEmpty()) return
+
+        // A neighbour prefetch may already hold a chapter with the previous correction overlay.
+        // Cancel the window before clearing individual requests so it cannot publish stale text
+        // after the database observer has delivered the newer correction set.
+        chapterPrefetchJob?.cancel()
+        chapterPrefetchJob = null
+        prefetchedAroundChapterIndex = null
+        affectedPositions.forEach { position ->
+            chapterLoads.remove(position)?.deferred?.cancel()
+        }
+
+        val currentPosition = _uiState.value.chapterIndex
+        if (currentPosition in affectedPositions) {
+            reloadCorrectedChapter(currentPosition)
+        } else if (!pageInteractionActive) {
+            val state = _uiState.value
+            if (state.chapter != null) prefetchNearbyChapters(state.chapterIndex, state.chapters)
+        }
+    }
+
+    private suspend fun reloadCorrectedChapter(position: Int) {
+        val target = _uiState.value.chapters.getOrNull(position) ?: return
+        chapterLoads.remove(position)?.deferred?.cancel()
+        val refreshed = books.getChapter(bookUuid, target.index)?.toReaderChapter() ?: return
+        _uiState.update { state ->
+            if (state.chapterIndex != position || state.chapters.getOrNull(position)?.id != target.id) {
+                state
+            } else {
+                // Correction changes are an in-place repagination, not chapter navigation.
+                // restorePosition intentionally remains at the chapter-entry destination during
+                // ordinary reading, so using it here jumps a later page back to page one. Promote
+                // the currently visible anchor before rebuilding the pager and clamp its offset
+                // when an undo restores a shorter source paragraph.
+                val anchorParagraph = refreshed.contentParagraphs().firstOrNull {
+                    it.index == state.currentPosition
+                }
+                val anchorPosition = anchorParagraph?.index ?: state.currentPosition
+                val anchorOffset = state.currentCharOffset.coerceIn(
+                    0,
+                    anchorParagraph?.text?.length ?: 0,
+                )
+                state.copy(
+                    chapter = refreshed,
+                    prefetchedChapters = mapOf(position to refreshed),
+                    restorePosition = anchorPosition,
+                    restoreCharOffset = anchorOffset,
+                    currentPosition = anchorPosition,
+                    currentCharOffset = anchorOffset,
+                    navigationVersion = state.navigationVersion + 1,
+                )
+            }
+        }
     }
 
     private fun navigateToChapter(
@@ -815,3 +930,26 @@ internal fun nextProgressUpdatedAt(currentTime: Long, latestLocalWriteAt: Long):
     } else {
         currentTime
     }
+
+internal fun changedCorrectionChapterPositions(
+    previous: List<TextCorrection>,
+    current: List<TextCorrection>,
+    chapters: List<Chapter>,
+): Set<Int> {
+    if (previous == current) return emptySet()
+    val previousById = previous.associateBy(TextCorrection::uuid)
+    val currentById = current.associateBy(TextCorrection::uuid)
+    val changed = (previousById.keys + currentById.keys).flatMap { uuid ->
+        val old = previousById[uuid]
+        val new = currentById[uuid]
+        if (old == new) emptyList() else listOfNotNull(old, new)
+    }
+    return chapters.mapIndexedNotNull { position, chapter ->
+        position.takeIf {
+            changed.any { correction ->
+                (correction.chapterKey.isNotBlank() && correction.chapterKey == chapter.chapterKey) ||
+                    correction.chapterIndex == chapter.index
+            }
+        }
+    }.toSet()
+}

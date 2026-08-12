@@ -81,6 +81,9 @@ internal fun ReaderScreen(
     setPageInteractionActive: (Boolean) -> Unit,
     addFont: () -> Unit,
     deleteFont: (UserFont) -> Unit,
+    saveCorrection: (Int, Int, String, String) -> Unit,
+    deleteCorrection: (String) -> Unit,
+    onManageCorrections: () -> Unit,
 ) {
     var controls by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -95,6 +98,12 @@ internal fun ReaderScreen(
     val view = LocalView.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+    var textActionTarget by remember(state.chapter?.id) {
+        mutableStateOf<ReaderTextActionTarget?>(null)
+    }
+    var correctionEditorTarget by remember(state.chapter?.id) {
+        mutableStateOf<ReaderTextActionTarget?>(null)
+    }
     var exitRequested by remember { mutableStateOf(false) }
     var retainedSheet by remember { mutableStateOf<ReaderSheet?>(null) }
     var showChapterLoading by remember { mutableStateOf(false) }
@@ -313,6 +322,17 @@ internal fun ReaderScreen(
     }
     KixyuOverlayHost(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {
+            ReaderSelectionToolbar(
+                dismissKey = state.chapterIndex to state.currentPosition,
+                onCorrectParagraph = {
+                    textActionTarget?.let { target ->
+                        correctionEditorTarget = target
+                        controls = false
+                        menu = false
+                        toolsMenu = false
+                    }
+                },
+            ) {
             Box(
             Modifier.fillMaxSize()
                 .background(palette.background)
@@ -400,6 +420,7 @@ internal fun ReaderScreen(
                     // overlays may cancel pagination; the drag still pauses unrelated EPUB work
                     // through setPageInteractionActive above.
                     resourcePriorityActive = overlayAnimationPriority,
+                    onTextActionTarget = { textActionTarget = it },
                 )
             }
             ReaderControlVisibility(
@@ -464,6 +485,35 @@ internal fun ReaderScreen(
                 },
             )
             }
+            }
+        }
+
+        correctionEditorTarget?.let { target ->
+            val chapterKey = state.chapters.firstOrNull { it.index == target.chapterIndex }?.chapterKey
+            val existing = state.corrections.firstOrNull {
+                it.chapterKey == chapterKey && it.paragraphIndex == target.paragraphIndex &&
+                    it.status != TextCorrectionStatus.UNRESOLVED
+            }
+            CorrectionEditDialog(
+                original = existing?.exactText ?: target.text,
+                initialReplacement = existing?.replacementText ?: target.text,
+                existing = existing,
+                onDismiss = { correctionEditorTarget = null },
+                onSave = { replacement ->
+                    saveCorrection(target.chapterIndex, target.paragraphIndex, target.text, replacement)
+                    correctionEditorTarget = null
+                },
+                onDelete = existing?.let { correction ->
+                    {
+                        deleteCorrection(correction.uuid)
+                        correctionEditorTarget = null
+                    }
+                },
+                onManageAll = {
+                    correctionEditorTarget = null
+                    onManageCorrections()
+                },
+            )
         }
 
         ReaderSearchOverlay(

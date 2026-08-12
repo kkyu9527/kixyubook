@@ -14,6 +14,8 @@ object Routes {
     const val DIAGNOSTIC_LOG = "diagnostic_log"
     const val DIAGNOSTIC_LOG_CATEGORY = "diagnostic_log/{category}"
     const val READER = "reader/{bookUuid}"
+    const val TEXT_CORRECTIONS = "reader/{bookUuid}/corrections"
     fun diagnosticLogCategory(category: String) = "diagnostic_log/$category"
     fun reader(bookUuid: String) = "reader/$bookUuid"
+    fun textCorrections(bookUuid: String) = "reader/$bookUuid/corrections"
 }

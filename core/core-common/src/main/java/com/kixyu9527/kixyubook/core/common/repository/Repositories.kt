@@ -9,7 +9,7 @@ interface BookRepository {
     /** Immediately promotes a book in local activity ordering without changing reading progress. */
     fun markBookOpened(bookUuid: String)
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
-    /** Copies the immutable source book to a user-selected document destination. */
+    /** Exports a UTF-8 reading copy with every valid personal correction applied. */
     suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit>
     /** Restores an immutable source blob while preserving its permanent book UUID. */
     suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean
@@ -41,6 +41,30 @@ interface BookRepository {
     suspend fun addBookmark(bookmark: Bookmark)
     suspend fun deleteBookmark(bookmarkUuid: String)
     suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult>
+}
+
+interface TextCorrectionRepository {
+    fun observeBookCorrections(bookUuid: String): Flow<List<TextCorrection>>
+    suspend fun getCorrection(uuid: String): TextCorrection?
+    suspend fun getBookCorrections(bookUuid: String): List<TextCorrection>
+    suspend fun createParagraphCorrection(
+        bookUuid: String,
+        chapterKey: String,
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        originalText: String,
+        replacementText: String,
+    ): TextCorrection
+    suspend fun updateCorrection(uuid: String, replacementText: String): TextCorrection?
+    suspend fun deleteCorrection(uuid: String)
+    /** Keeps this correction and tombstones any correction that overlaps the same source range. */
+    suspend fun resolveConflict(uuid: String)
+    /** Applies only valid, non-overlapping active corrections and re-anchors stale entries safely. */
+    suspend fun applyToChapter(content: ChapterContent): ChapterContent
+    /** Applies a remote object without recording another outbound mutation. */
+    suspend fun applyRemote(correction: TextCorrection)
+    /** Applies a remote tombstone without recording another outbound mutation. */
+    suspend fun deleteRemote(uuid: String)
 }
 
 /** Raw complete-library access for visibility partitioning and internal maintenance only. */
@@ -139,7 +163,7 @@ interface AppUpdateRepository {
     fun clearResult()
 }
 
-enum class SyncEntityType { BOOK, PROGRESS, BOOKMARKS, SETTINGS, SESSION, FONT }
+enum class SyncEntityType { BOOK, PROGRESS, BOOKMARKS, SETTINGS, SESSION, FONT, CORRECTION }
 enum class SyncMutationOperation { UPSERT, DELETE }
 
 /** Records local mutations for object-level cloud sync. Implementations must be cheap and offline-safe. */

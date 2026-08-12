@@ -166,20 +166,10 @@ fun LibraryRoute(
         pendingExportBookUuid = null
         if (uri != null && bookUuid != null) viewModel.export(bookUuid, uri.toString())
     }
-    val exportEpub = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/epub+zip"),
-    ) { uri ->
-        val bookUuid = pendingExportBookUuid
-        pendingExportBookUuid = null
-        if (uri != null && bookUuid != null) viewModel.export(bookUuid, uri.toString())
-    }
     val beginExport: (LibraryBook) -> Unit = { item ->
         pendingExportBookUuid = item.book.uuid
         val fileName = exportFileName(item)
-        when (item.book.format) {
-            BookFormat.EPUB -> exportEpub.launch(fileName)
-            else -> exportTxt.launch(fileName)
-        }
+        exportTxt.launch(fileName)
     }
     LaunchedEffect(externalImportRequestId) {
         val requestId = externalImportRequestId ?: return@LaunchedEffect
@@ -1523,7 +1513,7 @@ internal fun exportFileName(item: LibraryBook): String {
         .trim(' ', '.')
         .take(120)
         .ifBlank { "未命名书籍" }
-    return "$safeTitle.$extension"
+    return "$safeTitle-纠错版.txt"
 }
 
 internal fun openExportLocation(context: Context, uriString: String): Boolean {

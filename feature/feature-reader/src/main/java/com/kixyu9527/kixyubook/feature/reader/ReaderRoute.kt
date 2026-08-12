@@ -46,6 +46,7 @@ internal fun ReaderControlVisibility(
 fun ReaderRoute(
     initialSettings: ReaderSettings = ReaderSettings(),
     onExit: () -> Unit,
+    onManageCorrections: () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var readerDestinationEntered by remember(lifecycleOwner) {
@@ -64,7 +65,7 @@ fun ReaderRoute(
         // Create Hilt/ViewModel only after Navigation has committed the enter transition. This is
         // intentionally load-after-motion: Room, EPUB and pagination work cannot compete with the
         // single animated surface for a 120 Hz frame budget.
-        LoadedReaderRoute(initialSettings = initialSettings, onExit = onExit)
+        LoadedReaderRoute(initialSettings = initialSettings, onExit = onExit, onManageCorrections = onManageCorrections)
     }
 }
 
@@ -72,6 +73,7 @@ fun ReaderRoute(
 private fun LoadedReaderRoute(
     initialSettings: ReaderSettings,
     onExit: () -> Unit,
+    onManageCorrections: () -> Unit,
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -135,6 +137,9 @@ private fun LoadedReaderRoute(
             fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
         },
         deleteFont = viewModel::deleteFont,
+        saveCorrection = viewModel::saveParagraphCorrection,
+        deleteCorrection = viewModel::deleteCorrection,
+        onManageCorrections = onManageCorrections,
     )
 }
 

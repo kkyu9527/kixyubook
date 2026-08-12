@@ -2,9 +2,7 @@ package com.kixyu9527.kixyubook.feature.reader
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Toc
 import androidx.compose.material.icons.filled.Bookmark
@@ -18,7 +16,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
@@ -62,27 +59,50 @@ internal fun ReaderControls(
         val stableControlInsets = WindowInsets.statusBarsIgnoringVisibility
             .union(WindowInsets.navigationBarsIgnoringVisibility)
             .union(WindowInsets.displayCutout)
-        Box(Modifier.fillMaxSize().windowInsetsPadding(stableControlInsets)) {
+        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(stableControlInsets)) {
             if (bookTitle.isNotBlank()) {
+                val titleContainerColor = lerp(backgroundColor, accentColor, READER_CONTROL_ACCENT_MIX)
+                val titleContentColor = if (
+                    accentColor.contrastRatio(titleContainerColor) >= MIN_TEXT_CONTRAST
+                ) accentColor else titleContainerColor.highContrastContentColor()
+                val titleWidth = minOf(
+                    maxWidth * KixyuSize.readerBookTitleWidthFraction,
+                    KixyuSize.readerBookTitleMaxWidth,
+                )
                 KixyuPopupSurface(
                     modifier = Modifier.align(Alignment.TopCenter)
                         .padding(top = KixyuSize.readerTopControlInset)
-                        .height(KixyuSize.readerBookTitleHeight)
-                        .widthIn(max = KixyuSize.readerBookTitleMaxWidth)
+                        .width(titleWidth)
+                        .heightIn(min = KixyuSize.readerBookTitleMinHeight)
                         .then(controlsBackModifier),
+                    shadowElevation = KixyuSpacing.extraSmall,
+                    containerColor = titleContainerColor,
+                    contentColor = titleContentColor,
                 ) {
-                    Box(
-                        Modifier.fillMaxHeight()
+                    Row(
+                        Modifier.fillMaxWidth()
                             .clip(MaterialTheme.shapes.extraLarge)
                             .clickable(onClick = onBookInfo)
-                            .padding(horizontal = KixyuSpacing.small),
-                        contentAlignment = Alignment.Center,
+                            .padding(
+                                start = KixyuSpacing.large,
+                                top = KixyuSpacing.small,
+                                end = KixyuSpacing.medium,
+                                bottom = KixyuSpacing.small,
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            bookTitle,
-                            style = MaterialTheme.typography.titleMedium,
+                            text = bookTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = "查看书籍信息",
+                            modifier = Modifier.size(KixyuSize.iconSmall),
+                            tint = titleContentColor.copy(alpha = .72f),
                         )
                     }
                 }
@@ -221,17 +241,10 @@ internal fun Color.highContrastContentColor(): Color {
     return if (blackContrast >= whiteContrast) Color.Black else Color.White
 }
 
+private const val MIN_TEXT_CONTRAST = 4.5f
+
 internal fun Modifier.predictivePopupTransform(progress: Float): Modifier = graphicsLayer {
     alpha = 1f - progress
     scaleX = 1f - progress * .08f
     scaleY = scaleX
-}
-
-@Composable internal fun MenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, click: () -> Unit) {
-    Row(
-        Modifier.pointerInput(Unit) { detectTapGestures { click() } }
-            .padding(horizontal = KixyuSpacing.large, vertical = KixyuSpacing.small),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-    ) { Icon(icon, null, Modifier.size(KixyuSize.icon)); Text(text, maxLines = 1) }
 }

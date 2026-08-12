@@ -15,6 +15,7 @@ import com.kixyu9527.kixyubook.core.common.repository.CompleteLibraryRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
+import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticFailure
@@ -64,6 +65,7 @@ class LocalBookRepository @Inject constructor(
     private val dao: BookDao,
     private val epubParseCoordinator: EpubParseCoordinator,
     private val syncMutations: SyncMutationRecorder,
+    private val textCorrections: TextCorrectionRepository,
 ) : BookRepository, CompleteLibraryRepository {
     private val parsers = BookParserRegistry()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
@@ -214,11 +216,22 @@ class LocalBookRepository @Inject constructor(
         val startedAt = SystemClock.elapsedRealtime()
         runCatching {
             val book = dao.getBook(bookUuid) ?: error("书籍不存在或已被删除")
-            val source = File(book.storagePath)
-            require(source.isFile) { "书籍源文件不存在" }
             val destination = uriString.toUri()
             context.contentResolver.openOutputStream(destination, "w")?.use { output ->
-                source.inputStream().buffered().use { input -> input.copyTo(output) }
+                output.bufferedWriter(Charsets.UTF_8).use { writer ->
+                    dao.getChapters(bookUuid).forEachIndexed { index, chapter ->
+                        getChapter(bookUuid, chapter.chapterIndex)?.let { content ->
+                            if (index > 0) writer.appendLine()
+                            writer.appendLine(content.chapter.title)
+                            content.paragraphs.asSequence()
+                                .filter { it.kind == ParagraphKind.TEXT && it.text.isNotBlank() }
+                                .forEach { paragraph ->
+                                    writer.appendLine()
+                                    writer.appendLine(paragraph.text)
+                                }
+                        }
+                    }
+                }
             } ?: error("无法写入所选位置")
             Unit
         }.onSuccess {
@@ -473,6 +486,9 @@ class LocalBookRepository @Inject constructor(
             }
             val books = dao.getBooks(bookUuids)
             val progressCount = bookUuids.count { uuid -> dao.getProgress(uuid) != null }
+            val correctionUuids = bookUuids.flatMap { uuid ->
+                textCorrections.getBookCorrections(uuid).map(TextCorrection::uuid)
+            }
             database.withTransaction {
                 dao.deleteMetadataEdits(bookUuids)
                 dao.deleteBooks(bookUuids)
@@ -483,6 +499,9 @@ class LocalBookRepository @Inject constructor(
                     syncMutations.record(SyncEntityType.BOOKMARKS, uuid, SyncMutationOperation.DELETE)
                     syncMutations.record(SyncEntityType.PROGRESS, uuid, SyncMutationOperation.DELETE)
                     syncMutations.record(SyncEntityType.BOOK, uuid, SyncMutationOperation.DELETE)
+                }
+                correctionUuids.forEach { uuid ->
+                    syncMutations.record(SyncEntityType.CORRECTION, uuid, SyncMutationOperation.DELETE)
                 }
             }
             synchronized(chapterCacheLock) {
@@ -523,9 +542,13 @@ class LocalBookRepository @Inject constructor(
         var diagnosticSource = "unknown"
         try {
         val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
-        synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let { return@withContext it }
+        synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
+            return@withContext textCorrections.applyToChapter(it)
+        }
         chapterLoadMutex.withLock {
-            synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let { return@withLock it }
+            synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
+                return@withLock textCorrections.applyToChapter(it)
+            }
             val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
             val book = dao.getBook(bookUuid)
             var storedParagraphs = dao.getParagraphs(chapter.id)
@@ -572,7 +595,7 @@ class LocalBookRepository @Inject constructor(
                         ),
                     )
                 }
-            }
+            }.let { textCorrections.applyToChapter(it) }
         }
         } catch (error: CancellationException) {
             throw error
@@ -800,7 +823,25 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult> = withContext(Dispatchers.IO) {
         val escaped = query.trim().replace("~", "~~").replace("%", "~%").replace("_", "~_")
-        if (escaped.isBlank()) emptyList() else dao.searchBook(bookUuid, escaped).map { it.toModel() }
+        if (escaped.isBlank()) return@withContext emptyList()
+        val rawCandidates = dao.searchBook(bookUuid, escaped).map { it.toModel() }
+        val correctedCandidates = textCorrections.getBookCorrections(bookUuid)
+            .filter { it.status == TextCorrectionStatus.ACTIVE && it.replacementText.contains(query, ignoreCase = true) }
+            .mapNotNull { correction ->
+                val chapter = dao.getChapterByKey(bookUuid, correction.chapterKey)
+                    ?: dao.getChapter(bookUuid, correction.chapterIndex)
+                    ?: return@mapNotNull null
+                BookSearchResult(chapter.id, chapter.title, chapter.chapterIndex, correction.paragraphIndex, "")
+            }
+        (rawCandidates + correctedCandidates).distinctBy { it.chapterId to it.paragraphIndex }
+            .mapNotNull { candidate ->
+                val content = getChapter(bookUuid, candidate.chapterIndex) ?: return@mapNotNull null
+                val paragraph = content.paragraphs.firstOrNull { it.index == candidate.paragraphIndex }
+                    ?: return@mapNotNull null
+                candidate.copy(text = paragraph.text)
+                    .takeIf { paragraph.text.contains(query, ignoreCase = true) }
+            }
+            .take(1000)
     }
 
     private suspend fun importStreamingChapters(

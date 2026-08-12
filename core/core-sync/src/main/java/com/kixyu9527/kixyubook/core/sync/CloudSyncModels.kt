@@ -166,6 +166,7 @@ internal fun keysForMutation(value: SyncOutboxEntity): List<String> =
         SyncEntityType.SETTINGS -> listOf("settings/global")
         SyncEntityType.SESSION -> listOf("sessions/${value.entityId}")
         SyncEntityType.FONT -> listOf("fonts/${value.entityId}/metadata", "fonts/${value.entityId}/source")
+        SyncEntityType.CORRECTION -> listOf("corrections/${value.entityId}")
     }
 
 /** A pending deletion always wins over an older cloud object, including priority reader pulls. */

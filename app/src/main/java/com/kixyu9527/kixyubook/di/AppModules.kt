@@ -19,6 +19,10 @@ import com.kixyu9527.kixyubook.core.database.LocalReadingStatsRepository
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
+import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
+import com.kixyu9527.kixyubook.core.database.MIGRATION_8_9
+import com.kixyu9527.kixyubook.core.database.LocalTextCorrectionRepository
+import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.datastore.DataStoreReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.datastore.DataStoreLibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.datastore.DefaultLibraryCatalogRepository
@@ -38,6 +42,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): KixyuDatabase =
         Room.databaseBuilder(context, KixyuDatabase::class.java, "kixyu-books.db")
+            .addMigrations(MIGRATION_8_9)
             .build()
 
     @Provides
@@ -46,6 +51,8 @@ object DatabaseModule {
     @Provides fun provideFontDao(database: KixyuDatabase): FontDao = database.fontDao()
 
     @Provides fun provideSyncDao(database: KixyuDatabase): SyncDao = database.syncDao()
+
+    @Provides fun provideTextCorrectionDao(database: KixyuDatabase): TextCorrectionDao = database.textCorrectionDao()
 
 }
 
@@ -61,4 +68,5 @@ abstract class RepositoryModule {
     @Binds abstract fun bindStatsRepository(implementation: LocalReadingStatsRepository): ReadingStatsRepository
     @Binds abstract fun bindFontRepository(implementation: LocalFontRepository): FontRepository
     @Binds abstract fun bindAppUpdateRepository(implementation: GitHubUpdateRepository): AppUpdateRepository
+    @Binds abstract fun bindTextCorrectionRepository(implementation: LocalTextCorrectionRepository): TextCorrectionRepository
 }

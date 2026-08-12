@@ -55,6 +55,7 @@ internal fun PagedReader(
     topInsetDp: Float,
     bottomInsetDp: Float,
     physicalViewportHeightDp: Float,
+    onTextActionTarget: (ReaderTextActionTarget) -> Unit,
 ) {
     var retainedPage by remember(
         spec,
@@ -96,6 +97,7 @@ internal fun PagedReader(
                 pageNumber = retained.pageNumber,
                 modifier = Modifier.readerPageViewportModifier(retained.page, topInsetDp, bottomInsetDp),
                 fullPageViewportHeightDp = physicalViewportHeightDp,
+                onTextActionTarget = onTextActionTarget,
             )
         } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             ReaderLoadingIndicator(palette)
@@ -378,6 +380,7 @@ internal fun PagedReader(
                         topInsetDp = topInsetDp,
                         bottomInsetDp = bottomInsetDp,
                         physicalViewportHeightDp = physicalViewportHeightDp,
+                        onTextActionTarget = onTextActionTarget,
                     )
                 }
                 if (index < spread.items.lastIndex) {
@@ -404,6 +407,7 @@ internal fun ReaderPagerLeaf(
     topInsetDp: Float,
     bottomInsetDp: Float,
     physicalViewportHeightDp: Float,
+    onTextActionTarget: (ReaderTextActionTarget) -> Unit,
 ) {
     // A not-yet-paginated chapter is still a fully interactive lightweight page. Rendering a
     // spinner-only Box here discarded every tap that arrived after the first rapid turn.
@@ -433,6 +437,7 @@ internal fun ReaderPagerLeaf(
             },
             selectionEnabled = selectionEnabled,
             onSelectionActiveChange = onSelectionActiveChange,
+            onTextActionTarget = onTextActionTarget,
         )
     }
 }

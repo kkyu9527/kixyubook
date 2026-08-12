@@ -9,17 +9,17 @@ import org.junit.Test
 class BookExportFileNameTest {
     @Test
     fun `uses edited title and format extension`() {
-        assertEquals("正确的书名.epub", exportFileName(book("正确的书名", BookFormat.EPUB)))
+        assertEquals("正确的书名-纠错版.txt", exportFileName(book("正确的书名", BookFormat.EPUB)))
     }
 
     @Test
     fun `does not duplicate an existing extension`() {
-        assertEquals("小说.epub", exportFileName(book("小说.EPUB", BookFormat.EPUB)))
+        assertEquals("小说-纠错版.txt", exportFileName(book("小说.EPUB", BookFormat.EPUB)))
     }
 
     @Test
     fun `replaces characters forbidden by document providers`() {
-        assertEquals("卷一_开始_.txt", exportFileName(book("卷一/开始?", BookFormat.TXT)))
+        assertEquals("卷一_开始_-纠错版.txt", exportFileName(book("卷一/开始?", BookFormat.TXT)))
     }
 
     private fun book(title: String, format: BookFormat) = LibraryBook(

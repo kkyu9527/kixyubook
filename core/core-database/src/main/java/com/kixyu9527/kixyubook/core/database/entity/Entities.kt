@@ -153,3 +153,38 @@ data class SyncTombstoneEntity(
     val deviceId: String,
     val expiresAt: Long,
 )
+
+@Entity(
+    tableName = "text_corrections",
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["uuid"],
+            childColumns = ["bookUuid"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("bookUuid"),
+        Index(value = ["bookUuid", "chapterKey", "paragraphIndex"]),
+        Index("updatedTime"),
+    ],
+)
+data class TextCorrectionEntity(
+    @PrimaryKey val uuid: String,
+    val bookUuid: String,
+    val sourceContentHash: String,
+    val chapterKey: String,
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val startOffset: Int,
+    val endOffset: Int,
+    val exactText: String,
+    val prefixText: String,
+    val suffixText: String,
+    val replacementText: String,
+    val status: String,
+    val createdTime: Long,
+    val updatedTime: Long,
+    val deviceId: String,
+)

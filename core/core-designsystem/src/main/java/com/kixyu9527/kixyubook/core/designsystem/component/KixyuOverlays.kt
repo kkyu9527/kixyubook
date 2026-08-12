@@ -454,17 +454,19 @@ fun KixyuPopupSurface(
     modifier: Modifier = Modifier,
     shape: Shape = MaterialTheme.shapes.extraLarge,
     shadowElevation: Dp = KixyuSpacing.extraSmall,
+    containerColor: Color? = null,
+    contentColor: Color? = null,
     content: @Composable () -> Unit,
 ) {
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixSurface(
             modifier = modifier,
             shape = shape,
-            color = MiuixTheme.colorScheme.surfaceContainer,
+            color = containerColor ?: MiuixTheme.colorScheme.surfaceContainer,
             shadowElevation = shadowElevation,
         ) {
             androidx.compose.runtime.CompositionLocalProvider(
-                LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+                LocalContentColor provides (contentColor ?: MaterialTheme.colorScheme.onSurface),
                 content = content,
             )
         }
@@ -472,7 +474,8 @@ fun KixyuPopupSurface(
         androidx.compose.material3.Surface(
             modifier = modifier,
             shape = shape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = containerColor ?: MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = contentColor ?: MaterialTheme.colorScheme.onSurface,
             tonalElevation = KixyuSpacing.extraSmall,
             shadowElevation = shadowElevation,
             content = content,

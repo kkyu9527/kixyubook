@@ -80,6 +80,7 @@ import com.kixyu9527.kixyubook.core.navigation.Routes
 import com.kixyu9527.kixyubook.feature.home.HomeRoute
 import com.kixyu9527.kixyubook.feature.library.LibraryRoute
 import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
+import com.kixyu9527.kixyubook.feature.reader.CorrectionManagementRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
@@ -795,6 +796,10 @@ private fun KixyuNavHost(
                     val bookUuid = entry.arguments?.getString("bookUuid").orEmpty()
                     ReaderRoute(
                         initialSettings = initialReaderSettings,
+                        onManageCorrections = {
+                            prioritizeAnimation()
+                            navController.navigate(Routes.textCorrections(bookUuid))
+                        },
                         onExit = {
                             prioritizeAnimation()
                             val returnToHiddenLibrary = navController.previousBackStackEntry
@@ -824,6 +829,15 @@ private fun KixyuNavHost(
                             }
                         },
                     )
+                }
+                composable(
+                    route = Routes.TEXT_CORRECTIONS,
+                    arguments = listOf(navArgument("bookUuid") { type = NavType.StringType }),
+                ) {
+                    CorrectionManagementRoute(onBack = {
+                        prioritizeAnimation()
+                        navController.popBackStack()
+                    })
                 }
             }
             AnimatedVisibility(
