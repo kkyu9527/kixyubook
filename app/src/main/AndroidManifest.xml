@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- miuix-blur exposes its shader implementation from a minSdk 33 artifact. All calls that
+         require RuntimeShader are guarded at runtime, while older devices use the opaque capsule. -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+
     <application
         android:name=".KixyuBookApplication"
         android:allowBackup="true"

@@ -34,8 +34,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -52,7 +50,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -66,8 +63,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponent as MiuixBasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults as MiuixBasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.HorizontalDivider as MiuixHorizontalDivider
-import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
-import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
 import top.yukonga.miuix.kmp.basic.InputField as MiuixInputField
 import top.yukonga.miuix.kmp.basic.SearchBarDefaults as MiuixSearchBarDefaults
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
@@ -111,9 +106,12 @@ object KixyuSize {
     val continueCoverHeight = 118.dp
     val recentCoverWidth = 46.dp
     val recentCoverHeight = 64.dp
-    val bottomNavigationItemWidth = 80.dp
+    val bottomNavigationItemWidth = 76.dp
     val bottomNavigationBarHeight = 64.dp
-    val navigationContainerCornerRadius = 16.dp
+    val bottomNavigationIndicatorHeight = 56.dp
+    val bottomNavigationInnerPadding = 4.dp
+    val bottomNavigationBottomGap = 12.dp
+    val navigationContainerCornerRadius = 32.dp
     val bottomNavigationContentHeight = 76.dp
     val navigationRailWidth = 72.dp
     val navigationRailItemHeight = 64.dp
@@ -621,72 +619,34 @@ fun KixyuNavigationBar(
     items: List<KixyuNavigationItem>,
     selectedKey: String?,
     onSelected: (KixyuNavigationItem) -> Unit,
+    backdrop: KixyuNavigationBackdrop,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val appUiStyle = LocalAppUiStyle.current
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
-                .width(KixyuSize.bottomNavigationItemWidth * items.size)
+                .width(
+                    KixyuSize.bottomNavigationItemWidth * items.size +
+                        KixyuSize.bottomNavigationInnerPadding * 2,
+                )
                 .heightIn(
                     min = KixyuSize.bottomNavigationContentHeight,
                     max = KixyuSize.bottomNavigationContentHeight,
                 )
-                .padding(vertical = (KixyuSize.bottomNavigationContentHeight - KixyuSize.bottomNavigationBarHeight) / 2),
-            contentAlignment = Alignment.Center,
+                .padding(bottom = KixyuSize.bottomNavigationBottomGap),
+            contentAlignment = Alignment.TopCenter,
         ) {
-            Surface(
-                modifier = Modifier
-                    .width(KixyuSize.bottomNavigationItemWidth * items.size)
-                    .heightIn(
-                        min = KixyuSize.bottomNavigationBarHeight,
-                        max = KixyuSize.bottomNavigationBarHeight,
-                    ),
-                shape = RoundedCornerShape(KixyuSize.navigationContainerCornerRadius),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shadowElevation = if (appUiStyle == AppUiStyle.MIUIX) 0.dp else KixyuSpacing.extraSmall,
-            ) {
-                if (appUiStyle == AppUiStyle.MIUIX) {
-                    MiuixNavigationBar(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        showDivider = false,
-                        defaultWindowInsetsPadding = false,
-                    ) {
-                        items.forEach { item ->
-                            MiuixNavigationBarItem(
-                                selected = selectedKey == item.route,
-                                onClick = { onSelected(item) },
-                                icon = item.icon,
-                                label = item.label,
-                                modifier = Modifier.weight(1f),
-                                enabled = enabled,
-                            )
-                        }
-                    }
-                } else {
-                    NavigationBar(
-                        modifier = Modifier.fillMaxSize(),
-                        containerColor = Color.Transparent,
-                        windowInsets = WindowInsets(0, 0, 0, 0),
-                    ) {
-                        items.forEach { item ->
-                            NavigationBarItem(
-                                selected = selectedKey == item.route,
-                                onClick = { onSelected(item) },
-                                icon = { Icon(item.icon, item.label) },
-                                label = { Text(item.label) },
-                                modifier = Modifier.weight(1f),
-                                enabled = enabled,
-                            )
-                        }
-                    }
-                }
-            }
+            KixyuFloatingNavigationBar(
+                items = items,
+                selectedKey = selectedKey,
+                onSelected = onSelected,
+                backdrop = backdrop,
+                enabled = enabled,
+            )
         }
         Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
     }

@@ -65,6 +65,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdrop
+import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageEnterTransition
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageExitTransition
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
@@ -549,6 +551,7 @@ private fun KixyuNavHost(
         }
     }
     val navBackground = kixyuPageBackground()
+    val navigationBackdrop = rememberKixyuNavigationBackdrop(navBackground)
     CompositionLocalProvider(
         LocalKixyuNavigationContentPadding provides if (useNavigationRail) {
             0.dp
@@ -560,7 +563,9 @@ private fun KixyuNavHost(
             NavHost(
                 navController,
                 Routes.HOME,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .kixyuNavigationBackdrop(navigationBackdrop),
                 enterTransition = { kixyuDetailPageEnterTransition() },
                 // Secondary destinations are a new surface above the current page. Keeping the
                 // source stationary avoids translating two complete Compose trees at once and
@@ -852,6 +857,7 @@ private fun KixyuNavHost(
                     selectedKey = top.getOrNull(pagerState.settledPage)?.route,
                     enabled = bottomBarPresented,
                     onSelected = selectTopDestination,
+                    backdrop = navigationBackdrop,
                 )
             }
             AnimatedVisibility(
