@@ -517,7 +517,7 @@ internal fun String.highlighted(query: String, color: Color) =
     readerAnnotatedText(this, emptyList(), highlightQuery = query, highlightColor = color)
 
 @Composable
-internal fun rememberReaderFont(path: String?): FontFamily = remember(path) {
+fun rememberReaderFont(path: String?): FontFamily = remember(path) {
     ReaderFontFamilyCache.get(path)
 }
 

@@ -164,6 +164,7 @@ fun KixyuFontControls(
     onSelectFont: (String?) -> Unit,
     onAddFont: () -> Unit,
     onDeleteFont: (UserFont) -> Unit,
+    onManageFonts: (() -> Unit)? = null,
 ) {
     val options = remember(fonts) {
         buildList {
@@ -174,6 +175,17 @@ fun KixyuFontControls(
     }
     val selected = options.firstOrNull { !it.addFont && it.uuid == selectedFontUuid } ?: options[1]
     val selectedUserFont = fonts.firstOrNull { it.uuid == selectedFontUuid }
+    if (onManageFonts != null) {
+        KixyuSettingsRow(
+            title = "阅读字体",
+            supportingText = selectedUserFont?.name ?: "系统默认",
+            icon = KixyuSymbols.FontDownload,
+            onClick = onManageFonts,
+        ) {
+            Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
+        }
+        return
+    }
     KixyuDropdownRow(
         title = "阅读字体",
         selected = selected,

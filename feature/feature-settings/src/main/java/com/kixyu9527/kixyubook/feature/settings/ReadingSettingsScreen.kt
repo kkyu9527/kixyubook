@@ -3,8 +3,6 @@ package com.kixyu9527.kixyubook.feature.settings
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
 import android.app.TimePickerDialog
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
@@ -50,6 +48,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ReadingSettingsRoute(
     onBack: () -> Unit,
+    onManageFonts: () -> Unit,
     embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -65,9 +64,6 @@ fun ReadingSettingsRoute(
                 viewModel.setReadingReminderEnabled(true)
             }
         }
-    }
-    val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { viewModel.importFont(it.toString()) }
     }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     KixyuPageScaffold(
@@ -115,10 +111,9 @@ fun ReadingSettingsRoute(
                         fonts = state.fonts,
                         selectedFontUuid = state.settings.fontUuid,
                         onSelectFont = { uuid -> viewModel.update { it.copy(fontUuid = uuid) } },
-                        onAddFont = {
-                            fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
-                        },
+                        onAddFont = {},
                         onDeleteFont = viewModel::deleteFont,
+                        onManageFonts = onManageFonts,
                     )
                     KixyuDivider()
                     KixyuReaderLayoutControls(state.settings) { updated ->

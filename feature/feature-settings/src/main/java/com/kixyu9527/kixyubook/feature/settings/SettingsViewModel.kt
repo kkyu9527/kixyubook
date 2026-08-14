@@ -100,7 +100,16 @@ class SettingsViewModel @Inject constructor(
 
     fun update(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { repository.update(transform) } }
     fun setGoal(minutes: Int) { viewModelScope.launch { repository.setReadingGoalMinutes(minutes) } }
-    fun importFont(uri: String) { viewModelScope.launch { fonts.importFont(uri).onFailure { _messages.emit(it.message ?: "字体导入失败") } } }
+    fun importFont(uri: String) {
+        viewModelScope.launch {
+            fonts.importFont(uri)
+                .onSuccess { font ->
+                    repository.update { it.copy(fontUuid = font.uuid) }
+                    _messages.emit("已导入并使用 ${font.name}")
+                }
+                .onFailure { _messages.emit(it.message ?: "字体导入失败") }
+        }
+    }
     fun deleteFont(font: UserFont) { viewModelScope.launch {
         if (uiState.value.settings.fontUuid == font.uuid) repository.update { it.copy(fontUuid = null) }
         fonts.deleteFont(font.uuid)

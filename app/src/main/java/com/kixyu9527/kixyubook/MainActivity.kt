@@ -83,9 +83,9 @@ import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
 import com.kixyu9527.kixyubook.feature.reader.CorrectionManagementRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
+import com.kixyu9527.kixyubook.feature.settings.FontManagementRoute
 import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
 import com.kixyu9527.kixyubook.feature.settings.GoogleAccountRoute
-import com.kixyu9527.kixyubook.feature.settings.DataAndBackupRoute
 import com.kixyu9527.kixyubook.feature.settings.AboutRoute
 import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogRoute
 import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogCategoryRoute
@@ -215,7 +215,7 @@ class MainActivity : ComponentActivity() {
             val destination = pendingNotificationDestination ?: return@LaunchedEffect
             val route = when (destination) {
                 LocalNotificationManager.DESTINATION_CLOUD_SYNC -> Routes.CLOUD_SYNC
-                LocalNotificationManager.DESTINATION_DATA_BACKUP -> Routes.DATA_AND_BACKUP
+                LocalNotificationManager.DESTINATION_DATA_BACKUP -> Routes.HOME
                 else -> Routes.HOME
             }
             if (route == Routes.HOME) {
@@ -615,10 +615,6 @@ private fun KixyuNavHost(
                                     prioritizeAnimation()
                                     navController.navigate(Routes.READING_SETTINGS)
                                 },
-                                onDataAndBackup = {
-                                    prioritizeAnimation()
-                                    navController.navigate(Routes.DATA_AND_BACKUP)
-                                },
                                 onAbout = {
                                     prioritizeAnimation()
                                     navController.navigate(Routes.ABOUT)
@@ -637,19 +633,19 @@ private fun KixyuNavHost(
                                                 embedded = true,
                                             )
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.READING ->
-                                            ReadingSettingsRoute(onBack = {}, embedded = true)
+                                            ReadingSettingsRoute(
+                                                onBack = {},
+                                                onManageFonts = {
+                                                    prioritizeAnimation()
+                                                    navController.navigate(Routes.FONT_MANAGEMENT) {
+                                                        launchSingleTop = true
+                                                    }
+                                                },
+                                                embedded = true,
+                                            )
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.APPEARANCE ->
                                             com.kixyu9527.kixyubook.feature.settings.AppearanceRoute(
                                                 onBack = {},
-                                                embedded = true,
-                                            )
-                                        com.kixyu9527.kixyubook.feature.settings.SettingsPane.DATA_AND_BACKUP ->
-                                            DataAndBackupRoute(
-                                                onBack = {},
-                                                onOpenDiagnosticLog = {
-                                                    prioritizeAnimation()
-                                                    navController.navigate(Routes.DIAGNOSTIC_LOG)
-                                                },
                                                 embedded = true,
                                             )
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.ABOUT ->
@@ -661,6 +657,10 @@ private fun KixyuNavHost(
                                                 onShowReleaseNotes = {
                                                     onLoadReleaseNotes()
                                                     releaseNotesVisible = true
+                                                },
+                                                onOpenDiagnosticLog = {
+                                                    prioritizeAnimation()
+                                                    navController.navigate(Routes.DIAGNOSTIC_LOG)
                                                 },
                                                 onOpenProjectSource = {
                                                     runCatching { uriHandler.openUri(PROJECT_SOURCE_URL) }.isSuccess
@@ -701,7 +701,21 @@ private fun KixyuNavHost(
                     })
                 }
                 composable(Routes.READING_SETTINGS) {
-                    ReadingSettingsRoute(onBack = {
+                    ReadingSettingsRoute(
+                        onBack = {
+                            prioritizeAnimation()
+                            navController.popBackStack()
+                        },
+                        onManageFonts = {
+                            prioritizeAnimation()
+                            navController.navigate(Routes.FONT_MANAGEMENT) {
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
+                composable(Routes.FONT_MANAGEMENT) {
+                    FontManagementRoute(onBack = {
                         prioritizeAnimation()
                         navController.popBackStack()
                     })
@@ -726,18 +740,6 @@ private fun KixyuNavHost(
                         navController.popBackStack()
                     })
                 }
-                composable(Routes.DATA_AND_BACKUP) {
-                    DataAndBackupRoute(
-                        onBack = {
-                            prioritizeAnimation()
-                            navController.popBackStack()
-                        },
-                        onOpenDiagnosticLog = {
-                            prioritizeAnimation()
-                            navController.navigate(Routes.DIAGNOSTIC_LOG)
-                        },
-                    )
-                }
                 composable(Routes.ABOUT) {
                     AboutRoute(
                         updateState = updateState,
@@ -747,6 +749,10 @@ private fun KixyuNavHost(
                         onShowReleaseNotes = {
                             onLoadReleaseNotes()
                             releaseNotesVisible = true
+                        },
+                        onOpenDiagnosticLog = {
+                            prioritizeAnimation()
+                            navController.navigate(Routes.DIAGNOSTIC_LOG)
                         },
                         onOpenProjectSource = {
                             runCatching { uriHandler.openUri(PROJECT_SOURCE_URL) }.isSuccess

@@ -14,6 +14,7 @@ android {
 dependencies {
     implementation(project(":core:core-common"))
     implementation(project(":core:core-designsystem"))
+    implementation(project(":core:core-reader-engine"))
     implementation(project(":core:core-sync"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

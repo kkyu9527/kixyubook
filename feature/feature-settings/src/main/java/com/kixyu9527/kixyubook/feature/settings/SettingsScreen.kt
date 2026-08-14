@@ -67,6 +67,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSecondaryButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
@@ -79,6 +80,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.displayName
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.system.exitProcess
+import com.kixyu9527.kixyubook.core.sync.BackupOperationType
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
 import com.kixyu9527.kixyubook.core.sync.DriveStorageQuotaState
@@ -89,7 +92,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import kotlinx.coroutines.launch
 
-enum class SettingsPane { CLOUD_SYNC, READING, APPEARANCE, DATA_AND_BACKUP, ABOUT }
+enum class SettingsPane { CLOUD_SYNC, READING, APPEARANCE, ABOUT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,13 +100,43 @@ fun SettingsRoute(
     onCloudSync: () -> Unit,
     onReadingSettings: () -> Unit,
     onAppearance: () -> Unit,
-    onDataAndBackup: () -> Unit,
     onAbout: () -> Unit,
     currentVersion: String,
     detailContent: (@Composable (SettingsPane) -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val snackbar = remember { SnackbarHostState() }
+    val requestNotificationPermission = rememberNotificationPermissionAction()
+    var pendingRestore by rememberSaveable { mutableStateOf<String?>(null) }
+    var restored by rememberSaveable { mutableStateOf(false) }
+    val backupCreator = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.exportBackup(it.toString())
+        }
+    }
+    val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            pendingRestore = it.toString()
+        }
+    }
+    LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) { viewModel.restoreCompleted.collect { restored = true } }
     val syncAccount = state.cloudSync.account
     val windowSizeClass = kixyuWindowSizeClass()
     val twoPane = windowSizeClass.supportsTwoPane && detailContent != null
@@ -159,13 +192,91 @@ fun SettingsRoute(
     }
     val dataSection: @Composable () -> Unit = {
         KixyuSection(title = "数据") {
-            KixyuSettingsRow(
-                title = "数据与备份",
-                supportingText = "本地导出恢复数据",
-                icon = KixyuSymbols.Backup,
-                selected = if (twoPane) selectedPane == SettingsPane.DATA_AND_BACKUP else null,
-                onClick = { openPane(SettingsPane.DATA_AND_BACKUP, onDataAndBackup) },
-            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(
+                    horizontal = KixyuSpacing.rowHorizontal,
+                    vertical = KixyuSpacing.medium,
+                ),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                KixyuSymbols.Backup,
+                                null,
+                                Modifier.size(KixyuSize.icon),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                    ) {
+                        Text(
+                            "本地完整备份",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            when (state.backupOperation) {
+                                BackupOperationType.EXPORT -> "正在整理并导出完整数据…"
+                                BackupOperationType.RESTORE -> "正在恢复书库与设置…"
+                                null -> "包含书籍、阅读进度、设置与用户字体"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 520.dp)
+                        .fillMaxWidth()
+                        .align(Alignment.End),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                ) {
+                    KixyuSecondaryButton(
+                        text = if (state.backupOperation == BackupOperationType.RESTORE) {
+                            "正在恢复…"
+                        } else {
+                            "恢复备份"
+                        },
+                        onClick = {
+                            requestNotificationPermission(false) {
+                                backupPicker.launch(arrayOf("application/zip", "application/octet-stream"))
+                            }
+                        },
+                        enabled = state.backupOperation == null,
+                        modifier = Modifier.weight(1f),
+                    )
+                    KixyuButton(
+                        text = if (state.backupOperation == BackupOperationType.EXPORT) {
+                            "正在导出…"
+                        } else {
+                            "导出备份"
+                        },
+                        onClick = {
+                            requestNotificationPermission(false) {
+                                backupCreator.launch(
+                                    "KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup",
+                                )
+                            }
+                        },
+                        enabled = state.backupOperation == null,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
     }
     val aboutSection: @Composable () -> Unit = {
@@ -183,6 +294,14 @@ fun SettingsRoute(
     KixyuPageScaffold(
         title = "设置",
         modifier = Modifier.fillMaxSize(),
+        snackbarHost = {
+            KixyuSnackbarHost(
+                hostState = snackbar,
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                    .padding(horizontal = KixyuSpacing.screenHorizontal),
+            )
+        },
     ) { innerPadding ->
         if (twoPane) {
             Row(
@@ -230,6 +349,34 @@ fun SettingsRoute(
                 item { KixyuBottomContentSpacer() }
             }
         }
+    }
+
+    pendingRestore?.let { uri ->
+        KixyuActionDialog(
+            show = true,
+            title = "恢复完整备份？",
+            onDismissRequest = { pendingRestore = null },
+            confirmLabel = "开始恢复",
+            onConfirm = {
+                pendingRestore = null
+                viewModel.restoreBackup(uri)
+            },
+        ) {
+            Text("当前书库和设置将被备份内容替换，完成后需要重新启动应用。")
+        }
+    }
+    KixyuActionDialog(
+        show = restored,
+        title = "恢复完成",
+        onDismissRequest = {},
+        confirmLabel = "关闭应用",
+        dismissLabel = null,
+        onConfirm = {
+            (context as? Activity)?.finishAffinity()
+            exitProcess(0)
+        },
+    ) {
+        Text("请关闭后重新打开应用，以加载恢复后的书库。")
     }
 }
 

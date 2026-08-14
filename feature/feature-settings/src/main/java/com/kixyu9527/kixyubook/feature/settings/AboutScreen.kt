@@ -53,6 +53,7 @@ fun AboutRoute(
     onCheckForUpdates: () -> Unit,
     onUpdateResultConsumed: () -> Unit,
     onShowReleaseNotes: () -> Unit,
+    onOpenDiagnosticLog: () -> Unit,
     onOpenProjectSource: () -> Boolean,
     onContactTelegram: () -> Boolean,
     appLogo: @Composable () -> Unit,
@@ -132,6 +133,18 @@ fun AboutRoute(
                             onClick = onShowReleaseNotes,
                             modifier = Modifier.weight(1f),
                         )
+                    }
+                }
+            }
+            item {
+                KixyuSection(title = "诊断") {
+                    KixyuSettingsRow(
+                        title = "日志详情",
+                        supportingText = "查看同步、导入、解析与阅读性能记录",
+                        icon = KixyuSymbols.Storage,
+                        onClick = onOpenDiagnosticLog,
+                    ) {
+                        Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
                     }
                 }
             }
