@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -12,11 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.FontDownload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -182,7 +179,7 @@ fun KixyuFontControls(
         selected = selected,
         options = options,
         optionLabel = KixyuFontOption::label,
-        icon = Icons.Outlined.FontDownload,
+        icon = KixyuSymbols.FontDownload,
         onSelected = { option ->
             if (option.addFont) onAddFont() else onSelectFont(option.uuid)
         },
@@ -192,10 +189,10 @@ fun KixyuFontControls(
         KixyuSettingsRow(
             title = "删除当前字体",
             supportingText = font.name,
-            icon = Icons.Outlined.DeleteOutline,
+            icon = KixyuSymbols.DeleteOutline,
             onClick = { onDeleteFont(font) },
         ) {
-            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
+            Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
         }
     }
 }

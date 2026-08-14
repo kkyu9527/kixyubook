@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -13,9 +15,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -132,7 +131,7 @@ internal fun ReaderSearchOverlay(
                                 maxLines = 1,
                             )
                             KixyuIconButton(onClick = onDismiss) {
-                                Icon(Icons.Outlined.Close, "关闭搜索")
+                                Icon(KixyuSymbols.Close, "关闭搜索")
                             }
                         }
                     }
@@ -146,10 +145,10 @@ internal fun ReaderSearchOverlay(
                             .focusRequester(focusRequester)
                             .onFocusChanged { if (it.isFocused) expanded = true },
                         placeholder = "搜索书中内容",
-                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                        leadingIcon = { Icon(KixyuSymbols.Search, null) },
                         trailingIcon = {
                             KixyuIconButton(onClick = ::submit, enabled = query.isNotBlank()) {
-                                Icon(Icons.AutoMirrored.Outlined.ArrowForward, "搜索")
+                                Icon(KixyuSymbols.ArrowForward, "搜索")
                             }
                         },
                     )
@@ -168,13 +167,13 @@ internal fun ReaderSearchOverlay(
                         KixyuIconButton(
                             onClick = { onMove(-1) },
                             enabled = state.selectedSearchIndex > 0,
-                        ) { Icon(Icons.Outlined.KeyboardArrowUp, "上一个结果") }
+                        ) { Icon(KixyuSymbols.KeyboardArrowUp, "上一个结果") }
                         KixyuIconButton(
                             onClick = { onMove(1) },
                             enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
-                        ) { Icon(Icons.Outlined.KeyboardArrowDown, "下一个结果") }
+                        ) { Icon(KixyuSymbols.KeyboardArrowDown, "下一个结果") }
                         KixyuIconButton(onClick = onDismiss) {
-                            Icon(Icons.Outlined.Close, "退出搜索")
+                            Icon(KixyuSymbols.Close, "退出搜索")
                         }
                     }
                 } else {
@@ -194,7 +193,7 @@ internal fun ReaderSearchOverlay(
                             supportingText = result.text,
                             selected = index == state.selectedSearchIndex,
                             leading = { Text("${index + 1}", style = MaterialTheme.typography.labelMedium) },
-                            trailing = { Icon(Icons.Outlined.ChevronRight, null) },
+                            trailing = { Icon(KixyuSymbols.ChevronRight, null) },
                             onClick = {
                                 onSelect(index)
                                 focusManager.clearFocus()

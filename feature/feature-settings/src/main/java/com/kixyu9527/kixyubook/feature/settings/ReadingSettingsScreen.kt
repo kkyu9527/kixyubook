@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.settings
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.app.TimePickerDialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,8 +16,6 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -78,7 +78,7 @@ fun ReadingSettingsRoute(
         navigationIcon = {
             if (!embedded) {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, "返回")
                 }
             }
         },

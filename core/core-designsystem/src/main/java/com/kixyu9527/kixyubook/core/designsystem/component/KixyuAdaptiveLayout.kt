@@ -23,7 +23,6 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,8 +33,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
-import top.yukonga.miuix.kmp.basic.LocalNavigationRailDisplayMode
-import top.yukonga.miuix.kmp.basic.NavigationRailDisplayMode
 import top.yukonga.miuix.kmp.basic.NavigationRailItem as MiuixNavigationRailItem
 
 enum class KixyuWindowWidthClass { COMPACT, MEDIUM, EXPANDED }
@@ -160,26 +157,18 @@ fun KixyuNavigationRail(
             shadowElevation = if (appUiStyle == AppUiStyle.MIUIX) 0.dp else KixyuSpacing.extraSmall,
         ) {
             if (appUiStyle == AppUiStyle.MIUIX) {
-                CompositionLocalProvider(
-                    LocalNavigationRailDisplayMode provides if (showLabels) {
-                        NavigationRailDisplayMode.IconAndText
-                    } else {
-                        NavigationRailDisplayMode.IconOnly
-                    },
-                ) {
-                    Column {
-                        items.forEach { item ->
-                            MiuixNavigationRailItem(
-                                selected = selectedKey == item.route,
-                                onClick = { onSelected(item) },
-                                icon = item.icon,
-                                label = item.label,
-                                enabled = enabled,
-                                modifier = Modifier
-                                    .width(KixyuSize.navigationRailWidth)
-                                    .height(itemHeight),
-                            )
-                        }
+                Column {
+                    items.forEach { item ->
+                        MiuixNavigationRailItem(
+                            selected = selectedKey == item.route,
+                            onClick = { onSelected(item) },
+                            icon = item.icon,
+                            label = if (showLabels) item.label else "",
+                            enabled = enabled,
+                            modifier = Modifier
+                                .width(KixyuSize.navigationRailWidth)
+                                .height(itemHeight),
+                        )
                     }
                 }
             } else {

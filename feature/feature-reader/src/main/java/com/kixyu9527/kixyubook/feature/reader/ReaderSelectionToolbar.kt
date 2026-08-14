@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -36,10 +38,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.EditNote
-import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.Density
@@ -220,7 +218,11 @@ private fun ReaderTextSelectionMenu(
                 KixyuIconButton(
                     onClick = {
                         action.onClick(session)
-                        onDismiss()
+                        // Select all mutates the active selection and asks the context-menu data
+                        // provider to publish its new range. Resetting SelectionContainer here
+                        // immediately discards that range, making the action appear to do
+                        // nothing. Copy/correction are terminal actions and may still clear it.
+                        if (action.key !== TextContextMenuKeys.SelectAllKey) onDismiss()
                     },
                     modifier = Modifier.size(48.dp),
                 ) {
@@ -248,23 +250,24 @@ private data class SelectionActionVisual(
     val emphasized: Boolean = false,
 )
 
+@Composable
 private fun actionVisual(action: TextContextMenuItem): SelectionActionVisual =
     when (action.key) {
         TextContextMenuKeys.CopyKey -> SelectionActionVisual(
-            icon = Icons.Rounded.ContentCopy,
+            icon = KixyuSymbols.ContentCopyRounded,
             opticalSize = 20.dp,
         )
         TextContextMenuKeys.SelectAllKey -> SelectionActionVisual(
-            icon = Icons.Rounded.SelectAll,
+            icon = KixyuSymbols.SelectAllRounded,
             opticalSize = 21.dp,
         )
         CorrectParagraphKey -> SelectionActionVisual(
-            icon = Icons.Rounded.EditNote,
+            icon = KixyuSymbols.EditNoteRounded,
             opticalSize = 21.dp,
             emphasized = true,
         )
         else -> SelectionActionVisual(
-            icon = Icons.Rounded.EditNote,
+            icon = KixyuSymbols.EditNoteRounded,
             opticalSize = 21.dp,
         )
     }

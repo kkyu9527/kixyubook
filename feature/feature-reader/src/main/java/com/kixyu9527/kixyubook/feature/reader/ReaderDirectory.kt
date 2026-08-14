@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -10,11 +12,6 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Toc
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -108,7 +105,7 @@ internal fun DirectorySheet(
                 directoryView = if (directoryView == DirectoryView.CHAPTERS) DirectoryView.BOOKMARKS else DirectoryView.CHAPTERS
             }) {
                 Icon(
-                    if (directoryView == DirectoryView.CHAPTERS) Icons.Outlined.Bookmarks else Icons.AutoMirrored.Outlined.Toc,
+                    if (directoryView == DirectoryView.CHAPTERS) KixyuSymbols.Bookmarks else KixyuSymbols.Toc,
                     if (directoryView == DirectoryView.CHAPTERS) "查看书签" else "查看目录",
                 )
             }
@@ -165,7 +162,7 @@ internal fun DirectorySheet(
                                                 modifier = Modifier.size(KixyuSize.readerControlButton),
                                             ) {
                                                 Icon(
-                                                    if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                                    if (expanded) KixyuSymbols.KeyboardArrowDown else KixyuSymbols.KeyboardArrowRight,
                                                     if (expanded) "收起${row.title}" else "展开${row.title}",
                                                     tint = if (current && isMiuix) {
                                                         MaterialTheme.colorScheme.onPrimary
@@ -177,7 +174,7 @@ internal fun DirectorySheet(
                                         },
                                         trailing = {
                                             if (hasBookmark) Icon(
-                                                Icons.Filled.Bookmark,
+                                                KixyuSymbols.BookmarkFilled,
                                                 "本卷有书签",
                                                 tint = if (current && isMiuix) {
                                                     MaterialTheme.colorScheme.onPrimary
@@ -204,7 +201,7 @@ internal fun DirectorySheet(
                                         leading = {
                                             Box(Modifier.size(KixyuSize.icon), contentAlignment = Alignment.Center) {
                                                 if (current) Icon(
-                                                    Icons.Outlined.PlayArrow,
+                                                    KixyuSymbols.PlayArrow,
                                                     null,
                                                     Modifier.size(KixyuSize.icon),
                                                     tint = if (isMiuix) {
@@ -217,7 +214,7 @@ internal fun DirectorySheet(
                                         },
                                         trailing = {
                                             if (hasBookmark) Icon(
-                                                Icons.Filled.Bookmark,
+                                                KixyuSymbols.BookmarkFilled,
                                                 "本章有书签",
                                                 tint = if (current && isMiuix) {
                                                     MaterialTheme.colorScheme.onPrimary
@@ -264,10 +261,10 @@ internal fun DirectorySheet(
                             title = bookmark.chapterTitle,
                             supportingText = bookmark.preview.ifBlank { "第 ${bookmark.position + 1} 段" },
                             onClick = { selectBookmark(bookmark) },
-                            leading = { Icon(Icons.Outlined.Bookmark, null) },
+                            leading = { Icon(KixyuSymbols.Bookmark, null) },
                             trailing = {
                                 KixyuIconButton(onClick = { deleteBookmark(bookmark.uuid) }) {
-                                    Icon(Icons.Outlined.DeleteOutline, "删除书签")
+                                    Icon(KixyuSymbols.DeleteOutline, "删除书签")
                                 }
                             },
                             modifier = if (isMiuix) {
@@ -488,7 +485,7 @@ internal fun DirectoryFastScroller(
             tonalElevation = KixyuSpacing.extraSmall,
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.DragHandle, "快速滚动目录", Modifier.size(KixyuSize.icon))
+                Icon(KixyuSymbols.DragHandle, "快速滚动目录", Modifier.size(KixyuSize.icon))
             }
         }
     }

@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.settings
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,10 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
@@ -99,7 +97,7 @@ fun DataAndBackupRoute(
         navigationIcon = {
             if (!embedded) {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, "返回")
                 }
             }
         },
@@ -159,9 +157,9 @@ fun DataAndBackupRoute(
                         title = "日志详情",
                         supportingText = "查看同步、导入、解析与阅读性能记录",
                         onClick = onOpenDiagnosticLog,
-                        leading = { Icon(Icons.Outlined.Storage, null, Modifier.size(KixyuSize.icon)) },
+                        leading = { Icon(KixyuSymbols.Storage, null, Modifier.size(KixyuSize.icon)) },
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
+                        Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
                     }
                 }
             }

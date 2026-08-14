@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -31,8 +33,6 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -272,7 +272,7 @@ fun KixyuPopupMenu(
                         if (item.selected) {
                             Spacer(Modifier.weight(1f))
                             Icon(
-                                Icons.Outlined.Check,
+                                KixyuSymbols.Check,
                                 null,
                                 Modifier.size(KixyuSize.icon),
                                 tint = MiuixTheme.colorScheme.primary,
@@ -293,7 +293,7 @@ fun KixyuPopupMenu(
                     text = { Text(item.label, maxLines = 1) },
                     leadingIcon = { Icon(item.icon, null) },
                     trailingIcon = if (item.selected) {
-                        { Icon(Icons.Outlined.Check, null) }
+                        { Icon(KixyuSymbols.Check, null) }
                     } else {
                         null
                     },

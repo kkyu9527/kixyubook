@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.settings
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,14 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -176,13 +170,13 @@ private fun DiagnosticLogScreen(
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             KixyuIconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                Icon(KixyuSymbols.ArrowBack, "返回")
             }
         },
         actions = {
             Box {
                 KixyuIconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Outlined.MoreVert, "日志操作")
+                    Icon(KixyuSymbols.MoreVert, "日志操作")
                 }
                 KixyuPopupMenu(
                     expanded = menuExpanded,
@@ -191,7 +185,7 @@ private fun DiagnosticLogScreen(
                     items = listOf(
                         KixyuPopupMenuItem(
                             label = "仅显示异常",
-                            icon = Icons.Outlined.ErrorOutline,
+                            icon = KixyuSymbols.ErrorOutline,
                             enabled = newestEntries.isNotEmpty(),
                             selected = onlyFailures,
                             onClick = {
@@ -201,13 +195,13 @@ private fun DiagnosticLogScreen(
                         ),
                         KixyuPopupMenuItem(
                             label = "导出",
-                            icon = Icons.Outlined.Share,
+                            icon = KixyuSymbols.Share,
                             enabled = newestEntries.isNotEmpty(),
                             onClick = ::exportLog,
                         ),
                         KixyuPopupMenuItem(
                             label = "清空",
-                            icon = Icons.Outlined.DeleteOutline,
+                            icon = KixyuSymbols.DeleteOutline,
                             enabled = newestEntries.isNotEmpty(),
                             onClick = ::clearLog,
                         ),
@@ -242,7 +236,7 @@ private fun DiagnosticLogScreen(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Icon(
-                    Icons.Outlined.Description,
+                    KixyuSymbols.Description,
                     null,
                     Modifier.size(KixyuSize.icon * 2),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -274,14 +268,14 @@ private fun DiagnosticLogScreen(
                                 onClick = { onOpenCategory(summary.key) },
                                 leading = {
                                     Icon(
-                                        Icons.Outlined.Description,
+                                        KixyuSymbols.Description,
                                         null,
                                         Modifier.size(KixyuSize.icon),
                                     )
                                 },
                             ) {
                                 Icon(
-                                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                    KixyuSymbols.KeyboardArrowRight,
                                     null,
                                     Modifier.size(KixyuSize.icon),
                                 )

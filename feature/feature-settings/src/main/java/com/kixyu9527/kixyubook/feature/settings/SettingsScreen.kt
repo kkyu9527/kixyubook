@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.settings
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -29,22 +31,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.CloudDone
-import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.SwitchAccount
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -139,13 +125,13 @@ fun SettingsRoute(
                     else -> syncAccount.email
                 },
                 icon = when {
-                    syncAccount == null -> Icons.Outlined.Cloud
-                    state.cloudSync.initialSyncDecision != null -> Icons.Outlined.CloudSync
-                    else -> Icons.Outlined.CloudDone
+                    syncAccount == null -> KixyuSymbols.Cloud
+                    state.cloudSync.initialSyncDecision != null -> KixyuSymbols.CloudSync
+                    else -> KixyuSymbols.CloudDone
                 },
                 selected = if (twoPane) selectedPane == SettingsPane.CLOUD_SYNC else null,
                 onClick = { openPane(SettingsPane.CLOUD_SYNC, onCloudSync) },
-            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
     val preferenceSection: @Composable () -> Unit = {
@@ -157,18 +143,18 @@ fun SettingsRoute(
                     append(" · ")
                     append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
                 },
-                icon = Icons.Outlined.Tune,
+                icon = KixyuSymbols.Tune,
                 selected = if (twoPane) selectedPane == SettingsPane.READING else null,
                 onClick = { openPane(SettingsPane.READING, onReadingSettings) },
-            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
             KixyuDivider()
             KixyuSettingsRow(
                 title = "外观",
                 supportingText = "${state.settings.theme.displayName()} · ${state.settings.appUiStyle.displayName()} · ${state.settings.appColorTheme.displayName()}",
-                icon = Icons.Outlined.Palette,
+                icon = KixyuSymbols.Palette,
                 selected = if (twoPane) selectedPane == SettingsPane.APPEARANCE else null,
                 onClick = { openPane(SettingsPane.APPEARANCE, onAppearance) },
-            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
     val dataSection: @Composable () -> Unit = {
@@ -176,10 +162,10 @@ fun SettingsRoute(
             KixyuSettingsRow(
                 title = "数据与备份",
                 supportingText = "本地导出恢复数据",
-                icon = Icons.Outlined.Backup,
+                icon = KixyuSymbols.Backup,
                 selected = if (twoPane) selectedPane == SettingsPane.DATA_AND_BACKUP else null,
                 onClick = { openPane(SettingsPane.DATA_AND_BACKUP, onDataAndBackup) },
-            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
     val aboutSection: @Composable () -> Unit = {
@@ -187,10 +173,10 @@ fun SettingsRoute(
             KixyuSettingsRow(
                 title = "关于 Kixyu Book",
                 supportingText = "版本 $currentVersion · 更新与项目信息",
-                icon = Icons.Outlined.Info,
+                icon = KixyuSymbols.Info,
                 selected = if (twoPane) selectedPane == SettingsPane.ABOUT else null,
                 onClick = { openPane(SettingsPane.ABOUT, onAbout) },
-            ) { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
 
@@ -306,7 +292,7 @@ fun CloudSyncRoute(
             KixyuSettingsRow(
                 title = "自动同步",
                 supportingText = "有变更时在后台安静地增量同步",
-                icon = Icons.Outlined.CloudSync,
+                icon = KixyuSymbols.CloudSync,
                 onClick = {
                     if (state.cloudSync.initialSyncDecision != null) {
                         conflictDeferred = false
@@ -338,7 +324,7 @@ fun CloudSyncRoute(
                     if (wifiOnly) "仅 Wi-Fi" else "Wi-Fi 和移动数据"
                 },
                 onSelected = viewModel::setWifiOnlyForLargeFiles,
-                icon = Icons.Outlined.Wifi,
+                icon = KixyuSymbols.Wifi,
             )
         }
     }
@@ -348,7 +334,7 @@ fun CloudSyncRoute(
                 KixyuSettingsRow(
                     title = "原始书籍文件",
                     supportingText = "同步 TXT / EPUB，供其他设备完整恢复",
-                    icon = Icons.Outlined.Backup,
+                    icon = KixyuSymbols.Backup,
                     onClick = {
                         val enabled = !state.cloudSync.syncOriginalFiles
                         if (enabled) requestNotificationPermission(false) {
@@ -369,7 +355,7 @@ fun CloudSyncRoute(
                 KixyuSettingsRow(
                     title = "用户字体",
                     supportingText = "同步已导入的 TTF / OTF",
-                    icon = Icons.Outlined.Tune,
+                    icon = KixyuSymbols.Tune,
                     onClick = {
                         val enabled = !state.cloudSync.syncFonts
                         if (enabled) requestNotificationPermission(false) {
@@ -404,7 +390,7 @@ fun CloudSyncRoute(
         navigationIcon = {
             if (!embedded) {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, "返回")
                 }
             }
         },
@@ -505,7 +491,7 @@ private fun GoogleStorageSection(
                 horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
             ) {
                 Icon(
-                    Icons.Outlined.Cloud,
+                    KixyuSymbols.Cloud,
                     contentDescription = null,
                     modifier = Modifier.size(KixyuSize.icon),
                     tint = accentColor,
@@ -544,7 +530,7 @@ private fun GoogleStorageSection(
                     onClick = onRefresh,
                     enabled = !state.refreshing,
                 ) {
-                    Icon(Icons.Outlined.Refresh, "刷新云空间")
+                    Icon(KixyuSymbols.Refresh, "刷新云空间")
                 }
             }
             if (state.refreshing) {
@@ -603,7 +589,7 @@ private fun CloudSyncOverviewCard(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                Icons.Outlined.CloudDone,
+                                KixyuSymbols.CloudDone,
                                 null,
                                 modifier = Modifier.size(26.dp),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -664,7 +650,7 @@ private fun CloudSyncOverviewCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Icon(
-                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                    KixyuSymbols.KeyboardArrowRight,
                     null,
                     Modifier.size(KixyuSize.icon),
                 )
@@ -693,7 +679,7 @@ private fun CloudSyncOverviewCard(
                 if (!status.busy && !prominentAction && cloudSyncActionEnabled(state)) {
                     KixyuIconButton(onClick = onSyncAction) {
                         Icon(
-                            Icons.Outlined.Refresh,
+                            KixyuSymbols.Refresh,
                             "立即同步",
                         )
                     }
@@ -772,7 +758,7 @@ fun GoogleAccountRoute(
             modifier = Modifier.fillMaxSize(),
             navigationIcon = {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 Google Drive 同步")
+                    Icon(KixyuSymbols.ArrowBack, "返回 Google Drive 同步")
                 }
             },
             snackbarHost = {
@@ -864,7 +850,7 @@ private fun GoogleAccountPage(
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             KixyuIconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 Google Drive 同步")
+                Icon(KixyuSymbols.ArrowBack, "返回 Google Drive 同步")
             }
         },
         snackbarHost = {
@@ -908,11 +894,11 @@ private fun GoogleAccountPage(
                     KixyuSettingsRow(
                         title = "管理你的 Google 账号",
                         supportingText = "个人信息、安全、隐私和设备",
-                        icon = Icons.Outlined.AccountCircle,
+                        icon = KixyuSymbols.AccountCircle,
                         onClick = onManageGoogleAccount,
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Outlined.OpenInNew,
+                            KixyuSymbols.OpenInNew,
                             null,
                             Modifier.size(KixyuSize.icon),
                         )
@@ -921,11 +907,11 @@ private fun GoogleAccountPage(
                     KixyuSettingsRow(
                         title = "切换 Google 账号",
                         supportingText = "选择这台设备上的其他 Google 账号",
-                        icon = Icons.Outlined.SwitchAccount,
+                        icon = KixyuSymbols.SwitchAccount,
                         onClick = onSwitchAccount,
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                            KixyuSymbols.KeyboardArrowRight,
                             null,
                             Modifier.size(KixyuSize.icon),
                         )
@@ -934,7 +920,7 @@ private fun GoogleAccountPage(
                     KixyuSettingsRow(
                         title = "重新授权 Google Drive",
                         supportingText = "重新确认账号和应用访问权限",
-                        icon = Icons.Outlined.Refresh,
+                        icon = KixyuSymbols.Refresh,
                         onClick = onReconnect,
                     )
                 }
@@ -944,7 +930,7 @@ private fun GoogleAccountPage(
                     KixyuSettingsRow(
                         title = "断开 Google 账号",
                         supportingText = "停止同步并撤销 Kixyu Book 的访问权限",
-                        icon = Icons.Outlined.Cloud,
+                        icon = KixyuSymbols.Cloud,
                         contentColor = MaterialTheme.colorScheme.error,
                         onClick = onDisconnect,
                     )
@@ -952,7 +938,7 @@ private fun GoogleAccountPage(
                     KixyuSettingsRow(
                         title = "删除云端同步数据",
                         supportingText = "不会删除本机书籍和阅读数据",
-                        icon = Icons.Outlined.DeleteOutline,
+                        icon = KixyuSymbols.DeleteOutline,
                         contentColor = MaterialTheme.colorScheme.error,
                         onClick = onDeleteCloudData,
                     )
@@ -1056,6 +1042,7 @@ private fun GoogleAccountAvatar(account: SyncAccount) {
     }
 }
 
+@Composable
 private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
     val conflict = state.initialSyncDecision
     val lastSync = state.lastSyncTime.takeIf { it > 0 }?.let {
@@ -1065,64 +1052,64 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
         conflict != null -> CloudSyncStatusUi(
             title = "等待处理同步冲突",
             detail = "${conflict.conflicts.size} 项内容在本机和云端都已修改",
-            icon = Icons.Outlined.CloudSync,
+            icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         state.inspectingInitialSync -> CloudSyncStatusUi(
             title = "正在检查云端书库",
             detail = "正在识别本机与云端数据",
-            icon = Icons.Outlined.CloudSync,
+            icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         !state.enabled -> CloudSyncStatusUi(
             title = "同步已暂停",
             detail = lastSync?.let { "上次同步于 $it" } ?: "开启自动同步后开始上传数据",
-            icon = Icons.Outlined.Cloud,
+            icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.MUTED,
         )
         state.phase == CloudSyncPhase.AUTHORIZING -> CloudSyncStatusUi(
             title = "正在连接 Google Drive",
             detail = "正在确认账号与访问权限",
-            icon = Icons.Outlined.CloudSync,
+            icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         state.phase == CloudSyncPhase.AUTH_REQUIRED -> CloudSyncStatusUi(
             title = "需要重新授权",
             detail = "进入应用后会自动恢复 Google Drive 连接",
-            icon = Icons.Outlined.Cloud,
+            icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         state.phase == CloudSyncPhase.SYNCING -> CloudSyncStatusUi(
             title = "正在同步",
             detail = if (state.pendingCount > 0) "${state.pendingCount} 项本地变更等待完成" else "正在检查云端变更",
-            icon = Icons.Outlined.CloudSync,
+            icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         state.phase == CloudSyncPhase.ERROR -> CloudSyncStatusUi(
             title = "同步遇到问题",
             detail = state.errorMessage ?: "请检查网络后重试",
-            icon = Icons.Outlined.Cloud,
+            icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.ERROR,
         )
         state.pendingCount > 0 -> CloudSyncStatusUi(
             title = "等待同步",
             detail = "${state.pendingCount} 项本地变更等待上传",
-            icon = Icons.Outlined.CloudSync,
+            icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         lastSync != null -> CloudSyncStatusUi(
             title = "所有数据均已同步",
             detail = "上次同步于 $lastSync",
-            icon = Icons.Outlined.CloudDone,
+            icon = KixyuSymbols.CloudDone,
             tone = CloudSyncStatusTone.SUCCESS,
         )
         else -> CloudSyncStatusUi(
             title = "等待首次同步",
             detail = "连接网络后将自动开始",
-            icon = Icons.Outlined.CloudSync,
+            icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
         )
     }

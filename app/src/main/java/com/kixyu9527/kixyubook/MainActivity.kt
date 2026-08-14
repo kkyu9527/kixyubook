@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.os.Bundle
 import android.os.Build
 import android.content.Intent
@@ -30,10 +32,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -440,11 +438,14 @@ private fun KixyuNavHost(
 ) {
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
-    val top = remember {
+    val homeIcon = KixyuSymbols.AutoStories
+    val libraryIcon = KixyuSymbols.LibraryBooks
+    val settingsIcon = KixyuSymbols.Settings
+    val top = remember(homeIcon, libraryIcon, settingsIcon) {
         listOf(
-            TopDestination(Routes.HOME, "阅读", Icons.Outlined.AutoStories),
-            TopDestination(Routes.LIBRARY, "书库", Icons.AutoMirrored.Outlined.LibraryBooks),
-            TopDestination(Routes.SETTINGS, "设置", Icons.Outlined.Settings),
+            TopDestination(Routes.HOME, "阅读", homeIcon),
+            TopDestination(Routes.LIBRARY, "书库", libraryIcon),
+            TopDestination(Routes.SETTINGS, "设置", settingsIcon),
         )
     }
     val useNavigationRail = kixyuUsesNavigationRail()

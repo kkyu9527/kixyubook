@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,9 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -101,7 +100,7 @@ fun CorrectionManagementRoute(
                 title = { Text("文字纠错") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        Icon(KixyuSymbols.ArrowBack, "返回")
                     }
                 },
             )
@@ -131,7 +130,7 @@ fun CorrectionManagementRoute(
                             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                             if (correction.status != TextCorrectionStatus.ACTIVE) {
                                 Icon(
-                                    Icons.Outlined.ErrorOutline,
+                                    KixyuSymbols.ErrorOutline,
                                     correction.status.name,
                                     tint = MaterialTheme.colorScheme.error,
                                 )

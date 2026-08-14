@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.graphics.Color.parseColor
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -24,10 +26,6 @@ import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -494,7 +492,7 @@ fun KixyuStepperRow(
                 modifier = Modifier.size(KixyuSize.stepperButton),
                 minSize = KixyuSize.stepperButton,
             ) {
-                Icon(Icons.Outlined.Remove, "减小$title", Modifier.size(KixyuSize.iconSmall))
+                Icon(KixyuSymbols.Remove, "减小$title", Modifier.size(KixyuSize.iconSmall))
             }
             Text(
                 valueLabel,
@@ -510,7 +508,7 @@ fun KixyuStepperRow(
                 modifier = Modifier.size(KixyuSize.stepperButton),
                 minSize = KixyuSize.stepperButton,
             ) {
-                Icon(Icons.Outlined.Add, "增大$title", Modifier.size(KixyuSize.iconSmall))
+                Icon(KixyuSymbols.Add, "增大$title", Modifier.size(KixyuSize.iconSmall))
             }
         }
     }
@@ -566,7 +564,7 @@ fun <T> KixyuDropdownRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Icon(Icons.Outlined.ArrowDropDown, null, Modifier.size(KixyuSize.icon))
+                Icon(KixyuSymbols.ArrowDropDown, null, Modifier.size(KixyuSize.icon))
             }
             DropdownMenu(
                 expanded = expanded,

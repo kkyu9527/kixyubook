@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.home
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.os.Looper
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,9 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.LocalFireDepartment
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -303,8 +302,8 @@ private fun TodayOverview(
                     modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    StatItem(Icons.Outlined.LocalFireDepartment, "${stats.streakDays} 天", "连续阅读")
-                    StatItem(Icons.Outlined.Schedule, "${TimeUnit.MILLISECONDS.toHours(stats.totalMillis)} 小时", "累计时长")
+                    StatItem(KixyuSymbols.LocalFireDepartment, "${stats.streakDays} 天", "连续阅读")
+                    StatItem(KixyuSymbols.Schedule, "${TimeUnit.MILLISECONDS.toHours(stats.totalMillis)} 小时", "累计时长")
                 }
             }
         }

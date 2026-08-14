@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.library
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import android.app.Activity
 import android.content.ClipDescription
 import android.content.Context
@@ -45,23 +47,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Sort
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.material.icons.outlined.Category
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.FileUpload
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.SelectAll
-import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material.icons.outlined.GridView
-import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -310,10 +295,10 @@ private fun LibraryScreen(
                         selectedBookUuids = emptySet()
                     },
                 ) {
-                    Icon(Icons.Outlined.Close, "退出批量选择")
+                    Icon(KixyuSymbols.Close, "退出批量选择")
                 }
                 state.hiddenOnly -> KixyuIconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, "返回")
                 }
             }
         },
@@ -325,25 +310,25 @@ private fun LibraryScreen(
                             emptySet()
                         } else visibleBookUuids
                     },
-                ) { Icon(Icons.Outlined.SelectAll, "全选") }
+                ) { Icon(KixyuSymbols.SelectAll, "全选") }
                 KixyuIconButton(
                     onClick = { confirmingBatchDelete = true },
                     enabled = selectedBookUuids.isNotEmpty(),
-                ) { Icon(Icons.Outlined.DeleteSweep, "删除所选书籍") }
+                ) { Icon(KixyuSymbols.DeleteSweep, "删除所选书籍") }
             } else {
                 if (!state.hiddenOnly) {
                     KixyuIconButton(onClick = onImport) {
-                        Icon(Icons.Outlined.Add, "导入书籍")
+                        Icon(KixyuSymbols.Add, "导入书籍")
                     }
                     if (state.hiddenCategories.isNotEmpty()) {
                         KixyuIconButton(onClick = onOpenHiddenLibrary) {
-                            Icon(Icons.Outlined.VisibilityOff, "隐藏书架")
+                            Icon(KixyuSymbols.VisibilityOff, "隐藏书架")
                         }
                     }
                 }
                 Box {
                     KixyuIconButton(onClick = { optionsExpanded = true }) {
-                        Icon(Icons.Outlined.MoreVert, "书库操作")
+                        Icon(KixyuSymbols.MoreVert, "书库操作")
                     }
                     KixyuPopupMenu(
                         expanded = optionsExpanded,
@@ -352,7 +337,7 @@ private fun LibraryScreen(
                         items = listOf(
                             KixyuPopupMenuItem(
                                 label = "书架显示",
-                                icon = Icons.AutoMirrored.Outlined.Sort,
+                                icon = KixyuSymbols.Sort,
                                 enabled = true,
                             ) {
                                 optionsExpanded = false
@@ -360,7 +345,7 @@ private fun LibraryScreen(
                             },
                             KixyuPopupMenuItem(
                                 label = "管理分类",
-                                icon = Icons.Outlined.Category,
+                                icon = KixyuSymbols.Category,
                                 enabled = state.allCategories.isNotEmpty(),
                             ) {
                                 optionsExpanded = false
@@ -368,7 +353,7 @@ private fun LibraryScreen(
                             },
                             KixyuPopupMenuItem(
                                 label = "批量选择",
-                                icon = Icons.Outlined.SelectAll,
+                                icon = KixyuSymbols.SelectAll,
                                 enabled = state.books.isNotEmpty(),
                             ) {
                                 optionsExpanded = false
@@ -562,10 +547,10 @@ private fun LibraryFilters(
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             placeholder = { Text("搜索书名或作者", maxLines = 1) },
-            leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(KixyuSize.icon)) },
+            leadingIcon = { Icon(KixyuSymbols.Search, null, Modifier.size(KixyuSize.icon)) },
             trailingIcon = {
                 if (state.query.isNotEmpty()) IconButton({ onSearch("") }) {
-                    Icon(Icons.Outlined.Close, "清除", Modifier.size(KixyuSize.icon))
+                    Icon(KixyuSymbols.Close, "清除", Modifier.size(KixyuSize.icon))
                 }
             },
             shape = MaterialTheme.shapes.large,
@@ -598,10 +583,10 @@ private fun LibraryFilters(
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.large,
                     ) {
-                        Icon(Icons.Outlined.Category, null, Modifier.size(KixyuSize.iconSmall))
+                        Icon(KixyuSymbols.Category, null, Modifier.size(KixyuSize.iconSmall))
                         Spacer(Modifier.size(KixyuSpacing.small))
                         Text(state.category, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Outlined.ExpandMore, "选择分类", Modifier.size(KixyuSize.iconSmall))
+                        Icon(KixyuSymbols.ExpandMore, "选择分类", Modifier.size(KixyuSize.iconSmall))
                     }
                     DropdownMenu(
                         expanded = categoriesExpanded,
@@ -1054,7 +1039,7 @@ private fun LibraryBookRow(
             } else Column(horizontalAlignment = Alignment.End) {
                 Box {
                     IconButton(onClick = { onMenuExpandedChange(true) }) {
-                        Icon(Icons.Outlined.MoreVert, "更多操作", Modifier.size(KixyuSize.icon))
+                        Icon(KixyuSymbols.MoreVert, "更多操作", Modifier.size(KixyuSize.icon))
                     }
                     BookActionPopupMenu(
                         expanded = menuExpanded,
@@ -1227,10 +1212,10 @@ private fun BookActionPopupMenu(
             shadowElevation = KixyuSpacing.medium,
         ) {
             Column(Modifier.padding(vertical = 2.dp)) {
-                BookActionPopupMenuItem("管理", Icons.Outlined.Edit, onManage)
-                BookActionPopupMenuItem("导出", Icons.Outlined.FileUpload, onExport)
+                BookActionPopupMenuItem("管理", KixyuSymbols.Edit, onManage)
+                BookActionPopupMenuItem("导出", KixyuSymbols.FileUpload, onExport)
                 KixyuDivider()
-                BookActionPopupMenuItem("删除", Icons.Outlined.DeleteOutline, onDelete, destructive = true)
+                BookActionPopupMenuItem("删除", KixyuSymbols.DeleteOutline, onDelete, destructive = true)
             }
         }
     }
@@ -1327,9 +1312,9 @@ private fun LibraryDisplayDialog(
                         ) {
                             Icon(
                                 imageVector = if (mode == LibraryLayoutMode.GRID) {
-                                    Icons.Outlined.GridView
+                                    KixyuSymbols.GridView
                                 } else {
-                                    Icons.AutoMirrored.Outlined.ViewList
+                                    KixyuSymbols.ViewList
                                 },
                                 contentDescription = null,
                                 tint = if (selected) MaterialTheme.colorScheme.primary
@@ -1420,7 +1405,7 @@ private fun CategoryVisibilityDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                     ) {
-                        Icon(Icons.Outlined.VisibilityOff, null, Modifier.size(KixyuSize.icon))
+                        Icon(KixyuSymbols.VisibilityOff, null, Modifier.size(KixyuSize.icon))
                         Column(Modifier.weight(1f)) {
                             Text("隐藏书架", style = MaterialTheme.typography.bodyLarge)
                             Text(

@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.feature.settings
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,9 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -85,7 +84,7 @@ fun AboutRoute(
         navigationIcon = {
             if (!embedded) {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, "返回")
                 }
             }
         },
@@ -153,7 +152,7 @@ fun AboutRoute(
                             )
                         },
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(KixyuSize.icon))
+                        Icon(KixyuSymbols.OpenInNew, null, Modifier.size(KixyuSize.icon))
                     }
                     KixyuDivider()
                     KixyuSettingsRow(
@@ -171,7 +170,7 @@ fun AboutRoute(
                             )
                         },
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(KixyuSize.icon))
+                        Icon(KixyuSymbols.OpenInNew, null, Modifier.size(KixyuSize.icon))
                     }
                 }
             }

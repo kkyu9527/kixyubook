@@ -1,11 +1,11 @@
 package com.kixyu9527.kixyubook.core.ui
 
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,7 +22,7 @@ fun LibraryEmptyState(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(Icons.Outlined.AutoStories, null, tint = MaterialTheme.colorScheme.primary)
+        Icon(KixyuSymbols.AutoStories, null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(16.dp))
         Text("你的静谧书架", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
