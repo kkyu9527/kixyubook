@@ -168,6 +168,11 @@ private fun eventDescription(event: String, outcome: String?, category: String):
     } else {
         "章节内容加载失败" to "阅读器读取章节正文、缓存或本地索引时发生错误。"
     }
+    "memory_pressure_handled" -> if (outcome == "success") {
+        "系统内存预警已处理" to "已按系统要求保存阅读现场并释放可重建的内存缓存。"
+    } else {
+        "系统内存预警处理异常" to "释放缓存、保存阅读现场或回复系统时发生异常。"
+    }
     "priority_sync_failed" ->
         "当前书籍优先同步失败" to "快速同步阅读进度、书签或阅读设置时发生错误，后续完整同步仍会重试。"
     "chapter_navigation_finished" -> when (outcome) {
@@ -206,6 +211,8 @@ private fun readableOutcome(outcome: String): String = when (outcome) {
     "constraint_error" -> "本地数据约束冲突"
     "permission_error" -> "没有访问权限"
     "memory_error" -> "可用内存不足"
+    "memory_release_failed" -> "释放内存失败"
+    "memory_callback_failed" -> "回复系统失败"
     "io_error" -> "文件读写异常"
     "invalid_data" -> "数据格式异常"
     "invalid_state" -> "数据状态异常"
@@ -291,6 +298,18 @@ private fun fieldLabel(key: String, category: String): String = when (key) {
     "firstFailureReason" -> "首个失败原因"
     "firstFailedBook" -> "首个失败书籍"
     "entity" -> "数据类型"
+    "pressure" -> "内存压力级别"
+    "action" -> "系统操作"
+    "notifyType" -> "通知类型"
+    "notifyId" -> "通知编号"
+    "listeners" -> "已通知组件"
+    "listenerFailures" -> "处理失败组件"
+    "callbackReplied" -> "已回复系统"
+    "trimLevel" -> "Android 回收级别"
+    "heapAlloc" -> "Java 堆已用（KB）"
+    "heapCapacity" -> "Java 堆上限（KB）"
+    "pss" -> "物理内存已用（KB）"
+    "pssLimit" -> "物理内存上限（KB）"
     else -> key
 }
 
@@ -309,8 +328,28 @@ private fun readableValue(key: String, value: String): String = when (key) {
         "epub_disk_cache" -> "EPUB 磁盘缓存"
         "epub_parse" -> "实时解析 EPUB"
         "unknown" -> "尚未确定"
+        "hyperos" -> "小米澎湃 OS"
+        "android" -> "Android 内存回收"
+        "android_low_memory" -> "Android 低内存警告"
         else -> value
     }
+    "pressure" -> when (value) {
+        "BACKGROUND" -> "应用进入后台"
+        "MODERATE" -> "内存预警"
+        "CRITICAL" -> "即将回收进程"
+        else -> value
+    }
+    "action" -> when (value.uppercase()) {
+        "TRIM" -> "释放内存"
+        "KILL" -> "保存现场并结束进程"
+        else -> value
+    }
+    "notifyType" -> when (value) {
+        "1000" -> "物理内存预警"
+        "2000" -> "Java 堆内存预警"
+        else -> value
+    }
+    "callbackReplied" -> if (value == "true") "是" else "否"
     "purpose" -> when (value) {
         "index" -> "后台全文索引"
         "reader" -> "前台阅读请求"

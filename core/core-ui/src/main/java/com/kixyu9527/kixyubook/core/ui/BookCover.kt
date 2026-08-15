@@ -29,6 +29,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -37,7 +40,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
-private object BookCoverMemoryCache {
+private object BookCoverMemoryCache : MemoryPressureListener {
     private const val MAX_CACHE_BYTES = 16 * 1024 * 1024
     private const val MAX_DECODE_DIMENSION_PX = 384
     private val bitmaps = object : LruCache<String, ImageBitmap>(MAX_CACHE_BYTES) {
@@ -49,6 +52,10 @@ private object BookCoverMemoryCache {
     private val decodeSlots = Semaphore(2)
     private val pathLocks = ConcurrentHashMap<String, Mutex>()
 
+    init {
+        MemoryPressureRegistry.register(this)
+    }
+
     operator fun get(path: String): ImageBitmap? = bitmaps.get(path)
 
     suspend fun load(path: String): ImageBitmap? = withContext(Dispatchers.IO) {
@@ -59,6 +66,15 @@ private object BookCoverMemoryCache {
                     ?.asImageBitmap()
                     ?.also { bitmaps.put(path, it) }
             }
+        }
+    }
+
+    override fun onMemoryPressure(level: MemoryPressureLevel) {
+        when (level) {
+            MemoryPressureLevel.BACKGROUND -> bitmaps.trimToSize(MAX_CACHE_BYTES / 4)
+            MemoryPressureLevel.MODERATE,
+            MemoryPressureLevel.CRITICAL,
+            -> bitmaps.evictAll()
         }
     }
 

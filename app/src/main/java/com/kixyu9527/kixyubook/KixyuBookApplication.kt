@@ -12,11 +12,31 @@ import javax.inject.Inject
 @HiltAndroidApp
 class KixyuBookApplication : Application(), DefaultLifecycleObserver {
     @Inject lateinit var cloudSync: CloudSyncCoordinator
+    private lateinit var fairMemoryManager: HyperOsFairMemoryManager
 
     override fun onCreate() {
         super<Application>.onCreate()
         DiagnosticLog.initialize(this)
+        fairMemoryManager = HyperOsFairMemoryManager(this).also(HyperOsFairMemoryManager::start)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        fairMemoryManager.handleAndroidTrim(level)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onLowMemory() {
+        super.onLowMemory()
+        fairMemoryManager.handleAndroidLowMemory()
+    }
+
+    override fun onTerminate() {
+        fairMemoryManager.stop()
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
+        super.onTerminate()
     }
 
     override fun onStart(owner: LifecycleOwner) {

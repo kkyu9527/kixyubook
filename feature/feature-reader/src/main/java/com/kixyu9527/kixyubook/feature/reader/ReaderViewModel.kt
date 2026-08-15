@@ -8,6 +8,9 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.*
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderPositionManager
 import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
@@ -20,6 +23,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import kotlin.math.abs
@@ -59,7 +64,7 @@ class ReaderViewModel @Inject constructor(
     private val stats: ReadingStatsRepository,
     private val cloudSync: CloudSyncCoordinator,
     private val textCorrections: TextCorrectionRepository,
-) : ViewModel() {
+) : ViewModel(), MemoryPressureListener {
     private val bookUuid: String = checkNotNull(savedStateHandle["bookUuid"])
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState = _uiState.asStateFlow()
@@ -83,8 +88,10 @@ class ReaderViewModel @Inject constructor(
     private var openingCharOffset = 0
     private var userMovedBeforePrioritySync = false
     private var deferredLocalProgress: ReadingProgress? = null
+    @Volatile private var latestProgressCheckpoint: ReadingProgress? = null
 
     init {
+        MemoryPressureRegistry.register(this)
         cloudSync.prioritizeBook(bookUuid)
         viewModelScope.launch {
             // Initial loading already performs the first chapter/progress queries. Starting the
@@ -665,6 +672,7 @@ class ReaderViewModel @Inject constructor(
             paragraphIndex = safePosition,
             charOffset = safeCharOffset,
         )
+        latestProgressCheckpoint = progress
         val moved = hasReaderMovedFromOpening(
             openingChapterId = openingChapterId,
             openingPosition = openingPosition,
@@ -689,6 +697,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun persistProgress(progress: ReadingProgress) {
+        latestProgressCheckpoint = progress
         latestLocalProgressWriteAt = progress.updatedTime
         acceptedProgressUpdatedAt = maxOf(acceptedProgressUpdatedAt, progress.updatedTime)
         viewModelScope.launch {
@@ -697,6 +706,21 @@ class ReaderViewModel @Inject constructor(
             // not restart the reader or enqueue a global Worker.
             cloudSync.prioritizeBook(bookUuid)
         }
+    }
+
+    /** HyperOS can ask for a process checkpoint immediately before enforcing its memory budget. */
+    override fun onMemoryPressure(level: MemoryPressureLevel) {
+        if (level != MemoryPressureLevel.CRITICAL) return
+        val checkpoint = latestProgressCheckpoint ?: return
+        // The registry dispatches on the vendor receiver's background HandlerThread. Keep a firm
+        // deadline so the complete TRIM/KILL response remains inside HyperOS's three-second limit.
+        val saved = runBlocking(Dispatchers.IO) {
+            withTimeoutOrNull(PROGRESS_CHECKPOINT_TIMEOUT_MS) {
+                books.saveProgress(checkpoint)
+                true
+            }
+        }
+        check(saved == true) { "Reading progress checkpoint exceeded its deadline" }
     }
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { settingsRepository.update(transform) } }
@@ -866,6 +890,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        MemoryPressureRegistry.unregister(this)
         chapterPrefetchJob?.cancel()
         chapterLoads.values.forEach { request ->
             if (!request.deferred.isCompleted) request.deferred.cancel()
@@ -917,6 +942,7 @@ private const val CHAPTER_PREFETCH_RADIUS = 2
 // pair gives one-page EPUB chapters enough runway for rapid consecutive boundary gestures.
 private const val RENDER_PREFETCH_RADIUS = 2
 private const val SLOW_NAVIGATION_MS = 150L
+private const val PROGRESS_CHECKPOINT_TIMEOUT_MS = 1_500L
 
 internal fun shouldApplySyncedProgress(
     incomingUpdatedAt: Long,

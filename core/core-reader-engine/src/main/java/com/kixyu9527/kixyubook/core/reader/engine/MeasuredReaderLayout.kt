@@ -21,6 +21,9 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
 import kotlin.math.ceil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -135,7 +138,7 @@ internal data class PaginationCacheKey(
 /** One bounded pagination owner per reader composition, never process-global. */
 class ReaderPaginationCoordinator internal constructor(
     private val diskCache: ReaderPaginationDiskCache? = null,
-) {
+) : MemoryPressureListener {
     private val lock = Any()
     private val sessionJob: Job = SupervisorJob()
     // Text layout is CPU-heavy and can overlap a 120 Hz page drag. A dedicated Android
@@ -163,6 +166,10 @@ class ReaderPaginationCoordinator internal constructor(
             size > PAGINATION_CACHE_SIZE
     }
 
+    init {
+        MemoryPressureRegistry.register(this)
+    }
+
     internal fun cached(key: PaginationCacheKey): List<ReaderPage>? = synchronized(lock) { pages[key] }
 
     /** Cancels disposable layout work so an overlay/navigation animation owns the CPU budget. */
@@ -170,6 +177,19 @@ class ReaderPaginationCoordinator internal constructor(
         synchronized(lock) {
             inFlight.values.forEach { it.deferred.cancel() }
             inFlight.clear()
+        }
+    }
+
+    override fun onMemoryPressure(level: MemoryPressureLevel) {
+        synchronized(lock) {
+            inFlight.values.forEach { it.deferred.cancel() }
+            inFlight.clear()
+            val retainedPages = if (level == MemoryPressureLevel.MODERATE) 1 else 0
+            val iterator = pages.entries.iterator()
+            while (pages.size > retainedPages && iterator.hasNext()) {
+                iterator.next()
+                iterator.remove()
+            }
         }
     }
 
@@ -266,6 +286,7 @@ class ReaderPaginationCoordinator internal constructor(
     }
 
     internal fun close() {
+        MemoryPressureRegistry.unregister(this)
         sessionJob.cancel()
         paginationDispatcher.close()
         synchronized(lock) {

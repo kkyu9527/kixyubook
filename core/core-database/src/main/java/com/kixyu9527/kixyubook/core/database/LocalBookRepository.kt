@@ -20,6 +20,9 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
@@ -66,7 +69,7 @@ class LocalBookRepository @Inject constructor(
     private val epubParseCoordinator: EpubParseCoordinator,
     private val syncMutations: SyncMutationRecorder,
     private val textCorrections: TextCorrectionRepository,
-) : BookRepository, CompleteLibraryRepository {
+) : BookRepository, CompleteLibraryRepository, MemoryPressureListener {
     private val parsers = BookParserRegistry()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
     // reclamation. A partially evicted cache made otherwise identical directory jumps vary from
@@ -112,10 +115,16 @@ class LocalBookRepository @Inject constructor(
     }
 
     init {
+        MemoryPressureRegistry.register(this)
         importScope.launch {
             upgradeTxtParserDataIfNeeded()
             epubIndex.upgradeDirectoryDataIfNeeded()
         }
+    }
+
+    override fun onMemoryPressure(level: MemoryPressureLevel) {
+        synchronized(chapterCacheLock) { chapterCache.clear() }
+        (parsers.parserFor(BookFormat.EPUB) as EpubBookParser).clearMemoryCaches()
     }
 
     override fun observeCompleteLibrary(): Flow<List<LibraryBook>> = combine(

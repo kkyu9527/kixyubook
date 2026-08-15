@@ -23,20 +23,36 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipFile
 import kotlin.math.max
 
-private object EpubImageCache {
+private object EpubImageCache : MemoryPressureListener {
     private const val MAX_BYTES = 32 * 1024 * 1024
     private val images = object : LruCache<String, ImageBitmap>(MAX_BYTES) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
     }
 
+    init {
+        MemoryPressureRegistry.register(this)
+    }
+
     operator fun get(key: String): ImageBitmap? = images.get(key)
     fun put(key: String, image: ImageBitmap) = images.put(key, image)
+
+    override fun onMemoryPressure(level: MemoryPressureLevel) {
+        when (level) {
+            MemoryPressureLevel.BACKGROUND -> images.trimToSize(MAX_BYTES / 4)
+            MemoryPressureLevel.MODERATE,
+            MemoryPressureLevel.CRITICAL,
+            -> images.evictAll()
+        }
+    }
 }
 
 @Composable

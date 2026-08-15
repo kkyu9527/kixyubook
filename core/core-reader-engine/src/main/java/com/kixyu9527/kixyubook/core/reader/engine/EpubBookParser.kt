@@ -5,6 +5,9 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.singleLineBookHeading
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
+import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
 import org.w3c.dom.Element
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -14,7 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
-class EpubBookParser : BookParser {
+class EpubBookParser : BookParser, MemoryPressureListener {
     override val format = BookFormat.EPUB
     private val packageIndexCache = object : LinkedHashMap<PackageCacheKey, PackageDocument>(
         PACKAGE_INDEX_CACHE_SIZE,
@@ -33,6 +36,10 @@ class EpubBookParser : BookParser {
             size > CSS_SOURCE_CACHE_SIZE
     }
 
+    init {
+        MemoryPressureRegistry.register(this)
+    }
+
     /**
      * Drops only derived in-memory parsing state. The normalized binary chapter cache is owned by
      * the repository and remains on disk, so reopening a book does not require rebuilding content.
@@ -40,6 +47,10 @@ class EpubBookParser : BookParser {
     fun clearMemoryCaches() {
         synchronized(packageIndexCache) { packageIndexCache.clear() }
         synchronized(cssSourceCache) { cssSourceCache.clear() }
+    }
+
+    override fun onMemoryPressure(level: MemoryPressureLevel) {
+        clearMemoryCaches()
     }
 
     override fun readMetadata(file: File, fallbackTitle: String): DocumentMetadata = ZipFile(file).use { zip ->
