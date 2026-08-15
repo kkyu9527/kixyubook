@@ -8,7 +8,7 @@ import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 
-const val KIXYU_DATABASE_VERSION = 9
+const val KIXYU_DATABASE_VERSION = 12
 
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, ParagraphEntity::class, ReadingProgressEntity::class,

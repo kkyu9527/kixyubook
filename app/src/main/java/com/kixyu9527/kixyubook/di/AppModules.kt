@@ -21,6 +21,9 @@ import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
 import com.kixyu9527.kixyubook.core.database.MIGRATION_8_9
+import com.kixyu9527.kixyubook.core.database.MIGRATION_9_12
+import com.kixyu9527.kixyubook.core.database.MIGRATION_10_12
+import com.kixyu9527.kixyubook.core.database.MIGRATION_11_12
 import com.kixyu9527.kixyubook.core.database.LocalTextCorrectionRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.datastore.DataStoreReaderSettingsRepository
@@ -42,7 +45,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): KixyuDatabase =
         Room.databaseBuilder(context, KixyuDatabase::class.java, "kixyu-books.db")
-            .addMigrations(MIGRATION_8_9)
+            .addMigrations(MIGRATION_8_9, MIGRATION_9_12, MIGRATION_10_12, MIGRATION_11_12)
             .build()
 
     @Provides
