@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.Kixyubook" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
@@ -6,6 +6,9 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:colorAccent">#52655A</item>
         <item name="android:windowDisablePreview">true</item>
+        <!-- Compose provides an intentional light/dark palette; never let HyperOS apply a
+             second algorithmic inversion over the already adapted UI. -->
+        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
