@@ -36,6 +36,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider as MaterialSlider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -66,6 +67,7 @@ import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.HorizontalDivider as MiuixHorizontalDivider
 import top.yukonga.miuix.kmp.basic.InputField as MiuixInputField
 import top.yukonga.miuix.kmp.basic.SearchBarDefaults as MiuixSearchBarDefaults
+import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 
@@ -149,18 +151,25 @@ object KixyuSize {
 fun KixyuSection(
     modifier: Modifier = Modifier,
     title: String? = null,
+    action: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
         title?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = KixyuSpacing.extraSmall),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = KixyuSpacing.extraSmall),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                action?.invoke()
+            }
         }
         if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
             MiuixCard(
@@ -576,6 +585,59 @@ fun KixyuStepperRow(
             ) {
                 Icon(KixyuSymbols.Add, "增大$title", Modifier.size(KixyuSize.iconSmall))
             }
+        }
+    }
+}
+
+@Composable
+fun KixyuSliderRow(
+    title: String,
+    value: Float,
+    valueLabel: String,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    steps: Int = 0,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(
+            horizontal = KixyuSpacing.rowHorizontal,
+            vertical = KixyuSpacing.rowVertical,
+        ),
+        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = valueLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+            )
+        }
+        if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+            MiuixSlider(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth(),
+                valueRange = valueRange,
+                steps = steps,
+            )
+        } else {
+            MaterialSlider(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth(),
+                valueRange = valueRange,
+                steps = steps,
+            )
         }
     }
 }

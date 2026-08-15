@@ -80,7 +80,7 @@ internal class CloudSyncPayloadFactory(
     }
 
     private suspend fun settingsJson(): JSONObject = JSONObject()
-        .put("schema", 3)
+        .put("schema", 4)
         .put("updatedAt", System.currentTimeMillis())
         .put("reader", settingsToJson(settingsRepository.settings.first()))
         .put("readingGoalMinutes", settingsRepository.readingGoalMinutes.first())

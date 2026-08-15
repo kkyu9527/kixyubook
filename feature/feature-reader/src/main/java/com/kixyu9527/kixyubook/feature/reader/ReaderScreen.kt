@@ -244,6 +244,28 @@ internal fun ReaderScreen(
         view.keepScreenOn = state.settings.keepScreenOn
         onDispose { view.keepScreenOn = previous }
     }
+    val readerWindow = context.findActivity()?.window
+    DisposableEffect(readerWindow) {
+        val previousBrightness = readerWindow?.attributes?.screenBrightness
+        onDispose {
+            if (readerWindow != null && previousBrightness != null) {
+                readerWindow.attributes = readerWindow.attributes.apply {
+                    screenBrightness = previousBrightness
+                }
+            }
+        }
+    }
+    SideEffect {
+        readerWindow?.let { window ->
+            window.attributes = window.attributes.apply {
+                screenBrightness = if (state.settings.brightnessMode == ReaderBrightnessMode.MANUAL) {
+                    state.settings.brightness.coerceIn(.05f, 1f)
+                } else {
+                    WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                }
+            }
+        }
+    }
     DisposableEffect(searchVisible, view) {
         val window = context.findActivity()?.window
         val previousSoftInputMode = window?.attributes?.softInputMode
@@ -574,9 +596,20 @@ internal fun ReaderScreen(
                     },
                     deleteBookmark = deleteBookmark,
                 )
-                ReaderSheet.THEME -> ThemeSheet(state.settings, updateSettings)
-                ReaderSheet.LAYOUT -> LayoutSheet(state, updateSettings, addFont, deleteFont)
-                ReaderSheet.SETTINGS -> ReaderSettingsSheet(state.settings, updateSettings)
+                ReaderSheet.THEME -> ThemeSheet(
+                    state.settings,
+                    updateSettings,
+                )
+                ReaderSheet.LAYOUT -> LayoutSheet(
+                    state,
+                    updateSettings,
+                    addFont,
+                    deleteFont,
+                )
+                ReaderSheet.INFORMATION -> ReaderInformationSheet(
+                    state.settings,
+                    updateSettings,
+                )
                 null -> Unit
             }
         }

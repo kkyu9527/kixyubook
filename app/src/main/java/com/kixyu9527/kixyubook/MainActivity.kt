@@ -83,6 +83,7 @@ import com.kixyu9527.kixyubook.feature.reader.ReaderRoute
 import com.kixyu9527.kixyubook.feature.reader.CorrectionManagementRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
+import com.kixyu9527.kixyubook.feature.settings.ReadingInformationRoute
 import com.kixyu9527.kixyubook.feature.settings.FontManagementRoute
 import com.kixyu9527.kixyubook.feature.settings.CloudSyncRoute
 import com.kixyu9527.kixyubook.feature.settings.GoogleAccountRoute
@@ -648,6 +649,12 @@ private fun KixyuNavHost(
                                                         launchSingleTop = true
                                                     }
                                                 },
+                                                onReadingInformation = {
+                                                    prioritizeAnimation()
+                                                    navController.navigate(Routes.READING_INFORMATION) {
+                                                        launchSingleTop = true
+                                                    }
+                                                },
                                                 embedded = true,
                                             )
                                         com.kixyu9527.kixyubook.feature.settings.SettingsPane.APPEARANCE ->
@@ -719,7 +726,19 @@ private fun KixyuNavHost(
                                 launchSingleTop = true
                             }
                         },
+                        onReadingInformation = {
+                            prioritizeAnimation()
+                            navController.navigate(Routes.READING_INFORMATION) {
+                                launchSingleTop = true
+                            }
+                        },
                     )
+                }
+                composable(Routes.READING_INFORMATION) {
+                    ReadingInformationRoute(onBack = {
+                        prioritizeAnimation()
+                        navController.popBackStack()
+                    })
                 }
                 composable(Routes.FONT_MANAGEMENT) {
                     FontManagementRoute(onBack = {

@@ -22,7 +22,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderRenderPalette
 
-internal enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, SETTINGS }
+internal enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, INFORMATION }
 
 /** All floating reader controls share one enter/exit clock and transform. */
 @Composable

@@ -99,6 +99,59 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun update(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { repository.update(transform) } }
+    fun resetReaderTheme() = resetSettingsGroup("阅读外观已恢复默认") { current ->
+        val defaults = ReaderSettings()
+        current.copy(
+            theme = defaults.theme,
+            customThemeEnabled = defaults.customThemeEnabled,
+            customDayTheme = defaults.customDayTheme,
+            customNightTheme = defaults.customNightTheme,
+            brightnessMode = defaults.brightnessMode,
+            brightness = defaults.brightness,
+            keepScreenOn = defaults.keepScreenOn,
+        )
+    }
+    fun resetReaderLayout() = resetSettingsGroup("排版与翻页已恢复默认") { current ->
+        val defaults = ReaderSettings()
+        current.copy(
+            fontSize = defaults.fontSize,
+            lineHeight = defaults.lineHeight,
+            letterSpacing = defaults.letterSpacing,
+            margin = defaults.margin,
+            pageMode = defaults.pageMode,
+            fontUuid = defaults.fontUuid,
+        )
+    }
+    fun resetReaderBehavior() = resetSettingsGroup("阅读控制已恢复默认") { current ->
+        val defaults = ReaderSettings()
+        current.copy(
+            volumeKeyPageTurn = defaults.volumeKeyPageTurn,
+        )
+    }
+    fun resetReaderInformation() = resetSettingsGroup("阅读信息已恢复默认") { current ->
+        val defaults = ReaderSettings()
+        current.copy(
+            showStatusBar = defaults.showStatusBar,
+            hideNavigationBar = defaults.hideNavigationBar,
+            showChapterTitle = defaults.showChapterTitle,
+            showPageNumber = defaults.showPageNumber,
+            showReadingTime = defaults.showReadingTime,
+            showBatteryLevel = defaults.showBatteryLevel,
+        )
+    }
+    fun resetAllReaderSettings() = viewModelScope.launch {
+        val defaults = ReaderSettings()
+        repository.update { current ->
+            defaults.copy(
+                appColorTheme = current.appColorTheme,
+                appUiStyle = current.appUiStyle,
+                glassEffectEnabled = current.glassEffectEnabled,
+            )
+        }
+        repository.setReadingGoalMinutes(30)
+        readingReminders.setEnabled(false)
+        _messages.emit("阅读设置已全部恢复默认")
+    }
     fun setGoal(minutes: Int) { viewModelScope.launch { repository.setReadingGoalMinutes(minutes) } }
     fun importFont(uri: String) {
         viewModelScope.launch {
@@ -157,5 +210,13 @@ class SettingsViewModel @Inject constructor(
             is GoogleConnectResult.NeedsAuthorization -> _authorizationRequests.send(result.pendingIntent)
             is GoogleConnectResult.Failed -> _messages.emit(result.message)
         }
+    }
+
+    private fun resetSettingsGroup(
+        message: String,
+        transform: (ReaderSettings) -> ReaderSettings,
+    ) = viewModelScope.launch {
+        repository.update(transform)
+        _messages.emit(message)
     }
 }

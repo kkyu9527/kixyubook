@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.reader.engine
 
 import android.graphics.Typeface
+import android.os.BatteryManager
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -40,8 +41,12 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
+import kotlinx.coroutines.delay
+import java.text.DateFormat
+import java.util.Date
 
 @Immutable
 data class ReaderRenderPalette(
@@ -218,6 +223,8 @@ fun ReaderPageRenderer(
     showRegularChapterTitle: Boolean = true,
     highlightQuery: String = "",
     pageNumber: String? = null,
+    showReadingTime: Boolean = false,
+    showBatteryLevel: Boolean = false,
     selectionEnabled: Boolean = true,
     onSelectionActiveChange: (Boolean) -> Unit = {},
     fullPageViewportWidthDp: Float = spec.viewportWidthDp,
@@ -260,6 +267,8 @@ fun ReaderPageRenderer(
             showRegularChapterTitle = showRegularChapterTitle,
             highlightQuery = highlightQuery,
             pageNumber = pageNumber,
+            showReadingTime = showReadingTime,
+            showBatteryLevel = showBatteryLevel,
             handleTap = handleTap,
             onLongPress = {
                 if (selectionEnabled) {
@@ -292,6 +301,8 @@ private fun ReaderPageContent(
     showRegularChapterTitle: Boolean,
     highlightQuery: String,
     pageNumber: String?,
+    showReadingTime: Boolean,
+    showBatteryLevel: Boolean,
     handleTap: (Float) -> Unit,
     onLongPress: () -> Unit,
     fullPageViewportWidthDp: Float,
@@ -385,20 +396,70 @@ private fun ReaderPageContent(
             }
         }
         Spacer(Modifier.weight(1f))
+        val status = rememberReaderFooterStatus(showReadingTime, showBatteryLevel)
         Box(
             modifier = Modifier.fillMaxWidth().height(ReaderPageMetrics.footerHeightDp.dp),
-            contentAlignment = Alignment.BottomCenter,
         ) {
+            status.time?.let { value ->
+                Text(
+                    text = value,
+                    color = palette.secondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    modifier = Modifier.align(Alignment.BottomStart),
+                )
+            }
             pageNumber?.let { value ->
                 Text(
                     text = value,
                     color = palette.secondary,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
+            status.battery?.let { value ->
+                Text(
+                    text = value,
+                    color = palette.secondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    modifier = Modifier.align(Alignment.BottomEnd),
                 )
             }
         }
     }
+}
+
+@Immutable
+private data class ReaderFooterStatus(val time: String?, val battery: String?)
+
+@Composable
+private fun rememberReaderFooterStatus(
+    showTime: Boolean,
+    showBattery: Boolean,
+): ReaderFooterStatus {
+    val context = LocalContext.current
+    var now by remember(showTime) { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(showTime) {
+        while (showTime) {
+            now = System.currentTimeMillis()
+            delay(60_000L - now % 60_000L)
+        }
+    }
+    val time = if (showTime) {
+        remember(now / 60_000L) { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(now)) }
+    } else {
+        null
+    }
+    val battery = if (showBattery) {
+        val manager = remember(context) { context.getSystemService(BatteryManager::class.java) }
+        val level = manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        level.takeIf { it >= 0 }?.let { "$it%" }
+    } else {
+        null
+    }
+    return ReaderFooterStatus(time, battery)
 }
 
 @Composable

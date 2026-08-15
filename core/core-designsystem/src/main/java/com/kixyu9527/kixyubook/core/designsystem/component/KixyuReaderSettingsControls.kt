@@ -35,6 +35,7 @@ import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.CustomReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.PageMode
+import com.kixyu9527.kixyubook.core.common.model.ReaderBrightnessMode
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.UserFont
@@ -228,6 +229,8 @@ fun KixyuReaderLayoutControls(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
+    KixyuPageModeControl(settings, onSettingsChange)
+    KixyuDivider()
     ReaderStepper(
         title = "字号",
         value = settings.fontSize,
@@ -235,8 +238,6 @@ fun KixyuReaderLayoutControls(
         range = 15f..30f,
         suffix = "sp",
     ) { onSettingsChange(settings.copy(fontSize = it)) }
-    KixyuDivider()
-    KixyuPageModeControl(settings, onSettingsChange)
     KixyuDivider()
     ReaderStepper("行间距", settings.lineHeight, .1f, 1.2f..2.2f) {
         onSettingsChange(settings.copy(lineHeight = it))
@@ -257,6 +258,18 @@ fun KixyuReaderBehaviorControls(
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
     ReaderSwitch(
+        title = "音量键翻页",
+        supportingText = "音量加键上一页，音量减键下一页",
+        checked = settings.volumeKeyPageTurn,
+    ) { onSettingsChange(settings.copy(volumeKeyPageTurn = it)) }
+}
+
+@Composable
+fun KixyuReaderInformationControls(
+    settings: ReaderSettings,
+    onSettingsChange: (ReaderSettings) -> Unit,
+) {
+    ReaderSwitch(
         title = "显示状态栏",
         supportingText = "关闭后仅随阅读控制层临时显示",
         checked = settings.showStatusBar,
@@ -269,22 +282,53 @@ fun KixyuReaderBehaviorControls(
     ) { onSettingsChange(settings.copy(hideNavigationBar = it)) }
     KixyuDivider()
     ReaderSwitch(
-        title = "显示页码",
-        supportingText = "翻页模式底部显示当前页/总页数",
-        checked = settings.showPageNumber,
-    ) { onSettingsChange(settings.copy(showPageNumber = it)) }
-    KixyuDivider()
-    ReaderSwitch(
         title = "显示章节名",
         supportingText = "非章节首页顶部显示当前章节名",
         checked = settings.showChapterTitle,
     ) { onSettingsChange(settings.copy(showChapterTitle = it)) }
     KixyuDivider()
     ReaderSwitch(
-        title = "音量键翻页",
-        supportingText = "音量加键上一页，音量减键下一页",
-        checked = settings.volumeKeyPageTurn,
-    ) { onSettingsChange(settings.copy(volumeKeyPageTurn = it)) }
+        title = "显示页码",
+        supportingText = "翻页模式底部显示当前页/总页数",
+        checked = settings.showPageNumber,
+    ) { onSettingsChange(settings.copy(showPageNumber = it)) }
+    KixyuDivider()
+    ReaderSwitch(
+        title = "显示时间",
+        supportingText = "翻页模式底部显示当前时间",
+        checked = settings.showReadingTime,
+    ) { onSettingsChange(settings.copy(showReadingTime = it)) }
+    KixyuDivider()
+    ReaderSwitch(
+        title = "显示电量",
+        supportingText = "翻页模式底部显示设备剩余电量",
+        checked = settings.showBatteryLevel,
+    ) { onSettingsChange(settings.copy(showBatteryLevel = it)) }
+}
+
+@Composable
+fun KixyuReaderBrightnessControls(
+    settings: ReaderSettings,
+    onSettingsChange: (ReaderSettings) -> Unit,
+) {
+    KixyuDropdownRow(
+        title = "亮度",
+        selected = settings.brightnessMode,
+        options = ReaderBrightnessMode.entries,
+        optionLabel = ReaderBrightnessMode::displayName,
+        onSelected = { onSettingsChange(settings.copy(brightnessMode = it)) },
+    )
+    if (settings.brightnessMode == ReaderBrightnessMode.MANUAL) {
+        KixyuDivider()
+        KixyuSliderRow(
+            title = "阅读亮度",
+            value = settings.brightness,
+            valueLabel = "${(settings.brightness * 100).roundToInt()}%",
+            valueRange = .05f..1f,
+            steps = 18,
+            onValueChange = { onSettingsChange(settings.copy(brightness = it)) },
+        )
+    }
     KixyuDivider()
     ReaderSwitch(
         title = "保持屏幕常亮",
@@ -399,6 +443,11 @@ fun ReaderTheme.displayName(): String = when (this) {
 fun PageMode.displayName(): String = when (this) {
     PageMode.SCROLL -> "上下滑动"
     PageMode.PAGED -> "左右翻页"
+}
+
+fun ReaderBrightnessMode.displayName(): String = when (this) {
+    ReaderBrightnessMode.SYSTEM -> "跟随系统"
+    ReaderBrightnessMode.MANUAL -> "自定义"
 }
 
 fun AppColorTheme.displayName(): String = when (this) {

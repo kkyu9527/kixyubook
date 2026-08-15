@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -28,6 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBrightnessControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
@@ -49,6 +52,7 @@ import kotlinx.coroutines.launch
 fun ReadingSettingsRoute(
     onBack: () -> Unit,
     onManageFonts: () -> Unit,
+    onReadingInformation: () -> Unit,
     embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -65,6 +69,7 @@ fun ReadingSettingsRoute(
             }
         }
     }
+    var resetAllVisible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     KixyuPageScaffold(
         title = "阅读",
@@ -98,15 +103,25 @@ fun ReadingSettingsRoute(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
             item {
-                KixyuSection(title = "阅读配色") {
+                KixyuSection(
+                    title = "阅读外观",
+                    action = { ReadingSectionResetAction(viewModel::resetReaderTheme) },
+                ) {
                     KixyuReaderThemeControls(
                         settings = state.settings,
                         onSettingsChange = { updated -> viewModel.update { updated } },
                     )
+                    KixyuDivider()
+                    KixyuReaderBrightnessControls(state.settings) { updated ->
+                        viewModel.update { updated }
+                    }
                 }
             }
             item {
-                KixyuSection(title = "排版与翻页") {
+                KixyuSection(
+                    title = "排版与翻页",
+                    action = { ReadingSectionResetAction(viewModel::resetReaderLayout) },
+                ) {
                     KixyuFontControls(
                         fonts = state.fonts,
                         selectedFontUuid = state.settings.fontUuid,
@@ -122,9 +137,28 @@ fun ReadingSettingsRoute(
                 }
             }
             item {
-                KixyuSection(title = "阅读行为") {
+                KixyuSection(
+                    title = "阅读控制",
+                    action = { ReadingSectionResetAction(viewModel::resetReaderBehavior) },
+                ) {
                     KixyuReaderBehaviorControls(state.settings) { updated ->
                         viewModel.update { updated }
+                    }
+                }
+            }
+            item {
+                KixyuSection(title = "阅读信息") {
+                    KixyuSettingsRow(
+                        title = "阅读信息栏",
+                        supportingText = listOfNotNull(
+                            "章节名".takeIf { state.settings.showChapterTitle },
+                            "页码".takeIf { state.settings.showPageNumber },
+                            "时间".takeIf { state.settings.showReadingTime },
+                            "电量".takeIf { state.settings.showBatteryLevel },
+                        ).joinToString("、").ifBlank { "均不显示" },
+                        onClick = onReadingInformation,
+                    ) {
+                        Icon(KixyuSymbols.KeyboardArrowRight, null)
                     }
                 }
             }
@@ -181,7 +215,39 @@ fun ReadingSettingsRoute(
                     }
                 }
             }
+            item {
+                KixyuSection(title = "重置") {
+                    KixyuSettingsRow(
+                        title = "恢复全部阅读设置",
+                        supportingText = "不会修改应用外观、书籍内容和阅读记录",
+                        icon = KixyuSymbols.Refresh,
+                        onClick = { resetAllVisible = true },
+                    ) {
+                        Icon(KixyuSymbols.KeyboardArrowRight, null)
+                    }
+                }
+            }
             item { KixyuBottomContentSpacer() }
         }
+    }
+    KixyuActionDialog(
+        show = resetAllVisible,
+        onDismissRequest = { resetAllVisible = false },
+        title = "恢复全部阅读设置",
+        confirmLabel = "恢复默认",
+        onConfirm = {
+            resetAllVisible = false
+            viewModel.resetAllReaderSettings()
+        },
+        dismissLabel = "取消",
+    ) {
+        Text("将重置全局排版、阅读外观、阅读控制、信息栏和阅读目标。")
+    }
+}
+
+@Composable
+private fun ReadingSectionResetAction(onClick: () -> Unit) {
+    androidx.compose.material3.TextButton(onClick = onClick) {
+        Text("重置")
     }
 }

@@ -163,6 +163,7 @@ data class LibraryBook(val book: Book, val progress: ReadingProgress?)
 
 enum class ReaderTheme { SYSTEM, DAY, NIGHT }
 enum class PageMode { SCROLL, PAGED }
+enum class ReaderBrightnessMode { SYSTEM, MANUAL }
 enum class AppColorTheme { DEFAULT, DYNAMIC, SAGE, OCEAN, VIOLET, AMBER }
 enum class AppUiStyle { MATERIAL, MIUIX }
 
@@ -198,6 +199,10 @@ data class ReaderSettings(
     val volumeKeyPageTurn: Boolean = false,
     val keepScreenOn: Boolean = true,
     val showChapterTitle: Boolean = true,
+    val showReadingTime: Boolean = false,
+    val showBatteryLevel: Boolean = false,
+    val brightnessMode: ReaderBrightnessMode = ReaderBrightnessMode.SYSTEM,
+    val brightness: Float = 0.5f,
 )
 
 data class ChapterContent(val chapter: Chapter, val paragraphs: List<Paragraph>)

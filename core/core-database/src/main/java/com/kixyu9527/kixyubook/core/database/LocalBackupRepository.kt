@@ -70,6 +70,10 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("appUiStyle", settings.appUiStyle.name)
                     setProperty("glassEffectEnabled", settings.glassEffectEnabled.toString())
                     setProperty("showChapterTitle", settings.showChapterTitle.toString())
+                    setProperty("showReadingTime", settings.showReadingTime.toString())
+                    setProperty("showBatteryLevel", settings.showBatteryLevel.toString())
+                    setProperty("brightnessMode", settings.brightnessMode.name)
+                    setProperty("brightness", settings.brightness.toString())
                     settings.fontUuid?.let { setProperty("fontUuid", it) }
                     setProperty("readingGoalMinutes", goal.toString())
                 }
@@ -260,6 +264,10 @@ class LocalBackupRepository @Inject constructor(
             appUiStyle = properties.enum("appUiStyle", current.appUiStyle),
             glassEffectEnabled = properties.boolean("glassEffectEnabled", current.glassEffectEnabled),
             showChapterTitle = properties.boolean("showChapterTitle", current.showChapterTitle),
+            showReadingTime = properties.boolean("showReadingTime", current.showReadingTime),
+            showBatteryLevel = properties.boolean("showBatteryLevel", current.showBatteryLevel),
+            brightnessMode = properties.enum("brightnessMode", current.brightnessMode),
+            brightness = properties.float("brightness", current.brightness).coerceIn(.05f, 1f),
         ) }
         settingsRepository.setReadingGoalMinutes(properties.getProperty("readingGoalMinutes")?.toIntOrNull() ?: 30)
     }

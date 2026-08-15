@@ -31,20 +31,22 @@ import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppColorControl
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAppUiStyleControl
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuInteractivePopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBrightnessControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderInformationControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderLayoutControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderThemeControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSearchField
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
 import com.kixyu9527.kixyubook.core.reader.engine.*
 
 
@@ -220,23 +222,24 @@ internal fun ReaderSearchOverlay(
     }
 }
 
-@Composable internal fun ThemeSheet(settings: ReaderSettings, update: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+@Composable internal fun ThemeSheet(
+    settings: ReaderSettings,
+    update: ((ReaderSettings) -> ReaderSettings) -> Unit,
+) {
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("阅读配色", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("阅读外观", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
-            KixyuSection(title = "应用界面") {
-                KixyuAppUiStyleControl(settings) { updated -> update { updated } }
-                KixyuDivider()
-                KixyuAppColorControl(settings) { updated -> update { updated } }
+            KixyuSection(title = "显示与配色") {
+                KixyuReaderThemeControls(settings, { updated -> update { updated } }, modeTitle = "显示模式")
             }
         }
         item {
-            KixyuSection(title = "阅读配色") {
-                KixyuReaderThemeControls(settings, { updated -> update { updated } }, modeTitle = "显示模式")
+            KixyuSection(title = "屏幕亮度") {
+                KixyuReaderBrightnessControls(settings) { updated -> update { updated } }
             }
         }
         item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
@@ -270,12 +273,17 @@ internal fun LayoutSheet(
                 KixyuReaderLayoutControls(settings) { updated -> update { updated } }
             }
         }
+        item {
+            KixyuSection(title = "阅读控制") {
+                KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
+            }
+        }
         item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
     }
 }
 
 @Composable
-internal fun ReaderSettingsSheet(
+internal fun ReaderInformationSheet(
     settings: ReaderSettings,
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
 ) {
@@ -284,15 +292,16 @@ internal fun ReaderSettingsSheet(
         contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("阅读行为", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("阅读信息", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
-            KixyuSection(title = "阅读行为") {
-                KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
+            KixyuSection(title = "阅读信息") {
+                KixyuReaderInformationControls(settings) { updated -> update { updated } }
             }
         }
         item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
     }
 }
+
 
 @Composable internal fun BookInfoDialog(
     show: Boolean,

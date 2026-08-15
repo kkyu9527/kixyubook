@@ -187,14 +187,14 @@ internal fun ReaderControls(
                         onDismissRequest = { if (menuVisible) onSettings() },
                         alignEnd = true,
                         items = listOf(
-                            KixyuPopupMenuItem("阅读配色", KixyuSymbols.Palette) {
+                            KixyuPopupMenuItem("阅读外观", KixyuSymbols.Palette) {
                                 onSettings(); onSheet(ReaderSheet.THEME)
                             },
                             KixyuPopupMenuItem("排版与翻页", KixyuSymbols.ViewCarousel) {
                                 onSettings(); onSheet(ReaderSheet.LAYOUT)
                             },
-                            KixyuPopupMenuItem("阅读行为", KixyuSymbols.Tune) {
-                                onSettings(); onSheet(ReaderSheet.SETTINGS)
+                            KixyuPopupMenuItem("阅读信息", KixyuSymbols.Info) {
+                                onSettings(); onSheet(ReaderSheet.INFORMATION)
                             },
                         ),
                     )

@@ -7,6 +7,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val APPEARANCE = "appearance"
     const val READING_SETTINGS = "reading_settings"
+    const val READING_INFORMATION = "reading_settings/information"
     const val FONT_MANAGEMENT = "reading_settings/fonts"
     const val CLOUD_SYNC = "cloud_sync"
     const val GOOGLE_ACCOUNT = "cloud_sync/google_account"

@@ -55,6 +55,12 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             volumeKeyPageTurn = values[VOLUME_KEY_PAGE_TURN] ?: false,
             keepScreenOn = values[KEEP_SCREEN_ON] ?: true,
             showChapterTitle = values[SHOW_CHAPTER_TITLE] ?: true,
+            showReadingTime = values[SHOW_READING_TIME] ?: false,
+            showBatteryLevel = values[SHOW_BATTERY_LEVEL] ?: false,
+            brightnessMode = values[BRIGHTNESS_MODE]
+                ?.let { runCatching { ReaderBrightnessMode.valueOf(it) }.getOrNull() }
+                ?: ReaderBrightnessMode.SYSTEM,
+            brightness = (values[BRIGHTNESS] ?: .5f).coerceIn(.05f, 1f),
         )
     }
     override val readingGoalMinutes: Flow<Int> = context.readerSettingsDataStore.data.map { it[READING_GOAL] ?: 30 }
@@ -84,6 +90,10 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[VOLUME_KEY_PAGE_TURN] = updated.volumeKeyPageTurn
             values[KEEP_SCREEN_ON] = updated.keepScreenOn
             values[SHOW_CHAPTER_TITLE] = updated.showChapterTitle
+            values[SHOW_READING_TIME] = updated.showReadingTime
+            values[SHOW_BATTERY_LEVEL] = updated.showBatteryLevel
+            values[BRIGHTNESS_MODE] = updated.brightnessMode.name
+            values[BRIGHTNESS] = updated.brightness.coerceIn(.05f, 1f)
         }
         syncMutations.record(SyncEntityType.SETTINGS, "global")
     }
@@ -116,5 +126,9 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val VOLUME_KEY_PAGE_TURN = booleanPreferencesKey("volume_key_page_turn")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val SHOW_CHAPTER_TITLE = booleanPreferencesKey("show_chapter_title")
+        val SHOW_READING_TIME = booleanPreferencesKey("show_reading_time")
+        val SHOW_BATTERY_LEVEL = booleanPreferencesKey("show_battery_level")
+        val BRIGHTNESS_MODE = stringPreferencesKey("brightness_mode")
+        val BRIGHTNESS = floatPreferencesKey("brightness")
     }
 }

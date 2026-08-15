@@ -94,6 +94,8 @@ internal fun PagedReader(
                 showRegularChapterTitle = state.settings.showChapterTitle,
                 highlightQuery = state.searchQuery,
                 pageNumber = retained.pageNumber,
+                showReadingTime = state.settings.showReadingTime,
+                showBatteryLevel = state.settings.showBatteryLevel,
                 modifier = Modifier.readerPageViewportModifier(retained.page, topInsetDp, bottomInsetDp),
                 fullPageViewportHeightDp = physicalViewportHeightDp,
                 onTextActionTarget = onTextActionTarget,
@@ -434,6 +436,8 @@ internal fun ReaderPagerLeaf(
             pageNumber = item.page?.let {
                 readerPageNumber(state, item.pageIndex, item.pageCount)
             },
+            showReadingTime = state.settings.showReadingTime,
+            showBatteryLevel = state.settings.showBatteryLevel,
             selectionEnabled = selectionEnabled,
             onSelectionActiveChange = onSelectionActiveChange,
             onTextActionTarget = onTextActionTarget,

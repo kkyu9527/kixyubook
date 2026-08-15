@@ -68,6 +68,10 @@ internal fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("showPageNumber", value.showPageNumber)
     .put("volumeKeyPageTurn", value.volumeKeyPageTurn).put("keepScreenOn", value.keepScreenOn)
     .put("showChapterTitle", value.showChapterTitle)
+    .put("showReadingTime", value.showReadingTime)
+    .put("showBatteryLevel", value.showBatteryLevel)
+    .put("brightnessMode", value.brightnessMode.name)
+    .put("brightness", value.brightness)
 
 internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     fontSize = value.optDouble("fontSize", 19.0).toFloat(),
@@ -89,6 +93,10 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     volumeKeyPageTurn = value.optBoolean("volumeKeyPageTurn"),
     keepScreenOn = value.optBoolean("keepScreenOn", true),
     showChapterTitle = value.optBoolean("showChapterTitle", true),
+    showReadingTime = value.optBoolean("showReadingTime"),
+    showBatteryLevel = value.optBoolean("showBatteryLevel"),
+    brightnessMode = enumValue(value, "brightnessMode", ReaderBrightnessMode.SYSTEM),
+    brightness = value.optDouble("brightness", .5).toFloat().coerceIn(.05f, 1f),
 )
 
 internal fun libraryPreferencesToJson(value: LibraryPreferences) = JSONObject()
