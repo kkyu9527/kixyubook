@@ -24,6 +24,8 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuThemeModeControl
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 
@@ -69,6 +71,23 @@ fun AppearanceRoute(
                         settings = state.settings,
                         onSettingsChange = { updated -> viewModel.update { updated } },
                     )
+                    KixyuDivider()
+                    KixyuSettingsRow(
+                        title = "玻璃效果",
+                        supportingText = "用于部分控件，低版本 Android 不支持",
+                        onClick = {
+                            viewModel.update { current ->
+                                current.copy(glassEffectEnabled = !current.glassEffectEnabled)
+                            }
+                        },
+                    ) {
+                        KixyuSwitch(
+                            checked = state.settings.glassEffectEnabled,
+                            onCheckedChange = { enabled ->
+                                viewModel.update { it.copy(glassEffectEnabled = enabled) }
+                            },
+                        )
+                    }
                     KixyuDivider()
                     KixyuAppColorControl(
                         settings = state.settings,

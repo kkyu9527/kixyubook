@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
@@ -331,6 +332,8 @@ fun KixyuListRow(
     title: String,
     modifier: Modifier = Modifier,
     supportingText: String? = null,
+    titleStyle: TextStyle? = null,
+    supportingTextStyle: TextStyle? = null,
     selected: Boolean = false,
     highlighted: Boolean = false,
     onClick: () -> Unit,
@@ -347,6 +350,61 @@ fun KixyuListRow(
     if (isMiuix) {
         val selectedContentColor = MaterialTheme.colorScheme.onPrimary
         val selectedSupportingColor = selectedContentColor.copy(alpha = .78f)
+        if (titleStyle != null || supportingTextStyle != null) {
+            MiuixBasicComponent(
+                modifier = modifier.fillMaxWidth()
+                    .clip(MaterialTheme.shapes.large)
+                    .background(containerColor, MaterialTheme.shapes.large)
+                    .heightIn(min = KixyuSize.rowMinHeight),
+                startAction = leading?.let { content ->
+                    {
+                        CompositionLocalProvider(
+                            LocalContentColor provides if (selected) {
+                                selectedContentColor
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        ) { content() }
+                    }
+                },
+                endActions = {
+                    CompositionLocalProvider(
+                        LocalContentColor provides if (selected) {
+                            selectedContentColor
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    ) { trailing() }
+                },
+                insideMargin = PaddingValues(
+                    horizontal = KixyuSpacing.rowHorizontal,
+                    vertical = KixyuSpacing.rowVertical,
+                ),
+                onClick = onClick,
+            ) {
+                Text(
+                    text = title,
+                    style = titleStyle ?: MaterialTheme.typography.bodyLarge,
+                    color = if (selected) selectedContentColor else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                supportingText?.let { summary ->
+                    Text(
+                        text = summary,
+                        style = supportingTextStyle ?: MaterialTheme.typography.bodySmall,
+                        color = if (selected) {
+                            selectedSupportingColor
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            return
+        }
         MiuixBasicComponent(
             modifier = modifier.fillMaxWidth()
                 .clip(MaterialTheme.shapes.large)
@@ -393,11 +451,21 @@ fun KixyuListRow(
     } else {
         ListItem(
             headlineContent = {
-                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    title,
+                    style = titleStyle ?: MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             },
             supportingContent = supportingText?.let { summary ->
                 {
-                    Text(summary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        summary,
+                        style = supportingTextStyle ?: MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             },
             leadingContent = leading,

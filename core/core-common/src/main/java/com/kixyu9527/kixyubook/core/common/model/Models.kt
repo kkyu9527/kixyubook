@@ -191,6 +191,7 @@ data class ReaderSettings(
     val fontUuid: String? = null,
     val appColorTheme: AppColorTheme = AppColorTheme.DEFAULT,
     val appUiStyle: AppUiStyle = AppUiStyle.MATERIAL,
+    val glassEffectEnabled: Boolean = true,
     val showStatusBar: Boolean = true,
     val hideNavigationBar: Boolean = true,
     val showPageNumber: Boolean = true,

@@ -5,6 +5,7 @@ import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import androidx.compose.animation.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,7 +18,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
@@ -34,6 +36,7 @@ internal fun ReaderControls(
     bookTitle: String,
     accentColor: Color,
     backgroundColor: Color,
+    backdrop: KixyuNavigationBackdrop,
     currentPageBookmarked: Boolean,
     hasPreviousChapter: Boolean,
     hasNextChapter: Boolean,
@@ -59,33 +62,32 @@ internal fun ReaderControls(
             .union(WindowInsets.displayCutout)
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(stableControlInsets)) {
             if (bookTitle.isNotBlank()) {
-                val titleContainerColor = lerp(backgroundColor, accentColor, READER_CONTROL_ACCENT_MIX)
+                val titleContainerColor = lerp(backgroundColor, accentColor, READER_CONTROL_FALLBACK_ACCENT_MIX)
                 val titleContentColor = if (
-                    accentColor.contrastRatio(titleContainerColor) >= MIN_TEXT_CONTRAST
-                ) accentColor else titleContainerColor.highContrastContentColor()
+                    accentColor.contrastRatio(backgroundColor) >= MIN_TEXT_CONTRAST
+                ) accentColor else backgroundColor.highContrastContentColor()
                 val titleWidth = minOf(
                     maxWidth * KixyuSize.readerBookTitleWidthFraction,
                     KixyuSize.readerBookTitleMaxWidth,
                 )
-                KixyuPopupSurface(
+                KixyuGlassSurface(
+                    backdrop = backdrop,
                     modifier = Modifier.align(Alignment.TopCenter)
                         .padding(top = KixyuSize.readerTopControlInset)
                         .width(titleWidth)
-                        .heightIn(min = KixyuSize.readerBookTitleMinHeight)
+                        .height(KixyuSize.readerBookTitleMinHeight)
                         .then(controlsBackModifier),
-                    shadowElevation = KixyuSpacing.extraSmall,
-                    containerColor = titleContainerColor,
+                    glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
+                    fallbackContainerColor = titleContainerColor,
                     contentColor = titleContentColor,
                 ) {
                     Row(
-                        Modifier.fillMaxWidth()
+                        Modifier.fillMaxSize()
                             .clip(MaterialTheme.shapes.extraLarge)
                             .clickable(onClick = onBookInfo)
                             .padding(
                                 start = KixyuSpacing.large,
-                                top = KixyuSpacing.small,
                                 end = KixyuSpacing.medium,
-                                bottom = KixyuSpacing.small,
                             ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -116,18 +118,21 @@ internal fun ReaderControls(
                     onClick = onExit,
                     accentColor = accentColor,
                     backgroundColor = backgroundColor,
+                    backdrop = backdrop,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) { Icon(KixyuSymbols.Close, "退出") }
                 ReaderControlIconButton(
                     onClick = onDirectory,
                     accentColor = accentColor,
                     backgroundColor = backgroundColor,
+                    backdrop = backdrop,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) { Icon(KixyuSymbols.Toc, "目录") }
                 ReaderControlIconButton(
                     onClick = onPreviousChapter,
                     accentColor = accentColor,
                     backgroundColor = backgroundColor,
+                    backdrop = backdrop,
                     enabled = hasPreviousChapter,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) {
@@ -137,6 +142,7 @@ internal fun ReaderControls(
                     onClick = onNextChapter,
                     accentColor = accentColor,
                     backgroundColor = backgroundColor,
+                    backdrop = backdrop,
                     enabled = hasNextChapter,
                     modifier = Modifier.size(KixyuSize.readerControlButton),
                 ) {
@@ -147,6 +153,7 @@ internal fun ReaderControls(
                         onClick = onTools,
                         accentColor = accentColor,
                         backgroundColor = backgroundColor,
+                        backdrop = backdrop,
                         modifier = Modifier.size(KixyuSize.readerControlButton),
                     ) { Icon(KixyuSymbols.MoreHoriz, "阅读工具") }
                     KixyuPopupMenu(
@@ -172,6 +179,7 @@ internal fun ReaderControls(
                         onClick = onSettings,
                         accentColor = accentColor,
                         backgroundColor = backgroundColor,
+                        backdrop = backdrop,
                         modifier = Modifier.size(KixyuSize.readerControlButton),
                     ) { Icon(KixyuSymbols.Settings, "设置") }
                     KixyuPopupMenu(
@@ -201,26 +209,40 @@ internal fun ReaderControlIconButton(
     onClick: () -> Unit,
     accentColor: Color,
     backgroundColor: Color,
+    backdrop: KixyuNavigationBackdrop,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val containerColor = lerp(backgroundColor, accentColor, READER_CONTROL_ACCENT_MIX)
-    val contentColor = if (accentColor.contrastRatio(containerColor) >= MIN_ICON_CONTRAST) {
+    val fallbackContainerColor = lerp(
+        backgroundColor,
+        accentColor,
+        READER_CONTROL_FALLBACK_ACCENT_MIX,
+    )
+    val contentColor = if (accentColor.contrastRatio(backgroundColor) >= MIN_ICON_CONTRAST) {
         accentColor
     } else {
-        containerColor.highContrastContentColor()
+        backgroundColor.highContrastContentColor()
     }
-    KixyuTonalIconButton(
-        onClick = onClick,
+    KixyuGlassSurface(
+        backdrop = backdrop,
         modifier = modifier,
-        enabled = enabled,
-        containerColor = containerColor,
-        contentColor = contentColor,
-        disabledContainerColor = lerp(backgroundColor, accentColor, READER_CONTROL_DISABLED_ACCENT_MIX),
-        disabledContentColor = contentColor.copy(alpha = .5f),
-        content = content,
-    )
+        shape = CircleShape,
+        glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
+        fallbackContainerColor = fallbackContainerColor,
+        contentColor = if (enabled) contentColor else contentColor.copy(alpha = .38f),
+    ) {
+        KixyuTonalIconButton(
+            onClick = onClick,
+            modifier = Modifier.fillMaxSize(),
+            enabled = enabled,
+            containerColor = Color.Transparent,
+            contentColor = contentColor,
+            disabledContainerColor = Color.Transparent,
+            disabledContentColor = contentColor.copy(alpha = .38f),
+            content = content,
+        )
+    }
 }
 
 internal fun Color.contrastRatio(other: Color): Float {

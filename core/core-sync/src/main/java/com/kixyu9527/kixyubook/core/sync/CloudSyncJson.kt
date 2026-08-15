@@ -63,6 +63,7 @@ internal fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("customThemeEnabled", value.customThemeEnabled).put("customDayTheme", customThemeJson(value.customDayTheme))
     .put("customNightTheme", customThemeJson(value.customNightTheme)).put("fontUuid", value.fontUuid)
     .put("appColorTheme", value.appColorTheme.name).put("appUiStyle", value.appUiStyle.name)
+    .put("glassEffectEnabled", value.glassEffectEnabled)
     .put("showStatusBar", value.showStatusBar).put("hideNavigationBar", value.hideNavigationBar)
     .put("showPageNumber", value.showPageNumber)
     .put("volumeKeyPageTurn", value.volumeKeyPageTurn).put("keepScreenOn", value.keepScreenOn)
@@ -81,6 +82,7 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     fontUuid = value.optString("fontUuid").takeIf { it.isNotBlank() && it != "null" },
     appColorTheme = enumValue(value, "appColorTheme", AppColorTheme.DEFAULT),
     appUiStyle = enumValue(value, "appUiStyle", AppUiStyle.MATERIAL),
+    glassEffectEnabled = value.optBoolean("glassEffectEnabled", true),
     showStatusBar = value.optBoolean("showStatusBar", true),
     hideNavigationBar = value.optBoolean("hideNavigationBar", true),
     showPageNumber = value.optBoolean("showPageNumber", true),

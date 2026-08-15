@@ -68,6 +68,7 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("keepScreenOn", settings.keepScreenOn.toString())
                     setProperty("appColorTheme", settings.appColorTheme.name)
                     setProperty("appUiStyle", settings.appUiStyle.name)
+                    setProperty("glassEffectEnabled", settings.glassEffectEnabled.toString())
                     setProperty("showChapterTitle", settings.showChapterTitle.toString())
                     settings.fontUuid?.let { setProperty("fontUuid", it) }
                     setProperty("readingGoalMinutes", goal.toString())
@@ -257,6 +258,7 @@ class LocalBackupRepository @Inject constructor(
             keepScreenOn = properties.boolean("keepScreenOn", current.keepScreenOn),
             appColorTheme = properties.enum("appColorTheme", current.appColorTheme),
             appUiStyle = properties.enum("appUiStyle", current.appUiStyle),
+            glassEffectEnabled = properties.boolean("glassEffectEnabled", current.glassEffectEnabled),
             showChapterTitle = properties.boolean("showChapterTitle", current.showChapterTitle),
         ) }
         settingsRepository.setReadingGoalMinutes(properties.getProperty("readingGoalMinutes")?.toIntOrNull() ?: 30)

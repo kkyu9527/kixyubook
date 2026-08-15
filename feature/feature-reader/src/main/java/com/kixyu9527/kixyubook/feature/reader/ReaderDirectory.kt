@@ -97,7 +97,7 @@ internal fun DirectorySheet(
         ) {
             Text(
                 if (directoryView == DirectoryView.CHAPTERS) "目录 · ${state.chapters.size} 章" else "书签 · ${state.bookmarks.size}",
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
             )
@@ -153,6 +153,8 @@ internal fun DirectorySheet(
                                     KixyuListRow(
                                         title = row.title,
                                         supportingText = if (row.chapterCount > 0) "${row.chapterCount} 章" else "卷内容",
+                                        titleStyle = MaterialTheme.typography.bodyMedium,
+                                        supportingTextStyle = MaterialTheme.typography.bodySmall,
                                         selected = current,
                                         highlighted = hasBookmark,
                                         onClick = { selectChapter(row.targetChapterIndex) },
@@ -195,6 +197,7 @@ internal fun DirectorySheet(
                                     val hasBookmark = chapter.id in bookmarkedChapterIds
                                     KixyuListRow(
                                         title = chapter.title,
+                                        titleStyle = MaterialTheme.typography.bodyMedium,
                                         selected = current,
                                         highlighted = hasBookmark,
                                         onClick = { selectChapter(row.index) },
@@ -260,6 +263,8 @@ internal fun DirectorySheet(
                         KixyuListRow(
                             title = bookmark.chapterTitle,
                             supportingText = bookmark.preview.ifBlank { "第 ${bookmark.position + 1} 段" },
+                            titleStyle = MaterialTheme.typography.bodyMedium,
+                            supportingTextStyle = MaterialTheme.typography.bodySmall,
                             onClick = { selectBookmark(bookmark) },
                             leading = { Icon(KixyuSymbols.Bookmark, null) },
                             trailing = {

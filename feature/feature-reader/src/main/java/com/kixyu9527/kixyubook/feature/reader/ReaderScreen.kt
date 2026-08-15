@@ -49,7 +49,9 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuInteractivePopup
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPopupSpring
+import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.CancellationException
@@ -125,6 +127,7 @@ internal fun ReaderScreen(
     }
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val palette = readerPalette(state.settings, systemDark)
+    val readerBackdrop = rememberKixyuNavigationBackdrop(palette.background)
     val overlayVisible = controls || menu || toolsMenu || searchVisible ||
         bookInfoVisible || sheet != null || directoryPanelComposed
     val statusBarVisible = state.settings.showStatusBar || overlayVisible
@@ -391,35 +394,49 @@ internal fun ReaderScreen(
                 }
                 .focusable(),
             ) {
-            when {
-                !readerContentReady -> state.chapter?.let { pendingChapter ->
-                    Text(
-                        text = pendingChapter.title.substringAfterLast('·').trim(),
-                        color = palette.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.align(Alignment.Center)
-                            .padding(horizontal = state.settings.margin.dp),
+            Box(
+                modifier = Modifier.fillMaxSize().then(
+                    if (state.settings.glassEffectEnabled) {
+                        Modifier.kixyuNavigationBackdrop(readerBackdrop)
+                    } else {
+                        Modifier
+                    },
+                ),
+            ) {
+                when {
+                    !readerContentReady -> state.chapter?.let { pendingChapter ->
+                        Text(
+                            text = pendingChapter.title.substringAfterLast('·').trim(),
+                            color = palette.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.align(Alignment.Center)
+                                .padding(horizontal = state.settings.margin.dp),
+                        )
+                    }
+                    state.error != null -> Text(
+                        state.error,
+                        color = palette.body,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    state.chapter != null -> ReaderContent(
+                        state = state,
+                        palette = palette,
+                        savePosition = savePosition,
+                        moveChapterFromPage = moveChapterFromPage,
+                        middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
+                        dismissControls = { controls = false; menu = false; toolsMenu = false },
+                        volumeTurns = volumeTurns,
+                        chapterRendered = chapterRendered,
+                        setPageInteractionActive = { pageInteractionActive = it },
+                        // A page drag needs the already-started previous/next page layouts. Only
+                        // overlays may cancel pagination; the drag still pauses unrelated EPUB work
+                        // through setPageInteractionActive above.
+                        resourcePriorityActive = overlayAnimationPriority,
+                        onTextActionTarget = { textActionTarget = it },
                     )
                 }
-                state.error != null -> Text(state.error, color = palette.body, modifier = Modifier.align(Alignment.Center))
-                state.chapter != null -> ReaderContent(
-                    state = state,
-                    palette = palette,
-                    savePosition = savePosition,
-                    moveChapterFromPage = moveChapterFromPage,
-                    middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
-                    dismissControls = { controls = false; menu = false; toolsMenu = false },
-                    volumeTurns = volumeTurns,
-                    chapterRendered = chapterRendered,
-                    setPageInteractionActive = { pageInteractionActive = it },
-                    // A page drag needs the already-started previous/next page layouts. Only
-                    // overlays may cancel pagination; the drag still pauses unrelated EPUB work
-                    // through setPageInteractionActive above.
-                    resourcePriorityActive = overlayAnimationPriority,
-                    onTextActionTarget = { textActionTarget = it },
-                )
             }
             ReaderControlVisibility(
                 visible = showChapterLoading,
@@ -450,6 +467,7 @@ internal fun ReaderScreen(
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
                 accentColor = palette.accent,
                 backgroundColor = palette.background,
+                backdrop = readerBackdrop,
                 currentPageBookmarked = currentPageBookmark != null,
                 hasPreviousChapter = state.chapterIndex > 0,
                 hasNextChapter = state.chapterIndex < state.chapters.lastIndex,

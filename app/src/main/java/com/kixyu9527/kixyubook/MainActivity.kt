@@ -297,6 +297,7 @@ class MainActivity : ComponentActivity() {
             themeMode = settings.theme,
             colorTheme = settings.appColorTheme,
             uiStyle = renderedUiStyle,
+            glassEffectEnabled = settings.glassEffectEnabled,
         ) {
             val appBackground = kixyuPageBackground()
             val availableUpdate = updateState as? AppUpdateState.Available
@@ -565,7 +566,13 @@ private fun KixyuNavHost(
                 Routes.HOME,
                 modifier = Modifier
                     .fillMaxSize()
-                    .kixyuNavigationBackdrop(navigationBackdrop),
+                    .then(
+                        if (initialReaderSettings.glassEffectEnabled) {
+                            Modifier.kixyuNavigationBackdrop(navigationBackdrop)
+                        } else {
+                            Modifier
+                        },
+                    ),
                 enterTransition = { kixyuDetailPageEnterTransition() },
                 // Secondary destinations are a new surface above the current page. Keeping the
                 // source stationary avoids translating two complete Compose trees at once and

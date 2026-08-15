@@ -117,6 +117,7 @@ private val KixyuMiuixShapes = Shapes(
 )
 
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }
+val LocalKixyuGlassEffectEnabled = staticCompositionLocalOf { true }
 
 /** The opaque window background shared by navigation and page scaffolds. */
 @Composable
@@ -173,6 +174,7 @@ fun KixyuBookTheme(
     themeMode: ReaderTheme = ReaderTheme.SYSTEM,
     colorTheme: AppColorTheme = AppColorTheme.DEFAULT,
     uiStyle: AppUiStyle = AppUiStyle.MATERIAL,
+    glassEffectEnabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -196,7 +198,10 @@ fun KixyuBookTheme(
         else -> lightColors(colorTheme)
     }
     val themedContent: @Composable () -> Unit = {
-        CompositionLocalProvider(LocalAppUiStyle provides uiStyle) {
+        CompositionLocalProvider(
+            LocalAppUiStyle provides uiStyle,
+            LocalKixyuGlassEffectEnabled provides glassEffectEnabled,
+        ) {
             if (uiStyle == AppUiStyle.MIUIX) {
                 val miuixMode = when (colorTheme) {
                     AppColorTheme.DEFAULT -> if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light

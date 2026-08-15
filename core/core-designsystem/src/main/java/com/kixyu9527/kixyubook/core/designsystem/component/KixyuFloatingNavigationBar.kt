@@ -51,6 +51,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.platform.LocalLayoutDirection
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.blur
@@ -112,7 +113,7 @@ internal fun KixyuFloatingNavigationBar(
     val accentColor = MaterialTheme.colorScheme.primary.copy(alpha = 1f)
     val unselectedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 1f)
     val isDark = surfaceContainer.luminance() < 0.5f
-    val glassAvailable = remember { isRuntimeShaderSupported() }
+    val glassAvailable = LocalKixyuGlassEffectEnabled.current && remember { isRuntimeShaderSupported() }
     val shape = CircleShape
     val itemKeys = remember(items) { items.map(KixyuNavigationItem::route) }
     var currentIndex by remember(itemKeys) { mutableIntStateOf(selectedIndex) }
