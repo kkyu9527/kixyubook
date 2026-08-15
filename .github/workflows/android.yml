@@ -34,10 +34,17 @@ jobs:
       - name: Ensure Gradle wrapper is executable
         run: chmod +x gradlew
 
-      - name: Verify JVM tests, lint, and builds
-        run: >-
-          ./gradlew testDebugUnitTest lintDebug assembleDebug :app:assembleRelease
-          --stacktrace
+      - name: Verify JVM tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Verify Android lint
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Verify debug build
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Verify release build
+        run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Enable KVM for Android emulator
         run: |

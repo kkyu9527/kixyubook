@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -1191,9 +1192,10 @@ private fun GoogleAccountAvatar(account: SyncAccount) {
 
 @Composable
 private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
+    val locale = LocalLocale.current.platformLocale
     val conflict = state.initialSyncDecision
     val lastSync = state.lastSyncTime.takeIf { it > 0 }?.let {
-        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(it))
+        SimpleDateFormat("MM-dd HH:mm", locale).format(Date(it))
     }
     return when {
         conflict != null -> CloudSyncStatusUi(
