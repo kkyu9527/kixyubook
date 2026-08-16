@@ -2,7 +2,6 @@ package com.kixyu9527.kixyubook.feature.reader
 
 import android.content.Context
 import android.view.WindowManager
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
@@ -27,6 +26,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -44,17 +44,16 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.ViewCompat
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomSheet
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuInteractivePopupSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPopupSpring
 import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.reader.engine.*
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
@@ -91,7 +90,12 @@ internal fun ReaderScreen(
     var searchVisible by remember { mutableStateOf(false) }
     var bookInfoVisible by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
-    var backProgress by remember { mutableFloatStateOf(0f) }
+    val predictiveBackState = rememberReaderPredictiveBackState()
+    val controlsBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.CONTROLS)
+    val popupBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.POPUP_MENU)
+    val searchBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.SEARCH)
+    val sheetBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET)
+    val bookInfoBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.BOOK_INFO)
     val volumeTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val focusRequester = remember { FocusRequester() }
     val context = LocalContext.current
@@ -108,6 +112,7 @@ internal fun ReaderScreen(
     var retainedSheet by remember { mutableStateOf<ReaderSheet?>(null) }
     var showChapterLoading by remember { mutableStateOf(false) }
     var pageInteractionActive by remember { mutableStateOf(false) }
+    var brightnessPreview by remember { mutableStateOf<Float?>(null) }
     var overlayAnimationPriority by remember { mutableStateOf(false) }
     var overlayMotionObserved by remember { mutableStateOf(false) }
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
@@ -177,6 +182,9 @@ internal fun ReaderScreen(
         }
     }
     LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
+    LaunchedEffect(sheet) {
+        if (sheet != ReaderSheet.THEME) brightnessPreview = null
+    }
     val systemBarsController = remember(context, view) {
         context.findActivity()?.window?.let { WindowCompat.getInsetsController(it, view) }
     }
@@ -258,11 +266,12 @@ internal fun ReaderScreen(
     SideEffect {
         readerWindow?.let { window ->
             window.attributes = window.attributes.apply {
-                screenBrightness = if (state.settings.brightnessMode == ReaderBrightnessMode.MANUAL) {
-                    state.settings.brightness.coerceIn(.05f, 1f)
-                } else {
-                    WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                }
+                screenBrightness = brightnessPreview?.coerceIn(.05f, 1f)
+                    ?: if (state.settings.brightnessMode == ReaderBrightnessMode.MANUAL) {
+                        state.settings.brightness.coerceIn(.05f, 1f)
+                    } else {
+                        WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    }
             }
         }
     }
@@ -283,34 +292,36 @@ internal fun ReaderScreen(
     LaunchedEffect(searchVisible, sheet, bookInfoVisible) {
         if (!searchVisible && sheet == null && !bookInfoVisible) focusRequester.requestFocus()
     }
-    PredictiveBackHandler(
-        enabled = sheet == null && (searchVisible || menu || toolsMenu || state.searchResults.isNotEmpty()),
-    ) { events ->
-        try {
-            events.collect { backProgress = it.progress }
-            when {
-                searchVisible -> {
+    val predictiveBackTarget = when {
+        bookInfoVisible -> ReaderPredictiveBackTarget.BOOK_INFO
+        sheet != null -> ReaderPredictiveBackTarget.SHEET
+        searchVisible -> ReaderPredictiveBackTarget.SEARCH
+        menu || toolsMenu -> ReaderPredictiveBackTarget.POPUP_MENU
+        controls -> ReaderPredictiveBackTarget.CONTROLS
+        state.searchResults.isNotEmpty() -> ReaderPredictiveBackTarget.SEARCH_RESULTS
+        else -> null
+    }
+    ReaderPredictiveBackHandler(
+        target = predictiveBackTarget,
+        state = predictiveBackState,
+        onBack = { target ->
+            when (target) {
+                ReaderPredictiveBackTarget.BOOK_INFO -> bookInfoVisible = false
+                ReaderPredictiveBackTarget.SHEET -> sheet = null
+                ReaderPredictiveBackTarget.SEARCH -> {
                     searchVisible = false
                     clearSearch()
                 }
-                toolsMenu -> toolsMenu = false
-                menu -> menu = false
-                state.searchResults.isNotEmpty() -> clearSearch()
+                ReaderPredictiveBackTarget.POPUP_MENU -> {
+                    toolsMenu = false
+                    menu = false
+                }
+                ReaderPredictiveBackTarget.CONTROLS -> controls = false
+                ReaderPredictiveBackTarget.SEARCH_RESULTS -> clearSearch()
+                ReaderPredictiveBackTarget.ROUTE -> Unit
             }
-        } catch (_: CancellationException) { } finally {
-            backProgress = 0f
-        }
-    }
-    PredictiveBackHandler(
-        enabled = directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY,
-    ) { events ->
-        try {
-            events.collect { backProgress = it.progress }
-            sheet = null
-        } catch (_: CancellationException) { } finally {
-            backProgress = 0f
-        }
-    }
+        },
+    )
 
     val currentPageBookmark = state.chapter?.let { chapter ->
         state.bookmarks.firstOrNull { bookmark ->
@@ -344,6 +355,7 @@ internal fun ReaderScreen(
         }
     }
     KixyuOverlayHost(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalKixyuGlassBackdrop provides readerBackdrop) {
         CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {
             ReaderSelectionToolbar(
                 dismissKey = state.chapterIndex to state.currentPosition,
@@ -372,7 +384,7 @@ internal fun ReaderScreen(
                     val handled = when {
                         isSearchShortcut -> true
                         event.key == Key.Escape &&
-                            (searchVisible || sheet != null || controls || menu || toolsMenu) -> true
+                            (searchVisible || sheet != null || bookInfoVisible || controls || menu || toolsMenu) -> true
                         isVolumeKey -> state.settings.volumeKeyPageTurn
                         isPageShortcut -> !searchVisible && sheet == null && !bookInfoVisible &&
                             !controls && !menu && !toolsMenu
@@ -394,6 +406,7 @@ internal fun ReaderScreen(
                                     searchVisible = false
                                     clearSearch()
                                 }
+                                bookInfoVisible -> bookInfoVisible = false
                                 sheet != null -> sheet = null
                                 toolsMenu -> toolsMenu = false
                                 menu -> menu = false
@@ -485,7 +498,11 @@ internal fun ReaderScreen(
                 }
             }
             ReaderControls(
-                visible = controls, menuVisible = menu, toolsMenuVisible = toolsMenu, progress = backProgress,
+                visible = controls,
+                menuVisible = menu,
+                toolsMenuVisible = toolsMenu,
+                controlsBackProgress = controlsBackProgress,
+                popupBackProgress = popupBackProgress,
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
                 accentColor = palette.accent,
                 backgroundColor = palette.background,
@@ -556,7 +573,7 @@ internal fun ReaderScreen(
 
         ReaderSearchOverlay(
             visible = searchVisible,
-            progress = backProgress,
+            progress = searchBackProgress,
             state = state,
             onDismiss = {
                 searchVisible = false
@@ -573,9 +590,18 @@ internal fun ReaderScreen(
         )
 
         val activeSheet = sheet ?: retainedSheet
-        KixyuBottomSheet(
+        ReaderFloatingSheet(
             show = sheet != null && !(directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY),
+            progress = sheetBackProgress,
             onDismissRequest = { sheet = null },
+            backdrop = readerBackdrop,
+            backgroundColor = palette.background,
+            maxContentWidth = if (activeSheet == ReaderSheet.DIRECTORY) {
+                com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize.sheetContentMaxWidth
+            } else {
+                com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize.readerSettingsSheetMaxWidth
+            },
+            opaqueGlass = activeSheet == ReaderSheet.DIRECTORY,
         ) {
             when (activeSheet) {
                 ReaderSheet.DIRECTORY -> DirectorySheet(
@@ -599,6 +625,7 @@ internal fun ReaderScreen(
                 ReaderSheet.THEME -> ThemeSheet(
                     state.settings,
                     updateSettings,
+                    previewBrightness = { brightnessPreview = it },
                 )
                 ReaderSheet.LAYOUT -> LayoutSheet(
                     state,
@@ -620,7 +647,7 @@ internal fun ReaderScreen(
                     Modifier.fillMaxSize()
                         .background(
                             Color.Black.copy(
-                                alpha = .28f * panelProgress * (1f - backProgress),
+                                alpha = .28f * panelProgress * (1f - sheetBackProgress),
                             ),
                         )
                         .clickable(
@@ -633,18 +660,26 @@ internal fun ReaderScreen(
                         .windowInsetsPadding(WindowInsets.safeDrawing)
                         .padding(KixyuSpacing.medium),
                 ) {
-                    KixyuInteractivePopupSurface(
+                    KixyuGlassSurface(
+                        backdrop = readerBackdrop,
                         modifier = Modifier
                             .widthIn(min = 360.dp, max = 480.dp)
                             .fillMaxHeight()
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) awaitPointerEvent()
+                                }
+                            }
                             .graphicsLayer {
                                 // MIUIX bottom sheets translate by their complete measured height.
                                 // Apply the same progress horizontally and preserve predictive back.
                                 translationX = -size.width * (
-                                    (1f - panelProgress) + backProgress * panelProgress
+                                    (1f - panelProgress) + sheetBackProgress * panelProgress
                                 )
-                                alpha = 1f - backProgress * .35f
+                                alpha = 1f - sheetBackProgress * .35f
                             },
+                        glassTintColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .92f),
+                        fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         DirectorySheet(
                             state = state,
@@ -672,7 +707,11 @@ internal fun ReaderScreen(
         BookInfoDialog(
             show = bookInfoVisible,
             book = state.book,
+            progress = bookInfoBackProgress,
+            backdrop = readerBackdrop,
+            backgroundColor = palette.background,
             dismiss = { bookInfoVisible = false },
         )
+        }
     }
 }

@@ -2,7 +2,6 @@ package com.kixyu9527.kixyubook.feature.reader
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,7 +14,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -45,6 +43,7 @@ import com.kixyu9527.kixyubook.core.common.model.TextCorrectionStatus
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,13 +92,17 @@ fun CorrectionManagementRoute(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<TextCorrection?>(null) }
-    PredictiveBackHandler { progress -> progress.collect {}; onBack() }
+    ReaderPredictiveBackHandler(
+        target = ReaderPredictiveBackTarget.ROUTE,
+        state = rememberReaderPredictiveBackState(),
+        onBack = { onBack() },
+    )
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("文字纠错") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    KixyuIconButton(onClick = onBack) {
                         Icon(KixyuSymbols.ArrowBack, "返回")
                     }
                 },

@@ -9,6 +9,7 @@ import androidx.core.graphics.toColorInt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
@@ -30,12 +31,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuInteractivePopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBrightnessControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderInformationControls
@@ -47,7 +49,77 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.reader.engine.*
+
+
+@Composable
+internal fun ReaderFloatingSheet(
+    show: Boolean,
+    progress: Float,
+    onDismissRequest: () -> Unit,
+    backdrop: KixyuNavigationBackdrop,
+    backgroundColor: Color,
+    maxContentWidth: Dp,
+    opaqueGlass: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = show,
+        modifier = Modifier.fillMaxSize(),
+        enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
+        exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val sheetMaxHeight = maxHeight * .82f
+            Box(
+                Modifier.fillMaxSize()
+                    .background(Color.Black.copy(alpha = .28f * (1f - progress)))
+                    .clickable(onClick = onDismissRequest),
+            )
+            Box(
+                Modifier.align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(
+                        PaddingValues(
+                            start = KixyuSpacing.medium,
+                            end = KixyuSpacing.medium,
+                            bottom = KixyuSpacing.medium,
+                        ),
+                    )
+                    .animateEnterExit(
+                        enter = slideInVertically(tween(KixyuMotion.ReaderPopupEnterMillis)) { it / 3 } +
+                            fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
+                        exit = slideOutVertically(tween(KixyuMotion.ReaderPopupExitMillis)) { it / 3 } +
+                            fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
+                    )
+                    .predictivePopupTransform(progress),
+            ) {
+                KixyuGlassSurface(
+                    backdrop = backdrop,
+                    modifier = Modifier.widthIn(max = maxContentWidth)
+                        .fillMaxWidth()
+                        .heightIn(max = sheetMaxHeight)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) awaitPointerEvent()
+                            }
+                        },
+                    glassTintColor = if (opaqueGlass) {
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .92f)
+                    } else {
+                        backgroundColor.copy(alpha = .42f)
+                    },
+                    fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    // The scroll/content owner reaches the clipped surface bounds. Individual
+                    // screens provide visual content padding, never a second container inset.
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) { content() }
+                }
+            }
+        }
+    }
+}
 
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -225,13 +297,17 @@ internal fun ReaderSearchOverlay(
 @Composable internal fun ThemeSheet(
     settings: ReaderSettings,
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
+    previewBrightness: (Float?) -> Unit,
 ) {
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
+        contentPadding = PaddingValues(
+            horizontal = KixyuSpacing.large,
+            vertical = KixyuSpacing.large,
+        ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("阅读外观", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("显示与亮度", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
         item {
             KixyuSection(title = "显示与配色") {
                 KixyuReaderThemeControls(settings, { updated -> update { updated } }, modeTitle = "显示模式")
@@ -239,10 +315,13 @@ internal fun ReaderSearchOverlay(
         }
         item {
             KixyuSection(title = "屏幕亮度") {
-                KixyuReaderBrightnessControls(settings) { updated -> update { updated } }
+                KixyuReaderBrightnessControls(
+                    settings = settings,
+                    onSettingsChange = { updated -> update { updated } },
+                    onBrightnessPreview = previewBrightness,
+                )
             }
         }
-        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
     }
 }
 
@@ -256,7 +335,10 @@ internal fun LayoutSheet(
     val settings = state.settings
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
+        contentPadding = PaddingValues(
+            horizontal = KixyuSpacing.large,
+            vertical = KixyuSpacing.large,
+        ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
         item { Text("排版与翻页", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
@@ -273,12 +355,6 @@ internal fun LayoutSheet(
                 KixyuReaderLayoutControls(settings) { updated -> update { updated } }
             }
         }
-        item {
-            KixyuSection(title = "阅读控制") {
-                KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
-            }
-        }
-        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
     }
 }
 
@@ -289,16 +365,23 @@ internal fun ReaderInformationSheet(
 ) {
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = KixyuSpacing.large),
+        contentPadding = PaddingValues(
+            horizontal = KixyuSpacing.large,
+            vertical = KixyuSpacing.large,
+        ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("阅读信息", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { Text("阅读控制", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item {
+            KixyuSection(title = "翻页控制") {
+                KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
+            }
+        }
         item {
             KixyuSection(title = "阅读信息") {
                 KixyuReaderInformationControls(settings) { updated -> update { updated } }
             }
         }
-        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
     }
 }
 
@@ -306,63 +389,109 @@ internal fun ReaderInformationSheet(
 @Composable internal fun BookInfoDialog(
     show: Boolean,
     book: Book?,
+    progress: Float,
+    backdrop: KixyuNavigationBackdrop,
+    backgroundColor: Color,
     dismiss: () -> Unit,
 ) {
     val current = book ?: return
-    KixyuActionDialog(
-        show = show,
-        onDismissRequest = dismiss,
-        title = "书籍信息",
-        confirmLabel = "关闭",
-        onConfirm = dismiss,
-        dismissLabel = null,
+    AnimatedVisibility(
+        visible = show,
+        modifier = Modifier.fillMaxSize(),
+        enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
+        exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
     ) {
-        // This dialog intentionally owns its scroll state. A fixed-height Column only reports
-        // that fixed height to the parent even when Text draws beyond it, which made the overflow
-        // visible but unreachable. Keeping the viewport fixed and scrolling its measured content
-        // gives empty and long descriptions the same dialog size on phones and tablets.
-        Column(
-            modifier = Modifier.fillMaxWidth()
-                .height(300.dp)
-                .verticalScroll(rememberScrollState()),
+        Box(
+            Modifier.fillMaxSize()
+                .background(Color.Black.copy(alpha = .28f * (1f - progress)))
+                .clickable(onClick = dismiss),
+        )
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(KixyuSpacing.extraLarge),
+            contentAlignment = Alignment.Center,
         ) {
-            SelectionContainer {
+            val dialogHeight = minOf(maxHeight, 480.dp)
+            KixyuGlassSurface(
+                backdrop = backdrop,
+                modifier = Modifier.widthIn(max = 480.dp)
+                    .fillMaxWidth()
+                    .height(dialogHeight)
+                    .predictivePopupTransform(progress)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent()
+                        }
+                    },
+                glassTintColor = backgroundColor.copy(alpha = .78f),
+                fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                    modifier = Modifier.fillMaxSize(),
                 ) {
                     Text(
-                        current.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        "书籍信息",
+                        modifier = Modifier.padding(
+                            start = KixyuSpacing.extraLarge,
+                            end = KixyuSpacing.extraLarge,
+                            top = KixyuSpacing.extraLarge,
+                            bottom = KixyuSpacing.medium,
+                        ),
+                        style = MaterialTheme.typography.headlineSmall,
                     )
-                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
-                        Text(
-                            "作者",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            current.author,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(
+                                start = KixyuSpacing.extraLarge,
+                                end = KixyuSpacing.extraLarge,
+                                bottom = KixyuSpacing.medium,
+                            ),
+                    ) {
+                        SelectionContainer {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+                            ) {
+                                Text(current.title, style = MaterialTheme.typography.titleLarge)
+                                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                                    Text(
+                                        "作者",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(current.author, style = MaterialTheme.typography.bodyLarge)
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                                    Text(
+                                        "简介",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(
+                                        current.description.ifBlank { "暂无简介" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (current.description.isBlank()) {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
-                        Text(
-                            "简介",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            current.description.ifBlank { "暂无简介" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (current.description.isBlank()) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
+                    Row(
+                        Modifier.fillMaxWidth().padding(
+                            start = KixyuSpacing.large,
+                            end = KixyuSpacing.large,
+                            bottom = KixyuSpacing.medium,
+                        ),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        KixyuTextButton(text = "关闭", onClick = dismiss)
                     }
                 }
             }

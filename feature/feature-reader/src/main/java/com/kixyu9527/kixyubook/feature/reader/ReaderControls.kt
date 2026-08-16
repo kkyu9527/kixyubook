@@ -5,7 +5,6 @@ import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import androidx.compose.animation.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,8 +14,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
@@ -32,7 +31,8 @@ internal fun ReaderControls(
     visible: Boolean,
     menuVisible: Boolean,
     toolsMenuVisible: Boolean,
-    progress: Float,
+    controlsBackProgress: Float,
+    popupBackProgress: Float,
     bookTitle: String,
     accentColor: Color,
     backgroundColor: Color,
@@ -52,7 +52,15 @@ internal fun ReaderControls(
     onSheet: (ReaderSheet) -> Unit,
 ) {
     val popupVisible = menuVisible || toolsMenuVisible
-    val controlsBackModifier = if (popupVisible) Modifier else Modifier.predictivePopupTransform(progress)
+    var retainedToolsPopup by remember { mutableStateOf(false) }
+    LaunchedEffect(menuVisible, toolsMenuVisible) {
+        when {
+            toolsMenuVisible -> retainedToolsPopup = true
+            menuVisible -> retainedToolsPopup = false
+        }
+    }
+    val showToolsPopup = if (popupVisible) toolsMenuVisible else retainedToolsPopup
+    val controlsBackModifier = Modifier.predictivePopupTransform(controlsBackProgress)
     ReaderControlVisibility(
         visible = visible,
         modifier = Modifier.fillMaxSize(),
@@ -107,96 +115,130 @@ internal fun ReaderControls(
                     }
                 }
             }
-            Row(
+            val dockContainerColor = lerp(backgroundColor, accentColor, READER_CONTROL_FALLBACK_ACCENT_MIX)
+            val dockContentColor = if (accentColor.contrastRatio(backgroundColor) >= MIN_ICON_CONTRAST) {
+                accentColor
+            } else {
+                backgroundColor.highContrastContentColor()
+            }
+            val popupItems = if (showToolsPopup) {
+                listOf(
+                    KixyuPopupMenuItem(
+                        label = if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
+                        icon = if (currentPageBookmarked) KixyuSymbols.BookmarkFilled else KixyuSymbols.BookmarkAdd,
+                        onClick = onToggleBookmark,
+                    ),
+                    KixyuPopupMenuItem(
+                        label = "全文搜索",
+                        icon = KixyuSymbols.Search,
+                        onClick = onSearch,
+                    ),
+                )
+            } else {
+                listOf(
+                    KixyuPopupMenuItem("显示与亮度", KixyuSymbols.Palette) {
+                        onSheet(ReaderSheet.THEME)
+                    },
+                    KixyuPopupMenuItem("排版与翻页", KixyuSymbols.ViewCarousel) {
+                        onSheet(ReaderSheet.LAYOUT)
+                    },
+                    KixyuPopupMenuItem("阅读控制", KixyuSymbols.Tune) {
+                        onSheet(ReaderSheet.INFORMATION)
+                    },
+                )
+            }
+            AnimatedVisibility(
+                visible = popupVisible,
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = KixyuSize.readerMenuBottomOffset + KixyuSize.readerControlInset),
+                enter = fadeIn() + slideInVertically { it / 5 },
+                exit = fadeOut() + slideOutVertically { it / 5 },
+            ) {
+                ReaderInlinePopup(
+                    items = popupItems,
+                    backdrop = backdrop,
+                    backgroundColor = backgroundColor,
+                    contentColor = dockContentColor,
+                    modifier = Modifier.predictivePopupTransform(popupBackProgress),
+                )
+            }
+            KixyuGlassSurface(
+                backdrop = backdrop,
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(bottom = KixyuSize.readerControlInset)
                     .then(controlsBackModifier),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(KixyuSize.readerChapterActionGap),
+                glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
+                fallbackContainerColor = dockContainerColor,
+                contentColor = dockContentColor,
             ) {
-                ReaderControlIconButton(
-                    onClick = onExit,
-                    accentColor = accentColor,
-                    backgroundColor = backgroundColor,
-                    backdrop = backdrop,
-                    modifier = Modifier.size(KixyuSize.readerControlButton),
-                ) { Icon(KixyuSymbols.Close, "退出") }
-                ReaderControlIconButton(
-                    onClick = onDirectory,
-                    accentColor = accentColor,
-                    backgroundColor = backgroundColor,
-                    backdrop = backdrop,
-                    modifier = Modifier.size(KixyuSize.readerControlButton),
-                ) { Icon(KixyuSymbols.Toc, "目录") }
-                ReaderControlIconButton(
-                    onClick = onPreviousChapter,
-                    accentColor = accentColor,
-                    backgroundColor = backgroundColor,
-                    backdrop = backdrop,
-                    enabled = hasPreviousChapter,
-                    modifier = Modifier.size(KixyuSize.readerControlButton),
+                Row(
+                    modifier = Modifier.padding(KixyuSpacing.extraSmall),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSize.readerChapterActionGap),
                 ) {
-                    Icon(KixyuSymbols.SkipPrevious, "上一章")
+                    ReaderDockIconButton(onClick = onExit, contentColor = dockContentColor) {
+                        Icon(KixyuSymbols.Close, "退出")
+                    }
+                    ReaderDockIconButton(onClick = onDirectory, contentColor = dockContentColor) {
+                        Icon(KixyuSymbols.Toc, "目录")
+                    }
+                    ReaderDockIconButton(
+                        onClick = onPreviousChapter,
+                        contentColor = dockContentColor,
+                        enabled = hasPreviousChapter,
+                    ) { Icon(KixyuSymbols.SkipPrevious, "上一章") }
+                    ReaderDockIconButton(
+                        onClick = onNextChapter,
+                        contentColor = dockContentColor,
+                        enabled = hasNextChapter,
+                    ) { Icon(KixyuSymbols.SkipNext, "下一章") }
+                    ReaderDockIconButton(onClick = onTools, contentColor = dockContentColor) {
+                        Icon(KixyuSymbols.MoreHoriz, "阅读工具")
+                    }
+                    ReaderDockIconButton(onClick = onSettings, contentColor = dockContentColor) {
+                        Icon(KixyuSymbols.Settings, "设置")
+                    }
                 }
-                ReaderControlIconButton(
-                    onClick = onNextChapter,
-                    accentColor = accentColor,
-                    backgroundColor = backgroundColor,
-                    backdrop = backdrop,
-                    enabled = hasNextChapter,
-                    modifier = Modifier.size(KixyuSize.readerControlButton),
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderInlinePopup(
+    items: List<KixyuPopupMenuItem>,
+    backdrop: KixyuNavigationBackdrop,
+    backgroundColor: Color,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    KixyuGlassSurface(
+        backdrop = backdrop,
+        modifier = modifier.widthIn(min = 208.dp, max = 320.dp),
+        glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
+        fallbackContainerColor = backgroundColor,
+        contentColor = contentColor,
+    ) {
+        Column(Modifier.padding(vertical = KixyuSpacing.extraSmall)) {
+            items.forEach { item ->
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clickable(enabled = item.enabled, onClick = item.onClick)
+                        .padding(horizontal = KixyuSpacing.large),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(KixyuSymbols.SkipNext, "下一章")
-                }
-                Box {
-                    ReaderControlIconButton(
-                        onClick = onTools,
-                        accentColor = accentColor,
-                        backgroundColor = backgroundColor,
-                        backdrop = backdrop,
-                        modifier = Modifier.size(KixyuSize.readerControlButton),
-                    ) { Icon(KixyuSymbols.MoreHoriz, "阅读工具") }
-                    KixyuPopupMenu(
-                        expanded = toolsMenuVisible,
-                        onDismissRequest = { if (toolsMenuVisible) onTools() },
-                        alignEnd = true,
-                        items = listOf(
-                            KixyuPopupMenuItem(
-                                label = if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
-                                icon = if (currentPageBookmarked) KixyuSymbols.BookmarkFilled else KixyuSymbols.BookmarkAdd,
-                                onClick = onToggleBookmark,
-                            ),
-                            KixyuPopupMenuItem(
-                                label = "全文搜索",
-                                icon = KixyuSymbols.Search,
-                                onClick = onSearch,
-                            ),
-                        ),
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(KixyuSize.icon),
+                        tint = if (item.enabled) contentColor else contentColor.copy(alpha = .38f),
                     )
-                }
-                Box {
-                    ReaderControlIconButton(
-                        onClick = onSettings,
-                        accentColor = accentColor,
-                        backgroundColor = backgroundColor,
-                        backdrop = backdrop,
-                        modifier = Modifier.size(KixyuSize.readerControlButton),
-                    ) { Icon(KixyuSymbols.Settings, "设置") }
-                    KixyuPopupMenu(
-                        expanded = menuVisible,
-                        onDismissRequest = { if (menuVisible) onSettings() },
-                        alignEnd = true,
-                        items = listOf(
-                            KixyuPopupMenuItem("阅读外观", KixyuSymbols.Palette) {
-                                onSettings(); onSheet(ReaderSheet.THEME)
-                            },
-                            KixyuPopupMenuItem("排版与翻页", KixyuSymbols.ViewCarousel) {
-                                onSettings(); onSheet(ReaderSheet.LAYOUT)
-                            },
-                            KixyuPopupMenuItem("阅读信息", KixyuSymbols.Info) {
-                                onSettings(); onSheet(ReaderSheet.INFORMATION)
-                            },
-                        ),
+                    Spacer(Modifier.width(KixyuSpacing.medium))
+                    Text(
+                        text = item.label,
+                        color = if (item.enabled) contentColor else contentColor.copy(alpha = .38f),
+                        maxLines = 1,
                     )
                 }
             }
@@ -205,44 +247,22 @@ internal fun ReaderControls(
 }
 
 @Composable
-internal fun ReaderControlIconButton(
+private fun ReaderDockIconButton(
     onClick: () -> Unit,
-    accentColor: Color,
-    backgroundColor: Color,
-    backdrop: KixyuNavigationBackdrop,
-    modifier: Modifier = Modifier,
+    contentColor: Color,
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val fallbackContainerColor = lerp(
-        backgroundColor,
-        accentColor,
-        READER_CONTROL_FALLBACK_ACCENT_MIX,
+    KixyuTonalIconButton(
+        onClick = onClick,
+        modifier = Modifier.size(KixyuSize.readerControlButton),
+        enabled = enabled,
+        containerColor = Color.Transparent,
+        contentColor = contentColor,
+        disabledContainerColor = Color.Transparent,
+        disabledContentColor = contentColor.copy(alpha = .38f),
+        content = content,
     )
-    val contentColor = if (accentColor.contrastRatio(backgroundColor) >= MIN_ICON_CONTRAST) {
-        accentColor
-    } else {
-        backgroundColor.highContrastContentColor()
-    }
-    KixyuGlassSurface(
-        backdrop = backdrop,
-        modifier = modifier,
-        shape = CircleShape,
-        glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
-        fallbackContainerColor = fallbackContainerColor,
-        contentColor = if (enabled) contentColor else contentColor.copy(alpha = .38f),
-    ) {
-        KixyuTonalIconButton(
-            onClick = onClick,
-            modifier = Modifier.fillMaxSize(),
-            enabled = enabled,
-            containerColor = Color.Transparent,
-            contentColor = contentColor,
-            disabledContainerColor = Color.Transparent,
-            disabledContentColor = contentColor.copy(alpha = .38f),
-            content = content,
-        )
-    }
 }
 
 internal fun Color.contrastRatio(other: Color): Float {

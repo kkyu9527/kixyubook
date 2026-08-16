@@ -30,6 +30,7 @@ import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
@@ -57,11 +58,11 @@ internal fun DirectorySheet(
     val collapsedDirectoryRows = remember(state.chapters) {
         buildDirectoryRows(state.chapters, emptyMap())
     }
-    val currentVolume = remember(collapsedDirectoryRows, currentChapterId) {
+    val currentVolumeRow = remember(collapsedDirectoryRows, currentChapterId) {
         collapsedDirectoryRows.filterIsInstance<DirectoryRow.Volume>()
             .firstOrNull { currentChapterId in it.chapterIds }
-            ?.index
     }
+    val currentVolume = currentVolumeRow?.index
     val expandedVolumes = remember(state.book?.uuid) {
         mutableStateMapOf<Int, Boolean>().apply {
             currentVolume?.let { this[it] = true }
@@ -76,7 +77,19 @@ internal fun DirectorySheet(
             is DirectoryRow.Volume -> row.targetChapterIndex == currentIndex
         }
     }.coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = currentRowIndex)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = directoryChapterScrollAnchor(directoryRows, currentRowIndex),
+    )
+    val scope = rememberCoroutineScope()
+    val stickyVolume by remember(directoryRows, listState) {
+        derivedStateOf {
+            stickyVolumeFor(
+                rows = directoryRows,
+                firstVisibleItemIndex = listState.firstVisibleItemIndex,
+                firstVisibleItemScrollOffset = listState.firstVisibleItemScrollOffset,
+            )
+        }
+    }
     LaunchedEffect(currentIndex, directoryView) {
         if (directoryView == DirectoryView.CHAPTERS && state.chapters.isNotEmpty()) {
             currentVolume?.let { expandedVolumes[it] = true }
@@ -87,7 +100,9 @@ internal fun DirectorySheet(
                     is DirectoryRow.Volume -> row.targetChapterIndex == currentIndex
                 }
             }.coerceAtLeast(0)
-            if (targetRows.isNotEmpty()) listState.scrollToItem(target)
+            if (targetRows.isNotEmpty()) {
+                listState.scrollToItem(directoryChapterScrollAnchor(targetRows, target))
+            }
         }
     }
     Column(if (expandedLayout) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
@@ -236,7 +251,6 @@ internal fun DirectorySheet(
                                 }
                             }
                         }
-                        item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
                     }
                     if (directoryRows.size >= FAST_SCROLLER_MIN_CHAPTERS) {
                         DirectoryFastScroller(
@@ -244,6 +258,62 @@ internal fun DirectorySheet(
                             listState = listState,
                             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
                         )
+                    }
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = stickyVolume != null,
+                        modifier = Modifier.align(Alignment.TopStart),
+                        enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)) +
+                            slideInVertically(tween(KixyuMotion.ReaderPopupEnterMillis)) { -it / 3 },
+                        exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)) +
+                            slideOutVertically(tween(KixyuMotion.ReaderPopupExitMillis)) { -it / 3 },
+                    ) {
+                        stickyVolume?.let { volume ->
+                            val expanded = expandedVolumes[volume.index] == true
+                            KixyuPopupSurface(
+                                modifier = Modifier.fillMaxWidth()
+                                    .padding(
+                                        start = KixyuSpacing.medium,
+                                        end = KixyuSpacing.medium + if (
+                                            directoryRows.size >= FAST_SCROLLER_MIN_CHAPTERS
+                                        ) KixyuSize.directoryFastScrollerWidth else 0.dp,
+                                        top = KixyuSpacing.extraSmall,
+                                    ),
+                                shape = MaterialTheme.shapes.extraLarge,
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shadowElevation = KixyuSpacing.extraSmall,
+                            ) {
+                                KixyuListRow(
+                                    title = volume.title,
+                                    supportingText = "当前目录位置 · ${volume.chapterCount} 章",
+                                    titleStyle = MaterialTheme.typography.bodyMedium,
+                                    supportingTextStyle = MaterialTheme.typography.bodySmall,
+                                    onClick = {
+                                        if (expanded) {
+                                            val headerIndex = directoryRows.indexOfFirst {
+                                                it is DirectoryRow.Volume && it.index == volume.index
+                                            }
+                                            scope.launch {
+                                                if (headerIndex >= 0) listState.scrollToItem(headerIndex)
+                                                expandedVolumes[volume.index] = false
+                                            }
+                                        } else {
+                                            expandedVolumes[volume.index] = true
+                                        }
+                                    },
+                                    leading = {
+                                        Icon(
+                                            if (expanded) {
+                                                KixyuSymbols.KeyboardArrowDown
+                                            } else {
+                                                KixyuSymbols.KeyboardArrowRight
+                                            },
+                                            if (expanded) "收起${volume.title}" else "展开${volume.title}",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             } else if (state.bookmarks.isEmpty()) {
@@ -277,7 +347,6 @@ internal fun DirectorySheet(
                             } else Modifier,
                         )
                     }
-                    item { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
                 }
             }
         }
@@ -298,9 +367,58 @@ internal sealed interface DirectoryRow {
         override val key = "volume:$index:$title:$targetChapterIndex"
     }
 
-    data class ChapterRow(val index: Int, val id: Long) : DirectoryRow {
+    data class ChapterRow(
+        val index: Int,
+        val id: Long,
+        val volumeIndex: Int? = null,
+    ) : DirectoryRow {
         override val key = "chapter:$id"
     }
+}
+
+/**
+ * Keeps the selected chapter below the frozen volume card when the directory first opens. Two
+ * compact rows provide enough clearance for both Material and MIUIX volume-card measurements;
+ * anchoring never crosses into the preceding volume.
+ */
+internal fun directoryChapterScrollAnchor(
+    rows: List<DirectoryRow>,
+    targetIndex: Int,
+): Int {
+    val target = rows.getOrNull(targetIndex) as? DirectoryRow.ChapterRow ?: return targetIndex
+    val volumeIndex = target.volumeIndex ?: return targetIndex
+    val volumeHeaderIndex = (targetIndex downTo 0).firstOrNull {
+        (rows[it] as? DirectoryRow.Volume)?.index == volumeIndex
+    } ?: return targetIndex
+    return (targetIndex - CURRENT_CHAPTER_HEADER_CLEARANCE_ROWS).coerceAtLeast(volumeHeaderIndex)
+}
+
+/**
+ * Resolves the volume represented by the list's current viewport. This intentionally follows the
+ * directory scroll position rather than the chapter being read: after the user scrolls from volume
+ * one into volume two, volume two is the header frozen at the top of the directory.
+ */
+internal fun stickyVolumeFor(
+    rows: List<DirectoryRow>,
+    firstVisibleItemIndex: Int,
+    firstVisibleItemScrollOffset: Int,
+    minimumHeaderScrollOffset: Int = 24,
+): DirectoryRow.Volume? {
+    if (firstVisibleItemIndex !in rows.indices) return null
+    val volumeIndex = when (rows[firstVisibleItemIndex]) {
+        is DirectoryRow.Volume -> firstVisibleItemIndex
+        is DirectoryRow.ChapterRow -> {
+            val expectedVolumeIndex = (rows[firstVisibleItemIndex] as DirectoryRow.ChapterRow)
+                .volumeIndex ?: return null
+            (firstVisibleItemIndex downTo 0).firstOrNull {
+                (rows[it] as? DirectoryRow.Volume)?.index == expectedVolumeIndex
+            } ?: return null
+        }
+    }
+    val volume = rows[volumeIndex] as DirectoryRow.Volume
+    val headerHasLeftItsRestingPosition = firstVisibleItemIndex > volumeIndex ||
+        firstVisibleItemScrollOffset > minimumHeaderScrollOffset
+    return volume.takeIf { headerHasLeftItsRestingPosition }
 }
 
 internal fun buildDirectoryRows(
@@ -341,7 +459,13 @@ internal fun buildDirectoryRows(
             )
             if (expandedVolumes[section.volumeIndex] == true) {
                 section.childChapterIndices.forEach { chapterIndex ->
-                    add(DirectoryRow.ChapterRow(chapterIndex, chapters[chapterIndex].id))
+                    add(
+                        DirectoryRow.ChapterRow(
+                            index = chapterIndex,
+                            id = chapters[chapterIndex].id,
+                            volumeIndex = section.volumeIndex,
+                        ),
+                    )
                 }
             }
             position = section.endIndexExclusive
@@ -420,6 +544,7 @@ internal fun String.normalizedDirectoryTitle(): String =
     trim().replace(Regex("[\\s　]+"), "").trim('：', ':', '-', '—')
 
 internal const val FAST_SCROLLER_MIN_CHAPTERS = 30
+private const val CURRENT_CHAPTER_HEADER_CLEARANCE_ROWS = 2
 
 @Composable
 internal fun DirectoryFastScroller(
