@@ -92,6 +92,61 @@ class ReaderPerformanceBenchmark {
         }
     }
 
+    @Test
+    fun turnCoverPagesContinuously() = measurePageTurnMode("覆盖翻页")
+
+    /**
+     * The same benchmark runs as a two-leaf book spread on Pad/large landscape devices. Reports
+     * expose frameDurationCpuMs P50/P95, so regressions in page turns remain
+     * comparable with the normal phone journey.
+     */
+    private fun measurePageTurnMode(modeLabel: String) = benchmarkRule.measureRepeated(
+        packageName = PACKAGE_NAME,
+        metrics = listOf(FrameTimingMetric()),
+        compilationMode = CompilationMode.Partial(),
+        iterations = READER_ITERATIONS,
+        setupBlock = {
+            returnToLibrary()
+            findBenchmarkBook().click()
+            check(device.wait(Until.hasObject(By.desc(READER_CONTENT_DESCRIPTION)), READER_TIMEOUT_MILLIS)) {
+                "Reader 未在规定时间内完成首章渲染"
+            }
+            selectPageTurnMode(modeLabel)
+            device.waitForIdle()
+        },
+    ) {
+        repeat(PAGE_TURN_COUNT) {
+            device.swipe(
+                device.displayWidth * 4 / 5,
+                device.displayHeight / 2,
+                device.displayWidth / 5,
+                device.displayHeight / 2,
+                PAGE_TURN_STEPS,
+            )
+            device.waitForIdle()
+        }
+    }
+
+    private fun selectPageTurnMode(modeLabel: String) {
+        device.click(device.displayWidth / 2, device.displayHeight / 2)
+        val settings = device.wait(Until.findObject(By.desc("设置")), SHORT_TIMEOUT_MILLIS)
+            ?: error("阅读控制层没有显示设置按钮")
+        settings.click()
+        val layout = device.wait(Until.findObject(By.text("排版与翻页")), SHORT_TIMEOUT_MILLIS)
+            ?: error("阅读设置菜单没有排版与翻页")
+        layout.click()
+        val readingMode = device.wait(Until.findObject(By.text("阅读方式")), SHORT_TIMEOUT_MILLIS)
+            ?: error("排版与翻页页面没有阅读方式")
+        readingMode.click()
+        val target = device.wait(Until.findObject(By.text(modeLabel)), SHORT_TIMEOUT_MILLIS)
+            ?: error("找不到翻页方式：$modeLabel")
+        target.click()
+        device.pressBack()
+        check(device.wait(Until.hasObject(By.desc(READER_CONTENT_DESCRIPTION)), SHORT_TIMEOUT_MILLIS)) {
+            "关闭设置后没有回到阅读正文"
+        }
+    }
+
     private fun returnToLibrary() {
         pressHomeAndStart()
         if (device.wait(Until.hasObject(bookSelector()), SHORT_TIMEOUT_MILLIS)) return

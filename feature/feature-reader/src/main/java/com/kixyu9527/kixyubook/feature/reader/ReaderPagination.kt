@@ -13,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
@@ -21,6 +23,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.CancellationException
@@ -31,6 +34,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
+import kotlin.math.abs
 
 
 @Composable
@@ -366,33 +370,126 @@ internal fun PagedReader(
         key = { virtualPage -> pagerSpreads[virtualPage].key },
     ) { virtualPage ->
         val spread = pagerSpreads[virtualPage]
-        Row(Modifier.fillMaxSize()) {
-            spread.items.forEachIndexed { index, item ->
-                Box(Modifier.weight(1f).fillMaxHeight()) {
-                    ReaderPagerLeaf(
-                        item = item,
-                        state = state,
-                        spec = spec,
-                        palette = palette,
-                        middleTap = middleTap,
-                        selectionEnabled = item.page != null &&
-                            !pager.isScrollInProgress && virtualPage == pager.settledPage,
-                        onSelectionActiveChange = { active -> textSelectionActive = active },
-                        topInsetDp = topInsetDp,
-                        bottomInsetDp = bottomInsetDp,
-                        physicalViewportHeightDp = physicalViewportHeightDp,
-                        onTextActionTarget = onTextActionTarget,
-                    )
-                }
-                if (index < spread.items.lastIndex) {
-                    Spacer(Modifier.width(spreadGutter))
-                }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(palette.background)
+                .zIndex(
+                    if (state.settings.pageTurnAnimation == PageTurnAnimation.HORIZONTAL_SLIDE) {
+                        0f
+                    } else {
+                        // A physical book always keeps the lower-numbered leaf above the later
+                        // leaf. Forward turns remove that upper leaf; backward turns bring the
+                        // previous upper leaf back over the current page.
+                        (pagerSpreads.size - virtualPage).toFloat()
+                    },
+                )
+                .readerPageTurnEffect(
+                    animation = state.settings.pageTurnAnimation,
+                    pageOffset = {
+                        (pager.currentPage - virtualPage) + pager.currentPageOffsetFraction
+                    },
+                ),
+        ) {
+            ReaderPagerSpreadContent(
+                spread = spread,
+                twoPageSpread = twoPageSpread,
+                spreadGutter = spreadGutter,
+                state = state,
+                spec = spec,
+                palette = palette,
+                middleTap = middleTap,
+                selectionEnabled = !pager.isScrollInProgress && virtualPage == pager.settledPage,
+                onSelectionActiveChange = { active -> textSelectionActive = active },
+                topInsetDp = topInsetDp,
+                bottomInsetDp = bottomInsetDp,
+                physicalViewportHeightDp = physicalViewportHeightDp,
+                onTextActionTarget = onTextActionTarget,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReaderPagerSpreadContent(
+    spread: ReaderPagerSpread,
+    twoPageSpread: Boolean,
+    spreadGutter: Dp,
+    state: ReaderUiState,
+    spec: ReaderLayoutSpec,
+    palette: ReaderRenderPalette,
+    middleTap: () -> Unit,
+    selectionEnabled: Boolean,
+    onSelectionActiveChange: (Boolean) -> Unit,
+    topInsetDp: Float,
+    bottomInsetDp: Float,
+    physicalViewportHeightDp: Float,
+    onTextActionTarget: (ReaderTextActionTarget) -> Unit,
+) {
+    Row(Modifier.fillMaxSize()) {
+        spread.items.forEachIndexed { index, item ->
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                ReaderPagerLeaf(
+                    item = item,
+                    state = state,
+                    spec = spec,
+                    palette = palette,
+                    middleTap = middleTap,
+                    selectionEnabled = selectionEnabled && item.page != null,
+                    onSelectionActiveChange = onSelectionActiveChange,
+                    topInsetDp = topInsetDp,
+                    bottomInsetDp = bottomInsetDp,
+                    physicalViewportHeightDp = physicalViewportHeightDp,
+                    onTextActionTarget = onTextActionTarget,
+                )
             }
-            if (twoPageSpread && spread.items.size == 1) {
-                Spacer(Modifier.width(spreadGutter))
-                Spacer(Modifier.weight(1f).fillMaxHeight())
+            if (index < spread.items.lastIndex) {
+                ReaderSpreadSpine(spreadGutter, palette.body)
             }
         }
+        if (twoPageSpread && spread.items.size == 1) {
+            Spacer(Modifier.width(spreadGutter))
+            Spacer(Modifier.weight(1f).fillMaxHeight())
+        }
+    }
+}
+
+
+/**
+ * Keeps the reader's page content independent from its transition. Horizontal sliding is the
+ * Pager default; cover pins the incoming sheet below the outgoing one.
+ */
+private fun Modifier.readerPageTurnEffect(
+    animation: PageTurnAnimation,
+    pageOffset: () -> Float,
+): Modifier {
+    return when (animation) {
+        PageTurnAnimation.HORIZONTAL_SLIDE -> this
+        PageTurnAnimation.COVER -> graphicsLayer {
+            val clampedOffset = pageOffset().coerceIn(-1f, 1f)
+            alpha = if (abs(pageOffset()) <= 1.001f) 1f else 0f
+            if (clampedOffset <= 0f) {
+                // Later pages are pinned below the current leaf. This same rule makes the current
+                // page stay below the previous leaf while a backward gesture brings it in from
+                // the left, fixing the formerly inverted backward-cover animation.
+                translationX = size.width * clampedOffset
+            }
+            clip = true
+        }
+    }
+}
+
+@Composable
+private fun RowScope.ReaderSpreadSpine(width: Dp, color: Color) {
+    Box(
+        Modifier
+            .width(width)
+            .fillMaxHeight()
+            .background(color.copy(alpha = .025f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        // A book needs a visible center separation, not a simulated drop shadow.
+        Box(Modifier.width(1.dp).fillMaxHeight().background(color.copy(alpha = .14f)))
     }
 }
 
