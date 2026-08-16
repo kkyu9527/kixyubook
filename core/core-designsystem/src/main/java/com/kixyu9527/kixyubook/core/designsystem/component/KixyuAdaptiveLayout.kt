@@ -1,39 +1,42 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
-import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
-import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
-import top.yukonga.miuix.kmp.basic.NavigationRailItem as MiuixNavigationRailItem
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.CircleShape
 
 enum class KixyuWindowWidthClass { COMPACT, MEDIUM, EXPANDED }
 enum class KixyuWindowHeightClass { COMPACT, MEDIUM, EXPANDED }
@@ -129,10 +132,10 @@ fun KixyuNavigationRail(
     items: List<KixyuNavigationItem>,
     selectedKey: String?,
     onSelected: (KixyuNavigationItem) -> Unit,
+    backdrop: KixyuNavigationBackdrop,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val appUiStyle = LocalAppUiStyle.current
     val showLabels = kixyuWindowSizeClass().showNavigationLabels
     val itemHeight = if (showLabels) {
         KixyuSize.navigationRailLabeledItemHeight
@@ -141,54 +144,75 @@ fun KixyuNavigationRail(
     }
     Box(
         modifier = modifier
-            .fillMaxHeight()
+            // The rail owns only its compact capsule. Keeping the wrapper intrinsic means the
+            // transparent area above and below it never becomes a full-height touch blocker while
+            // pager content slides underneath.
+            .wrapContentWidth()
             .windowInsetsPadding(
-                WindowInsets.safeDrawing.only(
-                    WindowInsetsSides.Start + WindowInsetsSides.Vertical,
-                ),
+                WindowInsets.safeDrawing.only(WindowInsetsSides.Start),
             )
             .padding(start = KixyuSpacing.medium),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Surface(
+        KixyuGlassSurface(
+            backdrop = backdrop,
             modifier = Modifier.width(KixyuSize.navigationRailWidth),
-            shape = RoundedCornerShape(KixyuSize.navigationContainerCornerRadius),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            shadowElevation = if (appUiStyle == AppUiStyle.MIUIX) 0.dp else KixyuSpacing.extraSmall,
+            shape = CircleShape,
+            glassTintColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = .4f),
+            fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {
-            if (appUiStyle == AppUiStyle.MIUIX) {
-                Column {
-                    items.forEach { item ->
-                        MiuixNavigationRailItem(
-                            selected = selectedKey == item.route,
-                            onClick = { onSelected(item) },
-                            icon = item.icon,
-                            label = if (showLabels) item.label else "",
-                            enabled = enabled,
-                            modifier = Modifier
-                                .width(KixyuSize.navigationRailWidth)
-                                .height(itemHeight),
+            Column(Modifier.padding(KixyuSize.bottomNavigationInnerPadding)) {
+                items.forEach { item ->
+                    val selected = selectedKey == item.route
+                    val itemColor by animateColorAsState(
+                        targetValue = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        label = "navigationRailItemColor",
+                    )
+                    val indicatorColor by animateColorAsState(
+                        targetValue = if (selected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = .15f)
+                        } else {
+                            androidx.compose.ui.graphics.Color.Transparent
+                        },
+                        label = "navigationRailIndicatorColor",
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(itemHeight)
+                            .background(indicatorColor, CircleShape)
+                            .selectable(
+                                selected = selected,
+                                enabled = enabled,
+                                role = Role.Tab,
+                                onClick = { onSelected(item) },
+                            ),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+                            1.dp,
+                            Alignment.CenterVertically,
+                        ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = item.label.takeUnless { showLabels },
+                            modifier = Modifier.size(24.dp),
+                            tint = itemColor,
                         )
-                    }
-                }
-            } else {
-                Column {
-                    items.forEach { item ->
-                        NavigationRailItem(
-                            selected = selectedKey == item.route,
-                            onClick = { onSelected(item) },
-                            icon = { Icon(item.icon, item.label) },
-                            label = if (showLabels) {
-                                { Text(item.label, maxLines = 1) }
-                            } else {
-                                null
-                            },
-                            enabled = enabled,
-                            alwaysShowLabel = showLabels,
-                            modifier = Modifier
-                                .width(KixyuSize.navigationRailWidth)
-                                .height(itemHeight),
-                        )
+                        if (showLabels) {
+                            Text(
+                                text = item.label,
+                                color = itemColor,
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip,
+                            )
+                        }
                     }
                 }
             }

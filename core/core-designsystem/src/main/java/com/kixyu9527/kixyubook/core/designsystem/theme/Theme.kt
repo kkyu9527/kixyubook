@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
+import com.kixyu9527.kixyubook.core.common.model.DEFAULT_GLASS_BLUR_RADIUS
+import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_BLUR_RADIUS
+import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_BLUR_RADIUS
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -118,6 +121,7 @@ private val KixyuMiuixShapes = Shapes(
 
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }
 val LocalKixyuGlassEffectEnabled = staticCompositionLocalOf { true }
+val LocalKixyuGlassBlurRadius = staticCompositionLocalOf { DEFAULT_GLASS_BLUR_RADIUS }
 
 /** The opaque window background shared by navigation and page scaffolds. */
 @Composable
@@ -175,6 +179,7 @@ fun KixyuBookTheme(
     colorTheme: AppColorTheme = AppColorTheme.DEFAULT,
     uiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     glassEffectEnabled: Boolean = true,
+    glassBlurRadius: Float = DEFAULT_GLASS_BLUR_RADIUS,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -201,6 +206,10 @@ fun KixyuBookTheme(
         CompositionLocalProvider(
             LocalAppUiStyle provides uiStyle,
             LocalKixyuGlassEffectEnabled provides glassEffectEnabled,
+            LocalKixyuGlassBlurRadius provides glassBlurRadius.coerceIn(
+                MIN_GLASS_BLUR_RADIUS,
+                MAX_GLASS_BLUR_RADIUS,
+            ),
         ) {
             if (uiStyle == AppUiStyle.MIUIX) {
                 val miuixMode = when (colorTheme) {

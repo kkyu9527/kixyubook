@@ -138,6 +138,7 @@ object KixyuSize {
     val stepperValueWidth = 64.dp
     val readerMenuBottomOffset = 68.dp
     val readerSheetMaxContent = 620.dp
+    val readerSettingsSheetMaxWidth = 520.dp
     val updateNotesMaxHeight = 420.dp
     val readerSearchPanelMaxWidth = 600.dp
     val readerSearchPanelMaxHeight = 560.dp
@@ -595,8 +596,10 @@ fun KixyuSliderRow(
     value: Float,
     valueLabel: String,
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: (() -> Unit)? = null,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
     steps: Int = 0,
+    enabled: Boolean = true,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(
@@ -622,23 +625,48 @@ fun KixyuSliderRow(
                 maxLines = 1,
             )
         }
-        if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
-            MiuixSlider(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth(),
-                valueRange = valueRange,
-                steps = steps,
-            )
-        } else {
-            MaterialSlider(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth(),
-                valueRange = valueRange,
-                steps = steps,
-            )
-        }
+        KixyuSlider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled,
+            valueRange = valueRange,
+            steps = steps,
+        )
+    }
+}
+
+@Composable
+fun KixyuSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    steps: Int = 0,
+    onValueChangeFinished: (() -> Unit)? = null,
+) {
+    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        MiuixSlider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            modifier = modifier,
+            enabled = enabled,
+            valueRange = valueRange,
+            steps = steps,
+        )
+    } else {
+        MaterialSlider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            modifier = modifier,
+            enabled = enabled,
+            valueRange = valueRange,
+            steps = steps,
+        )
     }
 }
 

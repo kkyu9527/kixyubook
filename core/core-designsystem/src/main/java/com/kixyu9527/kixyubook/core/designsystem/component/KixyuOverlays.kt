@@ -35,6 +35,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -225,10 +226,76 @@ fun KixyuPopupMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     items: List<KixyuPopupMenuItem>,
+    modifier: Modifier = Modifier,
+    width: Dp? = null,
     alignEnd: Boolean = false,
     offset: DpOffset = DpOffset.Zero,
 ) {
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+    val glassBackdrop = LocalKixyuGlassBackdrop.current
+    if (glassBackdrop != null) {
+        val shape = MaterialTheme.shapes.extraLarge
+        val containerColor = if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+            MiuixTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        }
+        val contentColor = MaterialTheme.colorScheme.onSurface
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = onDismissRequest,
+            offset = offset,
+            modifier = modifier
+                .then(
+                    width?.let { Modifier.width(it) }
+                        ?: Modifier.widthIn(min = 196.dp, max = 320.dp),
+                )
+                .kixyuGlassSurfaceModifier(
+                    backdrop = glassBackdrop,
+                    shape = shape,
+                    glassTintColor = containerColor.copy(alpha = .42f),
+                    fallbackContainerColor = containerColor,
+                    shadowRadius = KixyuSpacing.extraSmall,
+                ),
+            shape = shape,
+            containerColor = Color.Transparent,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            CompositionLocalProvider(LocalContentColor provides contentColor) {
+                items.forEach { item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clickable(enabled = item.enabled, onClick = item.onClick)
+                            .padding(horizontal = KixyuSpacing.large),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            item.icon,
+                            null,
+                            Modifier.size(KixyuSize.icon),
+                            tint = if (item.enabled) LocalContentColor.current else LocalContentColor.current.copy(alpha = .38f),
+                        )
+                        Spacer(Modifier.width(KixyuSpacing.medium))
+                        Text(
+                            item.label,
+                            modifier = Modifier.weight(1f),
+                            color = if (item.enabled) LocalContentColor.current else LocalContentColor.current.copy(alpha = .38f),
+                            maxLines = 1,
+                        )
+                        if (item.selected) {
+                            Icon(
+                                KixyuSymbols.Check,
+                                null,
+                                Modifier.size(KixyuSize.icon),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    } else if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         OverlayListPopup(
             show = expanded,
             alignment = if (alignEnd) PopupPositionProvider.Align.End else PopupPositionProvider.Align.Start,
@@ -286,6 +353,9 @@ fun KixyuPopupMenu(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = onDismissRequest,
+            modifier = modifier.then(
+                width?.let { Modifier.width(it) } ?: Modifier,
+            ),
             offset = offset,
         ) {
             items.forEach { item ->
@@ -323,7 +393,7 @@ fun KixyuTonalIconButton(
         if (useMiuix) materialColors.surfaceContainerHigh else materialColors.secondaryContainer
     } else containerColor
     val resolvedContent = if (contentColor == Color.Unspecified) {
-        if (useMiuix) LocalContentColor.current else materialColors.onSecondaryContainer
+        materialColors.primary
     } else contentColor
     val resolvedDisabledContainer = if (disabledContainerColor == Color.Unspecified) {
         if (useMiuix && containerColor == Color.Unspecified) resolvedContainer else resolvedContainer.copy(alpha = .38f)
@@ -368,15 +438,30 @@ fun KixyuIconButton(
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val contentColor = MaterialTheme.colorScheme.primary
+    val disabledContentColor = contentColor.copy(alpha = .38f)
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixIconButton(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
+        ) {
+            CompositionLocalProvider(
+                LocalContentColor provides if (enabled) contentColor else disabledContentColor,
+                content = content,
+            )
+        }
+    } else {
+        IconButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            colors = IconButtonDefaults.iconButtonColors(
+                contentColor = contentColor,
+                disabledContentColor = disabledContentColor,
+            ),
             content = content,
         )
-    } else {
-        IconButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
     }
 }
 
@@ -434,17 +519,28 @@ fun KixyuTextButton(
     enabled: Boolean = true,
 ) {
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        val accent = MiuixTheme.colorScheme.primary
         MiuixTextButton(
             text = text,
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
+            colors = MiuixButtonDefaults.textButtonColors(
+                color = Color.Transparent,
+                disabledColor = Color.Transparent,
+                textColor = accent,
+                disabledTextColor = accent.copy(alpha = .38f),
+            ),
         )
     } else {
         TextButton(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = MaterialTheme.colorScheme.primary,
+                disabledContentColor = MaterialTheme.colorScheme.primary.copy(alpha = .38f),
+            ),
         ) { Text(text, maxLines = 1) }
     }
 }
@@ -458,15 +554,34 @@ fun KixyuPopupSurface(
     contentColor: Color? = null,
     content: @Composable () -> Unit,
 ) {
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+    val glassBackdrop = LocalKixyuGlassBackdrop.current
+    val resolvedContainer = containerColor ?: if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        MiuixTheme.colorScheme.surfaceContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val resolvedContent = contentColor ?: MaterialTheme.colorScheme.onSurface
+    if (glassBackdrop != null) {
+        KixyuGlassSurface(
+            backdrop = glassBackdrop,
+            modifier = modifier,
+            shape = shape,
+            glassTintColor = resolvedContainer.copy(alpha = .42f),
+            fallbackContainerColor = resolvedContainer,
+            contentColor = resolvedContent,
+            shadowRadius = shadowElevation.coerceAtLeast(KixyuSpacing.extraSmall),
+        ) {
+            content()
+        }
+    } else if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixSurface(
             modifier = modifier,
             shape = shape,
-            color = containerColor ?: MiuixTheme.colorScheme.surfaceContainer,
+            color = resolvedContainer,
             shadowElevation = shadowElevation,
         ) {
             androidx.compose.runtime.CompositionLocalProvider(
-                LocalContentColor provides (contentColor ?: MaterialTheme.colorScheme.onSurface),
+                LocalContentColor provides resolvedContent,
                 content = content,
             )
         }
@@ -474,8 +589,8 @@ fun KixyuPopupSurface(
         androidx.compose.material3.Surface(
             modifier = modifier,
             shape = shape,
-            color = containerColor ?: MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = contentColor ?: MaterialTheme.colorScheme.onSurface,
+            color = resolvedContainer,
+            contentColor = resolvedContent,
             tonalElevation = KixyuSpacing.extraSmall,
             shadowElevation = shadowElevation,
             content = content,
@@ -627,10 +742,10 @@ fun KixyuSnackbarHost(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     if (data.visuals.withDismissAction) {
-                        TextButton(onClick = data::dismiss) { Text("关闭") }
+                        KixyuTextButton(text = "关闭", onClick = data::dismiss)
                     }
                     data.visuals.actionLabel?.let { actionLabel ->
-                        TextButton(onClick = data::performAction) { Text(actionLabel) }
+                        KixyuTextButton(text = actionLabel, onClick = data::performAction)
                     }
                 }
             }
@@ -835,7 +950,7 @@ fun KixyuActionDialog(
             },
             dismissButton = {
                 if (alternativeLabel == null || onAlternative == null) {
-                    dismissLabel?.let { TextButton(onClick = onDismissRequest) { Text(it) } }
+                    dismissLabel?.let { KixyuTextButton(text = it, onClick = onDismissRequest) }
                 }
             },
         )

@@ -52,9 +52,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.platform.LocalLayoutDirection
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassBlurRadius
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.colorControls
 import top.yukonga.miuix.kmp.blur.drawBackdrop
 import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
@@ -114,6 +114,7 @@ internal fun KixyuFloatingNavigationBar(
     val unselectedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 1f)
     val isDark = surfaceContainer.luminance() < 0.5f
     val glassAvailable = LocalKixyuGlassEffectEnabled.current && remember { isRuntimeShaderSupported() }
+    val glassBlurRadius = LocalKixyuGlassBlurRadius.current
     val shape = CircleShape
     val itemKeys = remember(items) { items.map(KixyuNavigationItem::route) }
     var currentIndex by remember(itemKeys) { mutableIntStateOf(selectedIndex) }
@@ -155,7 +156,7 @@ internal fun KixyuFloatingNavigationBar(
         currentIndex
     }
     val containerColor = if (glassAvailable) {
-        surfaceContainer.copy(alpha = 0.4f)
+        surfaceContainer.copy(alpha = 0.4f).kixyuFrostedGlassTint()
     } else {
         surfaceContainer
     }
@@ -201,12 +202,7 @@ internal fun KixyuFloatingNavigationBar(
                                 backdrop = backdrop.value,
                                 shape = { shape },
                                 effects = {
-                                    vibrancy()
-                                    blur(4.dp.toPx(), 4.dp.toPx())
-                                    kixyuLens(
-                                        refractionHeight = 24.dp.toPx(),
-                                        refractionAmount = 24.dp.toPx(),
-                                    )
+                                    kixyuFrostedGlassEffects(glassBlurRadius)
                                 },
                                 highlight = { baseHighlight.copy(alpha = 0.75f) },
                                 onDrawSurface = { drawRect(containerColor) },
@@ -233,6 +229,7 @@ internal fun KixyuFloatingNavigationBar(
                             backdrop = selectedIndicatorBackdrop,
                             shape = { shape },
                             effects = {
+                                kixyuFrostedGlassEffects(glassBlurRadius)
                                 kixyuLens(
                                     refractionHeight = 10.dp.toPx() * pressProgress,
                                     refractionAmount = 14.dp.toPx() * pressProgress,
@@ -244,11 +241,11 @@ internal fun KixyuFloatingNavigationBar(
                             onDrawSurface = {
                                 drawRect(
                                     color = if (isDark) {
-                                        Color.White.copy(alpha = 0.1f)
+                                        Color.White.copy(alpha = 0.14f)
                                     } else {
-                                        Color.Black.copy(alpha = 0.1f)
+                                        Color.White.copy(alpha = 0.22f)
                                     },
-                                    alpha = 1f - pressProgress,
+                                    alpha = 1f - pressProgress * .35f,
                                 )
                                 drawRect(Color.Black.copy(alpha = 0.03f * pressProgress))
                             },

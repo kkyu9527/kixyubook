@@ -67,6 +67,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageEnterTransition
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageExitTransition
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
@@ -299,6 +300,7 @@ class MainActivity : ComponentActivity() {
             colorTheme = settings.appColorTheme,
             uiStyle = renderedUiStyle,
             glassEffectEnabled = settings.glassEffectEnabled,
+            glassBlurRadius = settings.glassBlurRadius,
         ) {
             val appBackground = kixyuPageBackground()
             val availableUpdate = updateState as? AppUpdateState.Available
@@ -555,6 +557,7 @@ private fun KixyuNavHost(
     val navBackground = kixyuPageBackground()
     val navigationBackdrop = rememberKixyuNavigationBackdrop(navBackground)
     CompositionLocalProvider(
+        LocalKixyuGlassBackdrop provides navigationBackdrop,
         LocalKixyuNavigationContentPadding provides if (useNavigationRail) {
             0.dp
         } else {
@@ -585,8 +588,12 @@ private fun KixyuNavHost(
                 composable(Routes.HOME) {
                     HorizontalPager(
                         state = pagerState,
-                        modifier = Modifier.fillMaxSize().padding(
-                            start = if (useNavigationRail) KixyuSize.navigationRailContentWidth else 0.dp,
+                        modifier = Modifier.fillMaxSize().then(
+                            if (useNavigationRail) {
+                                Modifier.padding(start = KixyuSize.navigationRailContentWidth)
+                            } else {
+                                Modifier
+                            },
                         ),
                         // Keep the adjacent library ready, but do not build all three complete page
                         // trees in the launch frame. Compose's pager prefetches the next page while
@@ -903,6 +910,7 @@ private fun KixyuNavHost(
                     selectedKey = top.getOrNull(pagerState.settledPage)?.route,
                     enabled = bottomBarPresented,
                     onSelected = selectTopDestination,
+                    backdrop = navigationBackdrop,
                 )
             }
             ReleaseNotesModal(
