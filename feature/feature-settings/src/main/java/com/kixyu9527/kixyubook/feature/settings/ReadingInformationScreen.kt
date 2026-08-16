@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,6 +28,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderInformatio
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
@@ -73,9 +73,7 @@ fun ReadingInformationRoute(
                 KixyuSection(
                     title = "显示内容",
                     action = {
-                        TextButton(onClick = viewModel::resetReaderInformation) {
-                            Text("重置")
-                        }
+                        KixyuTextButton(text = "重置", onClick = viewModel::resetReaderInformation)
                     },
                 ) {
                     KixyuReaderInformationControls(state.settings) { updated ->

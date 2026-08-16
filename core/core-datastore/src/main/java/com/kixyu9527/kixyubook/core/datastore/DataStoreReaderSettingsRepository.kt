@@ -30,6 +30,9 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             margin = values[MARGIN] ?: 24f,
             theme = storedTheme?.let { runCatching { ReaderTheme.valueOf(it) }.getOrNull() } ?: ReaderTheme.SYSTEM,
             pageMode = values[PAGE_MODE]?.let { runCatching { PageMode.valueOf(it) }.getOrNull() } ?: PageMode.SCROLL,
+            pageTurnAnimation = values[PAGE_TURN_ANIMATION]
+                ?.let { runCatching { PageTurnAnimation.valueOf(it) }.getOrNull() }
+                ?: PageTurnAnimation.HORIZONTAL_SLIDE,
             customThemeEnabled = values[CUSTOM_THEME_ENABLED] ?: (storedTheme == "CUSTOM"),
             customDayTheme = CustomReaderTheme(
                 values[CUSTOM_DAY_BACKGROUND] ?: "#F7F4EC",
@@ -49,6 +52,8 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             appUiStyle = values[APP_UI_STYLE]?.let { runCatching { AppUiStyle.valueOf(it) }.getOrNull() }
                 ?: AppUiStyle.MATERIAL,
             glassEffectEnabled = values[GLASS_EFFECT_ENABLED] ?: true,
+            glassBlurRadius = (values[GLASS_BLUR_RADIUS] ?: DEFAULT_GLASS_BLUR_RADIUS)
+                .coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS),
             showStatusBar = values[SHOW_STATUS_BAR] ?: true,
             hideNavigationBar = values[HIDE_NAVIGATION_BAR] ?: true,
             showPageNumber = values[SHOW_PAGE_NUMBER] ?: true,
@@ -71,6 +76,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[FONT_SIZE] = updated.fontSize; values[LINE_HEIGHT] = updated.lineHeight
             values[LETTER_SPACING] = updated.letterSpacing; values[MARGIN] = updated.margin
             values[THEME] = updated.theme.name; values[PAGE_MODE] = updated.pageMode.name
+            values[PAGE_TURN_ANIMATION] = updated.pageTurnAnimation.name
             values[CUSTOM_THEME_ENABLED] = updated.customThemeEnabled
             values[CUSTOM_DAY_BACKGROUND] = updated.customDayTheme.backgroundHex
             values[CUSTOM_DAY_BODY] = updated.customDayTheme.bodyHex
@@ -84,6 +90,8 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[APP_COLOR_THEME] = updated.appColorTheme.name
             values[APP_UI_STYLE] = updated.appUiStyle.name
             values[GLASS_EFFECT_ENABLED] = updated.glassEffectEnabled
+            values[GLASS_BLUR_RADIUS] = updated.glassBlurRadius
+                .coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS)
             values[SHOW_STATUS_BAR] = updated.showStatusBar
             values[HIDE_NAVIGATION_BAR] = updated.hideNavigationBar
             values[SHOW_PAGE_NUMBER] = updated.showPageNumber
@@ -107,6 +115,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val FONT_SIZE = floatPreferencesKey("font_size"); val LINE_HEIGHT = floatPreferencesKey("line_height")
         val LETTER_SPACING = floatPreferencesKey("letter_spacing"); val MARGIN = floatPreferencesKey("margin")
         val THEME = stringPreferencesKey("theme"); val PAGE_MODE = stringPreferencesKey("page_mode")
+        val PAGE_TURN_ANIMATION = stringPreferencesKey("page_turn_animation")
         val CUSTOM_THEME_ENABLED = booleanPreferencesKey("custom_theme_enabled")
         val CUSTOM_DAY_BACKGROUND = stringPreferencesKey("custom_day_background")
         val CUSTOM_DAY_BODY = stringPreferencesKey("custom_day_body")
@@ -120,6 +129,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val APP_COLOR_THEME = stringPreferencesKey("app_color_theme")
         val APP_UI_STYLE = stringPreferencesKey("app_ui_style")
         val GLASS_EFFECT_ENABLED = booleanPreferencesKey("glass_effect_enabled")
+        val GLASS_BLUR_RADIUS = floatPreferencesKey("glass_blur_radius")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
         val HIDE_NAVIGATION_BAR = booleanPreferencesKey("hide_navigation_bar")
         val SHOW_PAGE_NUMBER = booleanPreferencesKey("show_page_number")

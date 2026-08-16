@@ -60,10 +60,12 @@ internal fun parseCorrection(json: JSONObject) = TextCorrection(
 internal fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("fontSize", value.fontSize).put("lineHeight", value.lineHeight).put("letterSpacing", value.letterSpacing)
     .put("margin", value.margin).put("theme", value.theme.name).put("pageMode", value.pageMode.name)
+    .put("pageTurnAnimation", value.pageTurnAnimation.name)
     .put("customThemeEnabled", value.customThemeEnabled).put("customDayTheme", customThemeJson(value.customDayTheme))
     .put("customNightTheme", customThemeJson(value.customNightTheme)).put("fontUuid", value.fontUuid)
     .put("appColorTheme", value.appColorTheme.name).put("appUiStyle", value.appUiStyle.name)
     .put("glassEffectEnabled", value.glassEffectEnabled)
+    .put("glassBlurRadius", value.glassBlurRadius)
     .put("showStatusBar", value.showStatusBar).put("hideNavigationBar", value.hideNavigationBar)
     .put("showPageNumber", value.showPageNumber)
     .put("volumeKeyPageTurn", value.volumeKeyPageTurn).put("keepScreenOn", value.keepScreenOn)
@@ -80,6 +82,7 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     margin = value.optDouble("margin", 24.0).toFloat(),
     theme = enumValue(value, "theme", ReaderTheme.SYSTEM),
     pageMode = enumValue(value, "pageMode", PageMode.SCROLL),
+    pageTurnAnimation = enumValue(value, "pageTurnAnimation", PageTurnAnimation.HORIZONTAL_SLIDE),
     customThemeEnabled = value.optBoolean("customThemeEnabled"),
     customDayTheme = jsonToCustomTheme(value.optJSONObject("customDayTheme"), CustomReaderTheme()),
     customNightTheme = jsonToCustomTheme(value.optJSONObject("customNightTheme"), ReaderSettings().customNightTheme),
@@ -87,6 +90,8 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     appColorTheme = enumValue(value, "appColorTheme", AppColorTheme.DEFAULT),
     appUiStyle = enumValue(value, "appUiStyle", AppUiStyle.MATERIAL),
     glassEffectEnabled = value.optBoolean("glassEffectEnabled", true),
+    glassBlurRadius = value.optDouble("glassBlurRadius", DEFAULT_GLASS_BLUR_RADIUS.toDouble())
+        .toFloat().coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS),
     showStatusBar = value.optBoolean("showStatusBar", true),
     hideNavigationBar = value.optBoolean("hideNavigationBar", true),
     showPageNumber = value.optBoolean("showPageNumber", true),
@@ -122,6 +127,20 @@ internal fun jsonToReadingReminder(value: JSONObject) = ReadingReminderSettings(
     hour = value.optInt("hour", 20).coerceIn(0, 23),
     minute = value.optInt("minute", 0).coerceIn(0, 59),
 )
+
+internal fun settingsPayloadJson(
+    reader: ReaderSettings,
+    readingGoalMinutes: Int,
+    library: LibraryPreferences,
+    readingReminder: ReadingReminderSettings,
+    updatedAt: Long = System.currentTimeMillis(),
+) = JSONObject()
+    .put("schema", 4)
+    .put("updatedAt", updatedAt)
+    .put("reader", settingsToJson(reader))
+    .put("readingGoalMinutes", readingGoalMinutes)
+    .put("library", libraryPreferencesToJson(library))
+    .put("readingReminder", readingReminderToJson(readingReminder))
 
 private fun JSONArray?.toStringList(): List<String> = if (this == null) emptyList() else buildList {
     repeat(length()) { index -> optString(index).takeIf(String::isNotBlank)?.let(::add) }

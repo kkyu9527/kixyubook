@@ -79,13 +79,12 @@ internal class CloudSyncPayloadFactory(
         }.orEmpty()
     }
 
-    private suspend fun settingsJson(): JSONObject = JSONObject()
-        .put("schema", 4)
-        .put("updatedAt", System.currentTimeMillis())
-        .put("reader", settingsToJson(settingsRepository.settings.first()))
-        .put("readingGoalMinutes", settingsRepository.readingGoalMinutes.first())
-        .put("library", libraryPreferencesToJson(libraryPreferencesRepository.preferences.first()))
-        .put("readingReminder", readingReminderToJson(readingReminders.settings.first()))
+    private suspend fun settingsJson(): JSONObject = settingsPayloadJson(
+        reader = settingsRepository.settings.first(),
+        readingGoalMinutes = settingsRepository.readingGoalMinutes.first(),
+        library = libraryPreferencesRepository.preferences.first(),
+        readingReminder = readingReminders.settings.first(),
+    )
 
 
     fun jsonObject(key: String, json: JSONObject): LocalCloudObject {

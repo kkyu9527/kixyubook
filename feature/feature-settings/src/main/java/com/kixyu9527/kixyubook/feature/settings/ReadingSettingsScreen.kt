@@ -44,6 +44,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuStepperRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -112,9 +113,10 @@ fun ReadingSettingsRoute(
                         onSettingsChange = { updated -> viewModel.update { updated } },
                     )
                     KixyuDivider()
-                    KixyuReaderBrightnessControls(state.settings) { updated ->
-                        viewModel.update { updated }
-                    }
+                    KixyuReaderBrightnessControls(
+                        settings = state.settings,
+                        onSettingsChange = { updated -> viewModel.update { updated } },
+                    )
                 }
             }
             item {
@@ -247,7 +249,5 @@ fun ReadingSettingsRoute(
 
 @Composable
 private fun ReadingSectionResetAction(onClick: () -> Unit) {
-    androidx.compose.material3.TextButton(onClick = onClick) {
-        Text("重置")
-    }
+    KixyuTextButton(text = "重置", onClick = onClick)
 }

@@ -5,6 +5,8 @@ import android.database.sqlite.SQLiteDatabase
 import android.os.storage.StorageManager
 import androidx.core.net.toUri
 import com.kixyu9527.kixyubook.core.common.model.PageMode
+import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_BLUR_RADIUS
+import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_BLUR_RADIUS
 import com.kixyu9527.kixyubook.core.common.repository.BackupRepository
 import com.kixyu9527.kixyubook.core.common.repository.BackupResult
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
@@ -52,6 +54,7 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("margin", settings.margin.toString())
                     setProperty("theme", settings.theme.name)
                     setProperty("pageMode", settings.pageMode.name)
+                    setProperty("pageTurnAnimation", settings.pageTurnAnimation.name)
                     setProperty("customThemeEnabled", settings.customThemeEnabled.toString())
                     setProperty("customDayBackground", settings.customDayTheme.backgroundHex)
                     setProperty("customDayBody", settings.customDayTheme.bodyHex)
@@ -69,6 +72,7 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("appColorTheme", settings.appColorTheme.name)
                     setProperty("appUiStyle", settings.appUiStyle.name)
                     setProperty("glassEffectEnabled", settings.glassEffectEnabled.toString())
+                    setProperty("glassBlurRadius", settings.glassBlurRadius.toString())
                     setProperty("showChapterTitle", settings.showChapterTitle.toString())
                     setProperty("showReadingTime", settings.showReadingTime.toString())
                     setProperty("showBatteryLevel", settings.showBatteryLevel.toString())
@@ -263,11 +267,14 @@ class LocalBackupRepository @Inject constructor(
             appColorTheme = properties.enum("appColorTheme", current.appColorTheme),
             appUiStyle = properties.enum("appUiStyle", current.appUiStyle),
             glassEffectEnabled = properties.boolean("glassEffectEnabled", current.glassEffectEnabled),
+            glassBlurRadius = properties.float("glassBlurRadius", current.glassBlurRadius)
+                .coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS),
             showChapterTitle = properties.boolean("showChapterTitle", current.showChapterTitle),
             showReadingTime = properties.boolean("showReadingTime", current.showReadingTime),
             showBatteryLevel = properties.boolean("showBatteryLevel", current.showBatteryLevel),
             brightnessMode = properties.enum("brightnessMode", current.brightnessMode),
             brightness = properties.float("brightness", current.brightness).coerceIn(.05f, 1f),
+            pageTurnAnimation = properties.enum("pageTurnAnimation", current.pageTurnAnimation),
         ) }
         settingsRepository.setReadingGoalMinutes(properties.getProperty("readingGoalMinutes")?.toIntOrNull() ?: 30)
     }

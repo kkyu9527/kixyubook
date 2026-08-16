@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -22,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,12 +31,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.CustomReaderTheme
+import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_BLUR_RADIUS
+import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_BLUR_RADIUS
 import com.kixyu9527.kixyubook.core.common.model.PageMode
+import com.kixyu9527.kixyubook.core.common.model.PageTurnAnimation
 import com.kixyu9527.kixyubook.core.common.model.ReaderBrightnessMode
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -105,6 +111,8 @@ fun KixyuReaderThemeControls(
             }
         }
     }
+    KixyuDivider()
+    KixyuGlassEffectControls(settings, onSettingsChange)
 }
 
 /** Global light/dark mode selector shared by app appearance and the reader shortcut. */
@@ -148,6 +156,52 @@ fun KixyuAppUiStyleControl(
         options = AppUiStyle.entries,
         optionLabel = AppUiStyle::displayName,
         onSelected = { onSettingsChange(settings.copy(appUiStyle = it)) },
+    )
+}
+
+/** Glass controls shared by app appearance, global reading settings and the in-reader sheet. */
+@Composable
+fun KixyuGlassEffectControls(
+    settings: ReaderSettings,
+    onSettingsChange: (ReaderSettings) -> Unit,
+) {
+    var previewRadius by remember { mutableFloatStateOf(settings.glassBlurRadius) }
+    var dragging by remember { mutableStateOf(false) }
+    LaunchedEffect(settings.glassBlurRadius) {
+        if (!dragging) previewRadius = settings.glassBlurRadius
+    }
+    KixyuSettingsRow(
+        title = "玻璃效果",
+        supportingText = "用于悬浮控件，部分低版本 Android 不支持",
+        onClick = {
+            onSettingsChange(settings.copy(glassEffectEnabled = !settings.glassEffectEnabled))
+        },
+    ) {
+        KixyuSwitch(
+            checked = settings.glassEffectEnabled,
+            onCheckedChange = { enabled ->
+                onSettingsChange(settings.copy(glassEffectEnabled = enabled))
+            },
+        )
+    }
+    KixyuDivider()
+    KixyuSliderRow(
+        title = "模糊程度",
+        value = previewRadius,
+        valueLabel = "${previewRadius.roundToInt()} dp",
+        onValueChange = { value ->
+            dragging = true
+            previewRadius = value.coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS)
+        },
+        onValueChangeFinished = {
+            dragging = false
+            val snappedRadius = (previewRadius / 2f).roundToInt() * 2f
+            previewRadius = snappedRadius.coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS)
+            onSettingsChange(settings.copy(glassBlurRadius = previewRadius))
+        },
+        valueRange = MIN_GLASS_BLUR_RADIUS..MAX_GLASS_BLUR_RADIUS,
+        steps = 17,
+        enabled = settings.glassEffectEnabled,
     )
 }
 
@@ -215,12 +269,31 @@ fun KixyuPageModeControl(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
+    val selected = when {
+        settings.pageMode == PageMode.SCROLL -> ReaderReadingMode.VERTICAL_SCROLL
+        settings.pageTurnAnimation == PageTurnAnimation.COVER -> ReaderReadingMode.COVER
+        else -> ReaderReadingMode.HORIZONTAL_SLIDE
+    }
     KixyuDropdownRow(
         title = "阅读方式",
-        selected = settings.pageMode,
-        options = PageMode.entries,
-        optionLabel = PageMode::displayName,
-        onSelected = { onSettingsChange(settings.copy(pageMode = it)) },
+        selected = selected,
+        options = ReaderReadingMode.entries,
+        optionLabel = ReaderReadingMode::displayName,
+        onSelected = { mode ->
+            onSettingsChange(
+                when (mode) {
+                    ReaderReadingMode.VERTICAL_SCROLL -> settings.copy(pageMode = PageMode.SCROLL)
+                    ReaderReadingMode.HORIZONTAL_SLIDE -> settings.copy(
+                        pageMode = PageMode.PAGED,
+                        pageTurnAnimation = PageTurnAnimation.HORIZONTAL_SLIDE,
+                    )
+                    ReaderReadingMode.COVER -> settings.copy(
+                        pageMode = PageMode.PAGED,
+                        pageTurnAnimation = PageTurnAnimation.COVER,
+                    )
+                },
+            )
+        },
     )
 }
 
@@ -310,24 +383,90 @@ fun KixyuReaderInformationControls(
 fun KixyuReaderBrightnessControls(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
+    onBrightnessPreview: (Float?) -> Unit = {},
 ) {
-    KixyuDropdownRow(
-        title = "亮度",
-        selected = settings.brightnessMode,
-        options = ReaderBrightnessMode.entries,
-        optionLabel = ReaderBrightnessMode::displayName,
-        onSelected = { onSettingsChange(settings.copy(brightnessMode = it)) },
-    )
-    if (settings.brightnessMode == ReaderBrightnessMode.MANUAL) {
-        KixyuDivider()
-        KixyuSliderRow(
-            title = "阅读亮度",
-            value = settings.brightness,
-            valueLabel = "${(settings.brightness * 100).roundToInt()}%",
-            valueRange = .05f..1f,
-            steps = 18,
-            onValueChange = { onSettingsChange(settings.copy(brightness = it)) },
-        )
+    var previewBrightness by remember { mutableFloatStateOf(settings.brightness) }
+    var dragging by remember { mutableStateOf(false) }
+    LaunchedEffect(settings.brightness) {
+        if (!dragging) previewBrightness = settings.brightness
+    }
+    val automatic = settings.brightnessMode == ReaderBrightnessMode.SYSTEM
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(
+            horizontal = KixyuSpacing.rowHorizontal,
+            vertical = KixyuSpacing.rowVertical,
+        ),
+        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "阅读亮度",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = if (automatic) "跟随系统" else "${(previewBrightness * 100).roundToInt()}%",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (automatic) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                maxLines = 1,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+        ) {
+            KixyuTonalIconButton(
+                onClick = {
+                    val mode = if (automatic) ReaderBrightnessMode.MANUAL else ReaderBrightnessMode.SYSTEM
+                    dragging = false
+                    onBrightnessPreview(previewBrightness.takeIf { mode == ReaderBrightnessMode.MANUAL })
+                    onSettingsChange(settings.copy(brightnessMode = mode))
+                },
+                modifier = Modifier.size(KixyuSize.stepperButton).semantics { selected = automatic },
+                minSize = KixyuSize.stepperButton,
+                containerColor = if (automatic) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                contentColor = if (automatic) MaterialTheme.colorScheme.onPrimary else Color.Unspecified,
+            ) {
+                Icon(KixyuSymbols.Tune, "${if (automatic) "关闭" else "开启"}跟随系统亮度", Modifier.size(KixyuSize.iconSmall))
+            }
+            KixyuSlider(
+                value = previewBrightness,
+                onValueChange = { value ->
+                    dragging = true
+                    previewBrightness = value
+                    onBrightnessPreview(value)
+                },
+                onValueChangeFinished = {
+                    dragging = false
+                    onSettingsChange(
+                        settings.copy(
+                            brightnessMode = ReaderBrightnessMode.MANUAL,
+                            brightness = previewBrightness,
+                        ),
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                enabled = !automatic,
+                valueRange = .05f..1f,
+                steps = 18,
+            )
+            Text(
+                text = if (automatic) "自动" else "${(previewBrightness * 100).roundToInt()}%",
+                modifier = Modifier.width(44.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
     }
     KixyuDivider()
     ReaderSwitch(
@@ -443,6 +582,14 @@ fun ReaderTheme.displayName(): String = when (this) {
 fun PageMode.displayName(): String = when (this) {
     PageMode.SCROLL -> "上下滑动"
     PageMode.PAGED -> "左右翻页"
+}
+
+private enum class ReaderReadingMode { VERTICAL_SCROLL, HORIZONTAL_SLIDE, COVER }
+
+private fun ReaderReadingMode.displayName(): String = when (this) {
+    ReaderReadingMode.VERTICAL_SCROLL -> "上下滑动"
+    ReaderReadingMode.HORIZONTAL_SLIDE -> "左右滑动"
+    ReaderReadingMode.COVER -> "覆盖翻页"
 }
 
 fun ReaderBrightnessMode.displayName(): String = when (this) {

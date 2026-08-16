@@ -119,6 +119,7 @@ class SettingsViewModel @Inject constructor(
             letterSpacing = defaults.letterSpacing,
             margin = defaults.margin,
             pageMode = defaults.pageMode,
+            pageTurnAnimation = defaults.pageTurnAnimation,
             fontUuid = defaults.fontUuid,
         )
     }
@@ -146,6 +147,7 @@ class SettingsViewModel @Inject constructor(
                 appColorTheme = current.appColorTheme,
                 appUiStyle = current.appUiStyle,
                 glassEffectEnabled = current.glassEffectEnabled,
+                glassBlurRadius = current.glassBlurRadius,
             )
         }
         repository.setReadingGoalMinutes(30)
