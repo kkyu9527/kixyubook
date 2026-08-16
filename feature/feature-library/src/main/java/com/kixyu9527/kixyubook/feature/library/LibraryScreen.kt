@@ -48,11 +48,8 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -539,7 +536,6 @@ private fun LibraryFilters(
     onCategory: (String) -> Unit,
 ) {
     var categoriesExpanded by remember { mutableStateOf(false) }
-    val categoriesScrollState = rememberScrollState()
     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
         TextField(
             value = state.query,
@@ -549,7 +545,7 @@ private fun LibraryFilters(
             placeholder = { Text("搜索书名或作者", maxLines = 1) },
             leadingIcon = { Icon(KixyuSymbols.Search, null, Modifier.size(KixyuSize.icon)) },
             trailingIcon = {
-                if (state.query.isNotEmpty()) IconButton({ onSearch("") }) {
+                if (state.query.isNotEmpty()) KixyuIconButton({ onSearch("") }) {
                     Icon(KixyuSymbols.Close, "清除", Modifier.size(KixyuSize.icon))
                 }
             },
@@ -588,27 +584,22 @@ private fun LibraryFilters(
                         Text(state.category, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Icon(KixyuSymbols.ExpandMore, "选择分类", Modifier.size(KixyuSize.iconSmall))
                     }
-                    DropdownMenu(
+                    KixyuPopupMenu(
                         expanded = categoriesExpanded,
                         onDismissRequest = { categoriesExpanded = false },
-                        modifier = Modifier
-                            .width(categorySelectorWidth)
-                            .heightIn(max = KixyuSize.libraryCategoryMenuMaxHeight),
-                        scrollState = categoriesScrollState,
-                    ) {
-                        state.categories.forEach { category ->
-                            DropdownMenuItem(
-                                text = { Text(category, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                leadingIcon = {
-                                    RadioButton(selected = state.category == category, onClick = null)
-                                },
-                                onClick = {
-                                    categoriesExpanded = false
-                                    onCategory(category)
-                                },
-                            )
-                        }
-                    }
+                        items = state.categories.map { category ->
+                            KixyuPopupMenuItem(
+                                label = category,
+                                icon = KixyuSymbols.Category,
+                                selected = state.category == category,
+                            ) {
+                                categoriesExpanded = false
+                                onCategory(category)
+                            }
+                        },
+                        modifier = Modifier.heightIn(max = KixyuSize.libraryCategoryMenuMaxHeight),
+                        width = categorySelectorWidth,
+                    )
                 }
             }
         }
@@ -1038,9 +1029,6 @@ private fun LibraryBookRow(
                 Checkbox(selected, onCheckedChange = { onSelectionChange() })
             } else Column(horizontalAlignment = Alignment.End) {
                 Box {
-                    IconButton(onClick = { onMenuExpandedChange(true) }) {
-                        Icon(KixyuSymbols.MoreVert, "更多操作", Modifier.size(KixyuSize.icon))
-                    }
                     BookActionPopupMenu(
                         expanded = menuExpanded,
                         onDismissRequest = { onMenuExpandedChange(false) },
