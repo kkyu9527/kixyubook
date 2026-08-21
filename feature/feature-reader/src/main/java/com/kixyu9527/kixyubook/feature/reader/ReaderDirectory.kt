@@ -107,7 +107,11 @@ internal fun DirectorySheet(
     }
     Column(if (expandedLayout) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = KixyuSpacing.large, end = KixyuSpacing.small),
+            Modifier.fillMaxWidth().padding(
+                start = KixyuSpacing.large,
+                top = KixyuSpacing.medium,
+                end = KixyuSpacing.small,
+            ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -284,7 +288,7 @@ internal fun DirectorySheet(
                             ) {
                                 KixyuListRow(
                                     title = volume.title,
-                                    supportingText = "当前目录位置 · ${volume.chapterCount} 章",
+                                    supportingText = "当前卷章节数 · ${volume.chapterCount} 章",
                                     titleStyle = MaterialTheme.typography.bodyMedium,
                                     supportingTextStyle = MaterialTheme.typography.bodySmall,
                                     onClick = {

@@ -24,9 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
-import com.kixyu9527.kixyubook.core.common.model.DEFAULT_GLASS_BLUR_RADIUS
-import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_BLUR_RADIUS
-import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_BLUR_RADIUS
+import com.kixyu9527.kixyubook.core.common.model.DEFAULT_GLASS_FROST_LEVEL
+import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
+import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -84,6 +84,25 @@ private fun darkColors(theme: AppColorTheme) = (seeds[theme] ?: seeds.getValue(A
     )
 }
 
+private fun whiteColors() = lightColorScheme(
+    primary = Color(0xFF3367D6),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFDCE6FF),
+    onPrimaryContainer = Color(0xFF001A41),
+    secondary = Color(0xFF526071),
+    background = Color.White,
+    surface = Color.White,
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFFAFAFA),
+    surfaceContainer = Color(0xFFF5F5F5),
+    surfaceContainerHigh = Color(0xFFEEEEEE),
+    surfaceContainerHighest = Color(0xFFE8E8E8),
+    onSurface = Color(0xFF1B1B1F),
+    onSurfaceVariant = Color(0xFF45464F),
+    outline = Color(0xFF767680),
+    outlineVariant = Color(0xFFC7C7D0),
+)
+
 private val KixyuTypography = Typography(
     displaySmall = TextStyle(
         fontFamily = FontFamily.Serif,
@@ -121,7 +140,7 @@ private val KixyuMiuixShapes = Shapes(
 
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }
 val LocalKixyuGlassEffectEnabled = staticCompositionLocalOf { true }
-val LocalKixyuGlassBlurRadius = staticCompositionLocalOf { DEFAULT_GLASS_BLUR_RADIUS }
+val LocalKixyuGlassFrostLevel = staticCompositionLocalOf { DEFAULT_GLASS_FROST_LEVEL }
 
 /** The opaque window background shared by navigation and page scaffolds. */
 @Composable
@@ -179,7 +198,7 @@ fun KixyuBookTheme(
     colorTheme: AppColorTheme = AppColorTheme.DEFAULT,
     uiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     glassEffectEnabled: Boolean = true,
-    glassBlurRadius: Float = DEFAULT_GLASS_BLUR_RADIUS,
+    glassFrostLevel: Float = DEFAULT_GLASS_FROST_LEVEL,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -192,6 +211,9 @@ fun KixyuBookTheme(
     val colors = when {
         colorTheme == AppColorTheme.DEFAULT -> {
             if (darkTheme) darkColorScheme() else lightColorScheme()
+        }
+        colorTheme == AppColorTheme.WHITE -> {
+            if (darkTheme) darkColorScheme() else whiteColors()
         }
         colorTheme == AppColorTheme.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -206,18 +228,22 @@ fun KixyuBookTheme(
         CompositionLocalProvider(
             LocalAppUiStyle provides uiStyle,
             LocalKixyuGlassEffectEnabled provides glassEffectEnabled,
-            LocalKixyuGlassBlurRadius provides glassBlurRadius.coerceIn(
-                MIN_GLASS_BLUR_RADIUS,
-                MAX_GLASS_BLUR_RADIUS,
+            LocalKixyuGlassFrostLevel provides glassFrostLevel.coerceIn(
+                MIN_GLASS_FROST_LEVEL,
+                MAX_GLASS_FROST_LEVEL,
             ),
         ) {
             if (uiStyle == AppUiStyle.MIUIX) {
                 val miuixMode = when (colorTheme) {
-                    AppColorTheme.DEFAULT -> if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light
+                    AppColorTheme.DEFAULT, AppColorTheme.WHITE -> {
+                        if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light
+                    }
                     else -> if (darkTheme) ColorSchemeMode.MonetDark else ColorSchemeMode.MonetLight
                 }
                 val keyColor = colors.primary.takeIf {
-                    colorTheme != AppColorTheme.DEFAULT && colorTheme != AppColorTheme.DYNAMIC
+                    colorTheme != AppColorTheme.DEFAULT &&
+                        colorTheme != AppColorTheme.WHITE &&
+                        colorTheme != AppColorTheme.DYNAMIC
                 }
                 val controller = remember(miuixMode, keyColor) {
                     ThemeController(colorSchemeMode = miuixMode, keyColor = keyColor)

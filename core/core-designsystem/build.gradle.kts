@@ -13,6 +13,7 @@ android {
 dependencies {
     implementation(project(":core:core-common"))
     implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.miuix.ui.android)

@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.sync
 
 import com.kixyu9527.kixyubook.core.common.model.*
+import org.json.JSONObject
 import org.junit.Test
 import org.junit.Assert.assertEquals
 
@@ -22,7 +23,7 @@ class CloudReaderSettingsJsonTest {
             appColorTheme = AppColorTheme.VIOLET,
             appUiStyle = AppUiStyle.MIUIX,
             glassEffectEnabled = false,
-            glassBlurRadius = 34f,
+            glassFrostLevel = 85f,
             showStatusBar = false,
             hideNavigationBar = false,
             showPageNumber = false,
@@ -61,7 +62,7 @@ class CloudReaderSettingsJsonTest {
 
     @Test
     fun settingsPayloadIncludesEveryConfigurationGroup() {
-        val reader = ReaderSettings(glassBlurRadius = 34f)
+        val reader = ReaderSettings(glassFrostLevel = 85f)
         val library = LibraryPreferences(layoutMode = LibraryLayoutMode.GRID)
         val reminder = ReadingReminderSettings(enabled = true, hour = 7, minute = 35)
 
@@ -77,5 +78,22 @@ class CloudReaderSettingsJsonTest {
         assertEquals(55, payload.getInt("readingGoalMinutes"))
         assertEquals(library, jsonToLibraryPreferences(payload.getJSONObject("library")))
         assertEquals(reminder, jsonToReadingReminder(payload.getJSONObject("readingReminder")))
+    }
+
+    @Test
+    fun legacyBlurRadiusMigratesToFrostPercentage() {
+        val actual = jsonToSettings(JSONObject().put("glassBlurRadius", 20f))
+
+        assertEquals(50f, actual.glassFrostLevel)
+    }
+
+    @Test
+    fun materialWhiteThemeSurvivesCloudRoundTrip() {
+        val expected = ReaderSettings(
+            appUiStyle = AppUiStyle.MATERIAL,
+            appColorTheme = AppColorTheme.WHITE,
+        )
+
+        assertEquals(expected, jsonToSettings(settingsToJson(expected)))
     }
 }

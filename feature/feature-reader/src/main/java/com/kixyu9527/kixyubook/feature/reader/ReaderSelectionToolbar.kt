@@ -2,7 +2,6 @@ package com.kixyu9527.kixyubook.feature.reader
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -52,6 +51,9 @@ import androidx.compose.ui.window.PopupProperties
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
+import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuPredictiveBackState
 import com.kixyu9527.kixyubook.core.reader.engine.LocalReaderSelectionResetVersion
 import kotlinx.coroutines.CompletableDeferred
 
@@ -64,6 +66,7 @@ internal fun ReaderSelectionToolbar(
 ) {
     val currentCorrectionAction by rememberUpdatedState(onCorrectParagraph)
     val provider = remember { ReaderTextContextMenuProvider() }
+    val predictiveBackState = rememberKixyuPredictiveBackState<Unit>()
     var layoutCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var selectionResetVersion by remember { mutableIntStateOf(0) }
     val dismissSelection = {
@@ -78,10 +81,6 @@ internal fun ReaderSelectionToolbar(
     LaunchedEffect(dismissKey) {
         dismissSelection()
     }
-    BackHandler(enabled = provider.isVisible) {
-        dismissSelection()
-    }
-
     CompositionLocalProvider(
         LocalTextContextMenuToolbarProvider provides provider,
         LocalTextContextMenuDropdownProvider provides provider,
@@ -124,10 +123,16 @@ internal fun ReaderSelectionToolbar(
                 provider.Menu(
                     coordinates = coordinates,
                     onDismiss = dismissSelection,
+                    backProgress = predictiveBackState.progress,
                 )
             }
         }
     }
+    KixyuPredictiveBackHandler(
+        target = Unit.takeIf { provider.isVisible },
+        state = predictiveBackState,
+        onBack = { dismissSelection() },
+    )
 }
 
 private class ReaderTextContextMenuProvider : TextContextMenuProvider {
@@ -150,6 +155,7 @@ private class ReaderTextContextMenuProvider : TextContextMenuProvider {
     fun Menu(
         coordinates: LayoutCoordinates,
         onDismiss: () -> Unit,
+        backProgress: Float,
     ) {
         val currentRequest = request ?: return
         if (!coordinates.isAttached) return
@@ -176,6 +182,7 @@ private class ReaderTextContextMenuProvider : TextContextMenuProvider {
                 data = data,
                 session = currentRequest,
                 onDismiss = onDismiss,
+                backProgress = backProgress,
             )
         }
     }
@@ -205,12 +212,15 @@ private fun ReaderTextSelectionMenu(
     data: TextContextMenuData,
     session: TextContextMenuSession,
     onDismiss: () -> Unit,
+    backProgress: Float,
 ) {
     val actions = data.components.filterIsInstance<TextContextMenuItem>()
     if (actions.isEmpty()) return
 
     KixyuPopupSurface(
+        modifier = Modifier.kixyuPredictivePopupTransform(backProgress),
         shadowElevation = KixyuSpacing.extraSmall,
+        windowBlurred = true,
     ) {
         Row(Modifier.padding(KixyuSpacing.extraSmall)) {
             actions.forEach { action ->

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
 import top.yukonga.miuix.kmp.basic.BasicComponent as MiuixBasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults as MiuixBasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
@@ -94,6 +96,8 @@ object KixyuSize {
     val rowMinHeight = 52.dp
     val contextMenuItemHeight = 44.dp
     val contextMenuWidth = 144.dp
+    val popupMenuMinWidth = 196.dp
+    val popupMenuMaxWidth = 320.dp
     val colorSwatch = 24.dp
     val accountAvatar = 56.dp
     val progressHeight = 4.dp
@@ -114,8 +118,11 @@ object KixyuSize {
     val bottomNavigationIndicatorHeight = 56.dp
     val bottomNavigationInnerPadding = 4.dp
     val bottomNavigationBottomGap = 12.dp
+    val floatingSurfaceBottomGap = 24.dp
     val navigationContainerCornerRadius = 32.dp
     val bottomNavigationContentHeight = 76.dp
+    val bottomNavigationDefaultWidth = bottomNavigationItemWidth * 3 + bottomNavigationInnerPadding * 2
+    val transientPopupMaxWidth = 560.dp
     val navigationRailWidth = 72.dp
     val navigationRailItemHeight = 64.dp
     val navigationRailLabeledItemHeight = 76.dp
@@ -126,6 +133,7 @@ object KixyuSize {
     val readerSpreadGutter = 20.dp
     val sheetContentMaxWidth = 720.dp
     val adaptiveDialogMaxWidth = 680.dp
+    val actionDialogMaxWidth = 600.dp
     val adaptiveDialogMaxHeight = 640.dp
     val readerControlInset = 12.dp
     val readerTopControlInset = 0.dp
@@ -680,7 +688,9 @@ fun <T> KixyuDropdownRow(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
 ) {
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+    val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
+    val glassEnabled = LocalKixyuGlassEffectEnabled.current
+    if (isMiuix && !glassEnabled) {
         val labels = options.map(optionLabel)
         val selectedIndex = options.indexOf(selected).coerceAtLeast(0)
         WindowDropdownPreference(
@@ -722,17 +732,37 @@ fun <T> KixyuDropdownRow(
                 )
                 Icon(KixyuSymbols.ArrowDropDown, null, Modifier.size(KixyuSize.icon))
             }
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                modifier = Modifier.align(Alignment.TopEnd),
-            ) {
-                options.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(optionLabel(option), maxLines = 1) },
-                        onClick = { expanded = false; onSelected(option) },
-                        leadingIcon = { RadioButton(selected = selected == option, onClick = null) },
-                    )
+            if (glassEnabled) {
+                KixyuGlassDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                        .widthIn(
+                            min = KixyuSize.popupMenuMinWidth,
+                            max = KixyuSize.popupMenuMaxWidth,
+                        ),
+                ) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(optionLabel(option), maxLines = 1) },
+                            onClick = { expanded = false; onSelected(option) },
+                            leadingIcon = { RadioButton(selected = selected == option, onClick = null) },
+                        )
+                    }
+                }
+            } else {
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.align(Alignment.TopEnd),
+                ) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(optionLabel(option), maxLines = 1) },
+                            onClick = { expanded = false; onSelected(option) },
+                            leadingIcon = { RadioButton(selected = selected == option, onClick = null) },
+                        )
+                    }
                 }
             }
         }

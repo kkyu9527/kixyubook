@@ -90,6 +90,12 @@ internal fun ReaderScreen(
     var searchVisible by remember { mutableStateOf(false) }
     var bookInfoVisible by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
+    val returnFromSettingsSheet: () -> Unit = {
+        sheet = null
+        controls = true
+        menu = true
+        toolsMenu = false
+    }
     val predictiveBackState = rememberReaderPredictiveBackState()
     val controlsBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.CONTROLS)
     val popupBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.POPUP_MENU)
@@ -307,7 +313,13 @@ internal fun ReaderScreen(
         onBack = { target ->
             when (target) {
                 ReaderPredictiveBackTarget.BOOK_INFO -> bookInfoVisible = false
-                ReaderPredictiveBackTarget.SHEET -> sheet = null
+                ReaderPredictiveBackTarget.SHEET -> {
+                    if (sheet in READER_SETTINGS_SHEETS) {
+                        returnFromSettingsSheet()
+                    } else {
+                        sheet = null
+                    }
+                }
                 ReaderPredictiveBackTarget.SEARCH -> {
                     searchVisible = false
                     clearSearch()
@@ -318,7 +330,6 @@ internal fun ReaderScreen(
                 }
                 ReaderPredictiveBackTarget.CONTROLS -> controls = false
                 ReaderPredictiveBackTarget.SEARCH_RESULTS -> clearSearch()
-                ReaderPredictiveBackTarget.ROUTE -> Unit
             }
         },
     )
@@ -593,15 +604,19 @@ internal fun ReaderScreen(
         ReaderFloatingSheet(
             show = sheet != null && !(directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY),
             progress = sheetBackProgress,
-            onDismissRequest = { sheet = null },
+            onDismissRequest = {
+                if (sheet in READER_SETTINGS_SHEETS) {
+                    returnFromSettingsSheet()
+                } else {
+                    sheet = null
+                }
+            },
             backdrop = readerBackdrop,
-            backgroundColor = palette.background,
             maxContentWidth = if (activeSheet == ReaderSheet.DIRECTORY) {
                 com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize.sheetContentMaxWidth
             } else {
                 com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize.readerSettingsSheetMaxWidth
             },
-            opaqueGlass = activeSheet == ReaderSheet.DIRECTORY,
         ) {
             when (activeSheet) {
                 ReaderSheet.DIRECTORY -> DirectorySheet(
@@ -626,16 +641,19 @@ internal fun ReaderScreen(
                     state.settings,
                     updateSettings,
                     previewBrightness = { brightnessPreview = it },
+                    onBack = returnFromSettingsSheet,
                 )
                 ReaderSheet.LAYOUT -> LayoutSheet(
                     state,
                     updateSettings,
                     addFont,
                     deleteFont,
+                    onBack = returnFromSettingsSheet,
                 )
                 ReaderSheet.INFORMATION -> ReaderInformationSheet(
                     state.settings,
                     updateSettings,
+                    onBack = returnFromSettingsSheet,
                 )
                 null -> Unit
             }
@@ -678,7 +696,6 @@ internal fun ReaderScreen(
                                 )
                                 alpha = 1f - sheetBackProgress * .35f
                             },
-                        glassTintColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .92f),
                         fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         DirectorySheet(
@@ -709,9 +726,14 @@ internal fun ReaderScreen(
             book = state.book,
             progress = bookInfoBackProgress,
             backdrop = readerBackdrop,
-            backgroundColor = palette.background,
             dismiss = { bookInfoVisible = false },
         )
         }
     }
 }
+
+private val READER_SETTINGS_SHEETS = setOf(
+    ReaderSheet.THEME,
+    ReaderSheet.LAYOUT,
+    ReaderSheet.INFORMATION,
+)

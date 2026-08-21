@@ -25,18 +25,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -115,9 +111,12 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
+import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuPredictiveBackState
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import com.kixyu9527.kixyubook.core.ui.LibraryEmptyState
 import sh.calvin.reorderable.ReorderableItem
@@ -365,10 +364,7 @@ private fun LibraryScreen(
         snackbarHost = {
             KixyuSnackbarHost(
                 hostState = snackbar,
-                modifier = Modifier
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(bottom = navigationContentPadding + KixyuSpacing.small)
-                    .padding(horizontal = KixyuSpacing.screenHorizontal),
+                modifier = Modifier.padding(horizontal = KixyuSpacing.screenHorizontal),
             )
         },
     ) { innerPadding ->
@@ -1185,6 +1181,7 @@ private fun BookActionPopupMenu(
     onDelete: () -> Unit,
 ) {
     if (!expanded) return
+    val predictiveBackState = rememberKixyuPredictiveBackState<Unit>()
     Popup(
         alignment = Alignment.TopEnd,
         onDismissRequest = onDismissRequest,
@@ -1195,9 +1192,9 @@ private fun BookActionPopupMenu(
         ),
     ) {
         KixyuPopupSurface(
-            modifier = Modifier.width(KixyuSize.contextMenuWidth),
-            shape = MaterialTheme.shapes.large,
-            shadowElevation = KixyuSpacing.medium,
+            modifier = Modifier.width(KixyuSize.contextMenuWidth)
+                .kixyuPredictivePopupTransform(predictiveBackState.progress),
+            windowBlurred = true,
         ) {
             Column(Modifier.padding(vertical = 2.dp)) {
                 BookActionPopupMenuItem("管理", KixyuSymbols.Edit, onManage)
@@ -1207,6 +1204,11 @@ private fun BookActionPopupMenu(
             }
         }
     }
+    KixyuPredictiveBackHandler(
+        target = Unit,
+        state = predictiveBackState,
+        onBack = { onDismissRequest() },
+    )
 }
 
 @Composable

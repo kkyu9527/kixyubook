@@ -35,11 +35,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,23 +50,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.platform.LocalLayoutDirection
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
-import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassBlurRadius
-import top.yukonga.miuix.kmp.blur.BackdropEffectScope
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassFrostLevel
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.colorControls
 import top.yukonga.miuix.kmp.blur.drawBackdrop
-import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
-import top.yukonga.miuix.kmp.blur.highlight.Highlight
-import top.yukonga.miuix.kmp.blur.highlight.LightPosition
-import top.yukonga.miuix.kmp.blur.highlight.LightSource
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.blur.sensor.rememberDeviceTilt
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlin.math.roundToInt
 
 /** Keeps the MIUIX backdrop type out of app and feature module APIs. */
@@ -113,8 +100,10 @@ internal fun KixyuFloatingNavigationBar(
     val accentColor = MaterialTheme.colorScheme.primary.copy(alpha = 1f)
     val unselectedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 1f)
     val isDark = surfaceContainer.luminance() < 0.5f
-    val glassAvailable = LocalKixyuGlassEffectEnabled.current && remember { isRuntimeShaderSupported() }
-    val glassBlurRadius = LocalKixyuGlassBlurRadius.current
+    val glassEnabled = LocalKixyuGlassEffectEnabled.current
+    val glassAvailable = glassEnabled && remember { isRuntimeShaderSupported() }
+    val frostLevel = LocalKixyuGlassFrostLevel.current
+    val frostFraction = frostLevel.kixyuFrostFraction()
     val shape = CircleShape
     val itemKeys = remember(items) { items.map(KixyuNavigationItem::route) }
     var currentIndex by remember(itemKeys) { mutableIntStateOf(selectedIndex) }
@@ -155,19 +144,6 @@ internal fun KixyuFloatingNavigationBar(
     } else {
         currentIndex
     }
-    val containerColor = if (glassAvailable) {
-        surfaceContainer.copy(alpha = 0.4f).kixyuFrostedGlassTint()
-    } else {
-        surfaceContainer
-    }
-    val baseHighlight = rememberGravityRotatedHighlight(
-        base = iosIndicatorSpecular,
-        extraDegrees = -45f,
-    )
-    val indicatorHighlight = rememberGravityRotatedHighlight(
-        base = iosIndicatorSpecular,
-        extraDegrees = 90f,
-    )
     val navigationSurfaceBackdrop = rememberLayerBackdrop()
     val selectedIndicatorBackdrop = rememberKixyuCombinedBackdrop(
         page = backdrop.value,
@@ -180,36 +156,17 @@ internal fun KixyuFloatingNavigationBar(
                 KixyuSize.bottomNavigationItemWidth * items.size +
                     KixyuSize.bottomNavigationInnerPadding * 2,
             )
-            .height(KixyuSize.bottomNavigationBarHeight)
-            .dropShadow(
-                shape = shape,
-                shadow = Shadow(
-                    radius = 10.dp,
-                    color = Color.Black,
-                    alpha = if (isDark) 0.2f else 0.1f,
-                ),
-            ),
+            .height(KixyuSize.bottomNavigationBarHeight),
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    if (glassAvailable) {
-                        Modifier
-                            .layerBackdrop(navigationSurfaceBackdrop)
-                            .drawBackdrop(
-                                backdrop = backdrop.value,
-                                shape = { shape },
-                                effects = {
-                                    kixyuFrostedGlassEffects(glassBlurRadius)
-                                },
-                                highlight = { baseHighlight.copy(alpha = 0.75f) },
-                                onDrawSurface = { drawRect(containerColor) },
-                            )
-                    } else {
-                        Modifier.background(containerColor, shape)
-                    },
+                .kixyuGlassSurfaceModifier(
+                    backdrop = backdrop,
+                    shape = shape,
+                    fallbackContainerColor = surfaceContainer,
+                    surfaceBackdrop = navigationSurfaceBackdrop,
                 ),
         )
 
@@ -229,25 +186,28 @@ internal fun KixyuFloatingNavigationBar(
                             backdrop = selectedIndicatorBackdrop,
                             shape = { shape },
                             effects = {
-                                kixyuFrostedGlassEffects(glassBlurRadius)
-                                kixyuLens(
-                                    refractionHeight = 10.dp.toPx() * pressProgress,
-                                    refractionAmount = 14.dp.toPx() * pressProgress,
-                                    depthEffect = true,
-                                    chromaticAberration = 0.5f,
+                                kixyuFrostedGlassEffects(frostLevel)
+                                if (frostFraction > 0f) {
+                                    kixyuLens(
+                                        refractionHeight = 10.dp.toPx() * pressProgress,
+                                        refractionAmount = 14.dp.toPx() * pressProgress,
+                                        depthEffect = true,
+                                        chromaticAberration = 0.5f,
+                                    )
+                                }
+                            },
+                            highlight = {
+                                kixyuFrostedGlassHighlight(
+                                    frostLevel = frostLevel,
+                                    alphaMultiplier = pressProgress,
                                 )
                             },
-                            highlight = { indicatorHighlight.copy(alpha = pressProgress) },
                             onDrawSurface = {
-                                drawRect(
-                                    color = if (isDark) {
-                                        Color.White.copy(alpha = 0.14f)
-                                    } else {
-                                        Color.White.copy(alpha = 0.22f)
-                                    },
-                                    alpha = 1f - pressProgress * .35f,
+                                drawKixyuGlassIndicatorVeil(
+                                    isDark = isDark,
+                                    frostFraction = frostFraction,
+                                    pressProgress = pressProgress,
                                 )
-                                drawRect(Color.Black.copy(alpha = 0.03f * pressProgress))
                             },
                         )
                     } else {
@@ -367,69 +327,4 @@ internal fun updateNavigationDragPosition(
 internal fun navigationDragTargetIndex(position: Float, itemCount: Int): Int {
     if (itemCount <= 0) return 0
     return position.roundToInt().coerceIn(0, itemCount - 1)
-}
-
-private fun BackdropEffectScope.vibrancy() {
-    colorControls(
-        brightness = 0f,
-        contrast = 1f,
-        saturation = 1.5f,
-    )
-}
-
-private val iosIndicatorSpecular = Highlight(
-    width = 1.dp,
-    alpha = 1f,
-    style = BloomStroke(
-        color = Color.White.copy(alpha = 0.12f),
-        innerBlurRadius = 2.dp,
-        primaryLight = LightSource(
-            position = LightPosition(0.5f, -0.3f, -0.05f),
-            color = Color.White,
-            intensity = 1f,
-        ),
-        secondaryLight = LightSource(
-            position = LightPosition(0.5f, 0.8f, -0.5f),
-            color = Color.White,
-            intensity = 0.4f,
-        ),
-        dualPeak = true,
-    ),
-)
-
-private const val LIGHT_REF_X = 0.5f
-private const val LIGHT_REF_Y = 0.7f
-private const val GRAVITY_DIR_THRESHOLD_SQ = 0.01f
-
-@Composable
-private fun rememberGravityRotatedHighlight(
-    base: Highlight,
-    extraDegrees: Float,
-): Highlight {
-    val baseStyle = base.style as BloomStroke
-    val tilt by rememberDeviceTilt()
-    val rotatedPrimary = remember(tilt, baseStyle.primaryLight, extraDegrees) {
-        val gravityX = tilt.gravityX
-        val gravityY = tilt.gravityY
-        val gravityMagnitudeSquared = gravityX * gravityX + gravityY * gravityY
-        val (lightX, lightY) = if (gravityMagnitudeSquared > GRAVITY_DIR_THRESHOLD_SQ) {
-            val inverseMagnitude = 1f / sqrt(gravityMagnitudeSquared)
-            gravityX * inverseMagnitude to gravityY * inverseMagnitude
-        } else {
-            0f to -1f
-        }
-        val radians = extraDegrees * PI / 180.0
-        val cosine = cos(radians).toFloat()
-        val sine = sin(radians).toFloat()
-        baseStyle.primaryLight.copy(
-            position = LightPosition(
-                x = LIGHT_REF_X + cosine * lightX - sine * lightY,
-                y = LIGHT_REF_Y + sine * lightX + cosine * lightY,
-                z = baseStyle.primaryLight.position.z,
-            ),
-        )
-    }
-    return remember(base, rotatedPrimary) {
-        base.copy(style = baseStyle.copy(primaryLight = rotatedPrimary))
-    }
 }

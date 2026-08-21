@@ -165,12 +165,16 @@ enum class ReaderTheme { SYSTEM, DAY, NIGHT }
 enum class PageMode { SCROLL, PAGED }
 enum class PageTurnAnimation { HORIZONTAL_SLIDE, COVER }
 enum class ReaderBrightnessMode { SYSTEM, MANUAL }
-enum class AppColorTheme { DEFAULT, DYNAMIC, SAGE, OCEAN, VIOLET, AMBER }
+enum class AppColorTheme { DEFAULT, WHITE, DYNAMIC, SAGE, OCEAN, VIOLET, AMBER }
 enum class AppUiStyle { MATERIAL, MIUIX }
 
-const val DEFAULT_GLASS_BLUR_RADIUS = 22f
-const val MIN_GLASS_BLUR_RADIUS = 4f
-const val MAX_GLASS_BLUR_RADIUS = 40f
+const val DEFAULT_GLASS_FROST_LEVEL = 55f
+const val MIN_GLASS_FROST_LEVEL = 0f
+const val MAX_GLASS_FROST_LEVEL = 100f
+
+/** Converts the pre-2.8 blur-radius preference into the user-facing frosted percentage. */
+fun legacyGlassBlurRadiusToFrostLevel(radius: Float): Float =
+    (radius / 40f * 100f).coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
 
 data class CustomReaderTheme(
     val backgroundHex: String = "#F7F4EC",
@@ -199,7 +203,7 @@ data class ReaderSettings(
     val appColorTheme: AppColorTheme = AppColorTheme.DEFAULT,
     val appUiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     val glassEffectEnabled: Boolean = true,
-    val glassBlurRadius: Float = DEFAULT_GLASS_BLUR_RADIUS,
+    val glassFrostLevel: Float = DEFAULT_GLASS_FROST_LEVEL,
     val showStatusBar: Boolean = true,
     val hideNavigationBar: Boolean = true,
     val showPageNumber: Boolean = true,

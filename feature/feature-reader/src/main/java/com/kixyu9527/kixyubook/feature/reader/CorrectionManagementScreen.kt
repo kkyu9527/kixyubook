@@ -92,11 +92,8 @@ fun CorrectionManagementRoute(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<TextCorrection?>(null) }
-    ReaderPredictiveBackHandler(
-        target = ReaderPredictiveBackTarget.ROUTE,
-        state = rememberReaderPredictiveBackState(),
-        onBack = { onBack() },
-    )
+    // System Back belongs to NavHost here so the previous reader destination participates in the
+    // platform predictive preview. The explicit callback remains only for the toolbar button.
     Scaffold(
         topBar = {
             TopAppBar(

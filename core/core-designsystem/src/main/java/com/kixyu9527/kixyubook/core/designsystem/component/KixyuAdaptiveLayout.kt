@@ -158,7 +158,6 @@ fun KixyuNavigationRail(
             backdrop = backdrop,
             modifier = Modifier.width(KixyuSize.navigationRailWidth),
             shape = CircleShape,
-            glassTintColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = .4f),
             fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {
             Column(Modifier.padding(KixyuSize.bottomNavigationInnerPadding)) {

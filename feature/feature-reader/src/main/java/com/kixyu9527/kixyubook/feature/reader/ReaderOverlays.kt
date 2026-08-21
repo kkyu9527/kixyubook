@@ -50,6 +50,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.reader.engine.*
 
 
@@ -59,9 +60,7 @@ internal fun ReaderFloatingSheet(
     progress: Float,
     onDismissRequest: () -> Unit,
     backdrop: KixyuNavigationBackdrop,
-    backgroundColor: Color,
     maxContentWidth: Dp,
-    opaqueGlass: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     AnimatedVisibility(
@@ -84,7 +83,7 @@ internal fun ReaderFloatingSheet(
                         PaddingValues(
                             start = KixyuSpacing.medium,
                             end = KixyuSpacing.medium,
-                            bottom = KixyuSpacing.medium,
+                            bottom = KixyuSize.floatingSurfaceBottomGap,
                         ),
                     )
                     .animateEnterExit(
@@ -93,7 +92,7 @@ internal fun ReaderFloatingSheet(
                         exit = slideOutVertically(tween(KixyuMotion.ReaderPopupExitMillis)) { it / 3 } +
                             fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
                     )
-                    .predictivePopupTransform(progress),
+                    .kixyuPredictivePopupTransform(progress),
             ) {
                 KixyuGlassSurface(
                     backdrop = backdrop,
@@ -105,11 +104,6 @@ internal fun ReaderFloatingSheet(
                                 while (true) awaitPointerEvent()
                             }
                         },
-                    glassTintColor = if (opaqueGlass) {
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .92f)
-                    } else {
-                        backgroundColor.copy(alpha = .42f)
-                    },
                     fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 ) {
                     // The scroll/content owner reaches the clipped surface bounds. Individual
@@ -186,7 +180,7 @@ internal fun ReaderSearchOverlay(
                     .widthIn(max = KixyuSize.readerSearchPanelMaxWidth)
                     .heightIn(max = KixyuSize.readerSearchPanelMaxHeight)
                     .animateContentSize(tween(KixyuMotion.ReaderSearchEnterMillis))
-                    .predictivePopupTransform(progress),
+                    .kixyuPredictivePopupTransform(progress),
                 shadowElevation = 0.dp,
             ) {
                 Column(
@@ -298,6 +292,7 @@ internal fun ReaderSearchOverlay(
     settings: ReaderSettings,
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
     previewBrightness: (Float?) -> Unit,
+    onBack: () -> Unit,
 ) {
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
@@ -307,7 +302,7 @@ internal fun ReaderSearchOverlay(
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("显示与亮度", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { ReaderSettingsSheetHeader("显示与亮度", onBack) }
         item {
             KixyuSection(title = "显示与配色") {
                 KixyuReaderThemeControls(settings, { updated -> update { updated } }, modeTitle = "显示模式")
@@ -331,6 +326,7 @@ internal fun LayoutSheet(
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
     addFont: () -> Unit,
     deleteFont: (UserFont) -> Unit,
+    onBack: () -> Unit,
 ) {
     val settings = state.settings
     androidx.compose.foundation.lazy.LazyColumn(
@@ -341,7 +337,7 @@ internal fun LayoutSheet(
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("排版与翻页", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { ReaderSettingsSheetHeader("排版与翻页", onBack) }
         item {
             KixyuSection(title = "排版与翻页") {
                 KixyuFontControls(
@@ -362,6 +358,7 @@ internal fun LayoutSheet(
 internal fun ReaderInformationSheet(
     settings: ReaderSettings,
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
+    onBack: () -> Unit,
 ) {
     androidx.compose.foundation.lazy.LazyColumn(
         Modifier.fillMaxWidth(),
@@ -371,7 +368,7 @@ internal fun ReaderInformationSheet(
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { Text("阅读控制", style = MaterialTheme.typography.titleLarge, maxLines = 1) }
+        item { ReaderSettingsSheetHeader("阅读控制", onBack) }
         item {
             KixyuSection(title = "翻页控制") {
                 KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
@@ -385,13 +382,30 @@ internal fun ReaderInformationSheet(
     }
 }
 
+@Composable
+private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        KixyuIconButton(onClick = onBack) {
+            Icon(KixyuSymbols.ArrowBack, "返回阅读设置")
+        }
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+        )
+    }
+}
+
 
 @Composable internal fun BookInfoDialog(
     show: Boolean,
     book: Book?,
     progress: Float,
     backdrop: KixyuNavigationBackdrop,
-    backgroundColor: Color,
     dismiss: () -> Unit,
 ) {
     val current = book ?: return
@@ -418,13 +432,12 @@ internal fun ReaderInformationSheet(
                 modifier = Modifier.widthIn(max = 480.dp)
                     .fillMaxWidth()
                     .height(dialogHeight)
-                    .predictivePopupTransform(progress)
+                    .kixyuPredictivePopupTransform(progress)
                     .pointerInput(Unit) {
                         awaitPointerEventScope {
                             while (true) awaitPointerEvent()
                         }
                     },
-                glassTintColor = backgroundColor.copy(alpha = .78f),
                 fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             ) {
                 Column(
@@ -537,5 +550,4 @@ internal const val CHAPTER_LOADING_INDICATOR_DELAY_MILLIS = 180L
 internal const val READER_OVERLAY_SETTLE_MILLIS = 320L
 internal const val SYSTEM_BAR_GESTURE_HIDE_MILLIS = 2_000L
 internal const val READER_CONTROL_FALLBACK_ACCENT_MIX = .1f
-internal const val READER_GLASS_TINT_ALPHA = .4f
 internal const val MIN_ICON_CONTRAST = 3f

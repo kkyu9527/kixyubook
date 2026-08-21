@@ -31,7 +31,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             theme = storedTheme?.let { runCatching { ReaderTheme.valueOf(it) }.getOrNull() } ?: ReaderTheme.SYSTEM,
             pageMode = values[PAGE_MODE]?.let { runCatching { PageMode.valueOf(it) }.getOrNull() } ?: PageMode.SCROLL,
             pageTurnAnimation = values[PAGE_TURN_ANIMATION]
-                ?.let { runCatching { PageTurnAnimation.valueOf(it) }.getOrNull() }
+                ?.let(PageTurnAnimation::valueOf)
                 ?: PageTurnAnimation.HORIZONTAL_SLIDE,
             customThemeEnabled = values[CUSTOM_THEME_ENABLED] ?: (storedTheme == "CUSTOM"),
             customDayTheme = CustomReaderTheme(
@@ -52,8 +52,11 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             appUiStyle = values[APP_UI_STYLE]?.let { runCatching { AppUiStyle.valueOf(it) }.getOrNull() }
                 ?: AppUiStyle.MATERIAL,
             glassEffectEnabled = values[GLASS_EFFECT_ENABLED] ?: true,
-            glassBlurRadius = (values[GLASS_BLUR_RADIUS] ?: DEFAULT_GLASS_BLUR_RADIUS)
-                .coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS),
+            glassFrostLevel = (
+                values[GLASS_FROST_LEVEL]
+                    ?: values[GLASS_BLUR_RADIUS]?.let(::legacyGlassBlurRadiusToFrostLevel)
+                    ?: DEFAULT_GLASS_FROST_LEVEL
+                ).coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL),
             showStatusBar = values[SHOW_STATUS_BAR] ?: true,
             hideNavigationBar = values[HIDE_NAVIGATION_BAR] ?: true,
             showPageNumber = values[SHOW_PAGE_NUMBER] ?: true,
@@ -90,8 +93,9 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[APP_COLOR_THEME] = updated.appColorTheme.name
             values[APP_UI_STYLE] = updated.appUiStyle.name
             values[GLASS_EFFECT_ENABLED] = updated.glassEffectEnabled
-            values[GLASS_BLUR_RADIUS] = updated.glassBlurRadius
-                .coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS)
+            values[GLASS_FROST_LEVEL] = updated.glassFrostLevel
+                .coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
+            values.remove(GLASS_BLUR_RADIUS)
             values[SHOW_STATUS_BAR] = updated.showStatusBar
             values[HIDE_NAVIGATION_BAR] = updated.hideNavigationBar
             values[SHOW_PAGE_NUMBER] = updated.showPageNumber
@@ -129,6 +133,8 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val APP_COLOR_THEME = stringPreferencesKey("app_color_theme")
         val APP_UI_STYLE = stringPreferencesKey("app_ui_style")
         val GLASS_EFFECT_ENABLED = booleanPreferencesKey("glass_effect_enabled")
+        val GLASS_FROST_LEVEL = floatPreferencesKey("glass_frost_level")
+        /** Legacy dp-based value, read once and removed on the next settings write. */
         val GLASS_BLUR_RADIUS = floatPreferencesKey("glass_blur_radius")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
         val HIDE_NAVIGATION_BAR = booleanPreferencesKey("hide_navigation_bar")

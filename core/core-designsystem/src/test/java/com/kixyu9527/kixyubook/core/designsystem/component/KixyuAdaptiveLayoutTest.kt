@@ -14,7 +14,23 @@ class KixyuAdaptiveLayoutTest {
         assertEquals(56.dp, KixyuSize.bottomNavigationIndicatorHeight)
         assertEquals(4.dp, KixyuSize.bottomNavigationInnerPadding)
         assertEquals(12.dp, KixyuSize.bottomNavigationBottomGap)
+        assertEquals(24.dp, KixyuSize.floatingSurfaceBottomGap)
         assertEquals(32.dp, KixyuSize.navigationContainerCornerRadius)
+        assertEquals(236.dp, KixyuSize.bottomNavigationDefaultWidth)
+    }
+
+    @Test
+    fun simulatedPopupFrostKeepsExactEndpointsAndCompensatesMidrange() {
+        assertEquals(0f, 0f.kixyuSimulatedFrostFraction(), 0f)
+        assertEquals(1f, 100f.kixyuSimulatedFrostFraction(), 0f)
+        assertTrue(55f.kixyuSimulatedFrostFraction() > .75f)
+    }
+
+    @Test
+    fun popupFrostUsesTheSharedLinearVeilWhenItsWindowCanBlur() {
+        assertEquals(0f, 0f.kixyuPopupFrostFraction(windowBlurred = true), 0f)
+        assertEquals(.55f, 55f.kixyuPopupFrostFraction(windowBlurred = true), 0f)
+        assertEquals(1f, 100f.kixyuPopupFrostFraction(windowBlurred = true), 0f)
     }
 
     @Test

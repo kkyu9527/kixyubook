@@ -65,7 +65,7 @@ internal fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("customNightTheme", customThemeJson(value.customNightTheme)).put("fontUuid", value.fontUuid)
     .put("appColorTheme", value.appColorTheme.name).put("appUiStyle", value.appUiStyle.name)
     .put("glassEffectEnabled", value.glassEffectEnabled)
-    .put("glassBlurRadius", value.glassBlurRadius)
+    .put("glassFrostLevel", value.glassFrostLevel)
     .put("showStatusBar", value.showStatusBar).put("hideNavigationBar", value.hideNavigationBar)
     .put("showPageNumber", value.showPageNumber)
     .put("volumeKeyPageTurn", value.volumeKeyPageTurn).put("keepScreenOn", value.keepScreenOn)
@@ -82,7 +82,10 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     margin = value.optDouble("margin", 24.0).toFloat(),
     theme = enumValue(value, "theme", ReaderTheme.SYSTEM),
     pageMode = enumValue(value, "pageMode", PageMode.SCROLL),
-    pageTurnAnimation = enumValue(value, "pageTurnAnimation", PageTurnAnimation.HORIZONTAL_SLIDE),
+    pageTurnAnimation = value.optString("pageTurnAnimation")
+        .takeIf(String::isNotBlank)
+        ?.let(PageTurnAnimation::valueOf)
+        ?: PageTurnAnimation.HORIZONTAL_SLIDE,
     customThemeEnabled = value.optBoolean("customThemeEnabled"),
     customDayTheme = jsonToCustomTheme(value.optJSONObject("customDayTheme"), CustomReaderTheme()),
     customNightTheme = jsonToCustomTheme(value.optJSONObject("customNightTheme"), ReaderSettings().customNightTheme),
@@ -90,8 +93,11 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     appColorTheme = enumValue(value, "appColorTheme", AppColorTheme.DEFAULT),
     appUiStyle = enumValue(value, "appUiStyle", AppUiStyle.MATERIAL),
     glassEffectEnabled = value.optBoolean("glassEffectEnabled", true),
-    glassBlurRadius = value.optDouble("glassBlurRadius", DEFAULT_GLASS_BLUR_RADIUS.toDouble())
-        .toFloat().coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS),
+    glassFrostLevel = if (value.has("glassFrostLevel")) {
+        value.optDouble("glassFrostLevel", DEFAULT_GLASS_FROST_LEVEL.toDouble()).toFloat()
+    } else {
+        legacyGlassBlurRadiusToFrostLevel(value.optDouble("glassBlurRadius", 22.0).toFloat())
+    }.coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL),
     showStatusBar = value.optBoolean("showStatusBar", true),
     hideNavigationBar = value.optBoolean("hideNavigationBar", true),
     showPageNumber = value.optBoolean("showPageNumber", true),

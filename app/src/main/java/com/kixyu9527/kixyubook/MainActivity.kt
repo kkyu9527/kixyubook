@@ -9,7 +9,6 @@ import android.net.Uri
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -21,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -51,7 +51,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBar
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationRail
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAdaptiveModal
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationItem
@@ -67,6 +67,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
+import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuPredictiveBackState
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageEnterTransition
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageExitTransition
@@ -300,7 +301,7 @@ class MainActivity : ComponentActivity() {
             colorTheme = settings.appColorTheme,
             uiStyle = renderedUiStyle,
             glassEffectEnabled = settings.glassEffectEnabled,
-            glassBlurRadius = settings.glassBlurRadius,
+            glassFrostLevel = settings.glassFrostLevel,
         ) {
             val appBackground = kixyuPageBackground()
             val availableUpdate = updateState as? AppUpdateState.Available
@@ -476,9 +477,14 @@ private fun KixyuNavHost(
         }
     }
     val topLevelActive = route == null || route == Routes.HOME
+    val topLevelBackState = rememberKixyuPredictiveBackState<Unit>()
     // Home, Library and Settings are sibling pages inside the single HOME destination. At that
     // level Back exits the task; it must never pop an accidentally restored detail/reader entry.
-    BackHandler(enabled = topLevelActive, onBack = onExitApp)
+    KixyuPredictiveBackHandler(
+        target = Unit.takeIf { topLevelActive },
+        state = topLevelBackState,
+        onBack = { onExitApp() },
+    )
     val prioritizeAnimation: () -> Unit = {
         onAnimationPriorityChanged(true)
         animationPriorityJob?.cancel()
@@ -558,13 +564,14 @@ private fun KixyuNavHost(
     val navigationBackdrop = rememberKixyuNavigationBackdrop(navBackground)
     CompositionLocalProvider(
         LocalKixyuGlassBackdrop provides navigationBackdrop,
-        LocalKixyuNavigationContentPadding provides if (useNavigationRail) {
-            0.dp
-        } else {
-            KixyuSize.bottomNavigationContentHeight
-        },
+        LocalKixyuNavigationContentPadding provides KixyuSize.bottomNavigationContentHeight,
     ) {
-        Box(Modifier.fillMaxSize().background(navBackground)) {
+        // Keep task content opaque while Android owns the app-to-home predictive animation.
+        // A popup fade here exposes the Activity window background before finish() completes.
+        Box(
+            Modifier.fillMaxSize()
+                .background(navBackground),
+        ) {
             NavHost(
                 navController,
                 Routes.HOME,
@@ -588,13 +595,7 @@ private fun KixyuNavHost(
                 composable(Routes.HOME) {
                     HorizontalPager(
                         state = pagerState,
-                        modifier = Modifier.fillMaxSize().then(
-                            if (useNavigationRail) {
-                                Modifier.padding(start = KixyuSize.navigationRailContentWidth)
-                            } else {
-                                Modifier
-                            },
-                        ),
+                        modifier = Modifier.fillMaxSize(),
                         // Keep the adjacent library ready, but do not build all three complete page
                         // trees in the launch frame. Compose's pager prefetches the next page while
                         // retaining each page's saveable state, so the first frame no longer pays for
@@ -886,32 +887,22 @@ private fun KixyuNavHost(
                 }
             }
             AnimatedVisibility(
-                visible = bottomBarPresented && !useNavigationRail,
-                modifier = Modifier.align(Alignment.BottomCenter),
+                visible = bottomBarPresented,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth(if (useNavigationRail) .5f else 1f),
                 enter = fadeIn(tween(140)) + slideInVertically(tween(140)) { height -> height / 8 },
                 exit = fadeOut(tween(100)) + slideOutVertically(tween(100)) { height -> height / 8 },
             ) {
-                KixyuNavigationBar(
-                    items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
-                    selectedKey = top.getOrNull(pagerState.settledPage)?.route,
-                    enabled = bottomBarPresented,
-                    onSelected = selectTopDestination,
-                    backdrop = navigationBackdrop,
-                )
-            }
-            AnimatedVisibility(
-                visible = bottomBarPresented && useNavigationRail,
-                modifier = Modifier.align(Alignment.CenterStart),
-                enter = fadeIn(tween(160)) + slideInHorizontally(tween(160)) { width -> -width / 8 },
-                exit = fadeOut(tween(100)) + slideOutHorizontally(tween(100)) { width -> -width / 8 },
-            ) {
-                KixyuNavigationRail(
-                    items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
-                    selectedKey = top.getOrNull(pagerState.settledPage)?.route,
-                    enabled = bottomBarPresented,
-                    onSelected = selectTopDestination,
-                    backdrop = navigationBackdrop,
-                )
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    KixyuNavigationBar(
+                        items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
+                        selectedKey = top.getOrNull(pagerState.settledPage)?.route,
+                        enabled = bottomBarPresented,
+                        onSelected = selectTopDestination,
+                        backdrop = navigationBackdrop,
+                    )
+                }
             }
             ReleaseNotesModal(
                 show = releaseNotesVisible,
@@ -941,16 +932,14 @@ private fun ReleaseNotesModal(
     onRetry: () -> Unit,
     onOpenReleasePage: () -> Boolean,
 ) {
-    val useBottomSheet = kixyuWindowWidthClass() == KixyuWindowWidthClass.COMPACT
     KixyuAdaptiveModal(show = show, onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier.fillMaxWidth()
-                .then(if (useBottomSheet) Modifier.navigationBarsPadding() else Modifier)
                 .padding(
                     start = KixyuSpacing.large,
                     end = KixyuSpacing.large,
                     top = KixyuSpacing.medium,
-                    bottom = KixyuSpacing.large,
+                    bottom = KixyuSpacing.small,
                 ),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
         ) {
@@ -981,14 +970,6 @@ private fun ReleaseNotesModal(
                             ?: "此版本未填写 Release Note。",
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    Text(
-                        text = "在 GitHub 查看此版本",
-                        modifier = Modifier.clickable { onOpenReleasePage() },
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            textDecoration = TextDecoration.Underline,
-                        ),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
                 }
                 is ReleaseNotesState.Unavailable -> Column(
                     modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
@@ -1006,8 +987,20 @@ private fun ReleaseNotesModal(
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (state is ReleaseNotesState.Available) {
+                    Text(
+                        text = "在 GitHub 查看此版本",
+                        modifier = Modifier.clickable { onOpenReleasePage() },
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            textDecoration = TextDecoration.Underline,
+                        ),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
                 KixyuTextButton(text = "关闭", onClick = onDismiss)
             }
         }

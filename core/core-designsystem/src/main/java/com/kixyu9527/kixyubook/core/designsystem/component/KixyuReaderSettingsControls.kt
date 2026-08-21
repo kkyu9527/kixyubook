@@ -37,8 +37,8 @@ import kotlin.math.roundToInt
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.CustomReaderTheme
-import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_BLUR_RADIUS
-import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_BLUR_RADIUS
+import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
+import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.PageMode
 import com.kixyu9527.kixyubook.core.common.model.PageTurnAnimation
 import com.kixyu9527.kixyubook.core.common.model.ReaderBrightnessMode
@@ -139,7 +139,9 @@ fun KixyuAppColorControl(
     KixyuDropdownRow(
         title = "主题色",
         selected = settings.appColorTheme,
-        options = AppColorTheme.entries,
+        options = AppColorTheme.entries.filter {
+            settings.appUiStyle == AppUiStyle.MATERIAL || it != AppColorTheme.WHITE
+        },
         optionLabel = AppColorTheme::displayName,
         onSelected = { onSettingsChange(settings.copy(appColorTheme = it)) },
     )
@@ -155,7 +157,16 @@ fun KixyuAppUiStyleControl(
         selected = settings.appUiStyle,
         options = AppUiStyle.entries,
         optionLabel = AppUiStyle::displayName,
-        onSelected = { onSettingsChange(settings.copy(appUiStyle = it)) },
+        onSelected = { style ->
+            onSettingsChange(
+                settings.copy(
+                    appUiStyle = style,
+                    appColorTheme = settings.appColorTheme.takeUnless {
+                        style == AppUiStyle.MIUIX && it == AppColorTheme.WHITE
+                    } ?: AppColorTheme.DEFAULT,
+                ),
+            )
+        },
     )
 }
 
@@ -165,14 +176,14 @@ fun KixyuGlassEffectControls(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
-    var previewRadius by remember { mutableFloatStateOf(settings.glassBlurRadius) }
+    var previewLevel by remember { mutableFloatStateOf(settings.glassFrostLevel) }
     var dragging by remember { mutableStateOf(false) }
-    LaunchedEffect(settings.glassBlurRadius) {
-        if (!dragging) previewRadius = settings.glassBlurRadius
+    LaunchedEffect(settings.glassFrostLevel) {
+        if (!dragging) previewLevel = settings.glassFrostLevel
     }
     KixyuSettingsRow(
         title = "玻璃效果",
-        supportingText = "用于悬浮控件，部分低版本 Android 不支持",
+        supportingText = "低版本 Android 不支持",
         onClick = {
             onSettingsChange(settings.copy(glassEffectEnabled = !settings.glassEffectEnabled))
         },
@@ -186,21 +197,21 @@ fun KixyuGlassEffectControls(
     }
     KixyuDivider()
     KixyuSliderRow(
-        title = "模糊程度",
-        value = previewRadius,
-        valueLabel = "${previewRadius.roundToInt()} dp",
+        title = "磨砂程度",
+        value = previewLevel,
+        valueLabel = "${previewLevel.roundToInt()}%",
         onValueChange = { value ->
             dragging = true
-            previewRadius = value.coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS)
+            previewLevel = value.coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
         },
         onValueChangeFinished = {
             dragging = false
-            val snappedRadius = (previewRadius / 2f).roundToInt() * 2f
-            previewRadius = snappedRadius.coerceIn(MIN_GLASS_BLUR_RADIUS, MAX_GLASS_BLUR_RADIUS)
-            onSettingsChange(settings.copy(glassBlurRadius = previewRadius))
+            val snappedLevel = (previewLevel / 5f).roundToInt() * 5f
+            previewLevel = snappedLevel.coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
+            onSettingsChange(settings.copy(glassFrostLevel = previewLevel))
         },
-        valueRange = MIN_GLASS_BLUR_RADIUS..MAX_GLASS_BLUR_RADIUS,
-        steps = 17,
+        valueRange = MIN_GLASS_FROST_LEVEL..MAX_GLASS_FROST_LEVEL,
+        steps = 19,
         enabled = settings.glassEffectEnabled,
     )
 }
@@ -599,6 +610,7 @@ fun ReaderBrightnessMode.displayName(): String = when (this) {
 
 fun AppColorTheme.displayName(): String = when (this) {
     AppColorTheme.DEFAULT -> "默认"
+    AppColorTheme.WHITE -> "纯净白"
     AppColorTheme.DYNAMIC -> "莫奈动态取色"
     AppColorTheme.SAGE -> "静谧青"
     AppColorTheme.OCEAN -> "雾海蓝"

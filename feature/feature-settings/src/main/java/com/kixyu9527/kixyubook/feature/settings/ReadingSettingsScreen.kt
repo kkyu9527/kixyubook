@@ -2,17 +2,13 @@ package com.kixyu9527.kixyubook.feature.settings
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
-import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,9 +19,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
@@ -58,7 +54,6 @@ fun ReadingSettingsRoute(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val requestNotificationPermission = rememberNotificationPermissionAction()
     val updateReminderEnabled: (Boolean) -> Unit = { enabled ->
@@ -71,6 +66,7 @@ fun ReadingSettingsRoute(
         }
     }
     var resetAllVisible by remember { mutableStateOf(false) }
+    var reminderTimeVisible by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     KixyuPageScaffold(
         title = "阅读",
@@ -87,9 +83,7 @@ fun ReadingSettingsRoute(
         snackbarHost = {
             KixyuSnackbarHost(
                 hostState = snackbar,
-                modifier = Modifier
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(horizontal = KixyuSpacing.screenHorizontal),
+                modifier = Modifier.padding(horizontal = KixyuSpacing.screenHorizontal),
             )
         },
     ) { innerPadding ->
@@ -195,15 +189,7 @@ fun ReadingSettingsRoute(
                         KixyuSettingsRow(
                             title = "提醒时间",
                             supportingText = "系统可能根据省电策略延后少量时间",
-                            onClick = {
-                                TimePickerDialog(
-                                    context,
-                                    { _, hour, minute -> viewModel.setReadingReminderTime(hour, minute) },
-                                    state.readingReminder.hour,
-                                    state.readingReminder.minute,
-                                    true,
-                                ).show()
-                            },
+                            onClick = { reminderTimeVisible = true },
                         ) {
                             Text(
                                 "%02d:%02d".format(
@@ -244,6 +230,58 @@ fun ReadingSettingsRoute(
         dismissLabel = "取消",
     ) {
         Text("将重置全局排版、阅读外观、阅读控制、信息栏和阅读目标。")
+    }
+    ReadingReminderTimeDialog(
+        show = reminderTimeVisible,
+        initialHour = state.readingReminder.hour,
+        initialMinute = state.readingReminder.minute,
+        onDismissRequest = { reminderTimeVisible = false },
+        onConfirm = { hour, minute ->
+            reminderTimeVisible = false
+            viewModel.setReadingReminderTime(hour, minute)
+        },
+    )
+}
+
+@Composable
+private fun ReadingReminderTimeDialog(
+    show: Boolean,
+    initialHour: Int,
+    initialMinute: Int,
+    onDismissRequest: () -> Unit,
+    onConfirm: (Int, Int) -> Unit,
+) {
+    if (!show) return
+    var hour by rememberSaveable(initialHour) { mutableStateOf(initialHour) }
+    var minute by rememberSaveable(initialMinute) { mutableStateOf(initialMinute) }
+    KixyuActionDialog(
+        show = true,
+        title = "提醒时间",
+        onDismissRequest = onDismissRequest,
+        confirmLabel = "确定",
+        onConfirm = { onConfirm(hour, minute) },
+        dismissLabel = "取消",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium)) {
+            Text(
+                "%02d:%02d".format(Locale.US, hour, minute),
+                style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            KixyuStepperRow(
+                title = "小时",
+                valueLabel = hour.toString().padStart(2, '0'),
+                onDecrease = { hour = (hour + 23) % 24 },
+                onIncrease = { hour = (hour + 1) % 24 },
+            )
+            KixyuDivider()
+            KixyuStepperRow(
+                title = "分钟",
+                valueLabel = minute.toString().padStart(2, '0'),
+                onDecrease = { minute = (minute + 59) % 60 },
+                onIncrease = { minute = (minute + 1) % 60 },
+            )
+        }
     }
 }
 

@@ -13,7 +13,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
@@ -22,6 +21,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdr
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTonalIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.reader.engine.*
 
 
@@ -60,7 +60,7 @@ internal fun ReaderControls(
         }
     }
     val showToolsPopup = if (popupVisible) toolsMenuVisible else retainedToolsPopup
-    val controlsBackModifier = Modifier.predictivePopupTransform(controlsBackProgress)
+    val controlsBackModifier = Modifier.kixyuPredictivePopupTransform(controlsBackProgress)
     ReaderControlVisibility(
         visible = visible,
         modifier = Modifier.fillMaxSize(),
@@ -85,7 +85,6 @@ internal fun ReaderControls(
                         .width(titleWidth)
                         .height(KixyuSize.readerBookTitleMinHeight)
                         .then(controlsBackModifier),
-                    glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
                     fallbackContainerColor = titleContainerColor,
                     contentColor = titleContentColor,
                 ) {
@@ -159,7 +158,7 @@ internal fun ReaderControls(
                     backdrop = backdrop,
                     backgroundColor = backgroundColor,
                     contentColor = dockContentColor,
-                    modifier = Modifier.predictivePopupTransform(popupBackProgress),
+                    modifier = Modifier.kixyuPredictivePopupTransform(popupBackProgress),
                 )
             }
             KixyuGlassSurface(
@@ -167,7 +166,6 @@ internal fun ReaderControls(
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(bottom = KixyuSize.readerControlInset)
                     .then(controlsBackModifier),
-                glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
                 fallbackContainerColor = dockContainerColor,
                 contentColor = dockContentColor,
             ) {
@@ -215,7 +213,6 @@ private fun ReaderInlinePopup(
     KixyuGlassSurface(
         backdrop = backdrop,
         modifier = modifier.widthIn(min = 208.dp, max = 320.dp),
-        glassTintColor = backgroundColor.copy(alpha = READER_GLASS_TINT_ALPHA),
         fallbackContainerColor = backgroundColor,
         contentColor = contentColor,
     ) {
@@ -282,9 +279,3 @@ internal fun Color.highContrastContentColor(): Color {
 }
 
 private const val MIN_TEXT_CONTRAST = 4.5f
-
-internal fun Modifier.predictivePopupTransform(progress: Float): Modifier = graphicsLayer {
-    alpha = 1f - progress
-    scaleX = 1f - progress * .08f
-    scaleY = scaleX
-}

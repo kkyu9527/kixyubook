@@ -147,7 +147,7 @@ class SettingsViewModel @Inject constructor(
                 appColorTheme = current.appColorTheme,
                 appUiStyle = current.appUiStyle,
                 glassEffectEnabled = current.glassEffectEnabled,
-                glassBlurRadius = current.glassBlurRadius,
+                glassFrostLevel = current.glassFrostLevel,
             )
         }
         repository.setReadingGoalMinutes(30)
