@@ -49,6 +49,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupBackdropEffect
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
@@ -220,7 +221,8 @@ private fun ReaderTextSelectionMenu(
     KixyuPopupSurface(
         modifier = Modifier.kixyuPredictivePopupTransform(backProgress),
         shadowElevation = KixyuSpacing.extraSmall,
-        windowBlurred = true,
+        // Keep the reader and Compose selection handles in the interactive, unblurred plane.
+        backdropEffect = KixyuPopupBackdropEffect.SURFACE_ONLY,
     ) {
         Row(Modifier.padding(KixyuSpacing.extraSmall)) {
             actions.forEach { action ->

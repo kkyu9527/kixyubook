@@ -34,6 +34,12 @@ class KixyuAdaptiveLayoutTest {
     }
 
     @Test
+    fun popupBackdropPolicySeparatesSurfaceGlassFromWholeWindowBlur() {
+        assertFalse(KixyuPopupBackdropEffect.SURFACE_ONLY.blursWindow)
+        assertTrue(KixyuPopupBackdropEffect.BLUR_BEHIND.blursWindow)
+    }
+
+    @Test
     fun floatingNavigationDragFollowsDirectionAndClampsToTabs() {
         assertEquals(
             1.5f,

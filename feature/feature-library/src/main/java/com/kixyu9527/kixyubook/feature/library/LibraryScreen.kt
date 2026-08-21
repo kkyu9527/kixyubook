@@ -109,6 +109,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupBackdropEffect
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
@@ -1194,7 +1195,7 @@ private fun BookActionPopupMenu(
         KixyuPopupSurface(
             modifier = Modifier.width(KixyuSize.contextMenuWidth)
                 .kixyuPredictivePopupTransform(predictiveBackState.progress),
-            windowBlurred = true,
+            backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
         ) {
             Column(Modifier.padding(vertical = 2.dp)) {
                 BookActionPopupMenuItem("管理", KixyuSymbols.Edit, onManage)

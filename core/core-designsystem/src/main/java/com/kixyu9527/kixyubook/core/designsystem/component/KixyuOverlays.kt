@@ -229,7 +229,7 @@ fun KixyuAdaptiveModal(
                         .heightIn(max = surfaceHeight)
                         .kixyuPredictivePopupTransform(predictiveBackState.progress),
                     shadowElevation = KixyuSpacing.small,
-                    windowBlurred = true,
+                    backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
                     content = content,
                 )
             }
@@ -333,7 +333,7 @@ private fun KixyuSheetContent(content: @Composable () -> Unit) {
                 .wrapContentWidth(Alignment.CenterHorizontally)
                 .widthIn(max = KixyuSize.sheetContentMaxWidth),
             shadowElevation = KixyuSpacing.small,
-            windowBlurred = true,
+            backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
         ) {
             Box(contentAlignment = Alignment.TopCenter) { content() }
         }
@@ -486,6 +486,7 @@ internal fun KixyuGlassDropdownMenu(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = MaterialTheme.shapes.extraLarge
+    val backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND
     val fallbackContainer = if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixTheme.colorScheme.surfaceContainer
     } else {
@@ -498,14 +499,14 @@ internal fun KixyuGlassDropdownMenu(
         modifier = modifier.kixyuPopupGlassSurfaceModifier(
             shape = shape,
             fallbackContainerColor = fallbackContainer,
-            windowBlurred = true,
+            windowBlurred = backdropEffect.blursWindow,
         ),
         shape = shape,
         containerColor = Color.Transparent,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
-        KixyuPopupWindowEffect()
+        if (backdropEffect.blursWindow) KixyuPopupWindowEffect()
         CompositionLocalProvider(
             LocalContentColor provides MaterialTheme.colorScheme.onSurface,
         ) {
@@ -684,6 +685,15 @@ fun KixyuTextButton(
     }
 }
 
+/** Controls whether a popup frosts only its own surface or also blurs the window behind it. */
+enum class KixyuPopupBackdropEffect {
+    SURFACE_ONLY,
+    BLUR_BEHIND,
+}
+
+internal val KixyuPopupBackdropEffect.blursWindow: Boolean
+    get() = this == KixyuPopupBackdropEffect.BLUR_BEHIND
+
 @Composable
 fun KixyuPopupSurface(
     modifier: Modifier = Modifier,
@@ -691,7 +701,7 @@ fun KixyuPopupSurface(
     shadowElevation: Dp = KixyuSpacing.extraSmall,
     containerColor: Color? = null,
     contentColor: Color? = null,
-    windowBlurred: Boolean = false,
+    backdropEffect: KixyuPopupBackdropEffect = KixyuPopupBackdropEffect.SURFACE_ONLY,
     content: @Composable () -> Unit,
 ) {
     val resolvedContainer = containerColor ?: if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
@@ -700,6 +710,7 @@ fun KixyuPopupSurface(
         MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val resolvedContent = contentColor ?: MaterialTheme.colorScheme.onSurface
+    val windowBlurred = backdropEffect.blursWindow
     if (LocalKixyuGlassEffectEnabled.current) {
         if (windowBlurred) KixyuPopupWindowEffect()
         Box(
@@ -958,7 +969,7 @@ fun KixyuActionDialog(
                     .heightIn(max = surfaceHeight)
                     .kixyuPredictivePopupTransform(predictiveBackState.progress),
                 shadowElevation = KixyuSpacing.small,
-                windowBlurred = true,
+                backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
