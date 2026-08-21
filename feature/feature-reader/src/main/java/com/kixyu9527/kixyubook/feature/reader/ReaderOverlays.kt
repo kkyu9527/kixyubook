@@ -125,6 +125,7 @@ internal fun ReaderSearchOverlay(
     onDismiss: () -> Unit,
     onSearch: (String) -> Unit,
     onMove: (Int) -> Unit,
+    onReturn: () -> Unit,
     onSelect: (Int) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf(state.searchQuery) }
@@ -240,6 +241,14 @@ internal fun ReaderSearchOverlay(
                             onClick = { onMove(1) },
                             enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
                         ) { Icon(KixyuSymbols.KeyboardArrowDown, "下一个结果") }
+                        if (state.searchReturnAvailable) {
+                            KixyuIconButton(
+                                onClick = {
+                                    onReturn()
+                                    expanded = true
+                                },
+                            ) { Icon(KixyuSymbols.ArrowBack, "返回跳转前位置") }
+                        }
                         KixyuIconButton(onClick = onDismiss) {
                             Icon(KixyuSymbols.Close, "退出搜索")
                         }

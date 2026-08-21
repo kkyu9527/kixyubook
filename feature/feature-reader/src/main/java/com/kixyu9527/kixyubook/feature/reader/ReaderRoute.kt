@@ -130,6 +130,7 @@ private fun LoadedReaderRoute(
         search = viewModel::search,
         selectSearchResult = viewModel::selectSearchResult,
         moveSearchResult = viewModel::moveSearchResult,
+        returnFromSearchResult = viewModel::returnFromSearchResult,
         clearSearch = viewModel::clearSearch,
         chapterRendered = viewModel::chapterRendered,
         setPageInteractionActive = viewModel::setPageInteractionActive,

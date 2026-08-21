@@ -75,6 +75,7 @@ internal fun ReaderScreen(
     search: (String) -> Unit,
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
+    returnFromSearchResult: () -> Unit,
     clearSearch: () -> Unit,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
@@ -592,6 +593,7 @@ internal fun ReaderScreen(
             },
             onSearch = search,
             onMove = moveSearchResult,
+            onReturn = returnFromSearchResult,
             onSelect = { index ->
                 selectSearchResult(index)
                 controls = false

@@ -48,6 +48,7 @@ data class ReaderUiState(
     val searchQuery: String = "",
     val searchResults: List<BookSearchResult> = emptyList(),
     val selectedSearchIndex: Int = -1,
+    val searchReturnAvailable: Boolean = false,
     val navigationVersion: Int = 0,
     val loading: Boolean = true,
     val chapterLoading: Boolean = false,
@@ -72,6 +73,7 @@ class ReaderViewModel @Inject constructor(
     private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
     private var lastCharOffset = 0
+    private var searchReturnPosition: SearchReturnPosition? = null
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, ChapterLoadRequest>()
     private var chapterNavigationJob: Job? = null
@@ -762,8 +764,16 @@ class ReaderViewModel @Inject constructor(
 
     fun search(query: String) = viewModelScope.launch {
         val normalized = query.trim()
+        searchReturnPosition = null
         if (normalized.isBlank()) {
-            _uiState.update { it.copy(searchQuery = "", searchResults = emptyList(), selectedSearchIndex = -1) }
+            _uiState.update {
+                it.copy(
+                    searchQuery = "",
+                    searchResults = emptyList(),
+                    selectedSearchIndex = -1,
+                    searchReturnAvailable = false,
+                )
+            }
             return@launch
         }
         val results = books.searchBook(bookUuid, normalized)
@@ -772,6 +782,7 @@ class ReaderViewModel @Inject constructor(
                 searchQuery = normalized,
                 searchResults = results,
                 selectedSearchIndex = if (results.isEmpty()) -1 else 0,
+                searchReturnAvailable = false,
             )
         }
     }
@@ -781,8 +792,28 @@ class ReaderViewModel @Inject constructor(
         if (state.searchResults.isEmpty()) return
         val safeIndex = index.coerceIn(0, state.searchResults.lastIndex)
         val result = state.searchResults.getOrNull(safeIndex) ?: return
-        _uiState.update { it.copy(selectedSearchIndex = safeIndex) }
+        if (searchReturnPosition == null) {
+            searchReturnPosition = SearchReturnPosition(
+                chapterIndex = state.chapterIndex,
+                paragraphIndex = lastPosition,
+                charOffset = lastCharOffset,
+            )
+        }
+        _uiState.update {
+            it.copy(selectedSearchIndex = safeIndex, searchReturnAvailable = true)
+        }
         jumpToPosition(result.chapterIndex, result.paragraphIndex)
+    }
+
+    fun returnFromSearchResult() {
+        val position = searchReturnPosition ?: return
+        searchReturnPosition = null
+        _uiState.update { it.copy(searchReturnAvailable = false) }
+        navigateToChapter(
+            index = position.chapterIndex,
+            position = position.paragraphIndex,
+            charOffset = position.charOffset,
+        )
     }
 
     fun moveSearchResult(delta: Int) {
@@ -793,7 +824,15 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun clearSearch() {
-        _uiState.update { it.copy(searchQuery = "", searchResults = emptyList(), selectedSearchIndex = -1) }
+        searchReturnPosition = null
+        _uiState.update {
+            it.copy(
+                searchQuery = "",
+                searchResults = emptyList(),
+                selectedSearchIndex = -1,
+                searchReturnAvailable = false,
+            )
+        }
     }
 
     /** Counts only time during which this reader destination is resumed with readable content. */
@@ -903,6 +942,12 @@ class ReaderViewModel @Inject constructor(
         books.releaseReaderMemory(bookUuid)
     }
 }
+
+private data class SearchReturnPosition(
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val charOffset: Int,
+)
 
 internal fun hasReaderMovedFromOpening(
     openingChapterId: Long?,
