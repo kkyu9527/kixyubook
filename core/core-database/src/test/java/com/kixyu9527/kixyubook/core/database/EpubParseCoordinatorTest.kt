@@ -74,13 +74,79 @@ class EpubParseCoordinatorTest {
     }
 
     @Test
-    fun visibleReaderThrottlesButDoesNotPauseSilentIndexing() = runBlocking {
+    fun visibleReaderFullyPausesSilentIndexingUntilReaderLeaves() = runBlocking {
         val coordinator = EpubParseCoordinator()
+        val backgroundStarted = CompletableDeferred<Unit>()
+        val activeBackground = async {
+            coordinator.background {
+                backgroundStarted.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        backgroundStarted.await()
         coordinator.setReaderSessionActive(true)
+        assertFalse(withTimeout(1_000) { activeBackground.await() })
 
         val queuedBackground = async { coordinator.background { } }
-        delay(80)
+        delay(30)
         assertFalse(queuedBackground.isCompleted)
+
+        coordinator.setReaderSessionActive(false)
         assertTrue(withTimeout(1_000) { queuedBackground.await() })
+    }
+
+    @Test
+    fun animationKeepsRequestedChapterRunningButHoldsNeighbourPrefetch() = runBlocking {
+        val coordinator = EpubParseCoordinator()
+        coordinator.setAppAnimationActive(true)
+
+        val requestedChapter = async { coordinator.interactive { "当前正文" } }
+        val neighbour = async { coordinator.prefetch { "下一章" } }
+
+        assertEquals("当前正文", withTimeout(1_000) { requestedChapter.await() })
+        delay(30)
+        assertFalse(neighbour.isCompleted)
+
+        coordinator.setAppAnimationActive(false)
+        assertEquals("下一章", withTimeout(1_000) { neighbour.await() })
+    }
+
+    @Test
+    fun animationPreemptsAnActiveNeighbourPrefetch() = runBlocking {
+        val coordinator = EpubParseCoordinator()
+        val prefetchStarted = CompletableDeferred<Unit>()
+        val neighbour = async {
+            runCatching {
+                coordinator.prefetch {
+                    prefetchStarted.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+        }
+        prefetchStarted.await()
+
+        coordinator.setAppAnimationActive(true)
+
+        assertTrue(withTimeout(1_000) { neighbour.await().isFailure })
+    }
+
+    @Test
+    fun requestedChapterPreemptsNeighbourAndStartsImmediately() = runBlocking {
+        val coordinator = EpubParseCoordinator()
+        val prefetchStarted = CompletableDeferred<Unit>()
+        val neighbour = async {
+            runCatching {
+                coordinator.prefetch {
+                    prefetchStarted.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+        }
+        prefetchStarted.await()
+
+        val requestedChapter = coordinator.interactive { "用户刚刚翻到的正文" }
+
+        assertEquals("用户刚刚翻到的正文", requestedChapter)
+        assertTrue(withTimeout(1_000) { neighbour.await().isFailure })
     }
 }

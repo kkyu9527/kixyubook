@@ -550,62 +550,102 @@ class LocalBookRepository @Inject constructor(
         val startedAt = SystemClock.elapsedRealtime()
         var diagnosticSource = "unknown"
         try {
-        val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
-        synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
-            return@withContext textCorrections.applyToChapter(it)
-        }
-        chapterLoadMutex.withLock {
+            val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
             synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
-                return@withLock textCorrections.applyToChapter(it)
+                return@withContext textCorrections.applyToChapter(it)
             }
-            val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
-            val book = dao.getBook(bookUuid)
-            var storedParagraphs = dao.getParagraphs(chapter.id)
+
+            val initialChapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withContext null
+            val initialBook = dao.getBook(bookUuid)
             var source = "database"
             diagnosticSource = source
-            val paragraphs = if (book?.format == BookFormat.EPUB.name) {
-                val diskCached = epubChapterCache.read(bookUuid, book.contentHash, chapterIndex)
-                source = if (diskCached != null) "epub_disk_cache" else "epub_parse"
-                diagnosticSource = source
-                val parsed = diskCached ?: epubParseCoordinator.interactive {
-                        (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
-                            .readChapter(File(book.storagePath), chapterIndex, chapter.title, purpose = "reader")
-                    }?.also { parsedChapter ->
-                        epubChapterCache.write(bookUuid, book.contentHash, chapterIndex, parsedChapter)
+            val parsed = if (initialBook?.format == BookFormat.EPUB.name) {
+                when (priority) {
+                    ChapterLoadPriority.USER -> {
+                        val diskCached = epubChapterCache.read(bookUuid, initialBook.contentHash, chapterIndex)
+                        source = if (diskCached != null) "epub_disk_cache" else "epub_parse"
+                        diagnosticSource = source
+                        diskCached ?: epubParseCoordinator.interactive {
+                            (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
+                                .readChapter(
+                                    File(initialBook.storagePath),
+                                    chapterIndex,
+                                    initialChapter.title,
+                                    purpose = "reader",
+                                )
+                        }
                     }
-                if (parsed != null && !chapter.indexed) {
-                    dao.replaceChapterIndex(chapter.id, parsed.title, parsed.paragraphs)
-                    storedParagraphs = dao.getParagraphs(chapter.id)
-                }
-                parsed?.toReaderParagraphs(chapter.id, storedParagraphs) ?: storedParagraphs.map { paragraph ->
-                    Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+                    ChapterLoadPriority.PREFETCH -> epubParseCoordinator.prefetch {
+                        val diskCached = epubChapterCache.read(bookUuid, initialBook.contentHash, chapterIndex)
+                        source = if (diskCached != null) "epub_disk_cache" else "epub_parse"
+                        diagnosticSource = source
+                        diskCached ?: run {
+                            (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
+                                .readChapter(
+                                    File(initialBook.storagePath),
+                                    chapterIndex,
+                                    initialChapter.title,
+                                    purpose = "prefetch",
+                                )
+                        }
+                    }
                 }
             } else {
-                storedParagraphs.map { paragraph ->
-                    Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
-                }
+                null
             }
-            ChapterContent(chapter.toModel(), paragraphs).also { content ->
-                synchronized(chapterCacheLock) { chapterCache[cacheKey] = content }
-                val elapsedMs = SystemClock.elapsedRealtime() - startedAt
-                if (book?.format == BookFormat.EPUB.name || elapsedMs >= SLOW_CHAPTER_LOAD_MS) {
-                    DiagnosticLog.record(
-                        Category.READER,
-                        "chapter_loaded",
-                        elapsedMs = elapsedMs,
-                        outcome = "success",
-                        details = mapOf(
-                            "format" to (book?.format ?: "unknown"),
-                            "book" to bookUuid.shortDiagnosticId(),
-                            "chapter" to chapterIndex,
-                            "priority" to priority.name,
-                            "source" to source,
-                            "paragraphs" to paragraphs.size,
-                        ),
-                    )
+
+            // XHTML parsing deliberately happens outside the shared commit lock. A current-page
+            // request can therefore overtake a low-priority neighbour that is slow to decode.
+            val content = chapterLoadMutex.withLock {
+                synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
+                    return@withLock it
                 }
-            }.let { textCorrections.applyToChapter(it) }
-        }
+                val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
+                val book = dao.getBook(bookUuid) ?: return@withLock null
+                var storedParagraphs = dao.getParagraphs(chapter.id)
+                val isSameEpubRevision = book.format == BookFormat.EPUB.name &&
+                    initialBook?.contentHash == book.contentHash &&
+                    initialBook.storagePath == book.storagePath
+                if (parsed != null && isSameEpubRevision) {
+                    epubChapterCache.write(bookUuid, book.contentHash, chapterIndex, parsed)
+                    if (!chapter.indexed) {
+                        dao.replaceChapterIndex(chapter.id, parsed.title, parsed.paragraphs)
+                        storedParagraphs = dao.getParagraphs(chapter.id)
+                    }
+                }
+                val paragraphs = if (isSameEpubRevision) {
+                    parsed?.toReaderParagraphs(chapter.id, storedParagraphs)
+                        ?: storedParagraphs.map { paragraph ->
+                            Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+                        }
+                } else {
+                    storedParagraphs.map { paragraph ->
+                        Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
+                    }
+                }
+                ChapterContent(chapter.toModel(), paragraphs).also { loaded ->
+                    synchronized(chapterCacheLock) { chapterCache[cacheKey] = loaded }
+                }
+            } ?: return@withContext null
+
+            val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+            if (initialBook?.format == BookFormat.EPUB.name || elapsedMs >= SLOW_CHAPTER_LOAD_MS) {
+                DiagnosticLog.record(
+                    Category.READER,
+                    "chapter_loaded",
+                    elapsedMs = elapsedMs,
+                    outcome = "success",
+                    details = mapOf(
+                        "format" to (initialBook?.format ?: "unknown"),
+                        "book" to bookUuid.shortDiagnosticId(),
+                        "chapter" to chapterIndex,
+                        "priority" to priority.name,
+                        "source" to source,
+                        "paragraphs" to content.paragraphs.size,
+                    ),
+                )
+            }
+            textCorrections.applyToChapter(content)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {

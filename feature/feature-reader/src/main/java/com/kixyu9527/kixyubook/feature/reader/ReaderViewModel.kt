@@ -570,13 +570,15 @@ class ReaderViewModel @Inject constructor(
     ): Deferred<ReaderChapter?> {
         val existing = chapterLoads[index]
         if (existing != null && !existing.deferred.isCancelled) {
-            // A foreground boundary swipe requests the same exact chapter that prefetch is
-            // already parsing. Cancelling a nearly-complete EPUB parse and restarting it as USER
-            // caused the pager to pause on its boundary and spring back under rapid reversals.
             if (priority == ChapterLoadPriority.USER && existing.priority == ChapterLoadPriority.PREFETCH) {
-                chapterLoads[index] = existing.copy(priority = ChapterLoadPriority.USER)
+                // Current content must never inherit speculative scheduling. The prefetch parser
+                // may still be unwinding a difficult XHTML file, but parsing happens outside the
+                // repository commit lock so this USER request can overtake it immediately.
+                existing.deferred.cancel()
+                chapterLoads.remove(index)
+            } else {
+                return existing.deferred
             }
-            return existing.deferred
         }
         return viewModelScope.async {
             val target = chapters.getOrNull(index) ?: return@async null
@@ -841,14 +843,14 @@ class ReaderViewModel @Inject constructor(
         sessionTimer.setActive(active)
     }
 
-    /** Keeps indexing alive but rate-limits it while this reader is visible. */
+    /** Suspends full-book indexing while retaining on-demand current and neighbour chapter loads. */
     fun setReaderVisible(visible: Boolean) {
         books.setReaderSessionActive(visible)
     }
 
     /**
      * A drag or animated page turn owns the frame budget. Keep already prepared neighbours, but
-     * stop the remaining ten-chapter speculative queue until the pager settles. This mirrors the
+     * stop the remaining neighbouring speculative queue until the pager settles. This mirrors the
      * interaction freeze used by mature web-reader preloaders and prevents EPUB parsing from
      * causing intermittent missed frames on otherwise fast devices.
      */
