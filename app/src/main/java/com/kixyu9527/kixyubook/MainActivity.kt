@@ -103,6 +103,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -212,6 +213,17 @@ class MainActivity : ComponentActivity() {
         cloudSyncState: CloudSyncState,
     ) {
         val navController = rememberNavController()
+        val navigationPreferences = remember {
+            getSharedPreferences(NAVIGATION_PREFERENCES, MODE_PRIVATE)
+        }
+        val initialTopLevelRoute = remember {
+            navigationPreferences.getString(LAST_TOP_LEVEL_ROUTE, Routes.HOME)
+        }
+        val saveTopLevelRoute = remember(navigationPreferences) {
+            { route: String ->
+                navigationPreferences.edit().putString(LAST_TOP_LEVEL_ROUTE, route).apply()
+            }
+        }
         val pendingNotificationDestination by notificationDestination.collectAsState()
         val pendingExternalBookImport by externalBookImport.collectAsState()
         LaunchedEffect(pendingNotificationDestination) {
@@ -250,6 +262,8 @@ class MainActivity : ComponentActivity() {
             movableContentOf {
                 KixyuNavHost(
                     navController = navController,
+                    initialTopLevelRoute = initialTopLevelRoute,
+                    onTopLevelRouteChanged = saveTopLevelRoute,
                     initialReaderSettings = latestSettings.value,
                     updateState = latestUpdateState.value,
                     releaseNotesState = latestReleaseNotesState.value,
@@ -429,6 +443,8 @@ private data class ExternalBookImportRequest(val id: Long, val uris: List<String
 @Composable
 private fun KixyuNavHost(
     navController: NavHostController,
+    initialTopLevelRoute: String?,
+    onTopLevelRouteChanged: (String) -> Unit,
     initialReaderSettings: ReaderSettings,
     updateState: AppUpdateState,
     releaseNotesState: ReleaseNotesState,
@@ -456,7 +472,16 @@ private fun KixyuNavHost(
         )
     }
     val useNavigationRail = kixyuUsesNavigationRail()
-    val pagerState = rememberPagerState(pageCount = { top.size })
+    val initialTopLevelPage = remember(top, initialTopLevelRoute) {
+        topLevelPageForRoute(
+            savedRoute = initialTopLevelRoute,
+            routes = top.map(TopDestination::route),
+        )
+    }
+    val pagerState = rememberPagerState(
+        initialPage = initialTopLevelPage,
+        pageCount = { top.size },
+    )
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val uriHandler = LocalUriHandler.current
@@ -466,6 +491,11 @@ private fun KixyuNavHost(
     var bookReorderAfterReaderExitJob by remember { mutableStateOf<Job?>(null) }
     var releaseNotesVisible by rememberSaveable { mutableStateOf(false) }
     var diagnosticOnlyFailures by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(pagerState, top) {
+        snapshotFlow { pagerState.settledPage }
+            .distinctUntilChanged()
+            .collect { page -> top.getOrNull(page)?.route?.let(onTopLevelRouteChanged) }
+    }
     LaunchedEffect(externalImportRequestId) {
         if (externalImportRequestId == null) return@LaunchedEffect
         if (navController.currentDestination?.route != Routes.HOME) {
@@ -923,6 +953,12 @@ private fun KixyuNavHost(
         }
     }
 }
+
+internal fun topLevelPageForRoute(savedRoute: String?, routes: List<String>): Int =
+    routes.indexOf(savedRoute).takeIf { it >= 0 } ?: 0
+
+private const val NAVIGATION_PREFERENCES = "navigation_state"
+private const val LAST_TOP_LEVEL_ROUTE = "last_top_level_route"
 
 @Composable
 private fun ReleaseNotesModal(
