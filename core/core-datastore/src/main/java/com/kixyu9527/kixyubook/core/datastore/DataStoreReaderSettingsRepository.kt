@@ -57,6 +57,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
                     ?: values[GLASS_BLUR_RADIUS]?.let(::legacyGlassBlurRadiusToFrostLevel)
                     ?: DEFAULT_GLASS_FROST_LEVEL
                 ).coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL),
+            predictiveBackEnabled = values[PREDICTIVE_BACK_ENABLED] ?: false,
             showStatusBar = values[SHOW_STATUS_BAR] ?: true,
             hideNavigationBar = values[HIDE_NAVIGATION_BAR] ?: true,
             showPageNumber = values[SHOW_PAGE_NUMBER] ?: true,
@@ -96,6 +97,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[GLASS_FROST_LEVEL] = updated.glassFrostLevel
                 .coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
             values.remove(GLASS_BLUR_RADIUS)
+            values[PREDICTIVE_BACK_ENABLED] = updated.predictiveBackEnabled
             values[SHOW_STATUS_BAR] = updated.showStatusBar
             values[HIDE_NAVIGATION_BAR] = updated.hideNavigationBar
             values[SHOW_PAGE_NUMBER] = updated.showPageNumber
@@ -134,6 +136,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val APP_UI_STYLE = stringPreferencesKey("app_ui_style")
         val GLASS_EFFECT_ENABLED = booleanPreferencesKey("glass_effect_enabled")
         val GLASS_FROST_LEVEL = floatPreferencesKey("glass_frost_level")
+        val PREDICTIVE_BACK_ENABLED = booleanPreferencesKey("predictive_back_enabled")
         /** Legacy dp-based value, read once and removed on the next settings write. */
         val GLASS_BLUR_RADIUS = floatPreferencesKey("glass_blur_radius")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")

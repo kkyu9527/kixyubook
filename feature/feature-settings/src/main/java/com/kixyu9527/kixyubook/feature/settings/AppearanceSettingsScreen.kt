@@ -24,7 +24,9 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassEffectControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSwitch
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuThemeModeControl
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 
@@ -70,6 +72,27 @@ fun AppearanceRoute(
                         settings = state.settings,
                         onSettingsChange = { updated -> viewModel.update { updated } },
                     )
+                    KixyuDivider()
+                    KixyuSettingsRow(
+                        title = "可预测返回",
+                        supportingText = if (state.settings.predictiveBackEnabled) {
+                            "返回手势会跟随手指显示关闭过程"
+                        } else {
+                            "关闭 · 返回时直接执行当前操作"
+                        },
+                        onClick = {
+                            viewModel.update {
+                                it.copy(predictiveBackEnabled = !it.predictiveBackEnabled)
+                            }
+                        },
+                    ) {
+                        KixyuSwitch(
+                            checked = state.settings.predictiveBackEnabled,
+                            onCheckedChange = { enabled ->
+                                viewModel.update { it.copy(predictiveBackEnabled = enabled) }
+                            },
+                        )
+                    }
                     KixyuDivider()
                     KixyuGlassEffectControls(
                         settings = state.settings,

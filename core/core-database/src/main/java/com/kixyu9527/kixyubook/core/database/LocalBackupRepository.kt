@@ -75,6 +75,7 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("appUiStyle", settings.appUiStyle.name)
                     setProperty("glassEffectEnabled", settings.glassEffectEnabled.toString())
                     setProperty("glassFrostLevel", settings.glassFrostLevel.toString())
+                    setProperty("predictiveBackEnabled", settings.predictiveBackEnabled.toString())
                     setProperty("showChapterTitle", settings.showChapterTitle.toString())
                     setProperty("showReadingTime", settings.showReadingTime.toString())
                     setProperty("showBatteryLevel", settings.showBatteryLevel.toString())
@@ -275,6 +276,10 @@ class LocalBackupRepository @Inject constructor(
                         ?.let(::legacyGlassBlurRadiusToFrostLevel)
                     ?: current.glassFrostLevel
                 ).coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL),
+            predictiveBackEnabled = properties.boolean(
+                "predictiveBackEnabled",
+                current.predictiveBackEnabled,
+            ),
             showChapterTitle = properties.boolean("showChapterTitle", current.showChapterTitle),
             showReadingTime = properties.boolean("showReadingTime", current.showReadingTime),
             showBatteryLevel = properties.boolean("showBatteryLevel", current.showBatteryLevel),

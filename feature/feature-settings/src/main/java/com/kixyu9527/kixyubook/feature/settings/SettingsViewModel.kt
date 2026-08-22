@@ -148,6 +148,7 @@ class SettingsViewModel @Inject constructor(
                 appUiStyle = current.appUiStyle,
                 glassEffectEnabled = current.glassEffectEnabled,
                 glassFrostLevel = current.glassFrostLevel,
+                predictiveBackEnabled = current.predictiveBackEnabled,
             )
         }
         repository.setReadingGoalMinutes(30)

@@ -1,8 +1,10 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -10,8 +12,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuPredictiveBackEnabled
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -19,6 +23,14 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/**
+ * True only while a Navigation 3 scene is moving back to its parent.
+ *
+ * Expensive, non-interactive work may observe this signal to yield the frame budget to navigation.
+ * The current chapter itself must remain available; consumers should pause only speculative work.
+ */
+val LocalKixyuNavigationBackTransitionActive = staticCompositionLocalOf { false }
 
 /**
  * Shared highest-priority predictive-back lifecycle for app-owned overlays.
@@ -54,6 +66,12 @@ class KixyuPredictiveBackState<T> {
         activeTarget = null
     }
 
+    internal suspend fun resetImmediately() {
+        pendingReset?.cancel()
+        animatedProgress.snapTo(0f)
+        activeTarget = null
+    }
+
     internal fun resetAfterOverlayExit(scope: CoroutineScope) {
         pendingReset?.cancel()
         pendingReset = scope.launch {
@@ -70,7 +88,7 @@ fun <T> rememberKixyuPredictiveBackState(): KixyuPredictiveBackState<T> =
 
 /**
  * Register this after the overlay content so it is the last app callback and therefore owns Back
- * before the underlying NavHost or page. Platform Dialog/BottomSheet implementations may keep
+ * before the underlying NavDisplay or page. Platform Dialog/BottomSheet implementations may keep
  * their native handler only when they also own their complete predictive animation.
  */
 @Composable
@@ -79,9 +97,22 @@ fun <T> KixyuPredictiveBackHandler(
     state: KixyuPredictiveBackState<T>,
     onBack: (T) -> Unit,
 ) {
-    val resetScope = rememberCoroutineScope()
+    val predictiveBackEnabled = LocalKixyuPredictiveBackEnabled.current
     val currentTarget = rememberUpdatedState(target)
     val currentOnBack = rememberUpdatedState(onBack)
+
+    LaunchedEffect(predictiveBackEnabled) {
+        if (!predictiveBackEnabled) state.resetImmediately()
+    }
+
+    if (!predictiveBackEnabled) {
+        BackHandler(enabled = target != null) {
+            currentTarget.value?.let(currentOnBack.value)
+        }
+        return
+    }
+
+    val resetScope = rememberCoroutineScope()
     PredictiveBackHandler(enabled = target != null) { events ->
         val gestureTarget = currentTarget.value ?: return@PredictiveBackHandler
         var committed = false

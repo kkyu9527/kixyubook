@@ -141,6 +141,7 @@ private val KixyuMiuixShapes = Shapes(
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }
 val LocalKixyuGlassEffectEnabled = staticCompositionLocalOf { true }
 val LocalKixyuGlassFrostLevel = staticCompositionLocalOf { DEFAULT_GLASS_FROST_LEVEL }
+val LocalKixyuPredictiveBackEnabled = staticCompositionLocalOf { false }
 
 /** The opaque window background shared by navigation and page scaffolds. */
 @Composable
@@ -199,6 +200,7 @@ fun KixyuBookTheme(
     uiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     glassEffectEnabled: Boolean = true,
     glassFrostLevel: Float = DEFAULT_GLASS_FROST_LEVEL,
+    predictiveBackEnabled: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -232,6 +234,7 @@ fun KixyuBookTheme(
                 MIN_GLASS_FROST_LEVEL,
                 MAX_GLASS_FROST_LEVEL,
             ),
+            LocalKixyuPredictiveBackEnabled provides predictiveBackEnabled,
         ) {
             if (uiStyle == AppUiStyle.MIUIX) {
                 val miuixMode = when (colorTheme) {

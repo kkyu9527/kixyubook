@@ -66,6 +66,7 @@ internal fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("appColorTheme", value.appColorTheme.name).put("appUiStyle", value.appUiStyle.name)
     .put("glassEffectEnabled", value.glassEffectEnabled)
     .put("glassFrostLevel", value.glassFrostLevel)
+    .put("predictiveBackEnabled", value.predictiveBackEnabled)
     .put("showStatusBar", value.showStatusBar).put("hideNavigationBar", value.hideNavigationBar)
     .put("showPageNumber", value.showPageNumber)
     .put("volumeKeyPageTurn", value.volumeKeyPageTurn).put("keepScreenOn", value.keepScreenOn)
@@ -98,6 +99,7 @@ internal fun jsonToSettings(value: JSONObject) = ReaderSettings(
     } else {
         legacyGlassBlurRadiusToFrostLevel(value.optDouble("glassBlurRadius", 22.0).toFloat())
     }.coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL),
+    predictiveBackEnabled = value.optBoolean("predictiveBackEnabled", false),
     showStatusBar = value.optBoolean("showStatusBar", true),
     hideNavigationBar = value.optBoolean("hideNavigationBar", true),
     showPageNumber = value.optBoolean("showPageNumber", true),

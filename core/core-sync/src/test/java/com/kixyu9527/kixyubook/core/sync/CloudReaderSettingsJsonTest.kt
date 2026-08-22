@@ -24,6 +24,7 @@ class CloudReaderSettingsJsonTest {
             appUiStyle = AppUiStyle.MIUIX,
             glassEffectEnabled = false,
             glassFrostLevel = 85f,
+            predictiveBackEnabled = false,
             showStatusBar = false,
             hideNavigationBar = false,
             showPageNumber = false,
@@ -95,5 +96,10 @@ class CloudReaderSettingsJsonTest {
         )
 
         assertEquals(expected, jsonToSettings(settingsToJson(expected)))
+    }
+
+    @Test
+    fun legacyCloudSettingsKeepPredictiveBackDisabledByDefault() {
+        assertEquals(false, jsonToSettings(JSONObject()).predictiveBackEnabled)
     }
 }

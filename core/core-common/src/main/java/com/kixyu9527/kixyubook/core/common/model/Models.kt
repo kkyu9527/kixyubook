@@ -204,6 +204,7 @@ data class ReaderSettings(
     val appUiStyle: AppUiStyle = AppUiStyle.MATERIAL,
     val glassEffectEnabled: Boolean = true,
     val glassFrostLevel: Float = DEFAULT_GLASS_FROST_LEVEL,
+    val predictiveBackEnabled: Boolean = false,
     val showStatusBar: Boolean = true,
     val hideNavigationBar: Boolean = true,
     val showPageNumber: Boolean = true,
