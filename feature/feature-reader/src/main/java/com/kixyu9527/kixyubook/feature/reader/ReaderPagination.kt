@@ -54,6 +54,7 @@ internal fun PagedReader(
     setPageInteractionActive: (Boolean) -> Unit,
     resourcePriorityActive: Boolean,
     twoPageSpread: Boolean,
+    prioritizeNextChapter: (Int) -> Unit,
     spreadGutter: Dp,
     topInsetDp: Float,
     bottomInsetDp: Float,
@@ -85,26 +86,7 @@ internal fun PagedReader(
     // in composition across chapter pagination. Removing it while the newly activated chapter is
     // being measured cancels any immediately-following drag and produces a visible spring-back.
     if (pages.isEmpty() && retainedPage == null) {
-        retainedPage?.let { retained ->
-            ReaderPageRenderer(
-                page = retained.page,
-                spec = spec,
-                palette = palette,
-                fontPath = state.fontPath,
-                onTapFraction = { fraction ->
-                    if (fraction in .33f..67f) middleTap() else dismissControls()
-                },
-                epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
-                showRegularChapterTitle = state.settings.showChapterTitle,
-                highlightQuery = state.searchQuery,
-                pageNumber = retained.pageNumber,
-                showReadingTime = state.settings.showReadingTime,
-                showBatteryLevel = state.settings.showBatteryLevel,
-                modifier = Modifier.readerPageViewportModifier(retained.page, topInsetDp, bottomInsetDp),
-                fullPageViewportHeightDp = physicalViewportHeightDp,
-                onTextActionTarget = onTextActionTarget,
-            )
-        } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             ReaderLoadingIndicator(palette)
         }
         return
@@ -113,6 +95,19 @@ internal fun PagedReader(
         if (pages.isEmpty()) return@LaunchedEffect
         withFrameNanos { }
         chapterRendered(state.navigationVersion)
+    }
+    val hasPrevious = state.chapterIndex > 0
+    val hasNext = state.chapterIndex < state.chapters.lastIndex
+    var criticalNextChapter by remember(chapter.id) { mutableStateOf(false) }
+    LaunchedEffect(chapter.id, pages.size, hasNext) {
+        if (
+            hasNext &&
+            pages.isNotEmpty() &&
+            shouldPrioritizeNextChapter(pages.size, 0, twoPageSpread)
+        ) {
+            criticalNextChapter = true
+            prioritizeNextChapter(state.chapterIndex)
+        }
     }
     val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
     val nextPages = nextChapter?.takeUnless { resourcePriorityActive }?.let {
@@ -124,7 +119,9 @@ internal fun PagedReader(
             showRegularChapterTitle = state.settings.showChapterTitle,
             coordinator = paginationCoordinator,
             measurer = paginationMeasurer,
-            prefetch = true,
+            // The adaptive deadline promotes an existing layout without throwing away its
+            // in-flight result. Ordinary reading keeps this speculative and low priority.
+            prefetch = !criticalNextChapter,
             paused = resourcePriorityActive,
         )
     }.orEmpty()
@@ -143,7 +140,6 @@ internal fun PagedReader(
         )
     }.orEmpty()
     val positions = remember { ReaderPositionManager() }
-    val hasPrevious = state.chapterIndex > 0; val hasNext = state.chapterIndex < state.chapters.lastIndex
     // Keep one physical Pager alive across chapter changes. Its stable page keys let Compose retain
     // the page that crossed the boundary while the three-chapter window is recentered around it.
     // Recreating PagerState per chapter cancels a second gesture that starts immediately after the
@@ -258,6 +254,17 @@ internal fun PagedReader(
                     val lastVisible = spread.items.lastOrNull { visible ->
                         visible.chapterIndex == item.chapterIndex && visible.page != null
                     } ?: item
+                    if (
+                        hasNext &&
+                        shouldPrioritizeNextChapter(
+                            item.pageCount,
+                            lastVisible.pageIndex,
+                            twoPageSpread,
+                        )
+                    ) {
+                        criticalNextChapter = true
+                        prioritizeNextChapter(readerState.chapterIndex)
+                    }
                     val anchor = item.page.blocks.firstOrNull { block ->
                         block.kind == ParagraphKind.TEXT
                     }
@@ -338,74 +345,111 @@ internal fun PagedReader(
             fraction in .33f..67f -> middleTap()
         }
     }
-    HorizontalPager(
-        state = pager,
-        modifier = Modifier.fillMaxSize()
-            .pointerInput(turnRequests) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.type != PointerEventType.Scroll) continue
-                        val change = event.changes.firstOrNull() ?: continue
-                        val delta = change.scrollDelta
-                        val dominantDelta = if (kotlin.math.abs(delta.y) >= kotlin.math.abs(delta.x)) {
-                            delta.y
-                        } else {
-                            delta.x
+    Box(Modifier.fillMaxSize()) {
+        HorizontalPager(
+            state = pager,
+            modifier = Modifier.fillMaxSize()
+                .pointerInput(turnRequests) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.type != PointerEventType.Scroll) continue
+                            val change = event.changes.firstOrNull() ?: continue
+                            val delta = change.scrollDelta
+                            val dominantDelta = if (
+                                kotlin.math.abs(delta.y) >= kotlin.math.abs(delta.x)
+                            ) {
+                                delta.y
+                            } else {
+                                delta.x
+                            }
+                            if (
+                                dominantDelta != 0f &&
+                                change.uptimeMillis - lastWheelTurnAt >= 180L
+                            ) {
+                                lastWheelTurnAt = change.uptimeMillis
+                                turnRequests.trySend(if (dominantDelta > 0f) 1 else -1)
+                            }
+                            change.consume()
                         }
-                        if (dominantDelta != 0f && change.uptimeMillis - lastWheelTurnAt >= 180L) {
-                            lastWheelTurnAt = change.uptimeMillis
-                            turnRequests.trySend(if (dominantDelta > 0f) 1 else -1)
-                        }
-                        change.consume()
                     }
                 }
-            }
-            .observePagerTap(
-                onTapFraction = { fraction -> pagerTap(fraction) },
-            ),
-        // Only one already-measured neighbour is precomposed. This keeps the gesture surface
-        // continuous without laying out the entire retained chapter window.
-        beyondViewportPageCount = if (resourcePriorityActive) 0 else 1,
-        key = { virtualPage -> pagerSpreads[virtualPage].key },
-    ) { virtualPage ->
-        val spread = pagerSpreads[virtualPage]
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(palette.background)
-                .zIndex(
-                    if (state.settings.pageTurnAnimation == PageTurnAnimation.HORIZONTAL_SLIDE) {
-                        0f
-                    } else {
-                        // A physical book always keeps the lower-numbered leaf above the later
-                        // leaf. Forward turns remove that upper leaf; backward turns bring the
-                        // previous upper leaf back over the current page.
-                        (pagerSpreads.size - virtualPage).toFloat()
-                    },
-                )
-                .readerPageTurnEffect(
-                    animation = state.settings.pageTurnAnimation,
-                    pageOffset = {
-                        (pager.currentPage - virtualPage) + pager.currentPageOffsetFraction
-                    },
+                .observePagerTap(
+                    onTapFraction = { fraction -> pagerTap(fraction) },
                 ),
-        ) {
-            ReaderPagerSpreadContent(
-                spread = spread,
-                twoPageSpread = twoPageSpread,
-                spreadGutter = spreadGutter,
-                state = state,
-                spec = spec,
-                palette = palette,
-                middleTap = middleTap,
-                selectionEnabled = !pager.isScrollInProgress && virtualPage == pager.settledPage,
-                onSelectionActiveChange = { active -> textSelectionActive = active },
-                topInsetDp = topInsetDp,
-                bottomInsetDp = bottomInsetDp,
-                physicalViewportHeightDp = physicalViewportHeightDp,
-                onTextActionTarget = onTextActionTarget,
-            )
+            // Only one already-measured neighbour is precomposed. This keeps the gesture surface
+            // continuous without laying out the entire retained chapter window.
+            beyondViewportPageCount = if (resourcePriorityActive) 0 else 1,
+            key = { virtualPage -> pagerSpreads[virtualPage].key },
+        ) { virtualPage ->
+            val spread = pagerSpreads[virtualPage]
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(palette.background)
+                    .zIndex(
+                        if (state.settings.pageTurnAnimation == PageTurnAnimation.HORIZONTAL_SLIDE) {
+                            0f
+                        } else {
+                            // A physical book always keeps the lower-numbered leaf above the later
+                            // leaf. Forward turns remove that upper leaf; backward turns bring the
+                            // previous upper leaf back over the current page.
+                            (pagerSpreads.size - virtualPage).toFloat()
+                        },
+                    )
+                    .readerPageTurnEffect(
+                        animation = state.settings.pageTurnAnimation,
+                        pageOffset = {
+                            (pager.currentPage - virtualPage) + pager.currentPageOffsetFraction
+                        },
+                    ),
+            ) {
+                ReaderPagerSpreadContent(
+                    spread = spread,
+                    twoPageSpread = twoPageSpread,
+                    spreadGutter = spreadGutter,
+                    state = state,
+                    spec = spec,
+                    palette = palette,
+                    middleTap = middleTap,
+                    selectionEnabled = !pager.isScrollInProgress && virtualPage == pager.settledPage,
+                    onSelectionActiveChange = { active -> textSelectionActive = active },
+                    topInsetDp = topInsetDp,
+                    bottomInsetDp = bottomInsetDp,
+                    physicalViewportHeightDp = physicalViewportHeightDp,
+                    onTextActionTarget = onTextActionTarget,
+                )
+            }
+        }
+        if (pages.isEmpty()) {
+            retainedPage?.let { retained ->
+                Box(Modifier.fillMaxSize().background(palette.background)) {
+                    ReaderPageRenderer(
+                        page = retained.page,
+                        spec = spec,
+                        palette = palette,
+                        fontPath = state.fontPath,
+                        onTapFraction = { fraction ->
+                            if (fraction in .33f..67f) middleTap() else dismissControls()
+                        },
+                        epubPath = state.book?.takeIf {
+                            it.format == BookFormat.EPUB
+                        }?.storagePath,
+                        showRegularChapterTitle = state.settings.showChapterTitle,
+                        highlightQuery = state.searchQuery,
+                        pageNumber = retained.pageNumber,
+                        showReadingTime = state.settings.showReadingTime,
+                        showBatteryLevel = state.settings.showBatteryLevel,
+                        modifier = Modifier.readerPageViewportModifier(
+                            retained.page,
+                            topInsetDp,
+                            bottomInsetDp,
+                        ),
+                        fullPageViewportHeightDp = physicalViewportHeightDp,
+                        onTextActionTarget = onTextActionTarget,
+                    )
+                }
+            }
         }
     }
 }
@@ -507,39 +551,37 @@ internal fun ReaderPagerLeaf(
     physicalViewportHeightDp: Float,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
 ) {
-    // A not-yet-paginated chapter is still a fully interactive lightweight page. Rendering a
-    // spinner-only Box here discarded every tap that arrived after the first rapid turn.
-    val renderedPage = item.page ?: state.chapters.getOrNull(item.chapterIndex)?.let { target ->
-        ReaderPage(
-            index = item.pageIndex,
-            chapterIndex = target.index,
-            chapterTitle = target.title,
-            isChapterOpening = true,
-            blocks = emptyList(),
-        )
+    val renderedPage = item.page
+    if (renderedPage == null) {
+        // A boundary placeholder used to be an empty ReaderPage. On light themes that was
+        // indistinguishable from a white flash while a newly imported EPUB parsed its XHTML.
+        // Keep the stable Pager node and its tap handling, but make the wait intentional.
+        Box(
+            modifier = Modifier.fillMaxSize().background(palette.background),
+            contentAlignment = Alignment.Center,
+        ) {
+            ReaderLoadingIndicator(palette)
+        }
+        return
     }
-    if (renderedPage != null) {
-        ReaderPageRenderer(
-            page = renderedPage,
-            spec = spec,
-            palette = palette,
-            fontPath = state.fontPath,
-            onTapFraction = { fraction -> if (fraction in .33f..67f) middleTap() },
-            epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
-            modifier = Modifier.readerPageViewportModifier(renderedPage, topInsetDp, bottomInsetDp),
-            fullPageViewportHeightDp = physicalViewportHeightDp,
-            showRegularChapterTitle = state.settings.showChapterTitle,
-            highlightQuery = state.searchQuery,
-            pageNumber = item.page?.let {
-                readerPageNumber(state, item.pageIndex, item.pageCount)
-            },
-            showReadingTime = state.settings.showReadingTime,
-            showBatteryLevel = state.settings.showBatteryLevel,
-            selectionEnabled = selectionEnabled,
-            onSelectionActiveChange = onSelectionActiveChange,
-            onTextActionTarget = onTextActionTarget,
-        )
-    }
+    ReaderPageRenderer(
+        page = renderedPage,
+        spec = spec,
+        palette = palette,
+        fontPath = state.fontPath,
+        onTapFraction = { fraction -> if (fraction in .33f..67f) middleTap() },
+        epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
+        modifier = Modifier.readerPageViewportModifier(renderedPage, topInsetDp, bottomInsetDp),
+        fullPageViewportHeightDp = physicalViewportHeightDp,
+        showRegularChapterTitle = state.settings.showChapterTitle,
+        highlightQuery = state.searchQuery,
+        pageNumber = readerPageNumber(state, item.pageIndex, item.pageCount),
+        showReadingTime = state.settings.showReadingTime,
+        showBatteryLevel = state.settings.showBatteryLevel,
+        selectionEnabled = selectionEnabled,
+        onSelectionActiveChange = onSelectionActiveChange,
+        onTextActionTarget = onTextActionTarget,
+    )
 }
 
 internal fun Modifier.readerPageViewportModifier(
@@ -725,3 +767,27 @@ internal fun readerPageNumber(state: ReaderUiState, pageIndex: Int, pageCount: I
     } else {
         null
     }
+
+internal fun criticalReadAheadLeafCount(pageCount: Int, twoPageSpread: Boolean): Int {
+    if (pageCount <= 0) return 0
+    val leavesPerTurn = if (twoPageSpread) 2 else 1
+    val minimumRunway = leavesPerTurn * MINIMUM_CRITICAL_READ_AHEAD_TURNS
+    val maximumRunway = leavesPerTurn * MAXIMUM_CRITICAL_READ_AHEAD_TURNS
+    val proportionalRunway = kotlin.math.ceil(pageCount / READ_AHEAD_PAGE_FRACTION).toInt()
+    return maxOf(minimumRunway, proportionalRunway)
+        .coerceAtMost(maximumRunway)
+        .coerceAtMost(pageCount)
+}
+
+internal fun shouldPrioritizeNextChapter(
+    pageCount: Int,
+    visiblePageIndex: Int,
+    twoPageSpread: Boolean,
+): Boolean {
+    val runway = criticalReadAheadLeafCount(pageCount, twoPageSpread)
+    return runway > 0 && pageCount - visiblePageIndex <= runway
+}
+
+private const val MINIMUM_CRITICAL_READ_AHEAD_TURNS = 3
+private const val MAXIMUM_CRITICAL_READ_AHEAD_TURNS = 6
+private const val READ_AHEAD_PAGE_FRACTION = 8f

@@ -575,6 +575,24 @@ class LocalBookRepository @Inject constructor(
                                 )
                         }
                     }
+                    ChapterLoadPriority.READ_AHEAD -> epubParseCoordinator.readAhead {
+                        val diskCached = epubChapterCache.read(
+                            bookUuid,
+                            initialBook.contentHash,
+                            chapterIndex,
+                        )
+                        source = if (diskCached != null) "epub_disk_cache" else "epub_parse"
+                        diagnosticSource = source
+                        diskCached ?: run {
+                            (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
+                                .readChapter(
+                                    File(initialBook.storagePath),
+                                    chapterIndex,
+                                    initialChapter.title,
+                                    purpose = "read_ahead",
+                                )
+                        }
+                    }
                     ChapterLoadPriority.PREFETCH -> epubParseCoordinator.prefetch {
                         val diskCached = epubChapterCache.read(bookUuid, initialBook.contentHash, chapterIndex)
                         source = if (diskCached != null) "epub_disk_cache" else "epub_parse"

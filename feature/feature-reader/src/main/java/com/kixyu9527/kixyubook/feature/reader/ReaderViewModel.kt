@@ -79,6 +79,8 @@ class ReaderViewModel @Inject constructor(
     private var chapterNavigationJob: Job? = null
     private var chapterPrefetchJob: Job? = null
     private var criticalNeighborPublishJob: Job? = null
+    private var criticalReadAheadJob: Job? = null
+    private var criticalReadAheadIndex: Int? = null
     private var pendingChapterIndex: Int? = null
     private var prefetchedAroundChapterIndex: Int? = null
     private var pageInteractionActive = false
@@ -359,6 +361,8 @@ class ReaderViewModel @Inject constructor(
         chapterNavigationJob?.cancel()
         chapterPrefetchJob?.cancel()
         criticalNeighborPublishJob?.cancel()
+        criticalReadAheadJob?.cancel()
+        criticalReadAheadIndex = null
         prefetchedAroundChapterIndex = null
         cancelPendingChapterLoadsExcept(index)
 
@@ -570,7 +574,11 @@ class ReaderViewModel @Inject constructor(
     ): Deferred<ReaderChapter?> {
         val existing = chapterLoads[index]
         if (existing != null && !existing.deferred.isCancelled) {
-            if (priority == ChapterLoadPriority.USER && existing.priority == ChapterLoadPriority.PREFETCH) {
+            val promotesSpeculativeLoad = priority != ChapterLoadPriority.PREFETCH &&
+                existing.priority == ChapterLoadPriority.PREFETCH
+            val promotesReadAheadToUser = priority == ChapterLoadPriority.USER &&
+                existing.priority == ChapterLoadPriority.READ_AHEAD
+            if (promotesSpeculativeLoad || promotesReadAheadToUser) {
                 // Current content must never inherit speculative scheduling. The prefetch parser
                 // may still be unwinding a difficult XHTML file, but parsing happens outside the
                 // repository commit lock so this USER request can overtake it immediately.
@@ -618,6 +626,54 @@ class ReaderViewModel @Inject constructor(
                     }
                 }
                 kotlinx.coroutines.yield()
+            }
+        }
+    }
+
+    /**
+     * Promote only the next readable chapter when the adaptive end-of-chapter deadline is reached.
+     *
+     * Normal entry-time prefetch stays speculative and yields to every page animation. This
+     * deadline path uses a persistent background-priority lane: an uncached, newly imported EPUB
+     * keeps progressing through the final page turns without competing at render-thread priority.
+     * Cached chapters take the same path but return from memory/disk without parsing again.
+     */
+    fun prioritizeNextChapter(sourceChapterIndex: Int) {
+        val state = _uiState.value
+        if (state.chapterIndex != sourceChapterIndex) return
+        val targetIndex = sourceChapterIndex + 1
+        if (targetIndex !in state.chapters.indices || targetIndex in state.prefetchedChapters) return
+        if (criticalReadAheadIndex == targetIndex && criticalReadAheadJob?.isActive == true) return
+
+        criticalReadAheadJob?.cancel()
+        criticalReadAheadIndex = targetIndex
+        criticalReadAheadJob = viewModelScope.launch {
+            try {
+                val chapter = chapterLoad(
+                    targetIndex,
+                    state.chapters,
+                    ChapterLoadPriority.READ_AHEAD,
+                ).await() ?: return@launch
+                _uiState.update { current ->
+                    if (
+                        current.chapterIndex != sourceChapterIndex ||
+                        targetIndex !in current.chapters.indices
+                    ) {
+                        current
+                    } else {
+                        current.copy(
+                            prefetchedChapters = current.prefetchedChapters +
+                                (targetIndex to chapter),
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } finally {
+                if (criticalReadAheadIndex == targetIndex) {
+                    criticalReadAheadIndex = null
+                    criticalReadAheadJob = null
+                }
             }
         }
     }
@@ -933,6 +989,7 @@ class ReaderViewModel @Inject constructor(
     override fun onCleared() {
         MemoryPressureRegistry.unregister(this)
         chapterPrefetchJob?.cancel()
+        criticalReadAheadJob?.cancel()
         chapterLoads.values.forEach { request ->
             if (!request.deferred.isCompleted) request.deferred.cancel()
         }

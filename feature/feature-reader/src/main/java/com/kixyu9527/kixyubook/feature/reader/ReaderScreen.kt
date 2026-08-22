@@ -79,6 +79,7 @@ internal fun ReaderScreen(
     clearSearch: () -> Unit,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
+    prioritizeNextChapter: (Int) -> Unit,
     addFont: () -> Unit,
     deleteFont: (UserFont) -> Unit,
     saveCorrection: (Int, Int, String, String) -> Unit,
@@ -477,6 +478,7 @@ internal fun ReaderScreen(
                         volumeTurns = volumeTurns,
                         chapterRendered = chapterRendered,
                         setPageInteractionActive = { pageInteractionActive = it },
+                        prioritizeNextChapter = prioritizeNextChapter,
                         // A page drag needs the already-started previous/next page layouts. Only
                         // overlays may cancel pagination; the drag still pauses unrelated EPUB work
                         // through setPageInteractionActive above.

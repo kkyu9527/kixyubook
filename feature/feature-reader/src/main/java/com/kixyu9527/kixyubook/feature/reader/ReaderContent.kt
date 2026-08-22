@@ -56,6 +56,7 @@ internal fun ReaderContent(
     volumeTurns: SharedFlow<Int>,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
+    prioritizeNextChapter: (Int) -> Unit,
     resourcePriorityActive: Boolean,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
 ) {
@@ -182,6 +183,7 @@ internal fun ReaderContent(
                     state, chapter, spec, palette, savePosition, moveChapterFromPage,
                     middleTap, dismissControls, volumeTurns, paginationCoordinator, paginationMeasurer,
                     chapterRendered, setPageInteractionActive, resourcePriorityActive, twoPageSpread,
+                    prioritizeNextChapter,
                     spreadGutter,
                     topInsetDp,
                     bottomInsetDp,

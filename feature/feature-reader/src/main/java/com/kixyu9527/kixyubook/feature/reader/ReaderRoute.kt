@@ -134,6 +134,7 @@ private fun LoadedReaderRoute(
         clearSearch = viewModel::clearSearch,
         chapterRendered = viewModel::chapterRendered,
         setPageInteractionActive = viewModel::setPageInteractionActive,
+        prioritizeNextChapter = viewModel::prioritizeNextChapter,
         addFont = {
             fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
         },

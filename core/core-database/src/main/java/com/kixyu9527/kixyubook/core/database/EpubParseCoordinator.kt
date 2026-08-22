@@ -32,6 +32,7 @@ class EpubParseCoordinator @Inject constructor() {
     private val appAnimationActive = AtomicBoolean(false)
     private val activeBackground = AtomicReference<Deferred<Unit>?>(null)
     private val activePrefetch = AtomicReference<Job?>(null)
+    private val activeReadAhead = AtomicReference<Job?>(null)
     private val backgroundDispatcher = Executors.newSingleThreadExecutor { task ->
         Thread({
             // android.jar throws in local JVM tests; production devices apply this scheduler hint.
@@ -67,6 +68,7 @@ class EpubParseCoordinator @Inject constructor() {
         appAnimationActive.set(active)
         if (active) {
             activePrefetch.get()?.cancel()
+            activeReadAhead.get()?.cancel()
             activeBackground.get()?.cancel()
         }
     }
@@ -83,6 +85,7 @@ class EpubParseCoordinator @Inject constructor() {
             // Background indexing owns a separate parser instance. Cancellation can therefore be
             // cooperative without making a page turn wait for a blocking XML parse to unwind.
             activePrefetch.get()?.cancel()
+            activeReadAhead.get()?.cancel()
             activeBackground.get()?.cancel()
             return block()
         } finally {
@@ -112,6 +115,34 @@ class EpubParseCoordinator @Inject constructor() {
         }
     }
 
+    /**
+     * Adaptive end-of-chapter runway for the immediately following chapter.
+     *
+     * It uses the background-priority reader thread like ordinary prefetch, but an already-started
+     * unit survives page drags. The render thread therefore keeps scheduler priority while a short
+     * or newly imported chapter still makes forward progress. Explicit chapter navigation and app
+     * navigation remain authoritative and cancel this work.
+     */
+    suspend fun <T> readAhead(block: suspend () -> T): T = coroutineScope {
+        while (interactiveWaiters.get() > 0 || appAnimationActive.get()) {
+            delay(PRIORITY_POLL_MILLIS)
+        }
+        activePrefetch.get()?.cancel()
+        activeBackground.get()?.cancel()
+        val task = async {
+            if (interactiveWaiters.get() > 0 || appAnimationActive.get()) {
+                throw ReadAheadPreempted()
+            }
+            withContext(prefetchDispatcher) { block() }
+        }
+        activeReadAhead.set(task)
+        try {
+            task.await()
+        } finally {
+            activeReadAhead.compareAndSet(task, null)
+        }
+    }
+
     /** Returns false when an interactive request preempted this unit of background work. */
     suspend fun background(block: suspend () -> Unit): Boolean = coroutineScope {
         while (interactiveWaiters.get() > 0 || backgroundPaused()) {
@@ -137,6 +168,7 @@ class EpubParseCoordinator @Inject constructor() {
 
     private class BackgroundPreempted : CancellationException()
     private class PrefetchPreempted : CancellationException()
+    private class ReadAheadPreempted : CancellationException()
 
     private companion object {
         const val PRIORITY_POLL_MILLIS = 12L

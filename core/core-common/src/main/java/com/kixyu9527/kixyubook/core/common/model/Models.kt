@@ -31,7 +31,7 @@ data class Chapter(
     val chapterKey: String = "",
 )
 
-enum class ChapterLoadPriority { USER, PREFETCH }
+enum class ChapterLoadPriority { USER, READ_AHEAD, PREFETCH }
 
 enum class ParagraphKind { TEXT, IMAGE }
 

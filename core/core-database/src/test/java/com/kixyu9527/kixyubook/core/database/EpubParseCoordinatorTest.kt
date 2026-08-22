@@ -131,6 +131,28 @@ class EpubParseCoordinatorTest {
     }
 
     @Test
+    fun deadlineReadAheadSurvivesReaderGestureAtBackgroundPriority() = runBlocking {
+        val coordinator = EpubParseCoordinator()
+        val readAheadStarted = CompletableDeferred<Unit>()
+        val finishReadAhead = CompletableDeferred<Unit>()
+        val nextChapter = async {
+            coordinator.readAhead {
+                readAheadStarted.complete(Unit)
+                finishReadAhead.await()
+                "下一章正文"
+            }
+        }
+        readAheadStarted.await()
+
+        coordinator.setReaderInteractionActive(true)
+        delay(30)
+        assertFalse(nextChapter.isCompleted)
+
+        finishReadAhead.complete(Unit)
+        assertEquals("下一章正文", withTimeout(1_000) { nextChapter.await() })
+    }
+
+    @Test
     fun requestedChapterPreemptsNeighbourAndStartsImmediately() = runBlocking {
         val coordinator = EpubParseCoordinator()
         val prefetchStarted = CompletableDeferred<Unit>()

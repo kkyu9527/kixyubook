@@ -99,7 +99,7 @@ fun rememberMeasuredReaderPages(
     var pages by remember(cacheKey) {
         mutableStateOf(coordinator.cached(cacheKey).orEmpty())
     }
-    LaunchedEffect(cacheKey, chapter, family, paused) {
+    LaunchedEffect(cacheKey, chapter, family, prefetch, paused) {
         if (pages.isNotEmpty()) return@LaunchedEffect
         if (paused) return@LaunchedEffect
         pages = coordinator.getOrLoad(cacheKey, chapter, prefetch) {
