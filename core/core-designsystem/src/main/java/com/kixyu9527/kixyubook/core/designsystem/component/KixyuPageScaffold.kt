@@ -1,11 +1,17 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
@@ -28,7 +34,7 @@ import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
  * Shared edge-to-edge page frame. The top app bar and the list beneath it
  * always receive the same scroll behavior for the active component system.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun KixyuPageScaffold(
     title: String,
@@ -41,6 +47,13 @@ fun KixyuPageScaffold(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val horizontalInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
+    // A destination underneath the immersive reader is composed before the reader finishes
+    // leaving. Keep its top bar on the physical safe-area baseline even while system bars are
+    // hidden, otherwise the bar is measured twice and jumps when the reader restores them.
+    val stableTopBarInsets = WindowInsets.statusBarsIgnoringVisibility
+        .union(WindowInsets.navigationBarsIgnoringVisibility)
+        .union(WindowInsets.displayCutout)
+        .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         val scrollBehavior = MiuixScrollBehavior()
         MiuixScaffold(
@@ -53,10 +66,15 @@ fun KixyuPageScaffold(
                 if (showTopBar) {
                     MiuixTopAppBar(
                         title = title,
+                        modifier = Modifier.windowInsetsPadding(stableTopBarInsets),
                         largeTitle = title,
                         navigationIcon = navigationIcon,
                         actions = actions,
                         scrollBehavior = scrollBehavior,
+                        // The modifier above supplies and consumes the shared stable insets. The
+                        // MIUIX implementation still applies its mandatory top system-bar inset,
+                        // which becomes zero after that consumption.
+                        defaultWindowInsetsPadding = false,
                     )
                 }
             },
@@ -89,6 +107,7 @@ fun KixyuPageScaffold(
                             scrollBehavior = scrollBehavior,
                             colors = colors,
                             expandedHeight = 116.dp,
+                            windowInsets = stableTopBarInsets,
                         )
                     } else {
                         MediumTopAppBar(
@@ -98,6 +117,7 @@ fun KixyuPageScaffold(
                             scrollBehavior = scrollBehavior,
                             colors = colors,
                             expandedHeight = 88.dp,
+                            windowInsets = stableTopBarInsets,
                         )
                     }
                 }
