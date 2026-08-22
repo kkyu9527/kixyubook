@@ -2,7 +2,6 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
-import android.graphics.Color.parseColor
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -60,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.toColorInt
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
@@ -94,7 +94,8 @@ object KixyuSize {
     val iconSmall = 18.dp
     val icon = 20.dp
     val rowMinHeight = 52.dp
-    val contextMenuItemHeight = 44.dp
+    // Interactive rows must retain a 48dp touch target in both component families.
+    val contextMenuItemHeight = 48.dp
     val contextMenuWidth = 144.dp
     val popupMenuMinWidth = 196.dp
     val popupMenuMaxWidth = 320.dp
@@ -771,7 +772,9 @@ fun <T> KixyuDropdownRow(
 
 @Composable
 fun KixyuColorSwatch(hex: String, modifier: Modifier = Modifier) {
-    val color = remember(hex) { runCatching { Color(parseColor(hex)) }.getOrDefault(Color.Transparent) }
+    val color = remember(hex) {
+        runCatching { Color(hex.toColorInt()) }.getOrDefault(Color.Transparent)
+    }
     Surface(
         modifier = modifier.size(KixyuSize.colorSwatch).clip(MaterialTheme.shapes.small),
         color = color,
