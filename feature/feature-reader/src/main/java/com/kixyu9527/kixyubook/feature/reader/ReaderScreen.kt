@@ -27,21 +27,12 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import androidx.core.view.ViewCompat
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
@@ -52,6 +43,9 @@ import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdr
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPopupSpring
 import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationBackTransitionActive
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuSystemBarHost
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSystemBarPolicy
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.delay
@@ -108,8 +102,6 @@ internal fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     val context = LocalContext.current
     val view = LocalView.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
     var textActionTarget by remember(state.chapter?.id) {
         mutableStateOf<ReaderTextActionTarget?>(null)
     }
@@ -123,6 +115,7 @@ internal fun ReaderScreen(
     var brightnessPreview by remember { mutableStateOf<Float?>(null) }
     var overlayAnimationPriority by remember { mutableStateOf(false) }
     var overlayMotionObserved by remember { mutableStateOf(false) }
+    val navigationBackTransitionActive = LocalKixyuNavigationBackTransitionActive.current
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val windowSizeClass = kixyuWindowSizeClass()
     val directoryAsSidePanel = windowSizeClass.supportsTwoPane
@@ -145,12 +138,6 @@ internal fun ReaderScreen(
         bookInfoVisible || sheet != null || directoryPanelComposed
     val statusBarVisible = state.settings.showStatusBar || overlayVisible
     val navigationBarVisible = !state.settings.hideNavigationBar || overlayVisible
-    val systemBarDensity = LocalDensity.current
-    val actualStatusBarVisible = WindowInsets.statusBars.getTop(systemBarDensity) > 0
-    val actualNavigationBarVisible = WindowInsets.navigationBars.run {
-        getBottom(systemBarDensity) > 0 || getLeft(systemBarDensity, LayoutDirection.Ltr) > 0 ||
-            getRight(systemBarDensity, LayoutDirection.Ltr) > 0
-    }
     val overlayMotionKey = listOf(
         controls,
         menu,
@@ -174,7 +161,8 @@ internal fun ReaderScreen(
     }
     // Background indexing and distant prefetch can remain paused while an overlay is visible;
     // unlike current-chapter pagination, neither is required to fulfil the user's active action.
-    val resourcePriorityActive = pageInteractionActive || overlayVisible || overlayAnimationPriority
+    val resourcePriorityActive = pageInteractionActive || overlayVisible ||
+        overlayAnimationPriority || navigationBackTransitionActive
     LaunchedEffect(resourcePriorityActive) {
         setPageInteractionActive(resourcePriorityActive)
     }
@@ -193,67 +181,20 @@ internal fun ReaderScreen(
     LaunchedEffect(sheet) {
         if (sheet != ReaderSheet.THEME) brightnessPreview = null
     }
-    val systemBarsController = remember(context, view) {
-        context.findActivity()?.window?.let { WindowCompat.getInsetsController(it, view) }
+    val systemBarHost = LocalKixyuSystemBarHost.current
+    val systemBarOwner = remember { Any() }
+    SideEffect {
+        systemBarHost?.update(
+            owner = systemBarOwner,
+            value = KixyuSystemBarPolicy(
+                statusBarVisible = statusBarVisible,
+                navigationBarVisible = navigationBarVisible,
+                useDarkIcons = palette.background.luminance() > .5f,
+            ),
+        )
     }
-    val applyReaderSystemBars by rememberUpdatedState(newValue = {
-        val useDarkSystemIcons = palette.background.luminance() > .5f
-        // Default behavior keeps edge-to-edge bars fully transparent. Transient-bars behavior
-        // adds a system-owned contrast scrim on several Android/HyperOS versions.
-        systemBarsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-        systemBarsController?.isAppearanceLightNavigationBars = useDarkSystemIcons
-        systemBarsController?.isAppearanceLightStatusBars = useDarkSystemIcons
-        if (statusBarVisible) {
-            systemBarsController?.show(WindowInsetsCompat.Type.statusBars())
-        } else {
-            systemBarsController?.hide(WindowInsetsCompat.Type.statusBars())
-        }
-        if (navigationBarVisible) {
-            systemBarsController?.show(WindowInsetsCompat.Type.navigationBars())
-        } else {
-            systemBarsController?.hide(WindowInsetsCompat.Type.navigationBars())
-        }
-    })
-    val restoreSystemBars by rememberUpdatedState(newValue = {
-        systemBarsController?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-        systemBarsController?.show(WindowInsetsCompat.Type.systemBars())
-    })
-    DisposableEffect(statusBarVisible, navigationBarVisible, palette.background, systemBarsController) {
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            applyReaderSystemBars()
-        }
-        onDispose { }
-    }
-    // With the transparent default behavior, a system gesture reveals bars persistently. Mirror
-    // the short auto-dismiss used by reader apps without adopting the system's transient scrim.
-    LaunchedEffect(statusBarVisible, actualStatusBarVisible) {
-        if (!statusBarVisible && actualStatusBarVisible) {
-            delay(SYSTEM_BAR_GESTURE_HIDE_MILLIS)
-            systemBarsController?.hide(WindowInsetsCompat.Type.statusBars())
-        }
-    }
-    LaunchedEffect(navigationBarVisible, actualNavigationBarVisible) {
-        if (!navigationBarVisible && actualNavigationBarVisible) {
-            delay(SYSTEM_BAR_GESTURE_HIDE_MILLIS)
-            systemBarsController?.hide(WindowInsetsCompat.Type.navigationBars())
-        }
-    }
-    // Navigation starts its pop transition before this composition is disposed.
-    // Restore both bars at ON_PAUSE, so the destination underneath is never laid out
-    // once against the reader's immersive insets. ON_RESUME reapplies reader policy.
-    DisposableEffect(lifecycleOwner, systemBarsController) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE -> restoreSystemBars()
-                Lifecycle.Event.ON_RESUME -> applyReaderSystemBars()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            restoreSystemBars()
-        }
+    DisposableEffect(systemBarHost, systemBarOwner) {
+        onDispose { systemBarHost?.clear(systemBarOwner) }
     }
     DisposableEffect(state.settings.keepScreenOn, view) {
         val previous = view.keepScreenOn
@@ -344,27 +285,7 @@ internal fun ReaderScreen(
     val exitReader: () -> Unit = {
         if (!exitRequested) {
             exitRequested = true
-            restoreSystemBars()
-            scope.launch {
-                if (!state.settings.showStatusBar || state.settings.hideNavigationBar) {
-                    var previousInsets = Int.MIN_VALUE to Int.MIN_VALUE
-                    var stableFrames = 0
-                    for (frame in 0 until 12) {
-                        withFrameNanos { }
-                        val insets = ViewCompat.getRootWindowInsets(view)
-                        val currentInsets =
-                            (insets?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0) to
-                                (insets?.getInsets(WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0)
-                        stableFrames = if (
-                            (currentInsets.first > 0 || currentInsets.second > 0) &&
-                            currentInsets == previousInsets
-                        ) stableFrames + 1 else 0
-                        previousInsets = currentInsets
-                        if (stableFrames >= 1) break
-                    }
-                }
-                onExit()
-            }
+            onExit()
         }
     }
     KixyuOverlayHost(Modifier.fillMaxSize()) {

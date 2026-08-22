@@ -201,7 +201,7 @@ fun KixyuAdaptiveModal(
             backProgress = predictiveBackState.progress,
             content = content,
         )
-        // Compose after the visible surface so this callback outranks the underlying NavHost.
+        // Compose after the visible surface so this callback outranks the underlying NavDisplay.
         KixyuPredictiveBackHandler(
             target = Unit.takeIf { show },
             state = predictiveBackState,

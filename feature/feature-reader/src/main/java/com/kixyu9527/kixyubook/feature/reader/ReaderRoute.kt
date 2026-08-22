@@ -44,6 +44,7 @@ internal fun ReaderControlVisibility(
 
 @Composable
 fun ReaderRoute(
+    bookUuid: String,
     initialSettings: ReaderSettings = ReaderSettings(),
     onExit: () -> Unit,
     onManageCorrections: () -> Unit,
@@ -65,16 +66,25 @@ fun ReaderRoute(
         // Create Hilt/ViewModel only after Navigation has committed the enter transition. This is
         // intentionally load-after-motion: Room, EPUB and pagination work cannot compete with the
         // single animated surface for a 120 Hz frame budget.
-        LoadedReaderRoute(initialSettings = initialSettings, onExit = onExit, onManageCorrections = onManageCorrections)
+        LoadedReaderRoute(
+            bookUuid = bookUuid,
+            initialSettings = initialSettings,
+            onExit = onExit,
+            onManageCorrections = onManageCorrections,
+        )
     }
 }
 
 @Composable
 private fun LoadedReaderRoute(
+    bookUuid: String,
     initialSettings: ReaderSettings,
     onExit: () -> Unit,
     onManageCorrections: () -> Unit,
-    viewModel: ReaderViewModel = hiltViewModel(),
+    viewModel: ReaderViewModel = hiltViewModel<ReaderViewModel, ReaderViewModel.Factory>(
+        key = bookUuid,
+        creationCallback = { factory -> factory.create(bookUuid) },
+    ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current

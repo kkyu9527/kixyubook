@@ -1,7 +1,6 @@
 package com.kixyu9527.kixyubook.feature.reader
 
 import android.os.SystemClock
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
@@ -15,6 +14,9 @@ import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderPositionManager
 import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CancellationException
@@ -26,7 +28,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.inject.Inject
 import kotlin.math.abs
 
 data class ReaderUiState(
@@ -56,9 +57,9 @@ data class ReaderUiState(
     val error: String? = null,
 )
 
-@HiltViewModel
-class ReaderViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
+@HiltViewModel(assistedFactory = ReaderViewModel.Factory::class)
+class ReaderViewModel @AssistedInject constructor(
+    @Assisted private val bookUuid: String,
     private val books: BookRepository,
     private val settingsRepository: ReaderSettingsRepository,
     private val fonts: FontRepository,
@@ -66,7 +67,11 @@ class ReaderViewModel @Inject constructor(
     private val cloudSync: CloudSyncCoordinator,
     private val textCorrections: TextCorrectionRepository,
 ) : ViewModel(), MemoryPressureListener {
-    private val bookUuid: String = checkNotNull(savedStateHandle["bookUuid"])
+    @AssistedFactory
+    interface Factory {
+        fun create(bookUuid: String): ReaderViewModel
+    }
+
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState = _uiState.asStateFlow()
     private val sessionFinished = AtomicBoolean(false)

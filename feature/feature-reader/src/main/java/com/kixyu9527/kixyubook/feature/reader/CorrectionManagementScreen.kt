@@ -33,7 +33,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -46,24 +45,30 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 data class CorrectionManagementState(
     val corrections: List<TextCorrection> = emptyList(),
     val chapters: List<Chapter> = emptyList(),
 )
 
-@HiltViewModel
-class CorrectionManagementViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
+@HiltViewModel(assistedFactory = CorrectionManagementViewModel.Factory::class)
+class CorrectionManagementViewModel @AssistedInject constructor(
+    @Assisted private val bookUuid: String,
     private val repository: TextCorrectionRepository,
     books: BookRepository,
 ) : ViewModel() {
-    private val bookUuid: String = checkNotNull(savedStateHandle["bookUuid"])
+    @AssistedFactory
+    interface Factory {
+        fun create(bookUuid: String): CorrectionManagementViewModel
+    }
+
     private val _state = MutableStateFlow(CorrectionManagementState())
     val state = _state.asStateFlow()
 
@@ -87,12 +92,17 @@ class CorrectionManagementViewModel @Inject constructor(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CorrectionManagementRoute(
+    bookUuid: String,
     onBack: () -> Unit,
-    viewModel: CorrectionManagementViewModel = hiltViewModel(),
+    viewModel: CorrectionManagementViewModel =
+        hiltViewModel<CorrectionManagementViewModel, CorrectionManagementViewModel.Factory>(
+            key = bookUuid,
+            creationCallback = { factory -> factory.create(bookUuid) },
+        ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<TextCorrection?>(null) }
-    // System Back belongs to NavHost here so the previous reader destination participates in the
+    // System Back belongs to NavDisplay here so the previous reader destination participates in the
     // platform predictive preview. The explicit callback remains only for the toolbar button.
     Scaffold(
         topBar = {

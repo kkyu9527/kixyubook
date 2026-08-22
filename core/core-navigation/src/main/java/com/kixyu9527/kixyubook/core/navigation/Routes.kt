@@ -1,22 +1,29 @@
 package com.kixyu9527.kixyubook.core.navigation
 
+import android.os.Parcelable
+import androidx.navigation3.runtime.NavKey
+import kotlinx.parcelize.Parcelize
+
+/** Stable keys for the three sibling pages hosted inside the HOME destination. */
 object Routes {
     const val HOME = "home"
     const val LIBRARY = "library"
-    const val HIDDEN_LIBRARY = "hidden_library"
     const val SETTINGS = "settings"
-    const val APPEARANCE = "appearance"
-    const val READING_SETTINGS = "reading_settings"
-    const val READING_INFORMATION = "reading_settings/information"
-    const val FONT_MANAGEMENT = "reading_settings/fonts"
-    const val CLOUD_SYNC = "cloud_sync"
-    const val GOOGLE_ACCOUNT = "cloud_sync/google_account"
-    const val ABOUT = "about"
-    const val DIAGNOSTIC_LOG = "diagnostic_log"
-    const val DIAGNOSTIC_LOG_CATEGORY = "diagnostic_log/{category}"
-    const val READER = "reader/{bookUuid}"
-    const val TEXT_CORRECTIONS = "reader/{bookUuid}/corrections"
-    fun diagnosticLogCategory(category: String) = "diagnostic_log/$category"
-    fun reader(bookUuid: String) = "reader/$bookUuid"
-    fun textCorrections(bookUuid: String) = "reader/$bookUuid/corrections"
+}
+
+/** Type-safe, saveable Navigation 3 destination keys. */
+sealed interface AppRoute : NavKey, Parcelable {
+    @Parcelize data object Home : AppRoute
+    @Parcelize data object HiddenLibrary : AppRoute
+    @Parcelize data object Appearance : AppRoute
+    @Parcelize data object ReadingSettings : AppRoute
+    @Parcelize data object ReadingInformation : AppRoute
+    @Parcelize data object FontManagement : AppRoute
+    @Parcelize data object CloudSync : AppRoute
+    @Parcelize data object GoogleAccount : AppRoute
+    @Parcelize data object About : AppRoute
+    @Parcelize data object DiagnosticLog : AppRoute
+    @Parcelize data class DiagnosticLogCategory(val category: String) : AppRoute
+    @Parcelize data class Reader(val bookUuid: String) : AppRoute
+    @Parcelize data class TextCorrections(val bookUuid: String) : AppRoute
 }
