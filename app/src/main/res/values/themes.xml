@@ -5,11 +5,16 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:colorAccent">#52655A</item>
-        <item name="android:windowDisablePreview">true</item>
         <!-- Compose provides an intentional light/dark palette; never let HyperOS apply a
              second algorithmic inversion over the already adapted UI. -->
         <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+
+    <style name="Theme.Kixyubook.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Kixyubook</item>
     </style>
 </resources>

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <include domain="database" path="." />
-    <include domain="file" path="." />
+    <!-- Settings stay small and self-contained. Book binaries/databases are restored by the
+         app's explicit Google Drive sync instead of exhausting Android Auto Backup's 25MB quota. -->
+    <include domain="file" path="datastore/" />
+    <include domain="file" path="fonts/" />
     <include domain="sharedpref" path="." />
 </full-backup-content>

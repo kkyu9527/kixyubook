@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <include domain="database" path="." />
-        <include domain="file" path="." />
+        <!-- Cloud backup contains settings and user-added fonts only. The app's own Drive sync
+             owns books, covers, library metadata and reading progress as one consistent set. -->
+        <include domain="file" path="datastore/" />
+        <include domain="file" path="fonts/" />
         <include domain="sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
+        <!-- Direct device transfer has no Auto Backup quota and can preserve the full library. -->
         <include domain="database" path="." />
         <include domain="file" path="." />
         <include domain="sharedpref" path="." />
+        <exclude domain="file" path="diagnostics/" />
     </device-transfer>
 </data-extraction-rules>

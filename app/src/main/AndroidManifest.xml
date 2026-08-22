@@ -50,8 +50,10 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:theme="@style/Theme.Kixyubook.Starting"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|uiMode"
-            android:resizeableActivity="true">
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
