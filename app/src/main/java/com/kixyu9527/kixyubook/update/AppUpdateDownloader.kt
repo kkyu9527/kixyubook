@@ -12,6 +12,7 @@ import androidx.core.content.edit
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.kixyu9527.kixyubook.BuildConfig
+import com.kixyu9527.kixyubook.R
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -25,7 +26,7 @@ class AppUpdateDownloader @Inject constructor(
     fun download(update: AppUpdateInfo): Boolean = runCatching {
         enqueue(update)
     }.getOrElse {
-        Toast.makeText(context, "下载启动失败，请稍后重试", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, R.string.update_download_start_failed, Toast.LENGTH_LONG).show()
         false
     }
 
@@ -40,7 +41,7 @@ class AppUpdateDownloader @Inject constructor(
         val apk = File(directory, "$FILE_PREFIX${update.versionName.safeFileName()}.apk")
         val request = DownloadManager.Request(downloadUrl.toUri())
             .setTitle("Kixyu Book ${update.versionName}")
-            .setDescription("正在下载应用更新")
+            .setDescription(context.getString(R.string.update_downloading))
             .setMimeType(APK_MIME_TYPE)
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(false)
@@ -54,7 +55,7 @@ class AppUpdateDownloader @Inject constructor(
             putString(KEY_VERSION, update.versionName)
             putBoolean(KEY_INSTALL_LAUNCHED, false)
         }
-        Toast.makeText(context, "已在后台下载，完成后将打开安装页面", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, R.string.update_download_started, Toast.LENGTH_LONG).show()
         return true
     }
 
@@ -88,6 +89,7 @@ class AppUpdateDownloader @Inject constructor(
                 clearPendingDownload(context)
                 return
             }
+            if (!verifyPendingApk(context)) return
 
             if (context.packageManager.canRequestPackageInstalls()) {
                 launchPendingInstaller(context)
@@ -106,6 +108,7 @@ class AppUpdateDownloader @Inject constructor(
             val downloadId = prefs.getLong(KEY_DOWNLOAD_ID, -1L)
             val apk = prefs.getString(KEY_APK_PATH, null)?.let(::File) ?: return
             if (!apk.isFile || !downloadSucceeded(context, downloadId)) return
+            if (!verifyPendingApk(context)) return
 
             val uri = FileProvider.getUriForFile(
                 context,
@@ -141,6 +144,23 @@ class AppUpdateDownloader @Inject constructor(
         private fun pendingVersionIsNewer(context: Context): Boolean {
             val version = preferences(context).getString(KEY_VERSION, null) ?: return false
             return isNewerVersion(version, BuildConfig.VERSION_NAME)
+        }
+
+        private fun verifyPendingApk(context: Context): Boolean {
+            val apk = preferences(context).getString(KEY_APK_PATH, null)?.let(::File)
+            val result = apk?.let { verifyUpdateApk(context, it) } ?: ApkVerificationResult.Unreadable
+            if (result == ApkVerificationResult.Valid) return true
+
+            val message = when (result) {
+                ApkVerificationResult.Valid -> error("Handled above")
+                ApkVerificationResult.Unreadable -> R.string.update_apk_unreadable
+                ApkVerificationResult.WrongPackage -> R.string.update_apk_wrong_package
+                ApkVerificationResult.NotNewer -> R.string.update_apk_not_newer
+                ApkVerificationResult.WrongSignature -> R.string.update_apk_wrong_signature
+            }
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            clearPendingDownload(context)
+            return false
         }
 
         private fun clearPendingDownload(context: Context) {

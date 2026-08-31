@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAdaptiveModal
@@ -47,23 +48,23 @@ internal fun AvailableUpdateModal(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
         ) {
             Text(
-                text = "发现新版本 ${update?.versionName.orEmpty()}",
+                text = stringResource(R.string.update_available_title, update?.versionName.orEmpty()),
                 style = MaterialTheme.typography.headlineSmall,
                 maxLines = 1,
             )
             Text(
-                text = "当前版本 ${BuildConfig.VERSION_NAME}",
+                text = stringResource(R.string.current_version, BuildConfig.VERSION_NAME),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ReleaseNotesMarkdown(
                 markdown = update?.releaseNotes?.takeIf { it.isNotBlank() }
-                    ?: "新版本已经发布，下载完成后将自动打开系统安装页面。",
+                    ?: stringResource(R.string.update_notes_fallback),
                 modifier = Modifier.weight(1f, fill = false),
             )
             update?.releaseUrl?.let { releaseUrl ->
                 Text(
-                    text = "前往 GitHub 发布页",
+                    text = stringResource(R.string.open_github_release),
                     modifier = Modifier.clickable {
                         runCatching { uriHandler.openUri(releaseUrl) }
                     },
@@ -81,9 +82,9 @@ internal fun AvailableUpdateModal(
                 ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                KixyuTextButton(text = "取消", onClick = onDismiss)
+                KixyuTextButton(text = stringResource(R.string.cancel), onClick = onDismiss)
                 KixyuButton(
-                    text = "下载",
+                    text = stringResource(R.string.download),
                     onClick = {
                         if (update != null && onDownload(update)) onDismiss()
                     },

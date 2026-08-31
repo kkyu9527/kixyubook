@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAdaptiveModal
@@ -42,7 +43,7 @@ internal fun ReleaseNotesModal(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
         ) {
             Text(
-                text = "更新日志 · v${BuildConfig.VERSION_NAME}",
+                text = stringResource(R.string.release_notes_title, BuildConfig.VERSION_NAME),
                 style = MaterialTheme.typography.headlineSmall,
                 maxLines = 1,
             )
@@ -65,7 +66,7 @@ internal fun ReleaseNotesModal(
                     )
                     ReleaseNotesMarkdown(
                         markdown = state.release.releaseNotes.takeIf { it.isNotBlank() }
-                            ?: "此版本未填写 Release Note。",
+                            ?: stringResource(R.string.release_notes_empty),
                         modifier = Modifier.weight(1f, fill = false),
                     )
                 }
@@ -79,8 +80,8 @@ internal fun ReleaseNotesModal(
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    KixyuButton(text = "重试", onClick = onRetry)
-                    KixyuTextButton(text = "前往 GitHub", onClick = { onOpenReleasePage() })
+                    KixyuButton(text = stringResource(R.string.retry), onClick = onRetry)
+                    KixyuTextButton(text = stringResource(R.string.open_github), onClick = { onOpenReleasePage() })
                 }
             }
             Row(
@@ -90,7 +91,7 @@ internal fun ReleaseNotesModal(
             ) {
                 if (state is ReleaseNotesState.Available) {
                     Text(
-                        text = "在 GitHub 查看此版本",
+                        text = stringResource(R.string.view_release_on_github),
                         modifier = Modifier.clickable { onOpenReleasePage() },
                         style = MaterialTheme.typography.labelLarge.copy(
                             textDecoration = TextDecoration.Underline,
@@ -99,7 +100,7 @@ internal fun ReleaseNotesModal(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                KixyuTextButton(text = "关闭", onClick = onDismiss)
+                KixyuTextButton(text = stringResource(R.string.close), onClick = onDismiss)
             }
         }
     }
