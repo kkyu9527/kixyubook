@@ -123,8 +123,8 @@ internal fun ReaderScreen(
     }
     var exitRequested by remember { mutableStateOf(false) }
     var retainedSheet by remember { mutableStateOf<ReaderSheet?>(null) }
-    var showChapterLoading by remember { mutableStateOf(false) }
     var pageInteractionActive by remember { mutableStateOf(false) }
+    var showSlowFirstPageStatus by remember { mutableStateOf(false) }
     var brightnessPreview by remember { mutableStateOf<Float?>(null) }
     var overlayAnimationPriority by remember { mutableStateOf(false) }
     var overlayMotionObserved by remember { mutableStateOf(false) }
@@ -182,15 +182,14 @@ internal fun ReaderScreen(
     DisposableEffect(Unit) {
         onDispose { setPageInteractionActive(false) }
     }
-    LaunchedEffect(state.chapterLoading) {
-        if (state.chapterLoading) {
-            delay(CHAPTER_LOADING_INDICATOR_DELAY_MILLIS)
-            showChapterLoading = true
-        } else {
-            showChapterLoading = false
+    LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
+    LaunchedEffect(state.loadStage) {
+        showSlowFirstPageStatus = false
+        if (state.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE) {
+            delay(900L)
+            showSlowFirstPageStatus = true
         }
     }
-    LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
     LaunchedEffect(sheet) {
         if (sheet != ReaderSheet.THEME) brightnessPreview = null
     }
@@ -422,11 +421,6 @@ internal fun ReaderScreen(
                                 .padding(horizontal = state.settings.margin.dp),
                         )
                     }
-                    state.error != null -> Text(
-                        state.error,
-                        color = palette.body,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
                     state.chapter != null -> ReaderContent(
                         state = contentState,
                         palette = palette,
@@ -446,29 +440,18 @@ internal fun ReaderScreen(
                         onDocumentLink = openDocumentLink,
                     )
                 }
-            }
-            ReaderControlVisibility(
-                visible = showChapterLoading,
-                modifier = Modifier.align(Alignment.Center),
-            ) {
-                KixyuPopupSurface(shadowElevation = KixyuSpacing.extraSmall) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.small),
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = palette.accent,
-                            strokeWidth = 2.dp,
-                        )
-                        Text(
-                            text = state.pendingChapterTitle?.let { "正在加载 · $it" } ?: "正在加载章节",
-                            color = palette.body,
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                        )
-                    }
+                AnimatedVisibility(
+                    visible = showSlowFirstPageStatus &&
+                        state.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.reader_preparing_first_page),
+                        color = palette.secondary,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
             }
             ReaderControls(

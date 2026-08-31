@@ -10,7 +10,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -18,10 +17,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupBackdropEffect
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
-import com.kixyu9527.kixyubook.core.reader.engine.ReaderRenderPalette
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
+import kotlinx.coroutines.delay
 
 internal enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, INFORMATION }
 
@@ -62,7 +66,7 @@ fun ReaderRoute(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     if (!readerDestinationEntered) {
-        ReaderEntrySurface(initialSettings)
+        ReaderEntrySurface(initialSettings, stage = null, format = null)
     } else {
         // Create Hilt/ViewModel only after Navigation has committed the enter transition. This is
         // intentionally load-after-motion: Room, EPUB and pagination work cannot compete with the
@@ -123,9 +127,20 @@ private fun LoadedReaderRoute(
     }
     val renderedState = if (state.settingsLoaded) state else state.copy(settings = initialSettings)
     if (state.loading) {
-        // Keep the same lightweight cover visible from the first navigation frame until the
-        // initial chapter is ready. ReaderScreen never exposes an intermediate blank frame.
-        ReaderEntrySurface(renderedState.settings)
+        ReaderEntrySurface(
+            settings = renderedState.settings,
+            stage = state.loadStage,
+            format = state.book?.format,
+        )
+        return
+    }
+    if (state.chapter == null && state.error != null) {
+        ReaderLoadFailureSurface(
+            settings = renderedState.settings,
+            message = state.error.orEmpty(),
+            onRetry = viewModel::retryInitialLoad,
+            onExit = onExit,
+        )
         return
     }
     ReaderScreen(
@@ -177,41 +192,94 @@ private fun LoadedReaderRoute(
  * ViewModel continues loading the current chapter while this surface is visible.
  */
 @Composable
-private fun ReaderEntrySurface(settings: ReaderSettings) {
+private fun ReaderEntrySurface(
+    settings: ReaderSettings,
+    stage: ReaderLoadStage?,
+    format: BookFormat?,
+) {
     val palette = readerPalette(settings, androidx.compose.foundation.isSystemInDarkTheme())
+    var showSlowStatus by remember(stage) { mutableStateOf(false) }
+    LaunchedEffect(stage) {
+        if (stage == null) return@LaunchedEffect
+        delay(READER_SLOW_OPEN_STATUS_DELAY_MILLIS)
+        showSlowStatus = true
+    }
     Box(
         modifier = Modifier.fillMaxSize().background(palette.background),
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.BottomCenter,
     ) {
-        ReaderLoadingIndicator(palette)
-    }
-}
-
-@Composable
-internal fun ReaderLoadingIndicator(palette: ReaderRenderPalette) {
-    Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = palette.body.copy(alpha = if (palette.background.luminance() > .5f) .08f else .14f),
-    ) {
-        Row(
-            modifier = Modifier.padding(
-                horizontal = KixyuSpacing.medium,
-                vertical = KixyuSpacing.small,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-            verticalAlignment = Alignment.CenterVertically,
+        AnimatedVisibility(
+            visible = showSlowStatus && stage != null,
+            enter = fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
+            exit = fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
+            modifier = Modifier.padding(bottom = 32.dp),
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                color = palette.accent,
-                strokeWidth = 2.dp,
-            )
             Text(
-                text = stringResource(R.string.reader_loading_chapter),
-                color = palette.body,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
+                text = readerLoadStageLabel(stage, format),
+                color = palette.secondary,
+                style = MaterialTheme.typography.labelMedium,
             )
         }
     }
 }
+
+@Composable
+private fun readerLoadStageLabel(stage: ReaderLoadStage?, format: BookFormat?): String = when (stage) {
+    ReaderLoadStage.OPENING_BOOK -> stringResource(R.string.reader_opening_book)
+    ReaderLoadStage.READING_CONTENT -> if (format == BookFormat.EPUB) {
+        stringResource(R.string.reader_parsing_epub)
+    } else {
+        stringResource(R.string.reader_preparing_text)
+    }
+    ReaderLoadStage.PAGINATING_FIRST_PAGE -> stringResource(R.string.reader_preparing_first_page)
+    null -> ""
+}
+
+@Composable
+private fun ReaderLoadFailureSurface(
+    settings: ReaderSettings,
+    message: String,
+    onRetry: () -> Unit,
+    onExit: () -> Unit,
+) {
+    val palette = readerPalette(settings, androidx.compose.foundation.isSystemInDarkTheme())
+    Box(
+        modifier = Modifier.fillMaxSize().background(palette.background).padding(KixyuSpacing.large),
+        contentAlignment = Alignment.Center,
+    ) {
+        KixyuPopupSurface(
+            modifier = Modifier.widthIn(max = 420.dp),
+            shadowElevation = KixyuSpacing.extraSmall,
+            backdropEffect = KixyuPopupBackdropEffect.SURFACE_ONLY,
+        ) {
+            Column(
+                modifier = Modifier.padding(KixyuSpacing.large),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+            ) {
+                Text(
+                    text = stringResource(R.string.reader_open_failed),
+                    color = palette.title,
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Text(
+                    text = message,
+                    color = palette.secondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
+                    KixyuTextButton(
+                        text = stringResource(R.string.reader_return_to_book),
+                        onClick = onExit,
+                    )
+                    KixyuButton(
+                        text = stringResource(R.string.reader_retry),
+                        onClick = onRetry,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val READER_SLOW_OPEN_STATUS_DELAY_MILLIS = 900L

@@ -61,6 +61,7 @@ class ReaderViewModel @AssistedInject constructor(
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, ChapterLoadRequest>()
     private var chapterNavigationJob: Job? = null
+    private var initialRetryJob: Job? = null
     private var chapterPrefetchJob: Job? = null
     private var criticalNeighborPublishJob: Job? = null
     private var criticalReadAheadJob: Job? = null
@@ -180,6 +181,19 @@ class ReaderViewModel @AssistedInject constructor(
         val progress = initialData.progress
         acceptedProgressUpdatedAt = progress?.updatedTime ?: Long.MIN_VALUE
         val index = progress?.chapterId?.let { id -> chapters.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
+        _uiState.update {
+            it.copy(
+                book = book,
+                chapters = chapters,
+                settings = initialData.presentation.settings,
+                settingsLoaded = true,
+                fontPath = initialData.presentation.fontPath,
+                availableFonts = initialData.presentation.fonts,
+                loading = true,
+                loadStage = ReaderLoadStage.READING_CONTENT,
+                error = null,
+            )
+        }
         val content = chapterLoad(index, chapters, ChapterLoadPriority.USER).await() ?: error("章节读取失败")
         lastPosition = progress?.paragraphIndex ?: 0
         lastCharOffset = progress?.charOffset?.coerceAtLeast(0) ?: 0
@@ -201,9 +215,34 @@ class ReaderViewModel @AssistedInject constructor(
                 fontPath = initialData.presentation.fontPath,
                 availableFonts = initialData.presentation.fonts,
                 loading = false,
+                loadStage = ReaderLoadStage.PAGINATING_FIRST_PAGE,
+                error = null,
             )
         }
+        // Parsing the next chapter must overlap the user's first page, not begin near the
+        // boundary. Pagination is promoted separately as soon as the first visible leaf exists.
+        // Together these two stages make the next chapter enter the same Pager as an ordinary
+        // measured page before the reader can reach it, including one-page imported chapters.
+        prioritizeNextChapter(index)
     }.onFailure { error -> _uiState.update { it.copy(loading = false, error = error.message) } }
+
+    fun retryInitialLoad() {
+        if (_uiState.value.loading || initialRetryJob?.isActive == true) return
+        chapterLoads.values.forEach { request ->
+            if (!request.deferred.isCompleted) request.deferred.cancel()
+        }
+        chapterLoads.clear()
+        initialRetryJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    loading = true,
+                    loadStage = ReaderLoadStage.OPENING_BOOK,
+                    error = null,
+                )
+            }
+            loadInitial()
+        }
+    }
 
     fun moveChapter(delta: Int, openAtEnd: Boolean = false) {
         val state = _uiState.value
@@ -474,15 +513,12 @@ class ReaderViewModel @AssistedInject constructor(
         pendingChapterIndex = index
         _uiState.update {
             it.copy(
-                chapterLoading = true,
-                pendingChapterTitle = state.chapters.getOrNull(index)?.title,
                 error = null,
             )
         }
         chapterNavigationJob = viewModelScope.launch {
-            var chapterLoaded = false
             try {
-                chapterLoaded = loadChapter(index, position, charOffset, persistProgress)
+                loadChapter(index, position, charOffset, persistProgress)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -492,9 +528,6 @@ class ReaderViewModel @AssistedInject constructor(
             } finally {
                 if (pendingChapterIndex == index) {
                     pendingChapterIndex = null
-                    if (!chapterLoaded) {
-                        _uiState.update { it.copy(chapterLoading = false, pendingChapterTitle = null) }
-                    }
                 }
             }
         }
@@ -564,11 +597,13 @@ class ReaderViewModel @AssistedInject constructor(
                 restoreCharOffset = lastCharOffset,
                 navigationVersion = it.navigationVersion + 1,
                 loading = false,
-                chapterLoading = false,
-                pendingChapterTitle = null,
                 error = null,
             )
         }
+        // Every activated chapter immediately opens a new forward read-ahead window. Boundary
+        // activation itself is synchronous from prefetchedChapters, so this never participates in
+        // the turn that just completed and cannot delay its animation.
+        prioritizeNextChapter(index)
         if (persistProgress) savePosition(lastPosition, lastCharOffset)
     }
 
@@ -590,8 +625,6 @@ class ReaderViewModel @AssistedInject constructor(
                 restorePosition = lastPosition,
                 restoreCharOffset = lastCharOffset,
                 navigationVersion = current.navigationVersion + 1,
-                chapterLoading = false,
-                pendingChapterTitle = null,
             )
         }
         if (persistProgress) savePosition(lastPosition, lastCharOffset)
@@ -722,12 +755,11 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     /**
-     * Promote only the next readable chapter when the adaptive end-of-chapter deadline is reached.
+     * Prepare the next readable chapter from the moment the current chapter becomes visible.
      *
-     * Normal entry-time prefetch stays speculative and yields to every page animation. This
-     * deadline path uses a persistent background-priority lane: an uncached, newly imported EPUB
-     * keeps progressing through the final page turns without competing at render-thread priority.
-     * Cached chapters take the same path but return from memory/disk without parsing again.
+     * Ordinary speculative work still yields to page animation. This forward-only lane survives
+     * page drags at background priority so a newly imported EPUB can be decoded well before its
+     * first leaf joins the current Pager.
      */
     fun prioritizeNextChapter(sourceChapterIndex: Int) {
         val state = _uiState.value
@@ -1058,10 +1090,10 @@ class ReaderViewModel @AssistedInject constructor(
     fun chapterRendered(navigationVersion: Int) {
         val rendered = _uiState.value
         if (rendered.navigationVersion != navigationVersion || rendered.chapter == null) return
-        if (rendered.chapterLoading) {
+        if (rendered.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE) {
             _uiState.update { current ->
                 if (current.navigationVersion != navigationVersion) current else {
-                    current.copy(chapterLoading = false, pendingChapterTitle = null)
+                    current.copy(loadStage = null)
                 }
             }
         }

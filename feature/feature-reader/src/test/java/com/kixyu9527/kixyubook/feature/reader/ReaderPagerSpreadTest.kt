@@ -2,22 +2,10 @@ package com.kixyu9527.kixyubook.feature.reader
 
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderPage
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReaderPagerSpreadTest {
-    @Test
-    fun readAheadDeadlineAdaptsToChapterLengthAndVisibleLeafCount() {
-        assertFalse(shouldPrioritizeNextChapter(8, 4, twoPageSpread = false))
-        assertTrue(shouldPrioritizeNextChapter(8, 5, twoPageSpread = false))
-        assertFalse(shouldPrioritizeNextChapter(20, 13, twoPageSpread = true))
-        assertTrue(shouldPrioritizeNextChapter(20, 14, twoPageSpread = true))
-        assertFalse(shouldPrioritizeNextChapter(48, 41, twoPageSpread = false))
-        assertTrue(shouldPrioritizeNextChapter(48, 42, twoPageSpread = false))
-        assertTrue(shouldPrioritizeNextChapter(2, 0, twoPageSpread = false))
-    }
-
     @Test
     fun phoneLayoutKeepsEveryLeafIndependent() {
         val spreads = buildReaderPagerSpreads(chapterPages(chapter = 2, count = 3), false)
@@ -95,7 +83,7 @@ class ReaderPagerSpreadTest {
     }
 
     @Test
-    fun nextSpreadKeyDoesNotChangeWhenRightLeafFinishesLoading() {
+    fun nextChapterAppearsOnlyAfterItsRealPagesAreReady() {
         fun nextSpread(nextPages: List<ReaderPage>): ReaderPagerSpread {
             val window = buildReaderPagerWindow(
                 currentChapterIndex = 2,
@@ -114,10 +102,11 @@ class ReaderPagerSpreadTest {
         val pending = nextSpread(emptyList())
         val loaded = nextSpread(chapterPages(chapter = 3, count = 3).mapNotNull { it.page })
 
-        assertEquals("3:spread:0", pending.key)
-        assertEquals(pending.key, loaded.key)
-        assertEquals(1, pending.items.size)
+        assertEquals("2:spread:0", pending.key)
+        assertTrue(pending.items.all { it.chapterIndex == 2 && it.page != null })
+        assertEquals("3:spread:0", loaded.key)
         assertEquals(2, loaded.items.size)
+        assertTrue(loaded.items.all { it.chapterIndex == 3 && it.page != null })
     }
 
     @Test

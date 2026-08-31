@@ -12,6 +12,12 @@ import com.kixyu9527.kixyubook.core.common.model.TextCorrection
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
 
+enum class ReaderLoadStage {
+    OPENING_BOOK,
+    READING_CONTENT,
+    PAGINATING_FIRST_PAGE,
+}
+
 data class ReaderUiState(
     val book: Book? = null,
     val chapters: List<Chapter> = emptyList(),
@@ -36,8 +42,7 @@ data class ReaderUiState(
     val epubFootnote: EpubLinkResult.Footnote? = null,
     val navigationVersion: Int = 0,
     val loading: Boolean = true,
-    val chapterLoading: Boolean = false,
-    val pendingChapterTitle: String? = null,
+    val loadStage: ReaderLoadStage? = ReaderLoadStage.OPENING_BOOK,
     val error: String? = null,
 )
 

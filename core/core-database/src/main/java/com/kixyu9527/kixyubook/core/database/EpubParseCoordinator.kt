@@ -116,7 +116,7 @@ class EpubParseCoordinator @Inject constructor() {
     }
 
     /**
-     * Adaptive end-of-chapter runway for the immediately following chapter.
+     * Continuous read-ahead for the immediately following chapter.
      *
      * It uses the background-priority reader thread like ordinary prefetch, but an already-started
      * unit survives page drags. The render thread therefore keeps scheduler priority while a short

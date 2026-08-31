@@ -61,6 +61,7 @@ internal fun PagedReader(
     bottomInsetDp: Float,
     physicalViewportHeightDp: Float,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
+    onDocumentLink: (String) -> Unit,
 ) {
     var retainedPage by remember(
         spec,
@@ -88,13 +89,11 @@ internal fun PagedReader(
     DisposableEffect(paginationCoordinator) {
         onDispose { paginationCoordinator.setPaused(false) }
     }
-    // The first chapter still needs a loading surface, but once a Pager has rendered it must stay
-    // in composition across chapter pagination. Removing it while the newly activated chapter is
-    // being measured cancels any immediately-following drag and produces a visible spring-back.
+    // Opening the reader is content-first: the themed reading surface remains stable until the
+    // first measured page arrives. A transient spinner made every cached book feel like a cold
+    // start and competed visually with the navigation animation.
     if (pages.isEmpty() && retainedPage == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            ReaderLoadingIndicator(palette)
-        }
+        Box(Modifier.fillMaxSize().background(palette.background))
         return
     }
     LaunchedEffect(chapter.id, state.navigationVersion, pages) {
@@ -105,13 +104,11 @@ internal fun PagedReader(
     val hasPrevious = state.chapterIndex > 0
     val hasNext = state.chapterIndex < state.chapters.lastIndex
     var criticalNextChapter by remember(chapter.id) { mutableStateOf(false) }
-    LaunchedEffect(chapter.id, pages.size, pagination.isComplete, hasNext) {
-        if (
-            hasNext &&
-            pagination.isComplete &&
-            pages.isNotEmpty() &&
-            shouldPrioritizeNextChapter(pages.size, 0, twoPageSpread)
-        ) {
+    LaunchedEffect(chapter.id, pages.isNotEmpty(), hasNext) {
+        if (hasNext && pages.isNotEmpty()) {
+            // Cross-chapter navigation is part of the ordinary page stream. Start decoding and
+            // measuring the next chapter as soon as the visible page is ready, not when the user
+            // has already reached the final few leaves.
             criticalNextChapter = true
             prioritizeNextChapter(state.chapterIndex)
         }
@@ -126,8 +123,8 @@ internal fun PagedReader(
             showRegularChapterTitle = state.settings.showChapterTitle,
             coordinator = paginationCoordinator,
             measurer = paginationMeasurer,
-            // The adaptive deadline promotes an existing layout without throwing away its
-            // in-flight result. Ordinary reading keeps this speculative and low priority.
+            // Once parsing publishes the next chapter its first measured leaves are foreground
+            // reader work, not a late speculative task. Reuse any in-flight layout in place.
             prefetch = !criticalNextChapter,
             paused = resourcePriorityActive,
         )
@@ -288,18 +285,6 @@ internal fun PagedReader(
                     val lastVisible = spread.items.lastOrNull { visible ->
                         visible.chapterIndex == item.chapterIndex && visible.page != null
                     } ?: item
-                    if (
-                        hasNext &&
-                        latestPaginationComplete &&
-                        shouldPrioritizeNextChapter(
-                            item.pageCount,
-                            lastVisible.pageIndex,
-                            twoPageSpread,
-                        )
-                    ) {
-                        criticalNextChapter = true
-                        prioritizeNextChapter(readerState.chapterIndex)
-                    }
                     val anchor = item.page.blocks.firstOrNull { block ->
                         block.kind == ParagraphKind.TEXT
                     }
@@ -358,13 +343,14 @@ internal fun PagedReader(
                         }
                     }
                 }
-                direction < 0 && readerState.chapterIndex > 0 -> {
-                    moveChapterFromPage(readerState.chapterIndex, -1, true)
-                }
+                direction < 0 && readerState.chapterIndex > 0 -> Unit
                 direction > 0 &&
                     latestPaginationComplete &&
                     readerState.chapterIndex < readerState.chapters.lastIndex -> {
-                    moveChapterFromPage(readerState.chapterIndex, 1, false)
+                    // A chapter boundary is never a loading command. The read-ahead task will add
+                    // the real neighbouring page to this same Pager; until then the settled page
+                    // remains unchanged without a placeholder, spinner or partial transition.
+                    prioritizeNextChapter(readerState.chapterIndex)
                 }
             }
         }
@@ -457,6 +443,7 @@ internal fun PagedReader(
                     bottomInsetDp = bottomInsetDp,
                     physicalViewportHeightDp = physicalViewportHeightDp,
                     onTextActionTarget = onTextActionTarget,
+                    onDocumentLink = onDocumentLink,
                 )
             }
         }
@@ -485,7 +472,9 @@ internal fun PagedReader(
                             bottomInsetDp,
                         ),
                         fullPageViewportHeightDp = physicalViewportHeightDp,
+                        readerAnnotations = state.annotations,
                         onTextActionTarget = onTextActionTarget,
+                        onDocumentLink = onDocumentLink,
                     )
                 }
             }
@@ -508,6 +497,7 @@ private fun ReaderPagerSpreadContent(
     bottomInsetDp: Float,
     physicalViewportHeightDp: Float,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
+    onDocumentLink: (String) -> Unit,
 ) {
     Row(Modifier.fillMaxSize()) {
         spread.items.forEachIndexed { index, item ->
@@ -524,6 +514,7 @@ private fun ReaderPagerSpreadContent(
                     bottomInsetDp = bottomInsetDp,
                     physicalViewportHeightDp = physicalViewportHeightDp,
                     onTextActionTarget = onTextActionTarget,
+                    onDocumentLink = onDocumentLink,
                 )
             }
             if (index < spread.items.lastIndex) {
@@ -589,18 +580,11 @@ internal fun ReaderPagerLeaf(
     bottomInsetDp: Float,
     physicalViewportHeightDp: Float,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
+    onDocumentLink: (String) -> Unit,
 ) {
     val renderedPage = item.page
     if (renderedPage == null) {
-        // A boundary placeholder used to be an empty ReaderPage. On light themes that was
-        // indistinguishable from a white flash while a newly imported EPUB parsed its XHTML.
-        // Keep the stable Pager node and its tap handling, but make the wait intentional.
-        Box(
-            modifier = Modifier.fillMaxSize().background(palette.background),
-            contentAlignment = Alignment.Center,
-        ) {
-            ReaderLoadingIndicator(palette)
-        }
+        Box(modifier = Modifier.fillMaxSize().background(palette.background))
         return
     }
     ReaderPageRenderer(
@@ -614,12 +598,14 @@ internal fun ReaderPagerLeaf(
         fullPageViewportHeightDp = physicalViewportHeightDp,
         showRegularChapterTitle = state.settings.showChapterTitle,
         highlightQuery = state.searchQuery,
+        readerAnnotations = state.annotations,
         pageNumber = readerPageNumber(state, item.pageIndex, item.pageCount),
         showReadingTime = state.settings.showReadingTime,
         showBatteryLevel = state.settings.showBatteryLevel,
         selectionEnabled = selectionEnabled,
         onSelectionActiveChange = onSelectionActiveChange,
         onTextActionTarget = onTextActionTarget,
+        onDocumentLink = onDocumentLink,
     )
 }
 
@@ -726,10 +712,6 @@ internal fun buildReaderPagerWindow(
     chapterCount: Int,
     neighbourLeafCount: Int = 1,
 ): List<ReaderPagerItem> = buildList {
-    val firstChapter = (currentChapterIndex - PAGER_NAVIGATION_RADIUS).coerceAtLeast(0)
-    for (chapterIndex in firstChapter until currentChapterIndex - 1) {
-        add(ReaderPagerItem(chapterIndex, Int.MIN_VALUE, 0, null))
-    }
     if (hasPrevious) {
         // A landscape spread must already contain the same final leaf pair before and after the
         // chapter boundary is crossed. For an odd page count the final spread contains one leaf;
@@ -741,9 +723,7 @@ internal fun buildReaderPagerWindow(
             else -> 1
         }
         val visiblePreviousPages = previousPages.takeLast(previousLeafCount)
-        if (visiblePreviousPages.isEmpty()) {
-            add(ReaderPagerItem(currentChapterIndex - 1, Int.MIN_VALUE, 0, null))
-        } else {
+        if (visiblePreviousPages.isNotEmpty()) {
             visiblePreviousPages.forEach { page ->
                 add(
                     ReaderPagerItem(
@@ -779,9 +759,7 @@ internal fun buildReaderPagerWindow(
     }
     if (hasNext && currentPagesComplete) {
         val visibleNextPages = nextPages.take(neighbourLeafCount.coerceAtLeast(1))
-        if (visibleNextPages.isEmpty()) {
-            add(ReaderPagerItem(currentChapterIndex + 1, 0, 0, null))
-        } else {
+        if (visibleNextPages.isNotEmpty()) {
             visibleNextPages.forEach { page ->
                 add(
                     ReaderPagerItem(
@@ -792,13 +770,6 @@ internal fun buildReaderPagerWindow(
                     ),
                 )
             }
-        }
-    }
-    val lastChapter = (currentChapterIndex + PAGER_NAVIGATION_RADIUS)
-        .coerceAtMost(chapterCount - 1)
-    if (currentPagesComplete && currentChapterIndex + 2 <= lastChapter) {
-        for (chapterIndex in currentChapterIndex + 2..lastChapter) {
-            add(ReaderPagerItem(chapterIndex, 0, 0, null))
         }
     }
 }
@@ -814,27 +785,3 @@ internal fun readerPageNumber(state: ReaderContentState, pageIndex: Int, pageCou
     } else {
         null
     }
-
-internal fun criticalReadAheadLeafCount(pageCount: Int, twoPageSpread: Boolean): Int {
-    if (pageCount <= 0) return 0
-    val leavesPerTurn = if (twoPageSpread) 2 else 1
-    val minimumRunway = leavesPerTurn * MINIMUM_CRITICAL_READ_AHEAD_TURNS
-    val maximumRunway = leavesPerTurn * MAXIMUM_CRITICAL_READ_AHEAD_TURNS
-    val proportionalRunway = kotlin.math.ceil(pageCount / READ_AHEAD_PAGE_FRACTION).toInt()
-    return maxOf(minimumRunway, proportionalRunway)
-        .coerceAtMost(maximumRunway)
-        .coerceAtMost(pageCount)
-}
-
-internal fun shouldPrioritizeNextChapter(
-    pageCount: Int,
-    visiblePageIndex: Int,
-    twoPageSpread: Boolean,
-): Boolean {
-    val runway = criticalReadAheadLeafCount(pageCount, twoPageSpread)
-    return runway > 0 && pageCount - visiblePageIndex <= runway
-}
-
-private const val MINIMUM_CRITICAL_READ_AHEAD_TURNS = 3
-private const val MAXIMUM_CRITICAL_READ_AHEAD_TURNS = 6
-private const val READ_AHEAD_PAGE_FRACTION = 8f

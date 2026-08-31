@@ -564,7 +564,6 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 // retains large native buffers without producing useful hits, especially for malformed EPUB text.
 internal const val READER_TEXT_MEASURE_CACHE_SIZE = 0
 internal const val PAGER_NAVIGATION_RADIUS = 10
-internal const val CHAPTER_LOADING_INDICATOR_DELAY_MILLIS = 180L
 internal const val READER_OVERLAY_SETTLE_MILLIS = 320L
 internal const val READER_CONTROL_FALLBACK_ACCENT_MIX = .1f
 internal const val MIN_ICON_CONTRAST = 3f
