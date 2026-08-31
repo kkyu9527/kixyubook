@@ -77,6 +77,24 @@ class ReaderPagerSpreadTest {
     }
 
     @Test
+    fun partialCurrentPaginationCannotExposeChapterBoundary() {
+        val window = buildReaderPagerWindow(
+            currentChapterIndex = 1,
+            currentPages = chapterPages(chapter = 1, count = 4).mapNotNull { it.page },
+            previousPages = emptyList(),
+            nextPages = chapterPages(chapter = 2, count = 2).mapNotNull { it.page },
+            hasPrevious = false,
+            hasNext = true,
+            currentPagesComplete = false,
+            currentPlaceholderPageIndex = 0,
+            chapterCount = 3,
+        )
+
+        assertTrue(window.all { it.chapterIndex == 1 })
+        assertTrue(window.all { it.pageCount == 0 })
+    }
+
+    @Test
     fun nextSpreadKeyDoesNotChangeWhenRightLeafFinishesLoading() {
         fun nextSpread(nextPages: List<ReaderPage>): ReaderPagerSpread {
             val window = buildReaderPagerWindow(

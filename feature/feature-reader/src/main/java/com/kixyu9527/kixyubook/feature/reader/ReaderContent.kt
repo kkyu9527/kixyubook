@@ -47,7 +47,7 @@ private fun rememberReaderFoldingFeature(): FoldingFeature? {
 @OptIn(kotlinx.coroutines.FlowPreview::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ReaderContent(
-    state: ReaderUiState,
+    state: ReaderContentState,
     palette: ReaderRenderPalette,
     savePosition: (Int, Int, Boolean) -> Unit,
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,

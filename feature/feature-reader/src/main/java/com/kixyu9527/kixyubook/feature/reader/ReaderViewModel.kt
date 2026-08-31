@@ -30,33 +30,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
-data class ReaderUiState(
-    val book: Book? = null,
-    val chapters: List<Chapter> = emptyList(),
-    val chapter: ReaderChapter? = null,
-    val prefetchedChapters: Map<Int, ReaderChapter> = emptyMap(),
-    val chapterIndex: Int = 0,
-    val restorePosition: Int = 0,
-    val restoreCharOffset: Int = 0,
-    val currentPosition: Int = 0,
-    val currentCharOffset: Int = 0,
-    val settings: ReaderSettings = ReaderSettings(),
-    val settingsLoaded: Boolean = false,
-    val fontPath: String? = null,
-    val availableFonts: List<UserFont> = emptyList(),
-    val bookmarks: List<Bookmark> = emptyList(),
-    val corrections: List<TextCorrection> = emptyList(),
-    val searchQuery: String = "",
-    val searchResults: List<BookSearchResult> = emptyList(),
-    val selectedSearchIndex: Int = -1,
-    val searchReturnAvailable: Boolean = false,
-    val navigationVersion: Int = 0,
-    val loading: Boolean = true,
-    val chapterLoading: Boolean = false,
-    val pendingChapterTitle: String? = null,
-    val error: String? = null,
-)
-
 @HiltViewModel(assistedFactory = ReaderViewModel.Factory::class)
 class ReaderViewModel @AssistedInject constructor(
     @Assisted private val bookUuid: String,
@@ -74,11 +47,16 @@ class ReaderViewModel @AssistedInject constructor(
 
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState = _uiState.asStateFlow()
+    private val _positionState = MutableStateFlow(ReaderPositionState())
+    val positionState = _positionState.asStateFlow()
+    internal val contentState = _uiState
+        .map(ReaderUiState::toReaderContentState)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ReaderUiState().toReaderContentState())
     private val sessionFinished = AtomicBoolean(false)
     private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
     private var lastCharOffset = 0
-    private var searchReturnPosition: SearchReturnPosition? = null
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, ChapterLoadRequest>()
     private var chapterNavigationJob: Job? = null
@@ -98,6 +76,17 @@ class ReaderViewModel @AssistedInject constructor(
     private var userMovedBeforePrioritySync = false
     private var deferredLocalProgress: ReadingProgress? = null
     @Volatile private var latestProgressCheckpoint: ReadingProgress? = null
+    private val searchController = ReaderSearchController(
+        scope = viewModelScope,
+        bookUuid = bookUuid,
+        books = books,
+        state = _uiState,
+        currentPosition = { _positionState.value },
+        jumpToPosition = ::jumpToPosition,
+        restorePosition = { chapterPosition, paragraphIndex, charOffset ->
+            navigateToChapter(chapterPosition, paragraphIndex, charOffset)
+        },
+    )
 
     init {
         MemoryPressureRegistry.register(this)
@@ -192,6 +181,7 @@ class ReaderViewModel @AssistedInject constructor(
         openingChapterId = progress?.chapterId ?: chapters[index].id
         openingPosition = lastPosition
         openingCharOffset = lastCharOffset
+        _positionState.value = ReaderPositionState(lastPosition, lastCharOffset)
         _uiState.update {
             it.copy(
                 book = book,
@@ -201,8 +191,6 @@ class ReaderViewModel @AssistedInject constructor(
                 chapterIndex = index,
                 restorePosition = lastPosition,
                 restoreCharOffset = lastCharOffset,
-                currentPosition = lastPosition,
-                currentCharOffset = lastCharOffset,
                 settings = initialData.presentation.settings,
                 settingsLoaded = true,
                 fontPath = initialData.presentation.fontPath,
@@ -320,6 +308,8 @@ class ReaderViewModel @AssistedInject constructor(
         val target = _uiState.value.chapters.getOrNull(position) ?: return
         chapterLoads.remove(position)?.deferred?.cancel()
         val refreshed = books.getChapter(bookUuid, target.index)?.toReaderChapter() ?: return
+        val visiblePosition = _positionState.value
+        var adjustedPosition: ReaderPositionState? = null
         _uiState.update { state ->
             if (state.chapterIndex != position || state.chapters.getOrNull(position)?.id != target.id) {
                 state
@@ -330,24 +320,24 @@ class ReaderViewModel @AssistedInject constructor(
                 // the currently visible anchor before rebuilding the pager and clamp its offset
                 // when an undo restores a shorter source paragraph.
                 val anchorParagraph = refreshed.contentParagraphs().firstOrNull {
-                    it.index == state.currentPosition
+                    it.index == visiblePosition.paragraphIndex
                 }
-                val anchorPosition = anchorParagraph?.index ?: state.currentPosition
-                val anchorOffset = state.currentCharOffset.coerceIn(
+                val anchorPosition = anchorParagraph?.index ?: visiblePosition.paragraphIndex
+                val anchorOffset = visiblePosition.charOffset.coerceIn(
                     0,
                     anchorParagraph?.text?.length ?: 0,
                 )
+                adjustedPosition = ReaderPositionState(anchorPosition, anchorOffset)
                 state.copy(
                     chapter = refreshed,
                     prefetchedChapters = mapOf(position to refreshed),
                     restorePosition = anchorPosition,
                     restoreCharOffset = anchorOffset,
-                    currentPosition = anchorPosition,
-                    currentCharOffset = anchorOffset,
                     navigationVersion = state.navigationVersion + 1,
                 )
             }
         }
+        adjustedPosition?.let { _positionState.value = it }
     }
 
     private fun navigateToChapter(
@@ -465,6 +455,7 @@ class ReaderViewModel @AssistedInject constructor(
     ) {
         lastPosition = if (position == Int.MAX_VALUE) readerChapter.contentParagraphs().lastOrNull()?.index ?: 0 else position
         lastCharOffset = if (position == Int.MAX_VALUE) Int.MAX_VALUE else charOffset.coerceAtLeast(0)
+        _positionState.value = ReaderPositionState(lastPosition, lastCharOffset)
         _uiState.update {
             it.copy(
                 chapter = readerChapter,
@@ -473,8 +464,6 @@ class ReaderViewModel @AssistedInject constructor(
                 chapterIndex = index,
                 restorePosition = lastPosition,
                 restoreCharOffset = lastCharOffset,
-                currentPosition = lastPosition,
-                currentCharOffset = lastCharOffset,
                 navigationVersion = it.navigationVersion + 1,
                 loading = false,
                 chapterLoading = false,
@@ -497,12 +486,11 @@ class ReaderViewModel @AssistedInject constructor(
             position.coerceAtLeast(0)
         }
         lastCharOffset = if (position == Int.MAX_VALUE) Int.MAX_VALUE else charOffset.coerceAtLeast(0)
+        _positionState.value = ReaderPositionState(lastPosition, lastCharOffset)
         _uiState.update { current ->
             current.copy(
                 restorePosition = lastPosition,
                 restoreCharOffset = lastCharOffset,
-                currentPosition = lastPosition,
-                currentCharOffset = lastCharOffset,
                 navigationVersion = current.navigationVersion + 1,
                 chapterLoading = false,
                 pendingChapterTitle = null,
@@ -527,10 +515,11 @@ class ReaderViewModel @AssistedInject constructor(
         if (targetIndex < 0) return
         val targetPosition = progress.paragraphIndex.coerceAtLeast(0)
         val targetCharOffset = progress.charOffset.coerceAtLeast(0)
+        val currentPosition = _positionState.value
         if (
             targetIndex == state.chapterIndex &&
-            targetPosition == state.currentPosition &&
-            targetCharOffset == state.currentCharOffset
+            targetPosition == currentPosition.paragraphIndex &&
+            targetCharOffset == currentPosition.charOffset
         ) return
 
         if (targetIndex == state.chapterIndex && state.chapter != null) {
@@ -538,12 +527,11 @@ class ReaderViewModel @AssistedInject constructor(
             pendingChapterIndex = null
             lastPosition = targetPosition
             lastCharOffset = targetCharOffset
+            _positionState.value = ReaderPositionState(targetPosition, targetCharOffset)
             _uiState.update { current ->
                 current.copy(
                     restorePosition = targetPosition,
                     restoreCharOffset = targetCharOffset,
-                    currentPosition = targetPosition,
-                    currentCharOffset = targetCharOffset,
                     navigationVersion = current.navigationVersion + 1,
                 )
             }
@@ -717,9 +705,7 @@ class ReaderViewModel @AssistedInject constructor(
         val safeCharOffset = charOffset.coerceIn(0, paragraph?.text?.length ?: 0)
         lastPosition = safePosition
         lastCharOffset = safeCharOffset
-        _uiState.update {
-            it.copy(currentPosition = safePosition, currentCharOffset = safeCharOffset)
-        }
+        _positionState.value = ReaderPositionState(safePosition, safeCharOffset)
         val total = positions.bookFraction(
             chapterIndex = state.chapterIndex,
             chapterCount = state.chapters.size,
@@ -825,78 +811,15 @@ class ReaderViewModel @AssistedInject constructor(
 
     fun deleteBookmark(uuid: String) = viewModelScope.launch { books.deleteBookmark(uuid) }
 
-    fun search(query: String) = viewModelScope.launch {
-        val normalized = query.trim()
-        searchReturnPosition = null
-        if (normalized.isBlank()) {
-            _uiState.update {
-                it.copy(
-                    searchQuery = "",
-                    searchResults = emptyList(),
-                    selectedSearchIndex = -1,
-                    searchReturnAvailable = false,
-                )
-            }
-            return@launch
-        }
-        val results = books.searchBook(bookUuid, normalized)
-        _uiState.update {
-            it.copy(
-                searchQuery = normalized,
-                searchResults = results,
-                selectedSearchIndex = if (results.isEmpty()) -1 else 0,
-                searchReturnAvailable = false,
-            )
-        }
-    }
+    fun search(query: String) = searchController.search(query)
 
-    fun selectSearchResult(index: Int) {
-        val state = _uiState.value
-        if (state.searchResults.isEmpty()) return
-        val safeIndex = index.coerceIn(0, state.searchResults.lastIndex)
-        val result = state.searchResults.getOrNull(safeIndex) ?: return
-        if (searchReturnPosition == null) {
-            searchReturnPosition = SearchReturnPosition(
-                chapterIndex = state.chapterIndex,
-                paragraphIndex = lastPosition,
-                charOffset = lastCharOffset,
-            )
-        }
-        _uiState.update {
-            it.copy(selectedSearchIndex = safeIndex, searchReturnAvailable = true)
-        }
-        jumpToPosition(result.chapterIndex, result.paragraphIndex)
-    }
+    fun selectSearchResult(index: Int) = searchController.select(index)
 
-    fun returnFromSearchResult() {
-        val position = searchReturnPosition ?: return
-        searchReturnPosition = null
-        _uiState.update { it.copy(searchReturnAvailable = false) }
-        navigateToChapter(
-            index = position.chapterIndex,
-            position = position.paragraphIndex,
-            charOffset = position.charOffset,
-        )
-    }
+    fun returnFromSearchResult() = searchController.returnToReadingPosition()
 
-    fun moveSearchResult(delta: Int) {
-        val state = _uiState.value
-        if (state.searchResults.isEmpty()) return
-        val current = state.selectedSearchIndex.coerceAtLeast(0)
-        selectSearchResult((current + delta).coerceIn(state.searchResults.indices))
-    }
+    fun moveSearchResult(delta: Int) = searchController.move(delta)
 
-    fun clearSearch() {
-        searchReturnPosition = null
-        _uiState.update {
-            it.copy(
-                searchQuery = "",
-                searchResults = emptyList(),
-                selectedSearchIndex = -1,
-                searchReturnAvailable = false,
-            )
-        }
-    }
+    fun clearSearch() = searchController.clear()
 
     /** Counts only time during which this reader destination is resumed with readable content. */
     fun setReadingActive(active: Boolean) {
@@ -1005,86 +928,4 @@ class ReaderViewModel @AssistedInject constructor(
         cloudSync.releaseBook(bookUuid)
         books.releaseReaderMemory(bookUuid)
     }
-}
-
-private data class SearchReturnPosition(
-    val chapterIndex: Int,
-    val paragraphIndex: Int,
-    val charOffset: Int,
-)
-
-internal fun hasReaderMovedFromOpening(
-    openingChapterId: Long?,
-    openingPosition: Int,
-    openingCharOffset: Int = 0,
-    currentChapterId: Long,
-    currentPosition: Int,
-    currentCharOffset: Int = 0,
-): Boolean = openingChapterId != currentChapterId ||
-    openingPosition != currentPosition ||
-    openingCharOffset != currentCharOffset
-
-private data class ChapterLoadRequest(
-    val priority: ChapterLoadPriority,
-    val deferred: Deferred<ReaderChapter?>,
-)
-
-private data class InitialReaderPresentation(
-    val settings: ReaderSettings,
-    val fontPath: String?,
-    val fonts: List<UserFont>,
-)
-
-private data class InitialReaderData(
-    val book: Book?,
-    val chapters: List<Chapter>,
-    val progress: ReadingProgress?,
-    val presentation: InitialReaderPresentation,
-)
-
-private fun ChapterContent.toReaderChapter() = ReaderChapter(chapter.id, chapter.bookUuid, chapter.title, chapter.index, paragraphs)
-
-// Decode only what the pager can immediately reach. The wider ±10 chapter window is persisted by
-// the EPUB binary cache/background index instead of being retained as live paragraph objects.
-private const val CHAPTER_PREFETCH_RADIUS = 2
-// The renderer composes only the immediate previous/next chapter, but retaining a second decoded
-// pair gives one-page EPUB chapters enough runway for rapid consecutive boundary gestures.
-private const val RENDER_PREFETCH_RADIUS = 2
-private const val SLOW_NAVIGATION_MS = 150L
-private const val PROGRESS_CHECKPOINT_TIMEOUT_MS = 1_500L
-
-internal fun shouldApplySyncedProgress(
-    incomingUpdatedAt: Long,
-    acceptedUpdatedAt: Long,
-    latestLocalWriteAt: Long,
-): Boolean = incomingUpdatedAt > acceptedUpdatedAt && incomingUpdatedAt > latestLocalWriteAt
-
-internal fun nextProgressUpdatedAt(currentTime: Long, latestLocalWriteAt: Long): Long =
-    if (latestLocalWriteAt >= currentTime && latestLocalWriteAt < Long.MAX_VALUE) {
-        latestLocalWriteAt + 1
-    } else {
-        currentTime
-    }
-
-internal fun changedCorrectionChapterPositions(
-    previous: List<TextCorrection>,
-    current: List<TextCorrection>,
-    chapters: List<Chapter>,
-): Set<Int> {
-    if (previous == current) return emptySet()
-    val previousById = previous.associateBy(TextCorrection::uuid)
-    val currentById = current.associateBy(TextCorrection::uuid)
-    val changed = (previousById.keys + currentById.keys).flatMap { uuid ->
-        val old = previousById[uuid]
-        val new = currentById[uuid]
-        if (old == new) emptyList() else listOfNotNull(old, new)
-    }
-    return chapters.mapIndexedNotNull { position, chapter ->
-        position.takeIf {
-            changed.any { correction ->
-                (correction.chapterKey.isNotBlank() && correction.chapterKey == chapter.chapterKey) ||
-                    correction.chapterIndex == chapter.index
-            }
-        }
-    }.toSet()
 }

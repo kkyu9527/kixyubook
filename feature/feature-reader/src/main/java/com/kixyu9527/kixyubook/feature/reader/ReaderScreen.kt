@@ -29,7 +29,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,8 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun ReaderScreen(
     state: ReaderUiState,
+    position: ReaderPositionState,
+    contentState: ReaderContentState,
     readerContentReady: Boolean,
     onExit: () -> Unit,
     moveChapter: (Int, Boolean) -> Unit,
@@ -80,6 +83,7 @@ internal fun ReaderScreen(
     deleteCorrection: (String) -> Unit,
     onManageCorrections: () -> Unit,
 ) {
+    val readerPaneTitle = stringResource(R.string.reader_content_pane)
     var controls by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var toolsMenu by remember { mutableStateOf(false) }
@@ -279,7 +283,7 @@ internal fun ReaderScreen(
 
     val currentPageBookmark = state.chapter?.let { chapter ->
         state.bookmarks.firstOrNull { bookmark ->
-            bookmark.chapterId == chapter.id && bookmark.position == state.currentPosition
+            bookmark.chapterId == chapter.id && bookmark.position == position.paragraphIndex
         }
     }
     val exitReader: () -> Unit = {
@@ -292,7 +296,7 @@ internal fun ReaderScreen(
         CompositionLocalProvider(LocalKixyuGlassBackdrop provides readerBackdrop) {
         CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {
             ReaderSelectionToolbar(
-                dismissKey = state.chapterIndex to state.currentPosition,
+                dismissKey = state.chapterIndex to position.paragraphIndex,
                 onCorrectParagraph = {
                     textActionTarget?.let { target ->
                         correctionEditorTarget = target
@@ -305,7 +309,7 @@ internal fun ReaderScreen(
             Box(
             Modifier.fillMaxSize()
                 .background(palette.background)
-                .semantics { contentDescription = "阅读正文" }
+                .semantics { paneTitle = readerPaneTitle }
                 .focusRequester(focusRequester)
                 .onPreviewKeyEvent { event ->
                     val isVolumeKey = event.key == Key.VolumeUp || event.key == Key.VolumeDown
@@ -390,7 +394,7 @@ internal fun ReaderScreen(
                         modifier = Modifier.align(Alignment.Center),
                     )
                     state.chapter != null -> ReaderContent(
-                        state = state,
+                        state = contentState,
                         palette = palette,
                         savePosition = savePosition,
                         moveChapterFromPage = moveChapterFromPage,

@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -87,6 +88,8 @@ private fun LoadedReaderRoute(
     ),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val position by viewModel.positionState.collectAsStateWithLifecycle()
+    val contentState by viewModel.contentState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     var readerResumed by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
@@ -127,6 +130,10 @@ private fun LoadedReaderRoute(
     }
     ReaderScreen(
         state = renderedState,
+        position = position,
+        contentState = if (state.settingsLoaded) contentState else {
+            contentState.copy(settings = initialSettings)
+        },
         readerContentReady = state.settingsLoaded,
         onExit = onExit,
         moveChapter = viewModel::moveChapter,
@@ -192,7 +199,7 @@ internal fun ReaderLoadingIndicator(palette: ReaderRenderPalette) {
                 strokeWidth = 2.dp,
             )
             Text(
-                text = "正在加载章节",
+                text = stringResource(R.string.reader_loading_chapter),
                 color = palette.body,
                 style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,

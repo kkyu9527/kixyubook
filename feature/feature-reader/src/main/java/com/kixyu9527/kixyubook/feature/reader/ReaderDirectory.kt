@@ -23,6 +23,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -115,7 +116,11 @@ internal fun DirectorySheet(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (directoryView == DirectoryView.CHAPTERS) "目录 · ${state.chapters.size} 章" else "书签 · ${state.bookmarks.size}",
+                if (directoryView == DirectoryView.CHAPTERS) {
+                    stringResource(R.string.reader_directory_title, state.chapters.size)
+                } else {
+                    stringResource(R.string.reader_bookmarks_title, state.bookmarks.size)
+                },
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
@@ -125,7 +130,13 @@ internal fun DirectorySheet(
             }) {
                 Icon(
                     if (directoryView == DirectoryView.CHAPTERS) KixyuSymbols.Bookmarks else KixyuSymbols.Toc,
-                    if (directoryView == DirectoryView.CHAPTERS) "查看书签" else "查看目录",
+                    stringResource(
+                        if (directoryView == DirectoryView.CHAPTERS) {
+                            R.string.reader_view_bookmarks
+                        } else {
+                            R.string.reader_view_directory
+                        },
+                    ),
                 )
             }
         }
@@ -171,7 +182,11 @@ internal fun DirectorySheet(
                                     val current = row.hasOwnContent && row.targetChapterIndex == state.chapterIndex
                                     KixyuListRow(
                                         title = row.title,
-                                        supportingText = if (row.chapterCount > 0) "${row.chapterCount} 章" else "卷内容",
+                                        supportingText = if (row.chapterCount > 0) {
+                                            stringResource(R.string.reader_chapter_count, row.chapterCount)
+                                        } else {
+                                            stringResource(R.string.reader_volume_content)
+                                        },
                                         titleStyle = MaterialTheme.typography.bodyMedium,
                                         supportingTextStyle = MaterialTheme.typography.bodySmall,
                                         selected = current,
@@ -184,7 +199,11 @@ internal fun DirectorySheet(
                                             ) {
                                                 Icon(
                                                     if (expanded) KixyuSymbols.KeyboardArrowDown else KixyuSymbols.KeyboardArrowRight,
-                                                    if (expanded) "收起${row.title}" else "展开${row.title}",
+                                                    stringResource(
+                                                        if (expanded) R.string.reader_collapse_volume
+                                                        else R.string.reader_expand_volume,
+                                                        row.title,
+                                                    ),
                                                     tint = if (current && isMiuix) {
                                                         MaterialTheme.colorScheme.onPrimary
                                                     } else {
@@ -196,7 +215,7 @@ internal fun DirectorySheet(
                                         trailing = {
                                             if (hasBookmark) Icon(
                                                 KixyuSymbols.BookmarkFilled,
-                                                "本卷有书签",
+                                                stringResource(R.string.reader_volume_has_bookmark),
                                                 tint = if (current && isMiuix) {
                                                     MaterialTheme.colorScheme.onPrimary
                                                 } else {
@@ -237,7 +256,7 @@ internal fun DirectorySheet(
                                         trailing = {
                                             if (hasBookmark) Icon(
                                                 KixyuSymbols.BookmarkFilled,
-                                                "本章有书签",
+                                                stringResource(R.string.reader_chapter_has_bookmark),
                                                 tint = if (current && isMiuix) {
                                                     MaterialTheme.colorScheme.onPrimary
                                                 } else {
@@ -288,7 +307,10 @@ internal fun DirectorySheet(
                             ) {
                                 KixyuListRow(
                                     title = volume.title,
-                                    supportingText = "当前卷章节数 · ${volume.chapterCount} 章",
+                                    supportingText = stringResource(
+                                        R.string.reader_current_volume_chapters,
+                                        volume.chapterCount,
+                                    ),
                                     titleStyle = MaterialTheme.typography.bodyMedium,
                                     supportingTextStyle = MaterialTheme.typography.bodySmall,
                                     onClick = {
@@ -311,7 +333,11 @@ internal fun DirectorySheet(
                                             } else {
                                                 KixyuSymbols.KeyboardArrowRight
                                             },
-                                            if (expanded) "收起${volume.title}" else "展开${volume.title}",
+                                            stringResource(
+                                                if (expanded) R.string.reader_collapse_volume
+                                                else R.string.reader_expand_volume,
+                                                volume.title,
+                                            ),
                                             tint = MaterialTheme.colorScheme.primary,
                                         )
                                     },
@@ -326,7 +352,7 @@ internal fun DirectorySheet(
                     else Modifier.fillMaxWidth().height(KixyuSize.readerSheetMaxContent),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("还没有书签", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.reader_no_bookmarks), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 androidx.compose.foundation.lazy.LazyColumn(
@@ -336,14 +362,18 @@ internal fun DirectorySheet(
                     items(state.bookmarks, key = Bookmark::uuid) { bookmark ->
                         KixyuListRow(
                             title = bookmark.chapterTitle,
-                            supportingText = bookmark.preview.ifBlank { "第 ${bookmark.position + 1} 段" },
+                            supportingText = if (bookmark.preview.isBlank()) {
+                                stringResource(R.string.reader_paragraph_number, bookmark.position + 1)
+                            } else {
+                                bookmark.preview
+                            },
                             titleStyle = MaterialTheme.typography.bodyMedium,
                             supportingTextStyle = MaterialTheme.typography.bodySmall,
                             onClick = { selectBookmark(bookmark) },
                             leading = { Icon(KixyuSymbols.Bookmark, null) },
                             trailing = {
                                 KixyuIconButton(onClick = { deleteBookmark(bookmark.uuid) }) {
-                                    Icon(KixyuSymbols.DeleteOutline, "删除书签")
+                                    Icon(KixyuSymbols.DeleteOutline, stringResource(R.string.reader_delete_bookmark))
                                 }
                             },
                             modifier = if (isMiuix) {
@@ -619,7 +649,7 @@ internal fun DirectoryFastScroller(
             tonalElevation = KixyuSpacing.extraSmall,
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(KixyuSymbols.DragHandle, "快速滚动目录", Modifier.size(KixyuSize.icon))
+                Icon(KixyuSymbols.DragHandle, stringResource(R.string.reader_fast_scroll_directory), Modifier.size(KixyuSize.icon))
             }
         }
     }

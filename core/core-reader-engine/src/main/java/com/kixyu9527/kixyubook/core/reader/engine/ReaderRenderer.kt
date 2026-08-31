@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 import kotlinx.coroutines.delay
@@ -199,10 +200,10 @@ fun ReaderScrollRenderer(
                         ),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("· 本章完 ·", color = palette.secondary)
+                        Text(stringResource(R.string.reader_chapter_end), color = palette.secondary)
                         androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (hasPrevious) androidx.compose.material3.TextButton(onClick = onPreviousChapter) { Text("上一章", color = palette.accent) }
-                            if (hasNext) androidx.compose.material3.TextButton(onClick = onNextChapter) { Text("下一章", color = palette.accent) }
+                            if (hasPrevious) androidx.compose.material3.TextButton(onClick = onPreviousChapter) { Text(stringResource(R.string.reader_previous_chapter), color = palette.accent) }
+                            if (hasNext) androidx.compose.material3.TextButton(onClick = onNextChapter) { Text(stringResource(R.string.reader_next_chapter), color = palette.accent) }
                         }
                     }
                 }

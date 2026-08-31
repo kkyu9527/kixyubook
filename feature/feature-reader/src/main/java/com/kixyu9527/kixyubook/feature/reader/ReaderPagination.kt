@@ -21,6 +21,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -39,7 +40,7 @@ import kotlin.math.abs
 
 @Composable
 internal fun PagedReader(
-    state: ReaderUiState,
+    state: ReaderContentState,
     chapter: ReaderChapter,
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
@@ -69,7 +70,7 @@ internal fun PagedReader(
     var textSelectionActive by remember { mutableStateOf(false) }
     // Always finish the requested chapter first. EPUB pagination includes rich spans and image
     // blocks, so starting three layouts together made the visible chapter compete with prefetch.
-    val pages = rememberMeasuredReaderPages(
+    val pagination = rememberMeasuredReaderPages(
         chapter = chapter,
         contentHash = state.book?.contentHash.orEmpty(),
         spec = spec,
@@ -78,9 +79,14 @@ internal fun PagedReader(
         coordinator = paginationCoordinator,
         measurer = paginationMeasurer,
         paused = resourcePriorityActive,
+        minimumVisibleParagraphIndex = state.restorePosition,
     )
+    val pages = pagination.pages
     LaunchedEffect(resourcePriorityActive) {
-        if (resourcePriorityActive) paginationCoordinator.pauseInFlight()
+        paginationCoordinator.setPaused(resourcePriorityActive)
+    }
+    DisposableEffect(paginationCoordinator) {
+        onDispose { paginationCoordinator.setPaused(false) }
     }
     // The first chapter still needs a loading surface, but once a Pager has rendered it must stay
     // in composition across chapter pagination. Removing it while the newly activated chapter is
@@ -99,9 +105,10 @@ internal fun PagedReader(
     val hasPrevious = state.chapterIndex > 0
     val hasNext = state.chapterIndex < state.chapters.lastIndex
     var criticalNextChapter by remember(chapter.id) { mutableStateOf(false) }
-    LaunchedEffect(chapter.id, pages.size, hasNext) {
+    LaunchedEffect(chapter.id, pages.size, pagination.isComplete, hasNext) {
         if (
             hasNext &&
+            pagination.isComplete &&
             pages.isNotEmpty() &&
             shouldPrioritizeNextChapter(pages.size, 0, twoPageSpread)
         ) {
@@ -110,7 +117,7 @@ internal fun PagedReader(
         }
     }
     val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
-    val nextPages = nextChapter?.takeUnless { resourcePriorityActive }?.let {
+    val nextPagination = nextChapter?.takeUnless { resourcePriorityActive }?.let {
         rememberMeasuredReaderPages(
             chapter = it,
             contentHash = state.book?.contentHash.orEmpty(),
@@ -124,9 +131,10 @@ internal fun PagedReader(
             prefetch = !criticalNextChapter,
             paused = resourcePriorityActive,
         )
-    }.orEmpty()
+    } ?: ReaderPaginationSnapshot()
+    val nextPages = nextPagination.pages
     val previousChapter = state.prefetchedChapters[state.chapterIndex - 1]
-    val previousPages = previousChapter?.takeUnless { resourcePriorityActive }?.let {
+    val previousPagination = previousChapter?.takeUnless { resourcePriorityActive }?.let {
         rememberMeasuredReaderPages(
             chapter = it,
             contentHash = state.book?.contentHash.orEmpty(),
@@ -137,8 +145,10 @@ internal fun PagedReader(
             measurer = paginationMeasurer,
             prefetch = true,
             paused = resourcePriorityActive,
+            allowPartialResults = false,
         )
-    }.orEmpty()
+    } ?: ReaderPaginationSnapshot()
+    val previousPages = previousPagination.pages
     val positions = remember { ReaderPositionManager() }
     // Keep one physical Pager alive across chapter changes. Its stable page keys let Compose retain
     // the page that crossed the boundary while the three-chapter window is recentered around it.
@@ -152,6 +162,7 @@ internal fun PagedReader(
         pages,
         previousPages,
         nextPages,
+        pagination.isComplete,
         hasPrevious,
         hasNext,
         twoPageSpread,
@@ -164,6 +175,7 @@ internal fun PagedReader(
             nextPages = nextPages,
             hasPrevious = hasPrevious,
             hasNext = hasNext,
+            currentPagesComplete = pagination.isComplete,
             currentPlaceholderPageIndex = if (state.restorePosition > 0) Int.MIN_VALUE else 0,
             chapterCount = state.chapters.size,
             neighbourLeafCount = if (twoPageSpread) 2 else 1,
@@ -206,6 +218,28 @@ internal fun PagedReader(
     var settledSpreadKey by remember { mutableStateOf(desiredSpreadKey) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
     val latestReaderState by rememberUpdatedState(state)
+    val latestPaginationComplete by rememberUpdatedState(pagination.isComplete)
+    val prefetchDensity = LocalDensity.current.density
+    val epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath
+
+    LaunchedEffect(pager, pagerSpreads, epubPath, resourcePriorityActive, prefetchDensity) {
+        if (epubPath == null || resourcePriorityActive) return@LaunchedEffect
+        snapshotFlow { pager.settledPage to pager.isScrollInProgress }
+            .distinctUntilChanged()
+            .collectLatest { (settledPage, scrolling) ->
+                if (scrolling) return@collectLatest
+                val nearbyPages = buildList {
+                    pagerSpreads.getOrNull(settledPage + 1)?.items?.mapNotNullTo(this) { it.page }
+                    pagerSpreads.getOrNull(settledPage + 2)?.items?.mapNotNullTo(this) { it.page }
+                    pagerSpreads.getOrNull(settledPage - 1)?.items?.mapNotNullTo(this) { it.page }
+                }
+                prefetchReaderEpubImages(
+                    epubPath = epubPath,
+                    pages = nearbyPages,
+                    density = prefetchDensity,
+                )
+            }
+    }
 
     // Directory/search jumps intentionally select another logical page. Boundary navigation does
     // not scroll here: the key recorded by the completed gesture is already the desired page and
@@ -256,6 +290,7 @@ internal fun PagedReader(
                     } ?: item
                     if (
                         hasNext &&
+                        latestPaginationComplete &&
                         shouldPrioritizeNextChapter(
                             item.pageCount,
                             lastVisible.pageIndex,
@@ -271,7 +306,9 @@ internal fun PagedReader(
                     savePosition(
                         anchor?.paragraphIndex ?: item.page.startParagraph,
                         anchor?.textStart ?: 0,
-                        lastVisible.pageIndex == lastVisible.pageCount - 1,
+                        latestPaginationComplete &&
+                            lastVisible.pageCount > 0 &&
+                            lastVisible.pageIndex == lastVisible.pageCount - 1,
                     )
                 }
             }
@@ -324,7 +361,9 @@ internal fun PagedReader(
                 direction < 0 && readerState.chapterIndex > 0 -> {
                     moveChapterFromPage(readerState.chapterIndex, -1, true)
                 }
-                direction > 0 && readerState.chapterIndex < readerState.chapters.lastIndex -> {
+                direction > 0 &&
+                    latestPaginationComplete &&
+                    readerState.chapterIndex < readerState.chapters.lastIndex -> {
                     moveChapterFromPage(readerState.chapterIndex, 1, false)
                 }
             }
@@ -341,7 +380,7 @@ internal fun PagedReader(
         if (textSelectionActive) return@rememberUpdatedState
         when {
             fraction < .33f && hasPrevious -> turnRequests.trySend(-1)
-            fraction > .67f && hasNext -> turnRequests.trySend(1)
+            fraction > .67f && hasNext && pagination.isComplete -> turnRequests.trySend(1)
             fraction in .33f..67f -> middleTap()
         }
     }
@@ -459,7 +498,7 @@ private fun ReaderPagerSpreadContent(
     spread: ReaderPagerSpread,
     twoPageSpread: Boolean,
     spreadGutter: Dp,
-    state: ReaderUiState,
+    state: ReaderContentState,
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
     middleTap: () -> Unit,
@@ -540,7 +579,7 @@ private fun RowScope.ReaderSpreadSpine(width: Dp, color: Color) {
 @Composable
 internal fun ReaderPagerLeaf(
     item: ReaderPagerItem,
-    state: ReaderUiState,
+    state: ReaderContentState,
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
     middleTap: () -> Unit,
@@ -682,6 +721,7 @@ internal fun buildReaderPagerWindow(
     nextPages: List<ReaderPage>,
     hasPrevious: Boolean,
     hasNext: Boolean,
+    currentPagesComplete: Boolean = true,
     currentPlaceholderPageIndex: Int,
     chapterCount: Int,
     neighbourLeafCount: Int = 1,
@@ -727,10 +767,17 @@ internal fun buildReaderPagerWindow(
         )
     } else {
         currentPages.forEach { page ->
-            add(ReaderPagerItem(currentChapterIndex, page.index, currentPages.size, page))
+            add(
+                ReaderPagerItem(
+                    currentChapterIndex,
+                    page.index,
+                    if (currentPagesComplete) currentPages.size else 0,
+                    page,
+                ),
+            )
         }
     }
-    if (hasNext) {
+    if (hasNext && currentPagesComplete) {
         val visibleNextPages = nextPages.take(neighbourLeafCount.coerceAtLeast(1))
         if (visibleNextPages.isEmpty()) {
             add(ReaderPagerItem(currentChapterIndex + 1, 0, 0, null))
@@ -749,7 +796,7 @@ internal fun buildReaderPagerWindow(
     }
     val lastChapter = (currentChapterIndex + PAGER_NAVIGATION_RADIUS)
         .coerceAtMost(chapterCount - 1)
-    if (currentChapterIndex + 2 <= lastChapter) {
+    if (currentPagesComplete && currentChapterIndex + 2 <= lastChapter) {
         for (chapterIndex in currentChapterIndex + 2..lastChapter) {
             add(ReaderPagerItem(chapterIndex, 0, 0, null))
         }
@@ -761,7 +808,7 @@ internal data class RetainedReaderPage(
     val pageNumber: String?,
 )
 
-internal fun readerPageNumber(state: ReaderUiState, pageIndex: Int, pageCount: Int): String? =
+internal fun readerPageNumber(state: ReaderContentState, pageIndex: Int, pageCount: Int): String? =
     if (state.settings.showPageNumber && state.searchResults.isEmpty() && pageCount > 0) {
         "${pageIndex + 1}/$pageCount"
     } else {

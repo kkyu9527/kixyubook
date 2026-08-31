@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,10 +108,10 @@ fun CorrectionManagementRoute(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("文字纠错") },
+                title = { Text(stringResource(R.string.reader_corrections_title)) },
                 navigationIcon = {
                     KixyuIconButton(onClick = onBack) {
-                        Icon(KixyuSymbols.ArrowBack, "返回")
+                        Icon(KixyuSymbols.ArrowBack, stringResource(R.string.reader_back))
                     }
                 },
             )
@@ -122,15 +123,15 @@ fun CorrectionManagementRoute(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("还没有文字纠错", style = MaterialTheme.typography.titleLarge)
-                Text("在阅读页长按正文，然后选择“纠正段落”即可添加。")
+                Text(stringResource(R.string.reader_no_corrections), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.reader_corrections_hint))
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 items(state.corrections, key = TextCorrection::uuid) { correction ->
                     val title = state.chapters.firstOrNull {
                         it.chapterKey == correction.chapterKey || it.index == correction.chapterIndex
-                    }?.title ?: "第 ${correction.chapterIndex + 1} 章"
+                    }?.title ?: stringResource(R.string.reader_chapter_number, correction.chapterIndex + 1)
                     Column(
                         Modifier.fillMaxWidth().clickable { editing = correction }
                             .padding(horizontal = KixyuSpacing.large, vertical = KixyuSpacing.medium),
@@ -175,13 +176,13 @@ fun CorrectionManagementRoute(
                         )
                         if (correction.status == TextCorrectionStatus.CONFLICT) {
                             KixyuButton(
-                                text = "采用此版本",
+                                text = stringResource(R.string.reader_use_correction),
                                 onClick = { viewModel.resolve(correction.uuid) },
                             )
                         }
                         if (correction.status == TextCorrectionStatus.UNRESOLVED) {
                             Text(
-                                "原文已变化，已停止覆盖；可撤销后重新添加。",
+                                stringResource(R.string.reader_correction_source_changed),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.error,
                             )

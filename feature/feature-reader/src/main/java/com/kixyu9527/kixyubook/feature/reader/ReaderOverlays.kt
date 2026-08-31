@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -194,13 +195,13 @@ internal fun ReaderSearchOverlay(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "全文搜索",
+                                stringResource(R.string.reader_search_book),
                                 modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.titleLarge,
                                 maxLines = 1,
                             )
                             KixyuIconButton(onClick = onDismiss) {
-                                Icon(KixyuSymbols.Close, "关闭搜索")
+                                Icon(KixyuSymbols.Close, stringResource(R.string.reader_close_search))
                             }
                         }
                     }
@@ -213,11 +214,11 @@ internal fun ReaderSearchOverlay(
                         modifier = Modifier
                             .focusRequester(focusRequester)
                             .onFocusChanged { if (it.isFocused) expanded = true },
-                        placeholder = "搜索书中内容",
+                        placeholder = stringResource(R.string.reader_search_hint),
                         leadingIcon = { Icon(KixyuSymbols.Search, null) },
                         trailingIcon = {
                             KixyuIconButton(onClick = ::submit, enabled = query.isNotBlank()) {
-                                Icon(KixyuSymbols.ArrowForward, "搜索")
+                                Icon(KixyuSymbols.ArrowForward, stringResource(R.string.reader_search))
                             }
                         },
                     )
@@ -236,26 +237,26 @@ internal fun ReaderSearchOverlay(
                         KixyuIconButton(
                             onClick = { onMove(-1) },
                             enabled = state.selectedSearchIndex > 0,
-                        ) { Icon(KixyuSymbols.KeyboardArrowUp, "上一个结果") }
+                        ) { Icon(KixyuSymbols.KeyboardArrowUp, stringResource(R.string.reader_previous_search_result)) }
                         KixyuIconButton(
                             onClick = { onMove(1) },
                             enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
-                        ) { Icon(KixyuSymbols.KeyboardArrowDown, "下一个结果") }
+                        ) { Icon(KixyuSymbols.KeyboardArrowDown, stringResource(R.string.reader_next_search_result)) }
                         if (state.searchReturnAvailable) {
                             KixyuIconButton(
                                 onClick = {
                                     onReturn()
                                     expanded = true
                                 },
-                            ) { Icon(KixyuSymbols.ArrowBack, "返回跳转前位置") }
+                            ) { Icon(KixyuSymbols.ArrowBack, stringResource(R.string.reader_return_before_search)) }
                         }
                         KixyuIconButton(onClick = onDismiss) {
-                            Icon(KixyuSymbols.Close, "退出搜索")
+                            Icon(KixyuSymbols.Close, stringResource(R.string.reader_exit_search))
                         }
                     }
                 } else {
                 Text(
-                    "${state.searchResults.size} 个匹配结果",
+                    stringResource(R.string.reader_search_result_count, state.searchResults.size),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -282,11 +283,11 @@ internal fun ReaderSearchOverlay(
                 }
                     } else if (query.trim() == state.searchQuery && state.searchQuery.isNotBlank()) {
                 Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) {
-                    Text("没有找到匹配内容", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.reader_no_search_result), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                     } else if (query.isNotBlank()) {
                 Text(
-                    "修改后按搜索更新结果",
+                    stringResource(R.string.reader_search_query_changed),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -311,14 +312,18 @@ internal fun ReaderSearchOverlay(
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { ReaderSettingsSheetHeader("显示与亮度", onBack) }
+        item { ReaderSettingsSheetHeader(stringResource(R.string.reader_display_and_brightness), onBack) }
         item {
-            KixyuSection(title = "显示与配色") {
-                KixyuReaderThemeControls(settings, { updated -> update { updated } }, modeTitle = "显示模式")
+            KixyuSection(title = stringResource(R.string.reader_display_and_colors)) {
+                KixyuReaderThemeControls(
+                    settings,
+                    { updated -> update { updated } },
+                    modeTitle = stringResource(R.string.reader_display_mode),
+                )
             }
         }
         item {
-            KixyuSection(title = "屏幕亮度") {
+            KixyuSection(title = stringResource(R.string.reader_screen_brightness)) {
                 KixyuReaderBrightnessControls(
                     settings = settings,
                     onSettingsChange = { updated -> update { updated } },
@@ -346,9 +351,9 @@ internal fun LayoutSheet(
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { ReaderSettingsSheetHeader("排版与翻页", onBack) }
+        item { ReaderSettingsSheetHeader(stringResource(R.string.reader_layout_and_turning), onBack) }
         item {
-            KixyuSection(title = "排版与翻页") {
+            KixyuSection(title = stringResource(R.string.reader_layout_and_turning)) {
                 KixyuFontControls(
                     fonts = state.availableFonts,
                     selectedFontUuid = settings.fontUuid,
@@ -377,14 +382,14 @@ internal fun ReaderInformationSheet(
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item { ReaderSettingsSheetHeader("阅读控制", onBack) }
+        item { ReaderSettingsSheetHeader(stringResource(R.string.reader_controls), onBack) }
         item {
-            KixyuSection(title = "翻页控制") {
+            KixyuSection(title = stringResource(R.string.reader_page_turn_controls)) {
                 KixyuReaderBehaviorControls(settings) { updated -> update { updated } }
             }
         }
         item {
-            KixyuSection(title = "阅读信息") {
+            KixyuSection(title = stringResource(R.string.reader_reading_information)) {
                 KixyuReaderInformationControls(settings) { updated -> update { updated } }
             }
         }
@@ -398,7 +403,7 @@ private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         KixyuIconButton(onClick = onBack) {
-            Icon(KixyuSymbols.ArrowBack, "返回阅读设置")
+            Icon(KixyuSymbols.ArrowBack, stringResource(R.string.reader_back_to_settings))
         }
         Text(
             text = title,
@@ -453,7 +458,7 @@ private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     Text(
-                        "书籍信息",
+                        stringResource(R.string.reader_book_information),
                         modifier = Modifier.padding(
                             start = KixyuSpacing.extraLarge,
                             end = KixyuSpacing.extraLarge,
@@ -480,7 +485,7 @@ private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
                                 Text(current.title, style = MaterialTheme.typography.titleLarge)
                                 Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
                                     Text(
-                                        "作者",
+                                        stringResource(R.string.reader_author),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -488,12 +493,16 @@ private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
                                     Text(
-                                        "简介",
+                                        stringResource(R.string.reader_description),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Text(
-                                        current.description.ifBlank { "暂无简介" },
+                                        if (current.description.isBlank()) {
+                                            stringResource(R.string.reader_no_description)
+                                        } else {
+                                            current.description
+                                        },
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = if (current.description.isBlank()) {
                                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -513,7 +522,7 @@ private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
                         ),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        KixyuTextButton(text = "关闭", onClick = dismiss)
+                        KixyuTextButton(text = stringResource(R.string.reader_close), onClick = dismiss)
                     }
                 }
             }

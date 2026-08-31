@@ -67,6 +67,11 @@ class AppViewModel @Inject constructor(
         books.setAppAnimationActive(active)
     }
 
+    /** Hydrates only already-persisted reader data while the navigation surface is animating. */
+    fun prepareReader(bookUuid: String) {
+        viewModelScope.launch { books.prepareReader(bookUuid) }
+    }
+
     fun prioritizeBookSync(bookUuid: String) = cloudSync.prioritizeBook(bookUuid)
 
     override fun onCleared() {

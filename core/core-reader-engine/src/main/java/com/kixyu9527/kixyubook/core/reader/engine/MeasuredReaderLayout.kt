@@ -36,6 +36,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
@@ -57,7 +61,9 @@ fun rememberMeasuredReaderPages(
     measurer: TextMeasurer,
     prefetch: Boolean = false,
     paused: Boolean = false,
-): List<ReaderPage> {
+    allowPartialResults: Boolean = true,
+    minimumVisibleParagraphIndex: Int? = null,
+): ReaderPaginationSnapshot {
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val family = rememberReaderFont(fontPath)
@@ -96,18 +102,34 @@ fun rememberMeasuredReaderPages(
             layoutDirection = layoutDirection,
         )
     }
-    var pages by remember(cacheKey) {
-        mutableStateOf(coordinator.cached(cacheKey).orEmpty())
+    var snapshot by remember(cacheKey) {
+        mutableStateOf(
+            coordinator.cached(cacheKey)?.let { ReaderPaginationSnapshot(it, isComplete = true) }
+                ?: ReaderPaginationSnapshot(),
+        )
     }
     LaunchedEffect(cacheKey, chapter, family, prefetch, paused) {
-        if (pages.isNotEmpty()) return@LaunchedEffect
+        if (snapshot.isComplete) return@LaunchedEffect
         if (paused) return@LaunchedEffect
-        pages = coordinator.getOrLoad(cacheKey, chapter, prefetch) {
+        coordinator.getOrLoad(cacheKey, chapter, prefetch) { publishPartial, awaitPermit ->
             MeasuredReaderPaginator(measurer, density)
-                .paginate(chapter, spec, family, showRegularChapterTitle)
-        }.await()
+                .paginate(
+                    chapter = chapter,
+                    spec = spec,
+                    family = family,
+                    showRegularChapterTitle = showRegularChapterTitle,
+                    publishPartial = publishPartial,
+                    awaitPermit = awaitPermit,
+                )
+        }.first { update ->
+            val anchorReady = minimumVisibleParagraphIndex == null || update.pages.any { page ->
+                page.blocks.any { block -> block.paragraphIndex == minimumVisibleParagraphIndex }
+            }
+            if (update.isComplete || (allowPartialResults && anchorReady)) snapshot = update
+            update.isComplete
+        }
     }
-    return pages
+    return snapshot
 }
 
 @Composable
@@ -135,6 +157,11 @@ internal data class PaginationCacheKey(
     val layoutDirection: LayoutDirection,
 )
 
+data class ReaderPaginationSnapshot(
+    val pages: List<ReaderPage> = emptyList(),
+    val isComplete: Boolean = false,
+)
+
 /** One bounded pagination owner per reader composition, never process-global. */
 class ReaderPaginationCoordinator internal constructor(
     private val diskCache: ReaderPaginationDiskCache? = null,
@@ -156,6 +183,7 @@ class ReaderPaginationCoordinator internal constructor(
         }.asCoroutineDispatcher()
     private val paginationScope = CoroutineScope(sessionJob + paginationDispatcher)
     private val cacheScope = CoroutineScope(sessionJob + Dispatchers.IO.limitedParallelism(1))
+    private val paused = MutableStateFlow(false)
     private val inFlight = mutableMapOf<PaginationCacheKey, PaginationLoad>()
     private val pages = object : LinkedHashMap<PaginationCacheKey, List<ReaderPage>>(
         PAGINATION_CACHE_SIZE,
@@ -172,12 +200,21 @@ class ReaderPaginationCoordinator internal constructor(
 
     internal fun cached(key: PaginationCacheKey): List<ReaderPage>? = synchronized(lock) { pages[key] }
 
-    /** Cancels disposable layout work so an overlay/navigation animation owns the CPU budget. */
-    fun pauseInFlight() {
+    /** Pauses current pagination at page boundaries and cancels disposable speculative layouts. */
+    fun setPaused(value: Boolean) {
+        paused.value = value
+        if (!value) return
         synchronized(lock) {
-            inFlight.values.forEach { it.deferred.cancel() }
-            inFlight.clear()
+            val speculative = inFlight.filterValues { it.prefetch }
+            speculative.forEach { (key, load) ->
+                load.deferred.cancel()
+                inFlight.remove(key)
+            }
         }
+    }
+
+    private suspend fun awaitPermit() {
+        paused.first { value -> !value }
     }
 
     override fun onMemoryPressure(level: MemoryPressureLevel) {
@@ -202,9 +239,16 @@ class ReaderPaginationCoordinator internal constructor(
         key: PaginationCacheKey,
         chapter: ReaderChapter,
         prefetch: Boolean,
-        loader: suspend () -> List<ReaderPage>,
-    ): Deferred<List<ReaderPage>> = synchronized(lock) {
-        pages[key]?.let { return@synchronized kotlinx.coroutines.CompletableDeferred(it) }
+        loader: suspend (
+            publishPartial: (List<ReaderPage>) -> Unit,
+            awaitPermit: suspend () -> Unit,
+        ) -> List<ReaderPage>,
+    ): StateFlow<ReaderPaginationSnapshot> = synchronized(lock) {
+        pages[key]?.let {
+            return@synchronized MutableStateFlow(
+                ReaderPaginationSnapshot(it, isComplete = true),
+            ).asStateFlow()
+        }
         if (!prefetch) {
             val stalePrefetches = inFlight.filter { (staleKey, load) ->
                 staleKey != key && load.prefetch
@@ -215,16 +259,18 @@ class ReaderPaginationCoordinator internal constructor(
             }
             inFlight[key]?.let { target ->
                 inFlight[key] = target.copy(prefetch = false)
-                return@synchronized target.deferred
+                return@synchronized target.snapshots
             }
         }
-        inFlight[key]?.let { return@synchronized it.deferred }
+        inFlight[key]?.let { return@synchronized it.snapshots }
+        val snapshots = MutableStateFlow(ReaderPaginationSnapshot())
         lateinit var deferred: Deferred<List<ReaderPage>>
         deferred = paginationScope.async(start = CoroutineStart.LAZY) {
             val startedAt = System.nanoTime()
             try {
                 withContext(Dispatchers.IO) { diskCache?.read(key, chapter) }?.let { restored ->
                     synchronized(lock) { pages[key] = restored }
+                    snapshots.value = ReaderPaginationSnapshot(restored, isComplete = true)
                     DiagnosticLog.record(
                         DiagnosticLog.Category.PAGINATION,
                         "restore",
@@ -239,9 +285,17 @@ class ReaderPaginationCoordinator internal constructor(
                     )
                     return@async restored
                 }
-                val measured = loader()
+                val measured = loader(
+                    { partial ->
+                        if (partial.isNotEmpty()) {
+                            snapshots.value = ReaderPaginationSnapshot(partial, isComplete = false)
+                        }
+                    },
+                    ::awaitPermit,
+                )
                 coroutineContext.ensureActive()
                 synchronized(lock) { pages[key] = measured }
+                snapshots.value = ReaderPaginationSnapshot(measured, isComplete = true)
                 diskCache?.let { cache -> cacheScope.launch { cache.write(key, measured) } }
                 DiagnosticLog.record(
                     DiagnosticLog.Category.PAGINATION,
@@ -281,8 +335,10 @@ class ReaderPaginationCoordinator internal constructor(
                 }
             }
         }
-        inFlight[key] = PaginationLoad(deferred, prefetch)
-        deferred.also { it.start() }
+        val state = snapshots.asStateFlow()
+        inFlight[key] = PaginationLoad(deferred, prefetch, state)
+        deferred.start()
+        state
     }
 
     internal fun close() {
@@ -298,6 +354,7 @@ class ReaderPaginationCoordinator internal constructor(
     private data class PaginationLoad(
         val deferred: Deferred<List<ReaderPage>>,
         val prefetch: Boolean,
+        val snapshots: StateFlow<ReaderPaginationSnapshot>,
     )
 }
 
@@ -312,6 +369,8 @@ private class MeasuredReaderPaginator(
         spec: ReaderLayoutSpec,
         family: androidx.compose.ui.text.font.FontFamily,
         showRegularChapterTitle: Boolean,
+        publishPartial: (List<ReaderPage>) -> Unit = {},
+        awaitPermit: suspend () -> Unit = {},
     ): List<ReaderPage> {
         chapter.fullPageImageParagraph()?.let { image ->
             val block = DocumentBlock(
@@ -349,10 +408,17 @@ private class MeasuredReaderPaginator(
             blocks = mutableListOf()
             usedHeightPx = 0f
             opening = false
+            if (
+                pages.size == FIRST_READABLE_PAGE_BATCH_SIZE ||
+                pages.size % SUBSEQUENT_READABLE_PAGE_BATCH_SIZE == 0
+            ) {
+                publishPartial(pages.toList())
+            }
         }
 
         chapter.contentParagraphs().forEach { paragraph ->
             coroutineContext.ensureActive()
+            awaitPermit()
             if (paragraph.kind == ParagraphKind.IMAGE && paragraph.resourcePath != null) {
                 var imageLayout = standardizedReaderImageLayout(
                     contentWidthDp,
@@ -399,6 +465,7 @@ private class MeasuredReaderPaginator(
             var continuation = false
             while (remainingStart < sourceText.length) {
                 coroutineContext.ensureActive()
+                awaitPermit()
                 val availablePx = (bodyHeightPx() - usedHeightPx).coerceAtLeast(0f)
                 val style = readerBodyTextStyle(spec, family, indent = !continuation)
                 val lineHeightPx = with(density) {
@@ -540,6 +607,8 @@ private class MeasuredReaderPaginator(
 }
 
 private const val PAGINATION_CACHE_SIZE = 6
+private const val FIRST_READABLE_PAGE_BATCH_SIZE = 4
+private const val SUBSEQUENT_READABLE_PAGE_BATCH_SIZE = 8
 private const val MEASUREMENT_WINDOW_CHARS = 512
 private const val MIN_BODY_WIDTH_DP = 160f
 private const val MIN_BODY_HEIGHT_DP = 120f

@@ -13,6 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
@@ -107,7 +108,7 @@ internal fun ReaderControls(
                         )
                         Icon(
                             imageVector = KixyuSymbols.Info,
-                            contentDescription = "查看书籍信息",
+                            contentDescription = stringResource(R.string.reader_view_book_info),
                             modifier = Modifier.size(KixyuSize.iconSmall),
                             tint = titleContentColor.copy(alpha = .72f),
                         )
@@ -123,25 +124,28 @@ internal fun ReaderControls(
             val popupItems = if (showToolsPopup) {
                 listOf(
                     KixyuPopupMenuItem(
-                        label = if (currentPageBookmarked) "移除当前页书签" else "添加当前页书签",
+                        label = stringResource(
+                            if (currentPageBookmarked) R.string.reader_remove_page_bookmark
+                            else R.string.reader_add_page_bookmark,
+                        ),
                         icon = if (currentPageBookmarked) KixyuSymbols.BookmarkFilled else KixyuSymbols.BookmarkAdd,
                         onClick = onToggleBookmark,
                     ),
                     KixyuPopupMenuItem(
-                        label = "全文搜索",
+                        label = stringResource(R.string.reader_search_book),
                         icon = KixyuSymbols.Search,
                         onClick = onSearch,
                     ),
                 )
             } else {
                 listOf(
-                    KixyuPopupMenuItem("显示与亮度", KixyuSymbols.Palette) {
+                    KixyuPopupMenuItem(stringResource(R.string.reader_display_and_brightness), KixyuSymbols.Palette) {
                         onSheet(ReaderSheet.THEME)
                     },
-                    KixyuPopupMenuItem("排版与翻页", KixyuSymbols.ViewCarousel) {
+                    KixyuPopupMenuItem(stringResource(R.string.reader_layout_and_page_turn), KixyuSymbols.ViewCarousel) {
                         onSheet(ReaderSheet.LAYOUT)
                     },
-                    KixyuPopupMenuItem("阅读控制", KixyuSymbols.Tune) {
+                    KixyuPopupMenuItem(stringResource(R.string.reader_controls), KixyuSymbols.Tune) {
                         onSheet(ReaderSheet.INFORMATION)
                     },
                 )
@@ -175,26 +179,26 @@ internal fun ReaderControls(
                     horizontalArrangement = Arrangement.spacedBy(KixyuSize.readerChapterActionGap),
                 ) {
                     ReaderDockIconButton(onClick = onExit, contentColor = dockContentColor) {
-                        Icon(KixyuSymbols.Close, "退出")
+                        Icon(KixyuSymbols.Close, stringResource(R.string.reader_exit))
                     }
                     ReaderDockIconButton(onClick = onDirectory, contentColor = dockContentColor) {
-                        Icon(KixyuSymbols.Toc, "目录")
+                        Icon(KixyuSymbols.Toc, stringResource(R.string.reader_directory))
                     }
                     ReaderDockIconButton(
                         onClick = onPreviousChapter,
                         contentColor = dockContentColor,
                         enabled = hasPreviousChapter,
-                    ) { Icon(KixyuSymbols.SkipPrevious, "上一章") }
+                    ) { Icon(KixyuSymbols.SkipPrevious, stringResource(R.string.reader_previous_chapter)) }
                     ReaderDockIconButton(
                         onClick = onNextChapter,
                         contentColor = dockContentColor,
                         enabled = hasNextChapter,
-                    ) { Icon(KixyuSymbols.SkipNext, "下一章") }
+                    ) { Icon(KixyuSymbols.SkipNext, stringResource(R.string.reader_next_chapter)) }
                     ReaderDockIconButton(onClick = onTools, contentColor = dockContentColor) {
-                        Icon(KixyuSymbols.MoreHoriz, "阅读工具")
+                        Icon(KixyuSymbols.MoreHoriz, stringResource(R.string.reader_tools))
                     }
                     ReaderDockIconButton(onClick = onSettings, contentColor = dockContentColor) {
-                        Icon(KixyuSymbols.Settings, "设置")
+                        Icon(KixyuSymbols.Settings, stringResource(R.string.reader_settings))
                     }
                 }
             }

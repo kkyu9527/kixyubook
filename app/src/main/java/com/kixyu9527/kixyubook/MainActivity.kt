@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
                     onUpdateResultConsumed = appViewModel::clearUpdateResult,
                     onLoadReleaseNotes = appViewModel::loadCurrentReleaseNotes,
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
+                    onPrepareReader = appViewModel::prepareReader,
                     onPrioritizeBookSync = appViewModel::prioritizeBookSync,
                     onBookOpened = bookRepository::markBookOpened,
                     onDownloadUpdate = updateDownloader::download,

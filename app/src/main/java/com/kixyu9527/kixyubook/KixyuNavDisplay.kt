@@ -74,6 +74,7 @@ internal fun KixyuNavDisplay(
     onUpdateResultConsumed: () -> Unit,
     onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
+    onPrepareReader: (String) -> Unit,
     onPrioritizeBookSync: (String) -> Unit,
     onBookOpened: (String) -> Unit,
     externalImportRequestId: Long?,
@@ -163,6 +164,9 @@ internal fun KixyuNavDisplay(
         val sourceRoute = navigator.current()
         if (sourceRoute in setOf(AppRoute.Home, AppRoute.HiddenLibrary) && !bookNavigationPending) {
             bookNavigationPending = true
+            // Warm only Room and an existing binary chapter cache while the lightweight reader
+            // surface animates. An uncached EPUB deliberately does not start parsing here.
+            onPrepareReader(bookUuid)
             onPrioritizeBookSync(bookUuid)
             // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
             // from a Compose frame callback. withFrameNanos resumed at the beginning of the next
