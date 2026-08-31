@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
@@ -81,7 +82,7 @@ fun AboutRoute(
         navigationIcon = {
             if (!embedded) {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(KixyuSymbols.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, stringResource(R.string.settings_back))
                 }
             }
         },

@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
@@ -532,7 +533,7 @@ fun CloudSyncRoute(
         navigationIcon = {
             if (!embedded) {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(KixyuSymbols.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, stringResource(R.string.settings_back))
                 }
             }
         },
@@ -669,7 +670,7 @@ private fun GoogleStorageSection(
                     onClick = onRefresh,
                     enabled = !state.refreshing,
                 ) {
-                    Icon(KixyuSymbols.Refresh, "刷新云空间")
+                    Icon(KixyuSymbols.Refresh, stringResource(R.string.settings_refresh_cloud_storage))
                 }
             }
             if (state.refreshing) {
@@ -897,7 +898,7 @@ fun GoogleAccountRoute(
             modifier = Modifier.fillMaxSize(),
             navigationIcon = {
                 KixyuIconButton(onClick = onBack) {
-                    Icon(KixyuSymbols.ArrowBack, "返回 Google Drive 同步")
+                    Icon(KixyuSymbols.ArrowBack, stringResource(R.string.settings_back_to_google_drive))
                 }
             },
             snackbarHost = {
@@ -986,7 +987,7 @@ private fun GoogleAccountPage(
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             KixyuIconButton(onClick = onBack) {
-                Icon(KixyuSymbols.ArrowBack, "返回 Google Drive 同步")
+                Icon(KixyuSymbols.ArrowBack, stringResource(R.string.settings_back_to_google_drive))
             }
         },
         snackbarHost = {
@@ -1166,7 +1167,7 @@ private fun GoogleAccountAvatar(account: SyncAccount) {
                         .data(avatarUrl)
                         .crossfade(true)
                         .build(),
-                    contentDescription = "${account.displayName}的账号头像",
+                    contentDescription = stringResource(R.string.settings_account_avatar, account.displayName),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize().clip(CircleShape),
                 )

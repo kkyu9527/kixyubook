@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -45,6 +46,7 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderBrightnessMode
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.UserFont
+import com.kixyu9527.kixyubook.core.designsystem.R
 
 @Composable
 fun KixyuReaderThemeControls(
@@ -447,7 +449,14 @@ fun KixyuReaderBrightnessControls(
                 containerColor = if (automatic) MaterialTheme.colorScheme.primary else Color.Unspecified,
                 contentColor = if (automatic) MaterialTheme.colorScheme.onPrimary else Color.Unspecified,
             ) {
-                Icon(KixyuSymbols.Tune, "${if (automatic) "关闭" else "开启"}跟随系统亮度", Modifier.size(KixyuSize.iconSmall))
+                Icon(
+                    KixyuSymbols.Tune,
+                    stringResource(
+                        if (automatic) R.string.kixyu_disable_auto_brightness
+                        else R.string.kixyu_enable_auto_brightness,
+                    ),
+                    Modifier.size(KixyuSize.iconSmall),
+                )
             }
             KixyuSlider(
                 value = previewBrightness,

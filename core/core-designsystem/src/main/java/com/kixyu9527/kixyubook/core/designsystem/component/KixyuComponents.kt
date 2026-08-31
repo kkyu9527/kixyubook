@@ -52,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
+import com.kixyu9527.kixyubook.core.designsystem.R
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
 import top.yukonga.miuix.kmp.basic.BasicComponent as MiuixBasicComponent
@@ -577,7 +579,11 @@ fun KixyuStepperRow(
                 modifier = Modifier.size(KixyuSize.stepperButton),
                 minSize = KixyuSize.stepperButton,
             ) {
-                Icon(KixyuSymbols.Remove, "减小$title", Modifier.size(KixyuSize.iconSmall))
+                Icon(
+                    KixyuSymbols.Remove,
+                    stringResource(R.string.kixyu_decrease_value, title),
+                    Modifier.size(KixyuSize.iconSmall),
+                )
             }
             Text(
                 valueLabel,
@@ -593,7 +599,11 @@ fun KixyuStepperRow(
                 modifier = Modifier.size(KixyuSize.stepperButton),
                 minSize = KixyuSize.stepperButton,
             ) {
-                Icon(KixyuSymbols.Add, "增大$title", Modifier.size(KixyuSize.iconSmall))
+                Icon(
+                    KixyuSymbols.Add,
+                    stringResource(R.string.kixyu_increase_value, title),
+                    Modifier.size(KixyuSize.iconSmall),
+                )
             }
         }
     }

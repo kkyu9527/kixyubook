@@ -32,6 +32,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,8 +48,9 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.ui.BookCover
-import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 @Composable
@@ -70,7 +72,7 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
     }
 
     val expanded = kixyuWindowSizeClass().supportsTwoPane
-    KixyuPageScaffold(title = "阅读", modifier = Modifier.fillMaxSize()) { innerPadding ->
+    KixyuPageScaffold(title = stringResource(R.string.home_title), modifier = Modifier.fillMaxSize()) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .kixyuPageContentWidth(
@@ -125,7 +127,7 @@ private fun RecentReadingSection(
     expanded: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text("最近阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.home_recent_reading), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         if (expanded) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -162,10 +164,11 @@ private fun RecentReadingCard(
     open: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val openDescription = stringResource(R.string.home_open_recent_book, item.book.title)
     Surface(
         modifier = modifier
             .height(116.dp)
-            .semantics { contentDescription = "打开最近阅读：${item.book.title}" }
+            .semantics { contentDescription = openDescription }
             .clickable { open(item.book.uuid) },
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
@@ -203,7 +206,7 @@ private fun RecentReadingCard(
                     modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
                 )
                 Text(
-                    "已读 ${(progress * 100).toInt()}%",
+                    stringResource(R.string.home_read_progress, (progress * 100).toInt()),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -219,13 +222,14 @@ private fun ReadingFocusCard(
     modifier: Modifier = Modifier,
     fillAvailableHeight: Boolean = false,
 ) {
+    val openDescription = if (item == null) null else stringResource(R.string.home_open_book, item.book.title)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text("继续阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.home_continue_reading), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         Surface(
             modifier = (if (fillAvailableHeight) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth())
                 .then(
                     if (item == null) Modifier else Modifier
-                        .semantics { contentDescription = "打开书籍：${item.book.title}" }
+                        .semantics { contentDescription = openDescription.orEmpty() }
                         .clickable { open(item.book.uuid) },
                 ),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -236,8 +240,8 @@ private fun ReadingFocusCard(
                     modifier = Modifier.padding(KixyuSpacing.large),
                     verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                 ) {
-                    Text("从书架选一本书开始", style = MaterialTheme.typography.titleLarge)
-                    Text("开始阅读后，这里会直接带你回到上次的位置。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.home_choose_book), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.home_choose_book_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 Row(
@@ -258,7 +262,10 @@ private fun ReadingFocusCard(
                             modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
                         )
                         Text(
-                            "已读 ${((item.progress?.fraction ?: 0f) * 100).toInt()}%",
+                            stringResource(
+                                R.string.home_read_progress,
+                                ((item.progress?.fraction ?: 0f) * 100).toInt(),
+                            ),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -278,7 +285,7 @@ private fun TodayOverview(
     val stats = state.stats
     val goalMillis = TimeUnit.MINUTES.toMillis(stats.goalMinutes.toLong()).coerceAtLeast(1L)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text("今日目标", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.home_today_goal), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         Surface(
             modifier = if (fillAvailableHeight) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -293,17 +300,28 @@ private fun TodayOverview(
                         "${TimeUnit.MILLISECONDS.toMinutes(stats.todayMillis)}",
                         style = MaterialTheme.typography.headlineLarge,
                     )
-                    Text(" 分钟", modifier = Modifier.padding(bottom = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.home_minutes_unit), modifier = Modifier.padding(bottom = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.weight(1f))
-                    Text("目标 ${stats.goalMinutes} 分钟", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.home_goal_minutes, stats.goalMinutes), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 LinearProgressIndicator(
                     progress = { (stats.todayMillis.toFloat() / goalMillis).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    StatItem(KixyuSymbols.LocalFireDepartment, "${stats.streakDays} 天", "连续阅读")
-                    StatItem(KixyuSymbols.Schedule, "${TimeUnit.MILLISECONDS.toHours(stats.totalMillis)} 小时", "累计时长")
+                    StatItem(
+                        KixyuSymbols.LocalFireDepartment,
+                        stringResource(R.string.home_days_value, stats.streakDays),
+                        stringResource(R.string.home_reading_streak),
+                    )
+                    StatItem(
+                        KixyuSymbols.Schedule,
+                        stringResource(
+                            R.string.home_hours_value,
+                            TimeUnit.MILLISECONDS.toHours(stats.totalMillis),
+                        ),
+                        stringResource(R.string.home_total_duration),
+                    )
                 }
             }
         }
@@ -329,7 +347,7 @@ private fun WeeklyReadingCard(days: List<DailyReading>, goalMinutes: Int) {
     }
     val maxDuration = normalizedDays.maxOfOrNull(DailyReading::durationMillis)?.coerceAtLeast(1L) ?: 1L
     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text("近 7 天", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.home_last_seven_days), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -345,14 +363,14 @@ private fun WeeklyReadingCard(days: List<DailyReading>, goalMinutes: Int) {
                 val goalMillis = TimeUnit.MINUTES.toMillis(goalMinutes.toLong())
                 val goalDays = normalizedDays.count { it.durationMillis >= goalMillis }
                 val averageMinutes = TimeUnit.MILLISECONDS.toMinutes(weeklyMillis / normalizedDays.size)
-                Text("7 天共阅读 $weeklyMinutes 分钟", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.home_weekly_total, weeklyMinutes), style = MaterialTheme.typography.titleMedium)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    WeeklyMetric("$activeDays 天", "有阅读")
-                    WeeklyMetric("$goalDays 天", "完成目标")
-                    WeeklyMetric("$averageMinutes 分钟", "日均")
+                    WeeklyMetric(stringResource(R.string.home_days_value, activeDays), stringResource(R.string.home_days_read))
+                    WeeklyMetric(stringResource(R.string.home_days_value, goalDays), stringResource(R.string.home_days_goal_met))
+                    WeeklyMetric(stringResource(R.string.home_minutes_value, averageMinutes), stringResource(R.string.home_daily_average))
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth().height(112.dp),
@@ -400,12 +418,5 @@ private fun DayBar(day: DailyReading, maxDuration: Long, modifier: Modifier = Mo
     }
 }
 
-private fun dayLabel(epochDay: Long): String = when (LocalDate.ofEpochDay(epochDay).dayOfWeek) {
-    DayOfWeek.MONDAY -> "一"
-    DayOfWeek.TUESDAY -> "二"
-    DayOfWeek.WEDNESDAY -> "三"
-    DayOfWeek.THURSDAY -> "四"
-    DayOfWeek.FRIDAY -> "五"
-    DayOfWeek.SATURDAY -> "六"
-    DayOfWeek.SUNDAY -> "日"
-}
+private fun dayLabel(epochDay: Long): String = LocalDate.ofEpochDay(epochDay)
+    .format(DateTimeFormatter.ofPattern("EEEEE", Locale.getDefault()))

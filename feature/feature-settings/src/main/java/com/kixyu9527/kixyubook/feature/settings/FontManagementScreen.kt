@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -73,7 +74,7 @@ fun FontManagementRoute(
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             KixyuIconButton(onClick = onBack) {
-                Icon(KixyuSymbols.ArrowBack, "返回")
+                Icon(KixyuSymbols.ArrowBack, stringResource(R.string.settings_back))
             }
         },
         snackbarHost = {
@@ -186,9 +187,9 @@ private fun FontChoiceRow(
         },
     ) {
         if (onDelete == null) {
-            if (selected) Icon(KixyuSymbols.Check, "当前字体", tint = foreground)
+            if (selected) Icon(KixyuSymbols.Check, stringResource(R.string.settings_current_font), tint = foreground)
         } else {
-            if (selected) Icon(KixyuSymbols.Check, "当前字体", tint = foreground)
+            if (selected) Icon(KixyuSymbols.Check, stringResource(R.string.settings_current_font), tint = foreground)
             KixyuIconButton(onClick = onDelete) {
                 Icon(
                     KixyuSymbols.DeleteOutline,

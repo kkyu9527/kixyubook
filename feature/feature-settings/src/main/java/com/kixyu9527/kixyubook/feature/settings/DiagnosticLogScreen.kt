@@ -36,6 +36,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -166,13 +167,13 @@ private fun DiagnosticLogScreen(
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
             KixyuIconButton(onClick = onBack) {
-                Icon(KixyuSymbols.ArrowBack, "返回")
+                Icon(KixyuSymbols.ArrowBack, stringResource(R.string.settings_back))
             }
         },
         actions = {
             Box {
                 KixyuIconButton(onClick = { menuExpanded = true }) {
-                    Icon(KixyuSymbols.MoreVert, "日志操作")
+                    Icon(KixyuSymbols.MoreVert, stringResource(R.string.settings_log_actions))
                 }
                 KixyuPopupMenu(
                     expanded = menuExpanded,

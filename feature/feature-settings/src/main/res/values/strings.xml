@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_back">返回</string>
+    <string name="settings_log_actions">日志操作</string>
+    <string name="settings_current_font">当前字体</string>
+    <string name="settings_refresh_cloud_storage">刷新云空间</string>
+    <string name="settings_back_to_google_drive">返回 Google Drive 同步</string>
+    <string name="settings_account_avatar">%1$s的账号头像</string>
+</resources>

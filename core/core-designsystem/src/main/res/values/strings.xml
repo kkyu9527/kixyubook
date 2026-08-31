@@ -1,0 +1,6 @@
+<resources>
+    <string name="kixyu_decrease_value">减小%1$s</string>
+    <string name="kixyu_increase_value">增大%1$s</string>
+    <string name="kixyu_enable_auto_brightness">开启跟随系统亮度</string>
+    <string name="kixyu_disable_auto_brightness">关闭跟随系统亮度</string>
+</resources>
