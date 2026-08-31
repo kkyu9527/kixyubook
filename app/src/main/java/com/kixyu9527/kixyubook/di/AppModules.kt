@@ -20,12 +20,16 @@ import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
+import com.kixyu9527.kixyubook.core.database.dao.ReaderAnnotationDao
 import com.kixyu9527.kixyubook.core.database.MIGRATION_8_9
 import com.kixyu9527.kixyubook.core.database.MIGRATION_9_12
 import com.kixyu9527.kixyubook.core.database.MIGRATION_10_12
 import com.kixyu9527.kixyubook.core.database.MIGRATION_11_12
+import com.kixyu9527.kixyubook.core.database.MIGRATION_12_13
 import com.kixyu9527.kixyubook.core.database.LocalTextCorrectionRepository
+import com.kixyu9527.kixyubook.core.database.LocalReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
+import com.kixyu9527.kixyubook.core.common.repository.ReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.datastore.DataStoreReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.datastore.DataStoreLibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.datastore.DefaultLibraryCatalogRepository
@@ -45,7 +49,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): KixyuDatabase =
         Room.databaseBuilder(context, KixyuDatabase::class.java, "kixyu-books.db")
-            .addMigrations(MIGRATION_8_9, MIGRATION_9_12, MIGRATION_10_12, MIGRATION_11_12)
+            .addMigrations(MIGRATION_8_9, MIGRATION_9_12, MIGRATION_10_12, MIGRATION_11_12, MIGRATION_12_13)
             .build()
 
     @Provides
@@ -56,6 +60,8 @@ object DatabaseModule {
     @Provides fun provideSyncDao(database: KixyuDatabase): SyncDao = database.syncDao()
 
     @Provides fun provideTextCorrectionDao(database: KixyuDatabase): TextCorrectionDao = database.textCorrectionDao()
+
+    @Provides fun provideReaderAnnotationDao(database: KixyuDatabase): ReaderAnnotationDao = database.readerAnnotationDao()
 
 }
 
@@ -72,4 +78,5 @@ abstract class RepositoryModule {
     @Binds abstract fun bindFontRepository(implementation: LocalFontRepository): FontRepository
     @Binds abstract fun bindAppUpdateRepository(implementation: GitHubUpdateRepository): AppUpdateRepository
     @Binds abstract fun bindTextCorrectionRepository(implementation: LocalTextCorrectionRepository): TextCorrectionRepository
+    @Binds abstract fun bindReaderAnnotationRepository(implementation: LocalReaderAnnotationRepository): ReaderAnnotationRepository
 }

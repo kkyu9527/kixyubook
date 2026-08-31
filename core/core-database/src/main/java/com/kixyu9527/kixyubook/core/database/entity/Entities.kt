@@ -188,3 +188,36 @@ data class TextCorrectionEntity(
     val updatedTime: Long,
     val deviceId: String,
 )
+
+@Entity(
+    tableName = "reader_annotations",
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["uuid"],
+            childColumns = ["bookUuid"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("bookUuid"),
+        Index(value = ["bookUuid", "chapterKey", "paragraphIndex"]),
+        Index("updatedTime"),
+    ],
+)
+data class ReaderAnnotationEntity(
+    @PrimaryKey val uuid: String,
+    val bookUuid: String,
+    val sourceContentHash: String,
+    val chapterKey: String,
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val startOffset: Int,
+    val endOffset: Int,
+    val exactText: String,
+    val style: String,
+    val note: String,
+    val createdTime: Long,
+    val updatedTime: Long,
+    val deviceId: String,
+)

@@ -5,6 +5,7 @@ import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
+import com.kixyu9527.kixyubook.core.common.repository.ReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.entity.SyncObjectStateEntity
@@ -20,6 +21,7 @@ internal class CloudSyncPullPipeline(
     private val bookRepository: BookRepository,
     private val fontRepository: FontRepository,
     private val textCorrectionRepository: TextCorrectionRepository,
+    private val readerAnnotationRepository: ReaderAnnotationRepository,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
     private val remoteState: CloudRemoteStateApplier,
@@ -37,6 +39,7 @@ internal class CloudSyncPullPipeline(
                         SyncEntityType.BOOK -> if (books.bookExists(id)) bookRepository.deleteBook(id)
                         SyncEntityType.FONT -> fontRepository.deleteFont(id)
                         SyncEntityType.CORRECTION -> textCorrectionRepository.deleteRemote(id)
+                        SyncEntityType.ANNOTATION -> readerAnnotationRepository.deleteRemote(id)
                         else -> Unit
                     }
                 }
@@ -178,6 +181,7 @@ internal class CloudSyncPullPipeline(
                 key == "settings/global" -> remoteState.applySettings(token, info)
                 key.startsWith("sessions/") -> remoteState.applySession(token, info)
                 key.startsWith("corrections/") -> remoteState.applyCorrection(token, info)
+                key.startsWith("annotations/") -> remoteState.applyAnnotation(token, info)
             }
             rememberRemote(key, info)
         }

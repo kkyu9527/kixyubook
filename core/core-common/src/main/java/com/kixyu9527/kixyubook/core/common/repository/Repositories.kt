@@ -69,6 +69,26 @@ interface TextCorrectionRepository {
     suspend fun deleteRemote(uuid: String)
 }
 
+interface ReaderAnnotationRepository {
+    fun observeBookAnnotations(bookUuid: String): Flow<List<ReaderAnnotation>>
+    suspend fun getBookAnnotations(bookUuid: String): List<ReaderAnnotation>
+    suspend fun createAnnotation(
+        bookUuid: String,
+        chapterKey: String,
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        originalText: String,
+        startOffset: Int,
+        endOffset: Int,
+        style: ReaderAnnotationStyle,
+        note: String = "",
+    ): ReaderAnnotation
+    suspend fun updateNote(uuid: String, note: String): ReaderAnnotation?
+    suspend fun deleteAnnotation(uuid: String)
+    suspend fun applyRemote(annotation: ReaderAnnotation)
+    suspend fun deleteRemote(uuid: String)
+}
+
 /** Raw complete-library access for visibility partitioning and internal maintenance only. */
 interface CompleteLibraryRepository {
     /**
@@ -165,7 +185,7 @@ interface AppUpdateRepository {
     fun clearResult()
 }
 
-enum class SyncEntityType { BOOK, PROGRESS, BOOKMARKS, SETTINGS, SESSION, FONT, CORRECTION }
+enum class SyncEntityType { BOOK, PROGRESS, BOOKMARKS, SETTINGS, SESSION, FONT, CORRECTION, ANNOTATION }
 enum class SyncMutationOperation { UPSERT, DELETE }
 
 /** Records local mutations for object-level cloud sync. Implementations must be cheap and offline-safe. */

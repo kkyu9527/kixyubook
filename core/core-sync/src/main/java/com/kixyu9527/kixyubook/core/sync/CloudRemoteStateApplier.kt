@@ -7,6 +7,7 @@ import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
+import com.kixyu9527.kixyubook.core.common.repository.ReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
@@ -31,6 +32,7 @@ internal class CloudRemoteStateApplier(
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val textCorrectionRepository: TextCorrectionRepository,
+    private val readerAnnotationRepository: ReaderAnnotationRepository,
     private val readingReminders: ReadingReminderScheduler,
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
@@ -173,6 +175,10 @@ internal class CloudRemoteStateApplier(
 
     suspend fun applyCorrection(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
         textCorrectionRepository.applyRemote(parseCorrection(json))
+    }
+
+    suspend fun applyAnnotation(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
+        readerAnnotationRepository.applyRemote(parseAnnotation(json))
     }
 
     suspend fun applyFont(token: String, metadata: DriveObject, source: DriveObject) {

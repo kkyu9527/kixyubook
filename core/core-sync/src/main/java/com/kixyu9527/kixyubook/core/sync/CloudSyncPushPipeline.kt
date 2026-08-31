@@ -85,6 +85,7 @@ internal class CloudSyncPushPipeline(
             SyncEntityType.SESSION -> "sessions/${mutation.entityId}"
             SyncEntityType.SETTINGS -> "settings/global"
             SyncEntityType.CORRECTION -> "corrections/${mutation.entityId}"
+            SyncEntityType.ANNOTATION -> "annotations/${mutation.entityId}"
         }
         currentRemote.filterKeys { it == prefix || it.startsWith(prefix) }.forEach { (key, file) ->
             drive.delete(token, file.id)

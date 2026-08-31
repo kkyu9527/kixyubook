@@ -16,6 +16,7 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
+import com.kixyu9527.kixyubook.core.common.repository.ReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticFailure
@@ -70,6 +71,7 @@ class LocalBookRepository @Inject constructor(
     private val epubParseCoordinator: EpubParseCoordinator,
     private val syncMutations: SyncMutationRecorder,
     private val textCorrections: TextCorrectionRepository,
+    private val annotations: ReaderAnnotationRepository,
 ) : BookRepository, CompleteLibraryRepository, MemoryPressureListener {
     private val parsers = BookParserRegistry()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
@@ -641,6 +643,9 @@ class LocalBookRepository @Inject constructor(
             val correctionUuids = bookUuids.flatMap { uuid ->
                 textCorrections.getBookCorrections(uuid).map(TextCorrection::uuid)
             }
+            val annotationUuids = bookUuids.flatMap { uuid ->
+                annotations.getBookAnnotations(uuid).map(ReaderAnnotation::uuid)
+            }
             database.withTransaction {
                 dao.deleteMetadataEdits(bookUuids)
                 dao.deleteBooks(bookUuids)
@@ -654,6 +659,9 @@ class LocalBookRepository @Inject constructor(
                 }
                 correctionUuids.forEach { uuid ->
                     syncMutations.record(SyncEntityType.CORRECTION, uuid, SyncMutationOperation.DELETE)
+                }
+                annotationUuids.forEach { uuid ->
+                    syncMutations.record(SyncEntityType.ANNOTATION, uuid, SyncMutationOperation.DELETE)
                 }
             }
             synchronized(chapterCacheLock) {

@@ -159,6 +159,26 @@ data class TextCorrection(
     val deviceId: String = "",
 )
 
+enum class ReaderAnnotationStyle { HIGHLIGHT, UNDERLINE }
+
+/** A reader-owned annotation anchored to source paragraph offsets, independent of pagination. */
+data class ReaderAnnotation(
+    val uuid: String,
+    val bookUuid: String,
+    val sourceContentHash: String,
+    val chapterKey: String,
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val startOffset: Int,
+    val endOffset: Int,
+    val exactText: String,
+    val style: ReaderAnnotationStyle,
+    val note: String = "",
+    val createdTime: Long,
+    val updatedTime: Long,
+    val deviceId: String = "",
+)
+
 data class LibraryBook(val book: Book, val progress: ReadingProgress?)
 
 enum class ReaderTheme { SYSTEM, DAY, NIGHT }

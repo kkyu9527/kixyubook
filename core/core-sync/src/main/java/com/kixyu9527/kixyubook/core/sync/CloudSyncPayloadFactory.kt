@@ -8,6 +8,7 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
 import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
+import com.kixyu9527.kixyubook.core.database.dao.ReaderAnnotationDao
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
@@ -19,6 +20,7 @@ internal class CloudSyncPayloadFactory(
     private val books: BookDao,
     private val fonts: FontDao,
     private val corrections: TextCorrectionDao,
+    private val annotations: ReaderAnnotationDao,
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val readingReminders: ReadingReminderScheduler,
@@ -76,6 +78,9 @@ internal class CloudSyncPayloadFactory(
         } else emptyList()
         SyncEntityType.CORRECTION -> corrections.get(mutation.entityId)?.let { correction ->
             listOf(jsonObject("corrections/${correction.uuid}", correctionJson(correction)))
+        }.orEmpty()
+        SyncEntityType.ANNOTATION -> annotations.get(mutation.entityId)?.let { annotation ->
+            listOf(jsonObject("annotations/${annotation.uuid}", annotationJson(annotation)))
         }.orEmpty()
     }
 

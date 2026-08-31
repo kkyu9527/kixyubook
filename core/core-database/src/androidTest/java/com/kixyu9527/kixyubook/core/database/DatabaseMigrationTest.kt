@@ -18,7 +18,7 @@ class DatabaseMigrationTest {
     )
 
     @Test
-    fun migrate8To12_keepsBooksAndCreatesCorrections() {
+    fun migrate8To13_keepsBooksAndCreatesUserTextTables() {
         helper.createDatabase(TEST_DATABASE, 8).use { database ->
             database.insertBook()
         }
@@ -29,15 +29,18 @@ class DatabaseMigrationTest {
             true,
             MIGRATION_8_9,
             MIGRATION_9_12,
+            MIGRATION_12_13,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             database.insertCorrection()
             assertEquals(1, database.correctionCount())
+            database.insertAnnotation()
+            assertEquals(1, database.annotationCount())
         }
     }
 
     @Test
-    fun migrate9To12_keepsBooksAndCorrections() {
+    fun migrate9To13_keepsBooksAndCorrections() {
         helper.createDatabase(TEST_DATABASE, 9).use { database ->
             database.insertBook()
             database.insertCorrection()
@@ -48,9 +51,27 @@ class DatabaseMigrationTest {
             KIXYU_DATABASE_VERSION,
             true,
             MIGRATION_9_12,
+            MIGRATION_12_13,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             assertEquals(1, database.correctionCount())
+            assertEquals(0, database.annotationCount())
+        }
+    }
+
+    @Test
+    fun migrate12To13_keepsBooksAndCreatesAnnotations() {
+        helper.createDatabase(TEST_DATABASE, 12).use { database -> database.insertBook() }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            KIXYU_DATABASE_VERSION,
+            true,
+            MIGRATION_12_13,
+        ).use { database ->
+            assertEquals("迁移测试", database.bookTitle())
+            database.insertAnnotation()
+            assertEquals(1, database.annotationCount())
         }
     }
 
@@ -83,6 +104,21 @@ class DatabaseMigrationTest {
         )
     }
 
+    private fun SupportSQLiteDatabase.insertAnnotation() {
+        execSQL(
+            """
+            INSERT INTO reader_annotations(
+                uuid, bookUuid, sourceContentHash, chapterKey, chapterIndex,
+                paragraphIndex, startOffset, endOffset, exactText, style, note,
+                createdTime, updatedTime, deviceId
+            ) VALUES(
+                'annotation', 'migration-book', 'migration-hash', 'chapter-0', 0,
+                0, 0, 1, '原', 'HIGHLIGHT', '笔记', 1, 2, 'test-device'
+            )
+            """.trimIndent(),
+        )
+    }
+
     private fun SupportSQLiteDatabase.bookTitle(): String =
         query("SELECT title FROM books WHERE uuid = 'migration-book'").use { cursor ->
             check(cursor.moveToFirst())
@@ -91,6 +127,12 @@ class DatabaseMigrationTest {
 
     private fun SupportSQLiteDatabase.correctionCount(): Int =
         query("SELECT COUNT(*) FROM text_corrections").use { cursor ->
+            check(cursor.moveToFirst())
+            cursor.getInt(0)
+        }
+
+    private fun SupportSQLiteDatabase.annotationCount(): Int =
+        query("SELECT COUNT(*) FROM reader_annotations").use { cursor ->
             check(cursor.moveToFirst())
             cursor.getInt(0)
         }

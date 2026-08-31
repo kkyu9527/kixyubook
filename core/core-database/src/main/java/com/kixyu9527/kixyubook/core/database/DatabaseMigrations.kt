@@ -55,6 +55,36 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
     }
 }
 
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `reader_annotations` (
+                `uuid` TEXT NOT NULL,
+                `bookUuid` TEXT NOT NULL,
+                `sourceContentHash` TEXT NOT NULL,
+                `chapterKey` TEXT NOT NULL,
+                `chapterIndex` INTEGER NOT NULL,
+                `paragraphIndex` INTEGER NOT NULL,
+                `startOffset` INTEGER NOT NULL,
+                `endOffset` INTEGER NOT NULL,
+                `exactText` TEXT NOT NULL,
+                `style` TEXT NOT NULL,
+                `note` TEXT NOT NULL,
+                `createdTime` INTEGER NOT NULL,
+                `updatedTime` INTEGER NOT NULL,
+                `deviceId` TEXT NOT NULL,
+                PRIMARY KEY(`uuid`),
+                FOREIGN KEY(`bookUuid`) REFERENCES `books`(`uuid`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_reader_annotations_bookUuid` ON `reader_annotations` (`bookUuid`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_reader_annotations_bookUuid_chapterKey_paragraphIndex` ON `reader_annotations` (`bookUuid`, `chapterKey`, `paragraphIndex`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_reader_annotations_updatedTime` ON `reader_annotations` (`updatedTime`)")
+    }
+}
+
 private val BOOK_READER_COLUMNS_V10 = listOf(
     "readerSettingsEnabled",
     "readerFontSize",
