@@ -53,6 +53,7 @@ internal class EpubChapterCache(private val root: File) {
                             }.toSet(),
                             foreground = input.readEnumOrNull<ReaderSemanticColor>(),
                             background = input.readEnumOrNull<ReaderSemanticColor>(),
+                            linkTarget = input.readSizedString().takeIf(String::isNotEmpty),
                         )
                     }
                 }
@@ -98,6 +99,7 @@ internal class EpubChapterCache(private val root: File) {
                         output.writeInt(span.styles.fold(0) { mask, style -> mask or (1 shl style.ordinal) })
                         output.writeInt(span.foreground?.ordinal ?: NO_ENUM)
                         output.writeInt(span.background?.ordinal ?: NO_ENUM)
+                        output.writeSizedString(span.linkTarget.orEmpty())
                     }
                 }
             }
@@ -150,7 +152,7 @@ private fun String.safePathSegment() = replace(Regex("[^a-zA-Z0-9._-]"), "_")
 
 private const val MAGIC = 0x4B584543
 // Version 6 also persists whether publisher CSS requests a cover-style crop.
-private const val VERSION = 6
+private const val VERSION = 7
 private const val NO_ENUM = -1
 private const val MAX_PARAGRAPHS = 100_000
 private const val MAX_IMAGES = 10_000

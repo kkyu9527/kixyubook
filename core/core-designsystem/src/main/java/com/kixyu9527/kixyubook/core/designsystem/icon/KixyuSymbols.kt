@@ -65,6 +65,8 @@ object KixyuSymbols {
         @Composable get() = ImageVector.vectorResource(R.drawable.ms_file_upload_outlined)
     val FontDownload: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ms_font_download_outlined)
+    val FormatUnderlined: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ms_format_underlined_outlined)
     val GridView: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ms_grid_view_outlined)
     val Info: ImageVector

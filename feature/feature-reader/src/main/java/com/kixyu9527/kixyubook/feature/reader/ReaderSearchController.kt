@@ -17,20 +17,16 @@ internal class ReaderSearchController(
     private val bookUuid: String,
     private val books: BookRepository,
     private val state: MutableStateFlow<ReaderUiState>,
-    private val currentPosition: () -> ReaderPositionState,
+    private val recordOrigin: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
     private val jumpToPosition: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
-    private val restorePosition: (
-        chapterPosition: Int,
-        paragraphIndex: Int,
-        charOffset: Int,
-    ) -> Unit,
+    private val returnToOrigin: () -> Unit,
 ) {
-    private var returnPosition: SearchReturnPosition? = null
+    private var originRecorded = false
 
     fun search(query: String) {
         scope.launch {
             val normalized = query.trim()
-            returnPosition = null
+            originRecorded = false
             if (normalized.isBlank()) {
                 clearState()
                 return@launch
@@ -52,13 +48,9 @@ internal class ReaderSearchController(
         if (snapshot.searchResults.isEmpty()) return
         val safeIndex = index.coerceIn(0, snapshot.searchResults.lastIndex)
         val result = snapshot.searchResults.getOrNull(safeIndex) ?: return
-        if (returnPosition == null) {
-            val position = currentPosition()
-            returnPosition = SearchReturnPosition(
-                chapterIndex = snapshot.chapterIndex,
-                paragraphIndex = position.paragraphIndex,
-                charOffset = position.charOffset,
-            )
+        if (!originRecorded) {
+            recordOrigin(result.chapterIndex, result.paragraphIndex)
+            originRecorded = true
         }
         state.update {
             it.copy(selectedSearchIndex = safeIndex, searchReturnAvailable = true)
@@ -67,10 +59,10 @@ internal class ReaderSearchController(
     }
 
     fun returnToReadingPosition() {
-        val position = returnPosition ?: return
-        returnPosition = null
+        if (!originRecorded) return
+        originRecorded = false
         state.update { it.copy(searchReturnAvailable = false) }
-        restorePosition(position.chapterIndex, position.paragraphIndex, position.charOffset)
+        returnToOrigin()
     }
 
     fun move(delta: Int) {
@@ -81,7 +73,7 @@ internal class ReaderSearchController(
     }
 
     fun clear() {
-        returnPosition = null
+        originRecorded = false
         clearState()
     }
 

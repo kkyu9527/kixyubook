@@ -11,12 +11,6 @@ import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
 import kotlinx.coroutines.Deferred
 
-internal data class SearchReturnPosition(
-    val chapterIndex: Int,
-    val paragraphIndex: Int,
-    val charOffset: Int,
-)
-
 internal data class ChapterLoadRequest(
     val priority: ChapterLoadPriority,
     val deferred: Deferred<ReaderChapter?>,

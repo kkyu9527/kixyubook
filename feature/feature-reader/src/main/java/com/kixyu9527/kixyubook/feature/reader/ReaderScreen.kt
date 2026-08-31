@@ -73,6 +73,8 @@ internal fun ReaderScreen(
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
     returnFromSearchResult: () -> Unit,
+    navigateHistoryBack: () -> Unit,
+    navigateHistoryForward: () -> Unit,
     clearSearch: () -> Unit,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
@@ -81,6 +83,12 @@ internal fun ReaderScreen(
     deleteFont: (UserFont) -> Unit,
     saveCorrection: (Int, Int, String, String) -> Unit,
     deleteCorrection: (String) -> Unit,
+    saveHighlight: (Int, Int, String, Int, Int) -> Unit,
+    saveUnderline: (Int, Int, String, Int, Int) -> Unit,
+    saveNote: (Int, Int, String, Int, Int, String) -> Unit,
+    deleteAnnotation: (String) -> Unit,
+    openDocumentLink: (String) -> Unit,
+    closeFootnote: () -> Unit,
     onManageCorrections: () -> Unit,
 ) {
     val readerPaneTitle = stringResource(R.string.reader_content_pane)
@@ -106,10 +114,11 @@ internal fun ReaderScreen(
     val focusRequester = remember { FocusRequester() }
     val context = LocalContext.current
     val view = LocalView.current
-    var textActionTarget by remember(state.chapter?.id) {
+    val textInteraction = rememberReaderTextInteractionState()
+    var correctionEditorTarget by remember(state.chapter?.id) {
         mutableStateOf<ReaderTextActionTarget?>(null)
     }
-    var correctionEditorTarget by remember(state.chapter?.id) {
+    var noteEditorTarget by remember(state.chapter?.id) {
         mutableStateOf<ReaderTextActionTarget?>(null)
     }
     var exitRequested by remember { mutableStateOf(false) }
@@ -295,11 +304,36 @@ internal fun ReaderScreen(
     KixyuOverlayHost(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalKixyuGlassBackdrop provides readerBackdrop) {
         CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {
-            ReaderSelectionToolbar(
+            ReaderTextInteractionHost(
+                state = textInteraction,
                 dismissKey = state.chapterIndex to position.paragraphIndex,
-                onCorrectParagraph = {
-                    textActionTarget?.let { target ->
+                onCorrectText = {
+                    textInteraction.target?.let { target ->
                         correctionEditorTarget = target
+                        controls = false
+                        menu = false
+                        toolsMenu = false
+                    }
+                },
+                onHighlightText = {
+                    textInteraction.target?.let { target ->
+                        saveHighlight(
+                            target.chapterIndex, target.paragraphIndex, target.text,
+                            target.selectedStart, target.selectedEnd,
+                        )
+                    }
+                },
+                onUnderlineText = {
+                    textInteraction.target?.let { target ->
+                        saveUnderline(
+                            target.chapterIndex, target.paragraphIndex, target.text,
+                            target.selectedStart, target.selectedEnd,
+                        )
+                    }
+                },
+                onNoteText = {
+                    textInteraction.target?.let { target ->
+                        noteEditorTarget = target
                         controls = false
                         menu = false
                         toolsMenu = false
@@ -408,7 +442,8 @@ internal fun ReaderScreen(
                         // overlays may cancel pagination; the drag still pauses unrelated EPUB work
                         // through setPageInteractionActive above.
                         resourcePriorityActive = overlayAnimationPriority,
-                        onTextActionTarget = { textActionTarget = it },
+                        onTextActionTarget = textInteraction::publishTarget,
+                        onDocumentLink = openDocumentLink,
                     )
                 }
             }
@@ -471,6 +506,16 @@ internal fun ReaderScreen(
                     menu = false
                     toolsMenu = false
                 },
+                canNavigateBack = state.canNavigateBack,
+                canNavigateForward = state.canNavigateForward,
+                onNavigateBack = {
+                    navigateHistoryBack()
+                    toolsMenu = false
+                },
+                onNavigateForward = {
+                    navigateHistoryForward()
+                    toolsMenu = false
+                },
                 onSheet = {
                     controls = false
                     menu = false
@@ -508,6 +553,35 @@ internal fun ReaderScreen(
                     onManageCorrections()
                 },
             )
+        }
+
+        noteEditorTarget?.let { target ->
+            val existing = state.annotations.firstOrNull {
+                it.chapterIndex == target.chapterIndex && it.paragraphIndex == target.paragraphIndex &&
+                    it.startOffset == target.selectedStart && it.endOffset == target.selectedEnd
+            }
+            AnnotationNoteDialog(
+                excerpt = target.selectedText,
+                initialNote = existing?.note.orEmpty(),
+                onDismiss = { noteEditorTarget = null },
+                onSave = { note ->
+                    saveNote(
+                        target.chapterIndex, target.paragraphIndex, target.text,
+                        target.selectedStart, target.selectedEnd, note,
+                    )
+                    noteEditorTarget = null
+                },
+                onDelete = existing?.let { annotation ->
+                    {
+                        deleteAnnotation(annotation.uuid)
+                        noteEditorTarget = null
+                    }
+                },
+            )
+        }
+
+        state.epubFootnote?.let { footnote ->
+            EpubFootnoteDialog(footnote = footnote, onDismiss = closeFootnote)
         }
 
         ReaderSearchOverlay(

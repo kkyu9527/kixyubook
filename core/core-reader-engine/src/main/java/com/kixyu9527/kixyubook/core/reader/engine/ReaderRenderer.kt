@@ -17,22 +17,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.rememberSelectionState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextIndent
@@ -45,6 +47,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
+import com.kixyu9527.kixyubook.core.common.model.ReaderAnnotation
+import com.kixyu9527.kixyubook.core.common.model.ReaderAnnotationStyle
+import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
+import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -64,14 +70,22 @@ data class ReaderTextActionTarget(
     val chapterIndex: Int,
     val paragraphIndex: Int,
     val text: String,
-)
+    val selectedStart: Int = 0,
+    val selectedEnd: Int = 0,
+    val selectionHintOffset: Int = 0,
+) {
+    val isAnnotatable: Boolean
+        get() = selectedStart in 0 until selectedEnd && selectedEnd <= text.length
 
-/**
- * Incrementing this value disposes every active reader [SelectionContainer]. Keeping selection
- * reset at renderer level prevents a dismissed toolbar from leaving Compose's selection gesture
- * layer alive and intercepting later reader taps.
- */
-val LocalReaderSelectionResetVersion = staticCompositionLocalOf { 0 }
+    val selectedText: String
+        get() = text.substring(
+            selectedStart.coerceIn(0, text.length),
+            selectedEnd.coerceIn(selectedStart.coerceIn(0, text.length), text.length),
+        )
+}
+
+/** Explicit clear requests are observed by both reader modes without disposing their containers. */
+val LocalReaderSelectionClearRequest = staticCompositionLocalOf { 0 }
 
 @Composable
 fun ReaderScrollRenderer(
@@ -91,27 +105,35 @@ fun ReaderScrollRenderer(
     fullPageViewportHeightDp: Float = spec.viewportHeightDp,
     epubPath: String? = null,
     highlightQuery: String = "",
+    readerAnnotations: List<ReaderAnnotation> = emptyList(),
     onTextActionTarget: (ReaderTextActionTarget) -> Unit = {},
+    onDocumentLink: (String) -> Unit = {},
 ) {
     val family = rememberReaderFont(fontPath)
     val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
     val fullPageImage = remember(chapter) { chapter.fullPageImageParagraph() }
-    var selectionVersion by remember(chapter.id) { mutableIntStateOf(0) }
     var selectionActive by remember(chapter.id) { androidx.compose.runtime.mutableStateOf(false) }
-    val selectionResetVersion = LocalReaderSelectionResetVersion.current
-    LaunchedEffect(selectionResetVersion) {
+    val selectionState = rememberSelectionState()
+    var actionTarget by remember(chapter.id) { mutableStateOf<ReaderTextActionTarget?>(null) }
+    val selectionClearRequest = LocalReaderSelectionClearRequest.current
+    LaunchedEffect(selectionClearRequest) {
+        selectionState.clear()
         selectionActive = false
+    }
+    LaunchedEffect(selectionState, actionTarget) {
+        snapshotFlow { selectionState.selectedTexts.map { it.text } }.collect { selectedTexts ->
+            actionTarget?.withSelectedText(selectedTexts.joinToString(""))?.let(onTextActionTarget)
+        }
     }
     val handleTap: (Float) -> Unit = { fraction ->
         if (selectionActive) {
+            selectionState.clear()
             selectionActive = false
-            selectionVersion++
         } else {
             onTapFraction(fraction)
         }
     }
-    key(selectionVersion, selectionResetVersion) {
-        SelectionContainer {
+    SelectionContainer(state = selectionState) {
             LazyColumn(
                 state = listState,
                 modifier = modifier.readerTapInput(handleTap) { selectionActive = true },
@@ -177,16 +199,30 @@ fun ReaderScrollRenderer(
                                 spec,
                                 palette.body,
                                 family,
-                                spans = paragraph.spans,
+                                spans = paragraph.spans + annotationSpans(
+                                    readerAnnotations,
+                                    chapter.index,
+                                    paragraph.index,
+                                    paragraph.text,
+                                    0,
+                                    paragraph.text.length,
+                                ),
                                 accentColor = palette.accent,
                                 backgroundColor = palette.background,
                                 highlightQuery = highlightQuery,
                                 highlightColor = palette.accent,
-                                modifier = Modifier.observeReaderTextTarget {
-                                    onTextActionTarget(
-                                        ReaderTextActionTarget(chapter.index, paragraph.index, paragraph.text),
-                                    )
+                                onSelectionPointerDown = { offset ->
+                                    ReaderTextActionTarget(
+                                        chapter.index,
+                                        paragraph.index,
+                                        paragraph.text,
+                                        selectionHintOffset = offset,
+                                    ).let {
+                                        actionTarget = it
+                                        onTextActionTarget(it)
+                                    }
                                 },
+                                onLinkClick = onDocumentLink,
                             )
                         }
                     }
@@ -208,7 +244,6 @@ fun ReaderScrollRenderer(
                     }
                 }
             }
-        }
     }
 }
 
@@ -223,6 +258,7 @@ fun ReaderPageRenderer(
     epubPath: String? = null,
     showRegularChapterTitle: Boolean = true,
     highlightQuery: String = "",
+    readerAnnotations: List<ReaderAnnotation> = emptyList(),
     pageNumber: String? = null,
     showReadingTime: Boolean = false,
     showBatteryLevel: Boolean = false,
@@ -231,17 +267,19 @@ fun ReaderPageRenderer(
     fullPageViewportWidthDp: Float = spec.viewportWidthDp,
     fullPageViewportHeightDp: Float = spec.viewportHeightDp,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit = {},
+    onDocumentLink: (String) -> Unit = {},
 ) {
     val family = rememberReaderFont(fontPath)
-    var selectionVersion by remember(page.chapterIndex, page.index) { mutableIntStateOf(0) }
     var selectionActive by remember(page.chapterIndex, page.index) { androidx.compose.runtime.mutableStateOf(false) }
-    val selectionResetVersion = LocalReaderSelectionResetVersion.current
+    val selectionState = rememberSelectionState()
+    var actionTarget by remember(page.chapterIndex, page.index) { mutableStateOf<ReaderTextActionTarget?>(null) }
+    val selectionClearRequest = LocalReaderSelectionClearRequest.current
     val latestTap by rememberUpdatedState(onTapFraction)
     val handleTap: (Float) -> Unit = remember(selectionEnabled) {
         { fraction ->
             if (selectionEnabled && selectionActive) {
+                selectionState.clear()
                 selectionActive = false
-                selectionVersion++
                 onSelectionActiveChange(false)
             } else {
                 latestTap(fraction)
@@ -251,10 +289,16 @@ fun ReaderPageRenderer(
     LaunchedEffect(page.chapterIndex, page.index, selectionEnabled) {
         if (selectionEnabled) onSelectionActiveChange(selectionActive)
     }
-    LaunchedEffect(selectionResetVersion) {
+    LaunchedEffect(selectionClearRequest) {
+        selectionState.clear()
         if (selectionActive) {
             selectionActive = false
             onSelectionActiveChange(false)
+        }
+    }
+    LaunchedEffect(selectionState, actionTarget) {
+        snapshotFlow { selectionState.selectedTexts.map { it.text } }.collect { selectedTexts ->
+            actionTarget?.withSelectedText(selectedTexts.joinToString(""))?.let(onTextActionTarget)
         }
     }
     val content: @Composable () -> Unit = {
@@ -267,6 +311,7 @@ fun ReaderPageRenderer(
             modifier = modifier,
             showRegularChapterTitle = showRegularChapterTitle,
             highlightQuery = highlightQuery,
+            readerAnnotations = readerAnnotations,
             pageNumber = pageNumber,
             showReadingTime = showReadingTime,
             showBatteryLevel = showBatteryLevel,
@@ -279,13 +324,15 @@ fun ReaderPageRenderer(
             },
             fullPageViewportWidthDp = fullPageViewportWidthDp,
             fullPageViewportHeightDp = fullPageViewportHeightDp,
-            onTextActionTarget = onTextActionTarget,
+            onActionTarget = { target ->
+                actionTarget = target
+                onTextActionTarget(target)
+            },
+            onDocumentLink = onDocumentLink,
         )
     }
     if (selectionEnabled) {
-        key(selectionVersion, selectionResetVersion) {
-            SelectionContainer { content() }
-        }
+        SelectionContainer(state = selectionState) { content() }
     } else {
         content()
     }
@@ -301,6 +348,7 @@ private fun ReaderPageContent(
     modifier: Modifier,
     showRegularChapterTitle: Boolean,
     highlightQuery: String,
+    readerAnnotations: List<ReaderAnnotation>,
     pageNumber: String?,
     showReadingTime: Boolean,
     showBatteryLevel: Boolean,
@@ -308,7 +356,8 @@ private fun ReaderPageContent(
     onLongPress: () -> Unit,
     fullPageViewportWidthDp: Float,
     fullPageViewportHeightDp: Float,
-    onTextActionTarget: (ReaderTextActionTarget) -> Unit,
+    onActionTarget: (ReaderTextActionTarget) -> Unit,
+    onDocumentLink: (String) -> Unit,
 ) {
     val fullPageBlock = page.blocks.singleOrNull()?.takeIf { it.isFullPageImage }
     if (fullPageBlock != null) {
@@ -381,18 +430,31 @@ private fun ReaderPageContent(
                     spec,
                     palette.body,
                     family,
-                    spans = block.spans,
+                    spans = block.spans + annotationSpans(
+                        readerAnnotations,
+                        page.chapterIndex,
+                        block.paragraphIndex,
+                        block.fullText,
+                        block.textStart,
+                        block.visibleText.length,
+                    ),
                     accentColor = palette.accent,
                     backgroundColor = palette.background,
                     indent = !block.continuation,
                     bottomSpacing = block.bottomSpacing,
                     highlightQuery = highlightQuery,
                     highlightColor = palette.accent,
-                    modifier = Modifier.observeReaderTextTarget {
-                        onTextActionTarget(
-                            ReaderTextActionTarget(page.chapterIndex, block.paragraphIndex, block.fullText),
+                    onSelectionPointerDown = { offset ->
+                        onActionTarget(
+                            ReaderTextActionTarget(
+                                page.chapterIndex,
+                                block.paragraphIndex,
+                                block.fullText,
+                                selectionHintOffset = block.textStart + offset,
+                            ),
                         )
                     },
+                    onLinkClick = onDocumentLink,
                 )
             }
         }
@@ -430,6 +492,25 @@ private fun ReaderPageContent(
             }
         }
     }
+}
+
+private fun ReaderTextActionTarget.withSelectedText(selected: String): ReaderTextActionTarget {
+    if (selected.isBlank()) return this
+    val occurrences = buildList {
+        var next = text.indexOf(selected)
+        while (next >= 0) {
+            add(next)
+            next = text.indexOf(selected, next + 1)
+        }
+    }
+    val start = occurrences.minByOrNull { candidate ->
+        kotlin.math.abs(candidate - selectionHintOffset)
+    } ?: -1
+    // Native selection may span more than one selectable. The current annotation model is
+    // source-anchored to one paragraph, so never silently apply a multi-paragraph selection to
+    // the paragraph where the gesture started. Copy remains available through the system action.
+    if (start < 0) return copy(selectedStart = 0, selectedEnd = 0)
+    return copy(selectedStart = start, selectedEnd = start + selected.length)
 }
 
 @Immutable
@@ -507,6 +588,7 @@ private fun ReaderBodyText(
     spec: ReaderLayoutSpec,
     color: Color,
     family: FontFamily,
+    modifier: Modifier = Modifier,
     spans: List<ReaderTextSpan> = emptyList(),
     accentColor: Color = Color.Unspecified,
     backgroundColor: Color = Color.Unspecified,
@@ -514,7 +596,8 @@ private fun ReaderBodyText(
     bottomSpacing: Boolean = true,
     highlightQuery: String = "",
     highlightColor: Color = Color.Transparent,
-    modifier: Modifier = Modifier,
+    onLinkClick: (String) -> Unit = {},
+    onSelectionPointerDown: (Int) -> Unit = {},
 ) {
     // Building an AnnotatedString walks every rich-text span and every search match. Pager keeps
     // neighbouring pages composed, so retain this immutable result instead of rebuilding it when
@@ -536,21 +619,81 @@ private fun ReaderBodyText(
             highlightColor = highlightColor,
         )
     }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
     Text(
         text = annotatedText,
         color = color,
         style = readerBodyTextStyle(spec, family, indent),
-        modifier = modifier.fillMaxWidth()
+        onTextLayout = { layoutResult = it },
+        modifier = modifier
+            .observeReaderTextTarget(layoutResult, onSelectionPointerDown)
+            .readerLinkInput(spans, layoutResult, onLinkClick).fillMaxWidth()
             .padding(bottom = if (bottomSpacing) (spec.fontSizeSp * 0.9f).dp else 0.dp),
     )
 }
 
-/** Records the paragraph at pointer-down without consuming Compose's native selection gesture. */
-private fun Modifier.observeReaderTextTarget(onTarget: () -> Unit): Modifier =
-    pointerInput(onTarget) {
+private fun Modifier.readerLinkInput(
+    spans: List<ReaderTextSpan>,
+    layoutResult: TextLayoutResult?,
+    onLinkClick: (String) -> Unit,
+): Modifier {
+    val links = spans.filter { it.linkTarget != null }
+    if (links.isEmpty()) return this
+    return pointerInput(links, layoutResult) {
         awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            onTarget()
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+            val up = waitForUpOrCancellation(pass = PointerEventPass.Final) ?: return@awaitEachGesture
+            val offset = layoutResult?.getOffsetForPosition(up.position) ?: return@awaitEachGesture
+            links.firstOrNull { offset in it.start until it.end }?.linkTarget?.let(onLinkClick)
+        }
+    }
+}
+
+private fun annotationSpans(
+    annotations: List<ReaderAnnotation>,
+    chapterIndex: Int,
+    paragraphIndex: Int,
+    sourceText: String,
+    textStart: Int,
+    visibleLength: Int,
+): List<ReaderTextSpan> {
+    val visibleEnd = textStart + visibleLength
+    return annotations.asSequence()
+        .filter {
+            it.chapterIndex == chapterIndex && it.paragraphIndex == paragraphIndex &&
+                it.startOffset in 0..sourceText.length && it.endOffset in 0..sourceText.length &&
+                it.startOffset < it.endOffset &&
+                sourceText.substring(it.startOffset, it.endOffset) == it.exactText
+        }
+        .mapNotNull { annotation ->
+            val start = maxOf(annotation.startOffset, textStart)
+            val end = minOf(annotation.endOffset, visibleEnd)
+            if (start >= end) return@mapNotNull null
+            ReaderTextSpan(
+                start = start - textStart,
+                end = end - textStart,
+                styles = setOf(
+                    when (annotation.style) {
+                        ReaderAnnotationStyle.HIGHLIGHT -> ReaderInlineStyle.HIGHLIGHT
+                        ReaderAnnotationStyle.UNDERLINE -> ReaderInlineStyle.UNDERLINE
+                    },
+                ),
+                background = ReaderSemanticColor.YELLOW.takeIf {
+                    annotation.style == ReaderAnnotationStyle.HIGHLIGHT
+                },
+            )
+        }
+        .toList()
+}
+
+/** Records the source offset at pointer-down without consuming the native selection gesture. */
+private fun Modifier.observeReaderTextTarget(
+    layoutResult: TextLayoutResult?,
+    onTarget: (Int) -> Unit,
+): Modifier = pointerInput(onTarget, layoutResult) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            onTarget(layoutResult?.getOffsetForPosition(down.position) ?: 0)
             waitForUpOrCancellation(pass = PointerEventPass.Initial)
         }
     }

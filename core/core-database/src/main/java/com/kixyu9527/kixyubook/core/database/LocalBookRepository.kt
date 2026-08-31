@@ -1062,6 +1062,14 @@ class LocalBookRepository @Inject constructor(
             .take(1000)
     }
 
+    override suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult? =
+        withContext(Dispatchers.IO) {
+            val book = dao.getBook(bookUuid)?.toModel() ?: return@withContext null
+            if (book.format != BookFormat.EPUB) return@withContext null
+            (parsers.parserFor(BookFormat.EPUB) as EpubBookParser)
+                .resolveLink(File(book.storagePath), target)
+        }
+
     private suspend fun importStreamingChapters(
         bookUuid: String,
         source: File,

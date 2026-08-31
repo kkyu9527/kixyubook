@@ -73,6 +73,7 @@ internal data class NormalizedInlineState(
     val variables: Map<String, String> = emptyMap(),
     val preserveWhitespace: Boolean = false,
     val hidden: Boolean = false,
+    val linkTarget: String? = null,
 )
 
 internal class StyledTextBuilder {
@@ -109,12 +110,12 @@ internal class StyledTextBuilder {
     private fun appendCharacter(character: Char, style: NormalizedInlineState) {
         val start = text.length
         text.append(character)
-        if (style.styles.isEmpty() && style.foreground == null && style.background == null) return
+        if (style.styles.isEmpty() && style.foreground == null && style.background == null && style.linkTarget == null) return
         val previous = spans.lastOrNull()
         if (previous != null && previous.end == start && previous.matches(style)) {
             spans[spans.lastIndex] = previous.copy(end = start + 1)
         } else {
-            spans += ReaderTextSpan(start, start + 1, style.styles, style.foreground, style.background)
+            spans += ReaderTextSpan(start, start + 1, style.styles, style.foreground, style.background, style.linkTarget)
         }
     }
 
@@ -127,8 +128,10 @@ internal class StyledTextBuilder {
         variables = variables + other.variables,
         preserveWhitespace = preserveWhitespace || other.preserveWhitespace,
         hidden = hidden || other.hidden,
+        linkTarget = other.linkTarget ?: linkTarget,
     )
 
     private fun ReaderTextSpan.matches(style: NormalizedInlineState) =
-        styles == style.styles && foreground == style.foreground && background == style.background
+        styles == style.styles && foreground == style.foreground && background == style.background &&
+            linkTarget == style.linkTarget
 }

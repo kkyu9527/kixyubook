@@ -6,6 +6,8 @@ import com.kixyu9527.kixyubook.core.common.model.BookSearchResult
 import com.kixyu9527.kixyubook.core.common.model.Bookmark
 import com.kixyu9527.kixyubook.core.common.model.Chapter
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
+import com.kixyu9527.kixyubook.core.common.model.ReaderAnnotation
+import com.kixyu9527.kixyubook.core.common.model.EpubLinkResult
 import com.kixyu9527.kixyubook.core.common.model.TextCorrection
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
@@ -24,10 +26,14 @@ data class ReaderUiState(
     val availableFonts: List<UserFont> = emptyList(),
     val bookmarks: List<Bookmark> = emptyList(),
     val corrections: List<TextCorrection> = emptyList(),
+    val annotations: List<ReaderAnnotation> = emptyList(),
     val searchQuery: String = "",
     val searchResults: List<BookSearchResult> = emptyList(),
     val selectedSearchIndex: Int = -1,
     val searchReturnAvailable: Boolean = false,
+    val canNavigateBack: Boolean = false,
+    val canNavigateForward: Boolean = false,
+    val epubFootnote: EpubLinkResult.Footnote? = null,
     val navigationVersion: Int = 0,
     val loading: Boolean = true,
     val chapterLoading: Boolean = false,
@@ -58,6 +64,7 @@ internal data class ReaderContentState(
     val fontPath: String?,
     val searchQuery: String,
     val searchResults: List<BookSearchResult>,
+    val annotations: List<ReaderAnnotation>,
     val selectedSearchIndex: Int,
     val navigationVersion: Int,
 )
@@ -74,6 +81,7 @@ internal fun ReaderUiState.toReaderContentState() = ReaderContentState(
     fontPath = fontPath,
     searchQuery = searchQuery,
     searchResults = searchResults,
+    annotations = annotations,
     selectedSearchIndex = selectedSearchIndex,
     navigationVersion = navigationVersion,
 )

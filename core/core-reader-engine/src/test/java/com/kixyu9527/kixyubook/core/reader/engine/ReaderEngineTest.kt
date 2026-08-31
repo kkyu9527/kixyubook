@@ -655,6 +655,7 @@ class ReaderEngineTest {
         assertTrue(ReaderInlineStyle.ITALIC in stylesFor("斜体"))
         assertEquals(ReaderSemanticColor.ACCENT, spanFor("链接").foreground)
         assertTrue(ReaderInlineStyle.UNDERLINE in stylesFor("链接"))
+        assertEquals("OPS/Text/c1.xhtml#note", spanFor("链接").linkTarget)
         assertEquals(ReaderSemanticColor.YELLOW, spanFor("高亮").background)
         assertTrue(ReaderInlineStyle.STRIKETHROUGH in stylesFor("删除"))
         assertTrue(ReaderInlineStyle.BOLD !in stylesFor("常规"))
@@ -688,6 +689,30 @@ class ReaderEngineTest {
         assertEquals(1200, chapter.images.single().intrinsicWidth)
         assertEquals(800, chapter.images.single().intrinsicHeight)
         assertFalse(chapter.images.single().isFullPage)
+    }
+
+    @Test fun epubParserResolvesFootnotesWithoutLeavingReadingLocation() = runBlocking {
+        val epub = folder.newFile("footnotes.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>脚注书</dc:title></metadata><manifest><item id="c1" href="Text/c1.xhtml" media-type="application/xhtml+xml"/><item id="notes" href="Text/notes.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="notes"/></spine></package>""")
+            entry("OPS/Text/c1.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><p>正文<a href="notes.xhtml#n1">1</a></p></body></html>""")
+            entry("OPS/Text/notes.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><aside id="n1" epub:type="footnote">这是脚注内容。</aside></body></html>""")
+        }
+
+        val parser = EpubBookParser()
+        val chapter = parser.readChapter(epub, 0)!!
+        val link = chapter.paragraphSpans.single().first { it.linkTarget != null }
+
+        assertEquals("OPS/Text/notes.xhtml#n1", link.linkTarget)
+        assertEquals(
+            com.kixyu9527.kixyubook.core.common.model.EpubLinkResult.Footnote("注释", "这是脚注内容。"),
+            parser.resolveLink(epub, link.linkTarget!!),
+        )
     }
 
     @Test fun epubParserMarksEveryDedicatedImageSpineItemAsFullPage() = runBlocking {

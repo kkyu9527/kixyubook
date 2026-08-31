@@ -4,6 +4,7 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
+import com.kixyu9527.kixyubook.core.common.model.EpubLinkResult
 import com.kixyu9527.kixyubook.core.common.model.singleLineBookHeading
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
@@ -47,6 +48,41 @@ class EpubBookParser : BookParser, MemoryPressureListener {
     fun clearMemoryCaches() {
         synchronized(packageIndexCache) { packageIndexCache.clear() }
         synchronized(cssSourceCache) { cssSourceCache.clear() }
+    }
+
+    fun resolveLink(file: File, target: String): EpubLinkResult? = ZipFile(file).use { zip ->
+        val pkg = readPackage(file, zip)
+        val path = target.substringBefore('#').ifBlank {
+            pkg.spine.firstOrNull()?.let(pkg.manifest::get)?.path.orEmpty()
+        }
+        val chapterIndex = pkg.spine.indexOfFirst { id -> pkg.manifest[id]?.path.equals(path, true) }
+        if (chapterIndex < 0) return@use null
+        val fragment = target.substringAfter('#', "").trim()
+        if (fragment.isEmpty()) return@use EpubLinkResult.Location(chapterIndex)
+        val entry = zip.findEntry(path) ?: return@use EpubLinkResult.Location(chapterIndex)
+        val document = zip.getInputStream(entry).use { newDocumentBuilder().parse(it) }
+        val nodes = document.getElementsByTagNameNS("*", "*")
+        val targetElement = (0 until nodes.length).asSequence()
+            .mapNotNull { nodes.item(it) as? Element }
+            .firstOrNull { it.getAttribute("id") == fragment || it.getAttribute("xml:id") == fragment }
+            ?: return@use EpubLinkResult.Location(chapterIndex)
+        val noteContainer = generateSequence(targetElement as Element?) { it.parentNode as? Element }
+            .firstOrNull { element ->
+                element.getAttributeNS("http://www.idpf.org/2007/ops", "type")
+                    .contains("note", ignoreCase = true) ||
+                    element.getAttribute("epub:type").contains("note", ignoreCase = true) ||
+                    element.getAttribute("role").contains("doc-footnote", ignoreCase = true) ||
+                    element.getAttribute("class").contains("footnote", ignoreCase = true) ||
+                    element.localName.orEmpty().equals("aside", ignoreCase = true) ||
+                    NOTE_FRAGMENT_PATTERN.containsMatchIn(element.getAttribute("id"))
+            }
+        if (noteContainer != null) {
+            val text = noteContainer.textContent.orEmpty().replace(Regex("\\s+"), " ").trim()
+            return@use text.takeIf(String::isNotBlank)?.let {
+                EpubLinkResult.Footnote(noteContainer.getAttribute("title").ifBlank { "注释" }, it)
+            }
+        }
+        EpubLinkResult.Location(chapterIndex)
     }
 
     override fun onMemoryPressure(level: MemoryPressureLevel) {
@@ -463,7 +499,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 val readableBlock = tag in CONTENT_TAGS ||
                     (tag in FALLBACK_CONTENT_TAGS && !element.hasDescendantReadableBlock())
                 if (readableBlock && !element.hasContentAncestor()) {
-                    val styledText = element.toStyledText(stylesheet)
+                    val styledText = element.toStyledText(stylesheet, xhtmlPath)
                     if (heading == null && tag in HEADING_TAGS) {
                         heading = styledText.text.takeIf(String::isNotBlank)
                             ?: element.textContent?.singleLineBookHeading()?.takeIf(String::isNotBlank)
@@ -628,3 +664,5 @@ private data class SpineOutlineInspection(
 )
 
 private fun Long.elapsedMilliseconds(): Long = (System.nanoTime() - this) / 1_000_000L
+
+private val NOTE_FRAGMENT_PATTERN = Regex("(?i)^(?:fn|footnote|note|endnote)[-_]?\\d+")

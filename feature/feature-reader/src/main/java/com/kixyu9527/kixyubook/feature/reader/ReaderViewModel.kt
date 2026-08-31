@@ -39,6 +39,7 @@ class ReaderViewModel @AssistedInject constructor(
     private val stats: ReadingStatsRepository,
     private val cloudSync: CloudSyncCoordinator,
     private val textCorrections: TextCorrectionRepository,
+    private val annotations: ReaderAnnotationRepository,
 ) : ViewModel(), MemoryPressureListener {
     @AssistedFactory
     interface Factory {
@@ -76,16 +77,15 @@ class ReaderViewModel @AssistedInject constructor(
     private var userMovedBeforePrioritySync = false
     private var deferredLocalProgress: ReadingProgress? = null
     @Volatile private var latestProgressCheckpoint: ReadingProgress? = null
+    private val locationHistory = ReaderLocationHistory()
     private val searchController = ReaderSearchController(
         scope = viewModelScope,
         bookUuid = bookUuid,
         books = books,
         state = _uiState,
-        currentPosition = { _positionState.value },
-        jumpToPosition = ::jumpToPosition,
-        restorePosition = { chapterPosition, paragraphIndex, charOffset ->
-            navigateToChapter(chapterPosition, paragraphIndex, charOffset)
-        },
+        recordOrigin = ::recordNavigationOrigin,
+        jumpToPosition = ::jumpToPositionRaw,
+        returnToOrigin = ::navigateHistoryBack,
     )
 
     init {
@@ -134,6 +134,11 @@ class ReaderViewModel @AssistedInject constructor(
             launch {
                 textCorrections.observeBookCorrections(bookUuid).collectLatest { corrections ->
                     applyCorrectionSnapshot(corrections)
+                }
+            }
+            launch {
+                annotations.observeBookAnnotations(bookUuid).collect { values ->
+                    _uiState.update { it.copy(annotations = values) }
                 }
             }
             launch {
@@ -224,10 +229,9 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     fun jumpToChapter(index: Int) {
-        navigateToChapter(
-            index = index.coerceIn(0, _uiState.value.chapters.lastIndex),
-            position = 0,
-        )
+        val target = index.coerceIn(0, _uiState.value.chapters.lastIndex)
+        recordNavigationOrigin(target, 0)
+        navigateToChapter(index = target, position = 0)
     }
 
     fun saveParagraphCorrection(
@@ -264,6 +268,100 @@ class ReaderViewModel @AssistedInject constructor(
             textCorrections.deleteCorrection(uuid)
         }
     }
+
+    fun saveParagraphHighlight(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        displayedText: String,
+        startOffset: Int,
+        endOffset: Int,
+    ) {
+        saveAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.HIGHLIGHT)
+    }
+
+    fun saveParagraphUnderline(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        displayedText: String,
+        startOffset: Int,
+        endOffset: Int,
+    ) {
+        saveAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.UNDERLINE)
+    }
+
+    fun saveParagraphNote(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        displayedText: String,
+        startOffset: Int,
+        endOffset: Int,
+        note: String,
+    ) {
+        viewModelScope.launch {
+            val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
+            if (existing != null) {
+                annotations.updateNote(existing.uuid, note)
+            } else {
+                createAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.HIGHLIGHT, note)
+            }
+        }
+    }
+
+    fun deleteAnnotation(uuid: String) {
+        viewModelScope.launch { annotations.deleteAnnotation(uuid) }
+    }
+
+    private fun saveAnnotation(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        displayedText: String,
+        startOffset: Int,
+        endOffset: Int,
+        style: ReaderAnnotationStyle,
+    ) {
+        viewModelScope.launch {
+            val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
+            if (existing?.style == style && existing.note.isBlank()) {
+                annotations.deleteAnnotation(existing.uuid)
+            } else {
+                createAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, style, existing?.note.orEmpty())
+            }
+        }
+    }
+
+    private suspend fun createAnnotation(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        displayedText: String,
+        startOffset: Int,
+        endOffset: Int,
+        style: ReaderAnnotationStyle,
+        note: String,
+    ) {
+        val chapter = _uiState.value.chapters.firstOrNull { it.index == chapterIndex } ?: return
+        annotations.createAnnotation(
+            bookUuid = bookUuid,
+            chapterKey = chapter.chapterKey,
+            chapterIndex = chapter.index,
+            paragraphIndex = paragraphIndex,
+            originalText = displayedText,
+            startOffset = startOffset,
+            endOffset = endOffset,
+            style = style,
+            note = note,
+        )
+    }
+
+    private fun findAnnotation(
+        chapterIndex: Int,
+        paragraphIndex: Int,
+        startOffset: Int,
+        endOffset: Int,
+    ): ReaderAnnotation? =
+        _uiState.value.annotations.firstOrNull {
+            it.chapterIndex == chapterIndex && it.paragraphIndex == paragraphIndex &&
+                it.startOffset == startOffset && it.endOffset == endOffset
+        }
 
     /**
      * Corrections can change from the editor, the management destination, or cloud sync. Keep
@@ -688,11 +786,76 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     fun jumpToPosition(chapterIndex: Int, position: Int) {
+        recordNavigationOrigin(chapterIndex, position)
+        jumpToPositionRaw(chapterIndex, position)
+    }
+
+    private fun jumpToPositionRaw(chapterIndex: Int, position: Int) {
         val state = _uiState.value
         val safeChapter = state.chapters.indexOfFirst { it.index == chapterIndex }
             .takeIf { it >= 0 }
             ?: chapterIndex.coerceIn(0, state.chapters.lastIndex)
         navigateToChapter(safeChapter, position.coerceAtLeast(0))
+    }
+
+    fun navigateHistoryBack() {
+        val target = locationHistory.goBack(currentLocation()) ?: return
+        publishLocationHistoryState()
+        navigateToChapter(target.chapterPosition, target.paragraphIndex, target.charOffset)
+    }
+
+    fun navigateHistoryForward() {
+        val target = locationHistory.goForward(currentLocation()) ?: return
+        publishLocationHistoryState()
+        navigateToChapter(target.chapterPosition, target.paragraphIndex, target.charOffset)
+    }
+
+    fun openEpubLink(target: String) {
+        viewModelScope.launch {
+            when (val result = books.resolveEpubLink(bookUuid, target)) {
+                is EpubLinkResult.Footnote -> _uiState.update { it.copy(epubFootnote = result) }
+                is EpubLinkResult.Location -> {
+                    recordNavigationOrigin(result.chapterIndex, result.paragraphIndex)
+                    jumpToPositionRaw(result.chapterIndex, result.paragraphIndex)
+                }
+                null -> Unit
+            }
+        }
+    }
+
+    fun closeEpubFootnote() {
+        _uiState.update { it.copy(epubFootnote = null) }
+    }
+
+    private fun recordNavigationOrigin(chapterIndex: Int, paragraphIndex: Int) {
+        val state = _uiState.value
+        if (state.chapters.isEmpty()) return
+        val targetChapter = state.chapters.indexOfFirst { it.index == chapterIndex }
+            .takeIf { it >= 0 }
+            ?: chapterIndex.coerceIn(0, state.chapters.lastIndex)
+        locationHistory.record(
+            origin = currentLocation(),
+            destination = ReaderLocation(targetChapter, paragraphIndex.coerceAtLeast(0), 0),
+        )
+        publishLocationHistoryState()
+    }
+
+    private fun currentLocation(): ReaderLocation {
+        val position = _positionState.value
+        return ReaderLocation(
+            chapterPosition = _uiState.value.chapterIndex,
+            paragraphIndex = position.paragraphIndex,
+            charOffset = position.charOffset,
+        )
+    }
+
+    private fun publishLocationHistoryState() {
+        _uiState.update {
+            it.copy(
+                canNavigateBack = locationHistory.canGoBack,
+                canNavigateForward = locationHistory.canGoForward,
+            )
+        }
     }
 
     fun savePosition(position: Int, charOffset: Int = 0, chapterComplete: Boolean = false) {

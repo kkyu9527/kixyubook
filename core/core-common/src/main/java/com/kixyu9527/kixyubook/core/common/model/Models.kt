@@ -68,7 +68,14 @@ data class ReaderTextSpan(
     val styles: Set<ReaderInlineStyle>,
     val foreground: ReaderSemanticColor? = null,
     val background: ReaderSemanticColor? = null,
+    /** Absolute EPUB archive target such as `OPS/notes.xhtml#note-1`. */
+    val linkTarget: String? = null,
 )
+
+sealed interface EpubLinkResult {
+    data class Footnote(val title: String, val text: String) : EpubLinkResult
+    data class Location(val chapterIndex: Int, val paragraphIndex: Int = 0) : EpubLinkResult
+}
 
 data class Paragraph(
     val id: Long,

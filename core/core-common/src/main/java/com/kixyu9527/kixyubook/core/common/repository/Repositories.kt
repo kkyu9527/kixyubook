@@ -43,6 +43,7 @@ interface BookRepository {
     suspend fun addBookmark(bookmark: Bookmark)
     suspend fun deleteBookmark(bookmarkUuid: String)
     suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult>
+    suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult?
 }
 
 interface TextCorrectionRepository {

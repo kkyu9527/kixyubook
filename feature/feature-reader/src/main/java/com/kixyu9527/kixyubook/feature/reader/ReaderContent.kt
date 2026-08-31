@@ -59,6 +59,7 @@ internal fun ReaderContent(
     prioritizeNextChapter: (Int) -> Unit,
     resourcePriorityActive: Boolean,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
+    onDocumentLink: (String) -> Unit,
 ) {
     val chapter = state.chapter ?: return
     val density = LocalDensity.current
@@ -170,7 +171,9 @@ internal fun ReaderContent(
                     epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
                     modifier = Modifier.fillMaxSize(),
                     highlightQuery = state.searchQuery,
+                    readerAnnotations = state.annotations,
                     onTextActionTarget = onTextActionTarget,
+                    onDocumentLink = onDocumentLink,
                 )
                 LaunchedEffect(chapter.id, state.navigationVersion) {
                     withFrameNanos { }
@@ -189,6 +192,7 @@ internal fun ReaderContent(
                     bottomInsetDp,
                     physicalViewportHeight,
                     onTextActionTarget,
+                    onDocumentLink,
                 )
             }
         }

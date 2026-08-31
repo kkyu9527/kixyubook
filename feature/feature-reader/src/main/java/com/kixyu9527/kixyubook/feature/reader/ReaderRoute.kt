@@ -148,6 +148,8 @@ private fun LoadedReaderRoute(
         selectSearchResult = viewModel::selectSearchResult,
         moveSearchResult = viewModel::moveSearchResult,
         returnFromSearchResult = viewModel::returnFromSearchResult,
+        navigateHistoryBack = viewModel::navigateHistoryBack,
+        navigateHistoryForward = viewModel::navigateHistoryForward,
         clearSearch = viewModel::clearSearch,
         chapterRendered = viewModel::chapterRendered,
         setPageInteractionActive = viewModel::setPageInteractionActive,
@@ -158,6 +160,12 @@ private fun LoadedReaderRoute(
         deleteFont = viewModel::deleteFont,
         saveCorrection = viewModel::saveParagraphCorrection,
         deleteCorrection = viewModel::deleteCorrection,
+        saveHighlight = viewModel::saveParagraphHighlight,
+        saveUnderline = viewModel::saveParagraphUnderline,
+        saveNote = viewModel::saveParagraphNote,
+        deleteAnnotation = viewModel::deleteAnnotation,
+        openDocumentLink = viewModel::openEpubLink,
+        closeFootnote = viewModel::closeEpubFootnote,
         onManageCorrections = onManageCorrections,
     )
 }

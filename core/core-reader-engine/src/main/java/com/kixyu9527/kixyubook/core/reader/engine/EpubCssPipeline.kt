@@ -69,7 +69,7 @@ internal fun Element.backgroundImage(cssRules: List<CssRule>, xhtmlPath: String)
     }
 }
 
-internal fun Element.toStyledText(stylesheet: CssStylesheet): StyledText {
+internal fun Element.toStyledText(stylesheet: CssStylesheet, xhtmlPath: String): StyledText {
     val builder = StyledTextBuilder()
     fun visit(node: Node, inherited: NormalizedInlineState) {
         when (node.nodeType) {
@@ -87,7 +87,20 @@ internal fun Element.toStyledText(stylesheet: CssStylesheet): StyledText {
                 // represented reliably by the text paginator. Independent illustrations are
                 // still emitted as image blocks by readXhtml().
                 if (element.imageReference(tag) != null) return
-                val styles = element.normalizedStyle(stylesheet.rules, inherited)
+                val normalized = element.normalizedStyle(stylesheet.rules, inherited)
+                val styles = if (tag == "a") {
+                    val href = element.getAttribute("href").trim()
+                    normalized.copy(
+                        styles = normalized.styles + ReaderInlineStyle.ACCENT + ReaderInlineStyle.UNDERLINE,
+                        linkTarget = href.takeIf { it.isNotBlank() && !it.contains("://") && !it.startsWith("mailto:") }
+                            ?.let { reference ->
+                                val path = reference.substringBefore('#').substringBefore('?')
+                                val resolvedPath = if (path.isBlank()) xhtmlPath else resolveArchivePath(xhtmlPath, path)
+                                val fragment = reference.substringAfter('#', "")
+                                if (fragment.isBlank()) resolvedPath else "$resolvedPath#$fragment"
+                            },
+                    )
+                } else normalized
                 if (styles.hidden) return
                 var child = element.firstChild
                 while (child != null) {

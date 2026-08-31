@@ -50,6 +50,10 @@ internal fun ReaderControls(
     onTools: () -> Unit,
     onToggleBookmark: () -> Unit,
     onSearch: () -> Unit,
+    canNavigateBack: Boolean,
+    canNavigateForward: Boolean,
+    onNavigateBack: () -> Unit,
+    onNavigateForward: () -> Unit,
     onSheet: (ReaderSheet) -> Unit,
 ) {
     val popupVisible = menuVisible || toolsMenuVisible
@@ -135,6 +139,18 @@ internal fun ReaderControls(
                         label = stringResource(R.string.reader_search_book),
                         icon = KixyuSymbols.Search,
                         onClick = onSearch,
+                    ),
+                    KixyuPopupMenuItem(
+                        label = stringResource(R.string.reader_previous_reading_location),
+                        icon = KixyuSymbols.ArrowBack,
+                        enabled = canNavigateBack,
+                        onClick = onNavigateBack,
+                    ),
+                    KixyuPopupMenuItem(
+                        label = stringResource(R.string.reader_next_reading_location),
+                        icon = KixyuSymbols.ArrowForward,
+                        enabled = canNavigateForward,
+                        onClick = onNavigateForward,
                     ),
                 )
             } else {
