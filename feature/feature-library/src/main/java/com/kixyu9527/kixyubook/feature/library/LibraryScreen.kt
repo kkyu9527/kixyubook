@@ -86,6 +86,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -138,6 +139,9 @@ fun LibraryRoute(
     val stateFlow = if (hiddenOnly) viewModel.hiddenUiState else viewModel.uiState
     val state by stateFlow.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val exportedMessage = stringResource(R.string.library_exported)
+    val viewExportAction = stringResource(R.string.library_open_export_location)
+    val openExportFailedMessage = stringResource(R.string.library_open_export_failed)
     val snackbar = remember { SnackbarHostState() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.import(uris.map { it.toString() })
@@ -165,13 +169,13 @@ fun LibraryRoute(
     LaunchedEffect(Unit) {
         viewModel.exportEvents.collect { event ->
             val result = snackbar.showSnackbar(
-                message = "书籍已导出",
-                actionLabel = "查看",
+                message = exportedMessage,
+                actionLabel = viewExportAction,
                 withDismissAction = true,
                 duration = SnackbarDuration.Long,
             )
             if (result == SnackbarResult.ActionPerformed && !openExportLocation(context, event.uriString)) {
-                snackbar.showSnackbar("系统无法打开导出位置")
+                snackbar.showSnackbar(openExportFailedMessage)
             }
         }
     }
@@ -242,6 +246,11 @@ private fun LibraryScreen(
     val expanded = kixyuWindowSizeClass().supportsTwoPane
     val activity = LocalContext.current.findActivity()
     val latestDropDocuments by rememberUpdatedState(onDropDocuments)
+    val pageTitle = when {
+        selectionMode -> stringResource(R.string.library_selected_count, selectedBookUuids.size)
+        state.hiddenOnly -> stringResource(R.string.library_hidden_title)
+        else -> stringResource(R.string.library_title)
+    }
     val dropTarget = remember(activity) {
         object : DragAndDropTarget {
             override fun onDrop(event: DragAndDropEvent): Boolean {
@@ -265,7 +274,7 @@ private fun LibraryScreen(
         if (previewBookUuid !in visibleBookUuids) previewBookUuid = state.books.firstOrNull()?.book?.uuid
     }
     KixyuPageScaffold(
-        title = if (selectionMode) "已选择 ${selectedBookUuids.size} 本" else if (state.hiddenOnly) "隐藏书架" else "书库",
+        title = pageTitle,
         modifier = Modifier
             .fillMaxSize()
             .revealHiddenCategoriesGesture(
@@ -292,10 +301,10 @@ private fun LibraryScreen(
                         selectedBookUuids = emptySet()
                     },
                 ) {
-                    Icon(KixyuSymbols.Close, "退出批量选择")
+                    Icon(KixyuSymbols.Close, stringResource(R.string.library_exit_selection))
                 }
                 state.hiddenOnly -> KixyuIconButton(onClick = onBack) {
-                    Icon(KixyuSymbols.ArrowBack, "返回")
+                    Icon(KixyuSymbols.ArrowBack, stringResource(R.string.library_back))
                 }
             }
         },
@@ -307,25 +316,25 @@ private fun LibraryScreen(
                             emptySet()
                         } else visibleBookUuids
                     },
-                ) { Icon(KixyuSymbols.SelectAll, "全选") }
+                ) { Icon(KixyuSymbols.SelectAll, stringResource(R.string.library_select_all)) }
                 KixyuIconButton(
                     onClick = { confirmingBatchDelete = true },
                     enabled = selectedBookUuids.isNotEmpty(),
-                ) { Icon(KixyuSymbols.DeleteSweep, "删除所选书籍") }
+                ) { Icon(KixyuSymbols.DeleteSweep, stringResource(R.string.library_delete_selected)) }
             } else {
                 if (!state.hiddenOnly) {
                     KixyuIconButton(onClick = onImport) {
-                        Icon(KixyuSymbols.Add, "导入书籍")
+                        Icon(KixyuSymbols.Add, stringResource(R.string.library_import))
                     }
                     if (state.hiddenCategories.isNotEmpty()) {
                         KixyuIconButton(onClick = onOpenHiddenLibrary) {
-                            Icon(KixyuSymbols.VisibilityOff, "隐藏书架")
+                            Icon(KixyuSymbols.VisibilityOff, stringResource(R.string.library_hidden_title))
                         }
                     }
                 }
                 Box {
                     KixyuIconButton(onClick = { optionsExpanded = true }) {
-                        Icon(KixyuSymbols.MoreVert, "书库操作")
+                        Icon(KixyuSymbols.MoreVert, stringResource(R.string.library_actions))
                     }
                     KixyuPopupMenu(
                         expanded = optionsExpanded,
@@ -333,7 +342,7 @@ private fun LibraryScreen(
                         alignEnd = true,
                         items = listOf(
                             KixyuPopupMenuItem(
-                                label = "书架显示",
+                                label = stringResource(R.string.library_display_title),
                                 icon = KixyuSymbols.Sort,
                                 enabled = true,
                             ) {
@@ -341,7 +350,7 @@ private fun LibraryScreen(
                                 displayDialogVisible = true
                             },
                             KixyuPopupMenuItem(
-                                label = "管理分类",
+                                label = stringResource(R.string.library_manage_categories),
                                 icon = KixyuSymbols.Category,
                                 enabled = state.allCategories.isNotEmpty(),
                             ) {
@@ -349,7 +358,7 @@ private fun LibraryScreen(
                                 categoryDialogVisible = true
                             },
                             KixyuPopupMenuItem(
-                                label = "批量选择",
+                                label = stringResource(R.string.library_bulk_select),
                                 icon = KixyuSymbols.SelectAll,
                                 enabled = state.books.isNotEmpty(),
                             ) {
@@ -475,25 +484,25 @@ private fun LibraryScreen(
     deleting?.let { item ->
         KixyuActionDialog(
             show = true,
-            title = "删除《${item.book.title}》？",
+            title = stringResource(R.string.library_delete_book_title, item.book.title),
             onDismissRequest = { deletingUuid = null },
-            confirmLabel = "删除",
+            confirmLabel = stringResource(R.string.library_action_delete),
             onConfirm = { onDelete(item.book.uuid); deletingUuid = null },
-        ) { Text("书籍文件、阅读进度和统计也会一并删除。") }
+        ) { Text(stringResource(R.string.library_delete_explanation)) }
     }
     if (confirmingBatchDelete) {
         KixyuActionDialog(
             show = true,
-            title = "删除选中的 ${selectedBookUuids.size} 本书？",
+            title = stringResource(R.string.library_delete_selected_title, selectedBookUuids.size),
             onDismissRequest = { confirmingBatchDelete = false },
-            confirmLabel = "删除",
+            confirmLabel = stringResource(R.string.library_action_delete),
             onConfirm = {
                 onDeleteMany(selectedBookUuids)
                 confirmingBatchDelete = false
                 selectionMode = false
                 selectedBookUuids = emptySet()
             },
-        ) { Text("书籍文件、阅读进度和统计也会一并删除。") }
+        ) { Text(stringResource(R.string.library_delete_explanation)) }
     }
     if (displayDialogVisible) {
         LibraryDisplayDialog(
@@ -524,1046 +533,4 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
-}
-
-@Composable
-private fun LibraryFilters(
-    state: LibraryUiState,
-    onSearch: (String) -> Unit,
-    onCategory: (String) -> Unit,
-) {
-    var categoriesExpanded by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        TextField(
-            value = state.query,
-            onValueChange = onSearch,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = { Text("搜索书名或作者", maxLines = 1) },
-            leadingIcon = { Icon(KixyuSymbols.Search, null, Modifier.size(KixyuSize.icon)) },
-            trailingIcon = {
-                if (state.query.isNotEmpty()) KixyuIconButton({ onSearch("") }) {
-                    Icon(KixyuSymbols.Close, "清除", Modifier.size(KixyuSize.icon))
-                }
-            },
-            shape = MaterialTheme.shapes.large,
-            colors = TextFieldDefaults.colors(
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-            ),
-            textStyle = MaterialTheme.typography.bodyLarge,
-        )
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            val categorySelectorWidth = maxWidth * KixyuSize.libraryCategorySelectorWidthFraction
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "${state.books.size} 本",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                Box(
-                    modifier = Modifier.width(categorySelectorWidth),
-                ) {
-                    OutlinedButton(
-                        onClick = { categoriesExpanded = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
-                    ) {
-                        Icon(KixyuSymbols.Category, null, Modifier.size(KixyuSize.iconSmall))
-                        Spacer(Modifier.size(KixyuSpacing.small))
-                        Text(state.category, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(KixyuSymbols.ExpandMore, "选择分类", Modifier.size(KixyuSize.iconSmall))
-                    }
-                    KixyuPopupMenu(
-                        expanded = categoriesExpanded,
-                        onDismissRequest = { categoriesExpanded = false },
-                        items = state.categories.map { category ->
-                            KixyuPopupMenuItem(
-                                label = category,
-                                icon = KixyuSymbols.Category,
-                                selected = state.category == category,
-                            ) {
-                                categoriesExpanded = false
-                                onCategory(category)
-                            }
-                        },
-                        modifier = Modifier.heightIn(max = KixyuSize.libraryCategoryMenuMaxHeight),
-                        width = categorySelectorWidth,
-                    )
-                }
-            }
-        }
-        if (state.hiddenOnly && state.hiddenCategories.isNotEmpty()) {
-            Text(
-                "仅显示隐藏分类中的书籍",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LibraryBookCollection(
-    books: List<LibraryBook>,
-    layoutMode: LibraryLayoutMode,
-    adaptiveGrid: Boolean,
-    modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(0.dp),
-    header: (@Composable () -> Unit)? = null,
-    footer: (@Composable () -> Unit)? = null,
-    reorderEnabled: Boolean,
-    selectionMode: Boolean,
-    isSelected: (LibraryBook) -> Boolean,
-    onOpen: (LibraryBook) -> Unit,
-    onSelectionChange: (LibraryBook) -> Unit,
-    onManage: (LibraryBook) -> Unit,
-    onExport: (LibraryBook) -> Unit,
-    onDelete: (LibraryBook) -> Unit,
-    onMoveBook: (String, String) -> Unit,
-    onFinishReorder: () -> Unit,
-) {
-    if (layoutMode == LibraryLayoutMode.GRID) {
-        LibraryBookGrid(
-            books = books,
-            adaptiveGrid = adaptiveGrid,
-            modifier = modifier,
-            contentPadding = contentPadding,
-            header = header,
-            footer = footer,
-            reorderEnabled = reorderEnabled,
-            selectionMode = selectionMode,
-            isSelected = isSelected,
-            onOpen = onOpen,
-            onSelectionChange = onSelectionChange,
-            onManage = onManage,
-            onExport = onExport,
-            onDelete = onDelete,
-            onMoveBook = onMoveBook,
-            onFinishReorder = onFinishReorder,
-        )
-        return
-    }
-    val lazyListState = rememberLazyListState()
-    val hapticFeedback = LocalHapticFeedback.current
-    var menuBookUuid by remember { mutableStateOf<String?>(null) }
-    var reorderMoved by remember { mutableStateOf(false) }
-    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val fromUuid = from.key as? String ?: return@rememberReorderableLazyListState
-        val toUuid = to.key as? String ?: return@rememberReorderableLazyListState
-        reorderMoved = true
-        menuBookUuid = null
-        onMoveBook(fromUuid, toUuid)
-        hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
-    }
-    LazyColumn(
-        modifier = modifier,
-        state = lazyListState,
-        contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-    ) {
-        header?.let { item(key = "library_header", contentType = "header") { it() } }
-        if (books.isEmpty()) item(key = "library_empty", contentType = "empty") {
-            LibraryEmptyState(Modifier.fillParentMaxSize().padding(KixyuSpacing.extraLarge))
-        }
-        items(books, key = { it.book.uuid }, contentType = { "book" }) { item ->
-            ReorderableItem(reorderState, key = item.book.uuid, enabled = reorderEnabled) { dragging ->
-                val dragModifier = if (reorderEnabled) {
-                    val menuWasExpanded = menuBookUuid == item.book.uuid
-                    val onDragStarted: (Offset) -> Unit = {
-                        reorderMoved = false
-                        menuBookUuid = item.book.uuid
-                        hapticFeedback.performHapticFeedback(
-                            if (menuWasExpanded) {
-                                HapticFeedbackType.GestureThresholdActivate
-                            } else {
-                                HapticFeedbackType.LongPress
-                            },
-                        )
-                    }
-                    if (menuWasExpanded) {
-                        Modifier.draggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                } else {
-                                    menuBookUuid = null
-                                    onOpen(item)
-                                }
-                            },
-                        )
-                    } else {
-                        Modifier.longPressDraggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                }
-                            },
-                        )
-                    }
-                } else Modifier
-                LibraryBookRow(
-                    item = item,
-                    selected = isSelected(item),
-                    selectionMode = selectionMode,
-                    reorderEnabled = reorderEnabled,
-                    menuExpanded = menuBookUuid == item.book.uuid,
-                    dragging = dragging,
-                    onOpen = { onOpen(item) },
-                    onSelectionChange = { onSelectionChange(item) },
-                    onManage = { onManage(item) },
-                    onExport = { onExport(item) },
-                    onDelete = { onDelete(item) },
-                    onMenuExpandedChange = { expanded ->
-                        menuBookUuid = item.book.uuid.takeIf { expanded }
-                    },
-                    modifier = Modifier.animateItem().then(dragModifier),
-                )
-            }
-        }
-        footer?.let { item(key = "library_footer", contentType = "footer") { it() } }
-    }
-}
-
-@Composable
-private fun LibraryBookGrid(
-    books: List<LibraryBook>,
-    adaptiveGrid: Boolean,
-    modifier: Modifier,
-    contentPadding: PaddingValues,
-    header: (@Composable () -> Unit)?,
-    footer: (@Composable () -> Unit)?,
-    reorderEnabled: Boolean,
-    selectionMode: Boolean,
-    isSelected: (LibraryBook) -> Boolean,
-    onOpen: (LibraryBook) -> Unit,
-    onSelectionChange: (LibraryBook) -> Unit,
-    onManage: (LibraryBook) -> Unit,
-    onExport: (LibraryBook) -> Unit,
-    onDelete: (LibraryBook) -> Unit,
-    onMoveBook: (String, String) -> Unit,
-    onFinishReorder: () -> Unit,
-) {
-    val lazyGridState = rememberLazyGridState()
-    val hapticFeedback = LocalHapticFeedback.current
-    var menuBookUuid by remember { mutableStateOf<String?>(null) }
-    var reorderMoved by remember { mutableStateOf(false) }
-    val reorderState = rememberReorderableLazyGridState(lazyGridState) { from, to ->
-        val fromUuid = from.key as? String ?: return@rememberReorderableLazyGridState
-        val toUuid = to.key as? String ?: return@rememberReorderableLazyGridState
-        reorderMoved = true
-        menuBookUuid = null
-        onMoveBook(fromUuid, toUuid)
-        hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
-    }
-    LazyVerticalGrid(
-        columns = if (adaptiveGrid) GridCells.Adaptive(112.dp) else GridCells.Fixed(2),
-        modifier = modifier,
-        state = lazyGridState,
-        contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-    ) {
-        header?.let {
-            item(key = "library_grid_header", span = { GridItemSpan(maxLineSpan) }) { it() }
-        }
-        if (books.isEmpty()) item(key = "library_grid_empty", span = { GridItemSpan(maxLineSpan) }) {
-            LibraryEmptyState(Modifier.fillMaxWidth().padding(KixyuSpacing.extraLarge))
-        }
-        gridItems(books, key = { it.book.uuid }, contentType = { "book_grid" }) { item ->
-            ReorderableItem(reorderState, key = item.book.uuid, enabled = reorderEnabled) { dragging ->
-                val dragModifier = if (reorderEnabled) {
-                    val menuWasExpanded = menuBookUuid == item.book.uuid
-                    val onDragStarted: (Offset) -> Unit = {
-                        reorderMoved = false
-                        menuBookUuid = item.book.uuid
-                        hapticFeedback.performHapticFeedback(
-                            if (menuWasExpanded) {
-                                HapticFeedbackType.GestureThresholdActivate
-                            } else {
-                                HapticFeedbackType.LongPress
-                            },
-                        )
-                    }
-                    if (menuWasExpanded) {
-                        Modifier.draggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                } else {
-                                    menuBookUuid = null
-                                    onOpen(item)
-                                }
-                            },
-                        )
-                    } else {
-                        Modifier.longPressDraggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                }
-                            },
-                        )
-                    }
-                } else Modifier
-                LibraryBookGridCard(
-                    item = item,
-                    selected = isSelected(item),
-                    selectionMode = selectionMode,
-                    reorderEnabled = reorderEnabled,
-                    menuExpanded = menuBookUuid == item.book.uuid,
-                    dragging = dragging,
-                    onOpen = { onOpen(item) },
-                    onSelectionChange = { onSelectionChange(item) },
-                    onManage = { onManage(item) },
-                    onExport = { onExport(item) },
-                    onDelete = { onDelete(item) },
-                    onMenuExpandedChange = { expanded ->
-                        menuBookUuid = item.book.uuid.takeIf { expanded }
-                    },
-                    modifier = Modifier.animateItem().then(dragModifier),
-                )
-            }
-        }
-        footer?.let {
-            item(key = "library_grid_footer", span = { GridItemSpan(maxLineSpan) }) { it() }
-        }
-    }
-}
-
-@Composable
-private fun LibraryBookDetailPane(
-    item: LibraryBook?,
-    onOpen: (String) -> Unit,
-    onManage: (String) -> Unit,
-    onExport: (LibraryBook) -> Unit,
-    onDelete: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
-    ) {
-        if (item == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("选择一本书查看详情", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(KixyuSpacing.large),
-                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                BookCover(
-                    item.book.title,
-                    item.book.coverPath,
-                    Modifier.size(KixyuSize.libraryDetailCoverWidth, KixyuSize.libraryDetailCoverHeight),
-                )
-                Text(
-                    item.book.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    item.book.author,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    item.book.description.ifBlank { "暂无简介" },
-                    modifier = Modifier.weight(1f, fill = false),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 8,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                item.progress?.let {
-                    LinearProgressIndicator(
-                        progress = { it.fraction.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                    )
-                }
-                KixyuButton(
-                    text = if (item.progress == null) "开始阅读" else "继续阅读",
-                    onClick = { onOpen(item.book.uuid) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-                    OutlinedButton(onClick = { onExport(item) }, modifier = Modifier.weight(1f)) {
-                        Text("导出", maxLines = 1)
-                    }
-                    OutlinedButton(onClick = { onManage(item.book.uuid) }, modifier = Modifier.weight(1f)) {
-                        Text("管理", maxLines = 1)
-                    }
-                    OutlinedButton(onClick = { onDelete(item.book.uuid) }, modifier = Modifier.weight(1f)) {
-                        Text("删除", maxLines = 1)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryBookRow(
-    item: LibraryBook,
-    selected: Boolean,
-    selectionMode: Boolean,
-    reorderEnabled: Boolean,
-    menuExpanded: Boolean,
-    onOpen: () -> Unit,
-    onSelectionChange: () -> Unit,
-    onManage: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit,
-    onMenuExpandedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-    dragging: Boolean = false,
-) {
-    val rowShape = MaterialTheme.shapes.large
-    val raised = dragging || menuExpanded
-    val raisedScale by animateFloatAsState(
-        targetValue = if (raised) 1.015f else 1f,
-        label = "libraryBookRowScale",
-    )
-    val raisedElevation by animateDpAsState(
-        targetValue = if (raised) KixyuSpacing.medium else 0.dp,
-        label = "libraryBookRowElevation",
-    )
-    Surface(
-        onClick = {
-            if (!reorderEnabled || !menuExpanded) onOpen()
-        },
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = raisedScale
-                scaleY = raisedScale
-                shape = rowShape
-                clip = true
-                shadowElevation = raisedElevation.toPx()
-            }
-            .pointerHoverIcon(PointerIcon.Hand)
-            .pointerInput(onManage) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
-                            onManage()
-                            event.changes.forEach { it.consume() }
-                        }
-                    }
-                }
-            }
-            .semantics { contentDescription = "打开书籍：${item.book.title}" },
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = rowShape,
-        shadowElevation = 0.dp,
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .then(
-                    if (reorderEnabled) {
-                        Modifier
-                    } else {
-                        Modifier.combinedClickable(
-                            onClick = onOpen,
-                            onLongClick = if (selectionMode) null else ({ onMenuExpandedChange(true) }),
-                        )
-                    },
-                )
-                .padding(KixyuSpacing.medium),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-        ) {
-            BookCover(
-                item.book.title,
-                item.book.coverPath,
-                Modifier.size(KixyuSize.libraryCoverWidth, KixyuSize.libraryCoverHeight),
-            )
-            Column(
-                Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-            ) {
-                Text(item.book.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(item.book.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    "${item.book.format.name} · ${item.book.category}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                item.progress?.let {
-                    LinearProgressIndicator(
-                        progress = { it.fraction },
-                        modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                    )
-                }
-            }
-            if (selectionMode) {
-                Checkbox(selected, onCheckedChange = { onSelectionChange() })
-            } else Column(horizontalAlignment = Alignment.End) {
-                Box {
-                    BookActionPopupMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { onMenuExpandedChange(false) },
-                        onManage = {
-                            onMenuExpandedChange(false)
-                            onManage()
-                        },
-                        onExport = {
-                            onMenuExpandedChange(false)
-                            onExport()
-                        },
-                        onDelete = {
-                            onMenuExpandedChange(false)
-                            onDelete()
-                        },
-                    )
-                }
-                Text(
-                    "${((item.progress?.fraction ?: 0f) * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryBookGridCard(
-    item: LibraryBook,
-    selected: Boolean,
-    selectionMode: Boolean,
-    reorderEnabled: Boolean,
-    menuExpanded: Boolean,
-    dragging: Boolean,
-    onOpen: () -> Unit,
-    onSelectionChange: () -> Unit,
-    onManage: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit,
-    onMenuExpandedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val cardShape = MaterialTheme.shapes.large
-    val raised = dragging || menuExpanded
-    val raisedScale by animateFloatAsState(
-        targetValue = if (raised) 1.025f else 1f,
-        label = "libraryBookGridCardScale",
-    )
-    val raisedElevation by animateDpAsState(
-        targetValue = if (raised) KixyuSpacing.medium else 0.dp,
-        label = "libraryBookGridCardElevation",
-    )
-    Surface(
-        onClick = {
-            if (!reorderEnabled || !menuExpanded) onOpen()
-        },
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = raisedScale
-                scaleY = raisedScale
-                shape = cardShape
-                clip = true
-                shadowElevation = raisedElevation.toPx()
-            }
-            .pointerHoverIcon(PointerIcon.Hand)
-            .semantics { contentDescription = "打开书籍：${item.book.title}" },
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = cardShape,
-        shadowElevation = 0.dp,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (reorderEnabled) {
-                        Modifier
-                    } else {
-                        Modifier.combinedClickable(
-                            onClick = onOpen,
-                            onLongClick = if (selectionMode) null else ({ onMenuExpandedChange(true) }),
-                        )
-                    },
-                )
-                .padding(KixyuSpacing.small),
-            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-        ) {
-            Box(Modifier.fillMaxWidth()) {
-                BookCover(
-                    item.book.title,
-                    item.book.coverPath,
-                    Modifier.fillMaxWidth().aspectRatio(2f / 3f),
-                )
-                if (selectionMode) {
-                    Checkbox(
-                        checked = selected,
-                        onCheckedChange = { onSelectionChange() },
-                        modifier = Modifier.align(Alignment.TopEnd),
-                    )
-                }
-                BookActionPopupMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { onMenuExpandedChange(false) },
-                    onManage = {
-                        onMenuExpandedChange(false)
-                        onManage()
-                    },
-                    onExport = {
-                        onMenuExpandedChange(false)
-                        onExport()
-                    },
-                    onDelete = {
-                        onMenuExpandedChange(false)
-                        onDelete()
-                    },
-                )
-            }
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-            ) {
-                Text(
-                    text = item.book.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    minLines = 2,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = item.book.author,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    minLines = 1,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                LinearProgressIndicator(
-                    progress = { (item.progress?.fraction ?: 0f).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BookActionPopupMenu(
-    expanded: Boolean,
-    onDismissRequest: () -> Unit,
-    onManage: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    if (!expanded) return
-    val predictiveBackState = rememberKixyuPredictiveBackState<Unit>()
-    Popup(
-        alignment = Alignment.TopEnd,
-        onDismissRequest = onDismissRequest,
-        properties = PopupProperties(
-            focusable = false,
-            dismissOnBackPress = false,
-            dismissOnClickOutside = true,
-        ),
-    ) {
-        KixyuPopupSurface(
-            modifier = Modifier.width(KixyuSize.contextMenuWidth)
-                .kixyuPredictivePopupTransform(predictiveBackState.progress),
-            backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
-        ) {
-            Column(Modifier.padding(vertical = 2.dp)) {
-                BookActionPopupMenuItem("管理", KixyuSymbols.Edit, onManage)
-                BookActionPopupMenuItem("导出", KixyuSymbols.FileUpload, onExport)
-                KixyuDivider()
-                BookActionPopupMenuItem("删除", KixyuSymbols.DeleteOutline, onDelete, destructive = true)
-            }
-        }
-    }
-    KixyuPredictiveBackHandler(
-        target = Unit,
-        state = predictiveBackState,
-        onBack = { onDismissRequest() },
-    )
-}
-
-@Composable
-private fun BookActionPopupMenuItem(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    destructive: Boolean = false,
-) {
-    val contentColor = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = KixyuSize.contextMenuItemHeight)
-            .clickable(onClick = onClick)
-            .padding(horizontal = KixyuSpacing.medium),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, Modifier.size(KixyuSize.iconSmall), tint = contentColor)
-        Spacer(Modifier.width(KixyuSpacing.small))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            color = contentColor,
-        )
-    }
-}
-
-private fun Set<String>.toggle(value: String): Set<String> =
-    if (value in this) this - value else this + value
-
-private val LibrarySortMode.label: String
-    get() = when (this) {
-        LibrarySortMode.RECENT -> "最近活动"
-        LibrarySortMode.IMPORTED -> "新导入"
-        LibrarySortMode.TITLE -> "书名"
-        LibrarySortMode.AUTHOR -> "作者"
-        LibrarySortMode.PROGRESS -> "阅读进度"
-        LibrarySortMode.CUSTOM -> "自定义"
-    }
-
-@Composable
-private fun LibraryDisplayDialog(
-    selectedSortMode: LibrarySortMode,
-    selectedLayoutMode: LibraryLayoutMode,
-    onSortMode: (LibrarySortMode) -> Unit,
-    onLayoutMode: (LibraryLayoutMode) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    KixyuActionDialog(
-        show = true,
-        title = "书架显示",
-        onDismissRequest = onDismiss,
-        confirmLabel = "完成",
-        onConfirm = onDismiss,
-        dismissLabel = null,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 480.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-        ) {
-            Text(
-                "布局",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-            ) {
-                LibraryLayoutMode.entries.forEach { mode ->
-                    val selected = mode == selectedLayoutMode
-                    Surface(
-                        onClick = { onLayoutMode(mode) },
-                        modifier = Modifier.weight(1f),
-                        color = if (selected) MaterialTheme.colorScheme.secondaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = MaterialTheme.shapes.medium,
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(
-                                horizontal = KixyuSpacing.medium,
-                                vertical = KixyuSpacing.small,
-                            ),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                        ) {
-                            Icon(
-                                imageVector = if (mode == LibraryLayoutMode.GRID) {
-                                    KixyuSymbols.GridView
-                                } else {
-                                    KixyuSymbols.ViewList
-                                },
-                                contentDescription = null,
-                                tint = if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(if (mode == LibraryLayoutMode.GRID) "宫格" else "列表")
-                        }
-                    }
-                }
-            }
-            Text(
-                "排序",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            librarySortDisplayOrder.forEach { mode ->
-                Surface(
-                    onClick = { onSortMode(mode) },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = if (mode == selectedSortMode) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        Color.Transparent
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.small),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = mode == selectedSortMode, onClick = null)
-                        Column(Modifier.padding(start = KixyuSpacing.small)) {
-                            Text(mode.label, style = MaterialTheme.typography.bodyLarge)
-                            if (mode == LibrarySortMode.CUSTOM) {
-                                Text(
-                                    "长按书籍显示操作，继续拖动可排序",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private val librarySortDisplayOrder = listOf(
-    LibrarySortMode.RECENT,
-    LibrarySortMode.CUSTOM,
-    LibrarySortMode.IMPORTED,
-    LibrarySortMode.TITLE,
-    LibrarySortMode.AUTHOR,
-    LibrarySortMode.PROGRESS,
-)
-
-@Composable
-private fun CategoryVisibilityDialog(
-    categories: List<String>,
-    hiddenCategories: Set<String>,
-    onHiddenChange: (String, Boolean) -> Unit,
-    onOpenHiddenLibrary: (() -> Unit)?,
-    onDismiss: () -> Unit,
-) {
-    KixyuActionDialog(
-        show = true,
-        title = "管理分类",
-        onDismissRequest = onDismiss,
-        confirmLabel = "完成",
-        onConfirm = onDismiss,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-            Text(
-                "隐藏分类后，该分类中的书不会出现在普通书架和继续阅读中。可双指下滑进入隐藏书架。",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (onOpenHiddenLibrary != null) {
-                Surface(
-                    onClick = onOpenHiddenLibrary,
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(KixyuSpacing.medium),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                    ) {
-                        Icon(KixyuSymbols.VisibilityOff, null, Modifier.size(KixyuSize.icon))
-                        Column(Modifier.weight(1f)) {
-                            Text("隐藏书架", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "${hiddenCategories.size} 个分类已隐藏",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Text("查看", color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-            ) {
-                categories.forEach { category ->
-                    val hidden = category in hiddenCategories
-                    Surface(
-                        onClick = { onHiddenChange(category, !hidden) },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = MaterialTheme.shapes.medium,
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.small),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(category, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    if (hidden) "已隐藏" else "显示在书架",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(checked = !hidden, onCheckedChange = { onHiddenChange(category, !it) })
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun Modifier.revealHiddenCategoriesGesture(
-    enabled: Boolean,
-    onReveal: () -> Unit,
-): Modifier = if (!enabled) this else pointerInput(onReveal) {
-    awaitPointerEventScope {
-        var distance = 0f
-        var intercepting = false
-        var revealed = false
-        while (true) {
-            // Observe before child click handlers. As soon as a second pointer joins the
-            // gesture, consume the entire pointer stream so releasing either finger cannot
-            // complete a pending book click.
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            val pressed = event.changes.filter { it.pressed }
-            if (!intercepting && pressed.size >= 2) {
-                intercepting = true
-                distance = 0f
-            }
-            if (intercepting) {
-                event.changes.forEach { it.consume() }
-            }
-            if (pressed.size >= 2 && !revealed) {
-                distance += pressed.sumOf { (it.position.y - it.previousPosition.y).toDouble() }.toFloat() / pressed.size
-                if (distance > viewConfiguration.touchSlop * 4f) {
-                    revealed = true
-                    onReveal()
-                }
-            } else if (pressed.isEmpty()) {
-                distance = 0f
-                intercepting = false
-                revealed = false
-            }
-        }
-    }
-}
-
-internal fun exportFileName(item: LibraryBook): String {
-    val extension = item.book.format.name.lowercase()
-    val withoutExistingExtension = item.book.title.trim().replace(
-        Regex("\\.${Regex.escape(extension)}$", RegexOption.IGNORE_CASE),
-        "",
-    )
-    val safeTitle = withoutExistingExtension
-        .replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
-        .trim(' ', '.')
-        .take(120)
-        .ifBlank { "未命名书籍" }
-    return "$safeTitle-纠错版.txt"
-}
-
-internal fun openExportLocation(context: Context, uriString: String): Boolean {
-    val uri = uriString.toUri()
-    val parentUri = exportedDocumentParent(context, uri)
-    if (parentUri != null) {
-        val directoryIntent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(parentUri, DocumentsContract.Document.MIME_TYPE_DIR)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (context.tryStartActivity(directoryIntent)) return true
-    }
-    val fileIntent = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(uri, context.contentResolver.getType(uri) ?: "application/octet-stream")
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-    return context.tryStartActivity(fileIntent)
-}
-
-private fun exportedDocumentParent(context: Context, uri: Uri): Uri? {
-    if (!DocumentsContract.isDocumentUri(context, uri)) return null
-    val authority = uri.authority ?: return null
-    val parentId = runCatching {
-        DocumentsContract.findDocumentPath(context.contentResolver, uri)
-            ?.path
-            ?.dropLast(1)
-            ?.lastOrNull()
-    }.getOrNull() ?: if (authority == "com.android.externalstorage.documents") {
-        // ExternalStorageProvider uses volume:path document IDs. Other providers are opaque and
-        // must not be guessed by splitting their IDs.
-        runCatching {
-            DocumentsContract.getDocumentId(uri).substringBeforeLast('/', missingDelimiterValue = "")
-                .takeIf(String::isNotBlank)
-        }.getOrNull()
-    } else {
-        null
-    }
-    return parentId?.let { DocumentsContract.buildDocumentUri(authority, it) }
-}
-
-private fun Context.tryStartActivity(intent: Intent): Boolean = runCatching {
-    startActivity(intent)
-}.isSuccess
-
-@Composable
-private fun BookManagementDialog(
-    item: LibraryBook,
-    dismiss: () -> Unit,
-    save: (String, String, String, String) -> Unit,
-) {
-    var title by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.title) }
-    var author by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.author) }
-    var description by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.description) }
-    var category by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.category) }
-    KixyuActionDialog(
-        show = true,
-        title = "编辑书籍",
-        onDismissRequest = dismiss,
-        confirmLabel = "保存",
-        onConfirm = { save(title, author, description, category) },
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-        ) {
-            OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text("书名") }, singleLine = true)
-            OutlinedTextField(author, { author = it }, modifier = Modifier.fillMaxWidth(), label = { Text("作者") }, singleLine = true)
-            OutlinedTextField(
-                description,
-                { description = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("简介") },
-                minLines = 3,
-                maxLines = 6,
-            )
-            OutlinedTextField(category, { category = it }, modifier = Modifier.fillMaxWidth(), label = { Text("分类") }, singleLine = true)
-        }
-    }
 }
