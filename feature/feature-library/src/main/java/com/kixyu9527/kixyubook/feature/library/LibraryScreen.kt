@@ -97,6 +97,7 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
+import com.kixyu9527.kixyubook.core.common.model.ImportProgress
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
@@ -138,6 +139,7 @@ fun LibraryRoute(
 ) {
     val stateFlow = if (hiddenOnly) viewModel.hiddenUiState else viewModel.uiState
     val state by stateFlow.collectAsStateWithLifecycle()
+    val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val exportedMessage = stringResource(R.string.library_exported)
     val viewExportAction = stringResource(R.string.library_open_export_location)
@@ -181,6 +183,7 @@ fun LibraryRoute(
     }
     LibraryScreen(
         state = state,
+        importProgress = importProgress,
         snackbar = snackbar,
         onSearch = viewModel::search,
         onCategory = viewModel::selectCategory,
@@ -201,6 +204,7 @@ fun LibraryRoute(
         onDropDocuments = { uris, releasePermission ->
             viewModel.import(uris) { releasePermission?.invoke() }
         },
+        onClearImportProgress = viewModel::clearFinishedImportProgress,
     )
 }
 
@@ -208,6 +212,7 @@ fun LibraryRoute(
 @Composable
 private fun LibraryScreen(
     state: LibraryUiState,
+    importProgress: ImportProgress?,
     snackbar: SnackbarHostState,
     onSearch: (String) -> Unit,
     onCategory: (String) -> Unit,
@@ -226,6 +231,7 @@ private fun LibraryScreen(
     onUpdateMetadata: (String, String, String, String) -> Unit,
     onSetCategory: (String, String) -> Unit,
     onDropDocuments: (List<String>, (() -> Unit)?) -> Unit,
+    onClearImportProgress: () -> Unit,
 ) {
     var managingUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var deletingUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -238,6 +244,7 @@ private fun LibraryScreen(
     }
     var selectedBookUuids by rememberSaveable(stateSaver = stringSetSaver) { mutableStateOf(emptySet()) }
     var confirmingBatchDelete by rememberSaveable { mutableStateOf(false) }
+    var importDialogVisible by rememberSaveable { mutableStateOf(false) }
     var previewBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
     val managing = state.books.firstOrNull { it.book.uuid == managingUuid }
     val deleting = state.books.firstOrNull { it.book.uuid == deletingUuid }
@@ -246,6 +253,9 @@ private fun LibraryScreen(
     val expanded = kixyuWindowSizeClass().supportsTwoPane
     val activity = LocalContext.current.findActivity()
     val latestDropDocuments by rememberUpdatedState(onDropDocuments)
+    LaunchedEffect(importProgress?.runId) {
+        if (importProgress != null) importDialogVisible = true
+    }
     val pageTitle = when {
         selectionMode -> stringResource(R.string.library_selected_count, selectedBookUuids.size)
         state.hiddenOnly -> stringResource(R.string.library_hidden_title)
@@ -322,6 +332,11 @@ private fun LibraryScreen(
                     enabled = selectedBookUuids.isNotEmpty(),
                 ) { Icon(KixyuSymbols.DeleteSweep, stringResource(R.string.library_delete_selected)) }
             } else {
+                if (importProgress != null) {
+                    KixyuIconButton(onClick = { importDialogVisible = true }) {
+                        Icon(KixyuSymbols.Schedule, stringResource(R.string.library_import_progress))
+                    }
+                }
                 if (!state.hiddenOnly) {
                     KixyuIconButton(onClick = onImport) {
                         Icon(KixyuSymbols.Add, stringResource(R.string.library_import))
@@ -525,6 +540,16 @@ private fun LibraryScreen(
                 }
             },
             onDismiss = { categoryDialogVisible = false },
+        )
+    }
+    if (importDialogVisible && importProgress != null) {
+        ImportProgressDialog(
+            progress = importProgress,
+            onDismiss = { importDialogVisible = false },
+            onDone = {
+                importDialogVisible = false
+                onClearImportProgress()
+            },
         )
     }
 }

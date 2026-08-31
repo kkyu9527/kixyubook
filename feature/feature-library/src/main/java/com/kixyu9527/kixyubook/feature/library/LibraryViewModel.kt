@@ -61,6 +61,7 @@ class LibraryViewModel @Inject constructor(
     val messageEvents = messages.receiveAsFlow()
     private val exports = Channel<BookExportEvent>(Channel.BUFFERED)
     val exportEvents = exports.receiveAsFlow()
+    val importProgress = repository.importProgress
 
     init {
         viewModelScope.launch {
@@ -195,6 +196,8 @@ class LibraryViewModel @Inject constructor(
             onComplete()
         }
     }
+
+    fun clearFinishedImportProgress() = repository.clearFinishedImportProgress()
 
     fun export(bookUuid: String, uriString: String) = viewModelScope.launch {
         repository.exportBook(bookUuid, uriString)

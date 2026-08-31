@@ -52,4 +52,17 @@
     <string name="library_book_author">作者</string>
     <string name="library_book_description">简介</string>
     <string name="library_book_category">分类</string>
+    <string name="library_import_progress">导入进度</string>
+    <string name="library_import_progress_title">正在导入书籍</string>
+    <string name="library_import_progress_done">导入完成</string>
+    <string name="library_import_summary">已处理 %1$d/%2$d 本</string>
+    <string name="library_import_waiting">等待导入</string>
+    <string name="library_import_copying">正在复制和校验文件</string>
+    <string name="library_import_metadata">正在读取书籍信息</string>
+    <string name="library_import_directory">正在建立目录</string>
+    <string name="library_import_indexing">正在建立正文索引</string>
+    <string name="library_import_finished">已完成</string>
+    <string name="library_import_duplicate">已跳过重复书籍</string>
+    <string name="library_import_failed">导入失败</string>
+    <string name="library_import_continue_background">后台继续</string>
 </resources>

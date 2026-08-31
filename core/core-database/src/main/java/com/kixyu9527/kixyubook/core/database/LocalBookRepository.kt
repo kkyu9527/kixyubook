@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -84,6 +85,8 @@ class LocalBookRepository @Inject constructor(
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val importIndexJobs = ConcurrentHashMap<String, Job>()
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    private val _importProgress = MutableStateFlow<ImportProgress?>(null)
+    override val importProgress = _importProgress.asStateFlow()
     private val openedAtOverrides = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val activityClock = LibraryActivityClock()
     private val workManager by lazy(LazyThreadSafetyMode.NONE) { WorkManager.getInstance(context) }
@@ -152,6 +155,10 @@ class LocalBookRepository @Inject constructor(
 
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
 
+    override fun clearFinishedImportProgress() {
+        _importProgress.update { current -> current?.takeUnless(ImportProgress::finished) }
+    }
+
     override fun markBookOpened(bookUuid: String) {
         val openedAt = activityClock.next()
         // Publish before Room I/O so the shelf order changes in the same input dispatch as the
@@ -188,6 +195,17 @@ class LocalBookRepository @Inject constructor(
     override suspend fun importDocuments(uriStrings: List<String>): ImportSummary = withContext(Dispatchers.IO) {
         val startedAt = SystemClock.elapsedRealtime()
         val importRun = startedAt.toString(36)
+        val sources = uriStrings.distinct().map { rawUri ->
+            ImportItemProgress(
+                id = rawUri,
+                displayName = displayNameFor(rawUri.toUri()),
+            )
+        }
+        _importProgress.value = ImportProgress(
+            runId = importRun,
+            items = sources,
+            startedTime = System.currentTimeMillis(),
+        )
         DiagnosticLog.record(
             Category.IMPORT,
             "documents_selected",
@@ -196,7 +214,7 @@ class LocalBookRepository @Inject constructor(
         val registration = storageMutationMutex.withLock {
             cleanupImportArtifacts()
             pruneUnreferencedBookFiles()
-            registerDocuments(uriStrings)
+            registerDocuments(sources)
         }
         registration.imports.forEach(::enqueueBackgroundIndex)
         ImportSummary(registration.imports.size, registration.duplicateCount, registration.failures).also { summary ->
@@ -270,31 +288,35 @@ class LocalBookRepository @Inject constructor(
      * therefore show the complete selection in the library immediately instead of waiting for the
      * preceding book's full-text index.
      */
-    private suspend fun registerDocuments(uriStrings: List<String>): ImportRegistration {
+    private suspend fun registerDocuments(sources: List<ImportItemProgress>): ImportRegistration {
         val imports = mutableListOf<RegisteredImport>()
         var duplicates = 0
         val failures = mutableListOf<String>()
         val failureDiagnostics = mutableListOf<DiagnosticFailure>()
         val importDir = File(context.cacheDir, "imports").apply { mkdirs() }
-        uriStrings.distinct().forEach { rawUri ->
+        sources.forEach { sourceProgress ->
+            val rawUri = sourceProgress.id
             val uri = rawUri.toUri()
-            val displayName = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                ?.use { if (it.moveToFirst()) it.getString(0) else null }
-                ?: uri.lastPathSegment.orEmpty().substringAfterLast('/').ifBlank { "未命名小说" }
+            val displayName = sourceProgress.displayName
             val temp = File(importDir, UUID.randomUUID().toString())
             var insertedUuid: String? = null
             var storedFile: File? = null
             var coverFile: File? = null
             try {
-                val hash = context.contentResolver.openInputStream(uri)?.use { input ->
-                    val digest = MessageDigest.getInstance("SHA-256")
-                    temp.outputStream().use { output -> DigestInputStream(input, digest).use { it.copyTo(output) } }
-                    digest.digest().joinToString("") { "%02x".format(it) }
-                } ?: error("无法读取文件")
+                updateImportProgress(rawUri, ImportStage.COPYING, .02f, ImportItemStatus.RUNNING)
+                val hash = copyImportSource(uri, rawUri, temp)
                 if (dao.findUuidByHash(hash) != null) {
                     duplicates++
+                    updateImportProgress(
+                        rawUri,
+                        ImportStage.FINISHED,
+                        1f,
+                        ImportItemStatus.DUPLICATE,
+                        message = "已存在相同内容",
+                    )
                     return@forEach
                 }
+                updateImportProgress(rawUri, ImportStage.READING_METADATA, .36f, ImportItemStatus.RUNNING)
                 val format = detectFormat(displayName, temp)
                 val parser = parsers.parserFor(format)
                 val metadata = parser.readMetadata(temp, displayName)
@@ -306,6 +328,13 @@ class LocalBookRepository @Inject constructor(
                     identityMatch.title.normalizedEpubIdentityTitle() == metadata.title.normalizedEpubIdentityTitle()
                 ) {
                     duplicates++
+                    updateImportProgress(
+                        rawUri,
+                        ImportStage.FINISHED,
+                        1f,
+                        ImportItemStatus.DUPLICATE,
+                        message = "已存在同一本 EPUB",
+                    )
                     return@forEach
                 }
                 // EPUB authoring tools occasionally reuse dc:identifier for another title. Only
@@ -327,14 +356,29 @@ class LocalBookRepository @Inject constructor(
                     BookEntity(bookUuid, metadata.title, metadata.author, metadata.description, coverPath, format.name, rawUri, stored.absolutePath, System.currentTimeMillis(), hash, "未分类"),
                 )
                 insertedUuid = bookUuid
+                updateImportProgress(
+                    rawUri,
+                    ImportStage.BUILDING_DIRECTORY,
+                    .62f,
+                    ImportItemStatus.RUNNING,
+                    bookUuid = bookUuid,
+                )
                 val outlines = if (format == BookFormat.EPUB) {
                     epubIndex.registerDirectory(bookUuid, stored, parser as EpubBookParser)
                         .also { if (it.isEmpty()) error("未找到可阅读章节") }
                 } else {
                     emptyList()
                 }
-                imports += RegisteredImport(bookUuid, displayName, format, stored, parser)
+                imports += RegisteredImport(rawUri, bookUuid, displayName, format, stored, parser)
                 syncMutations.record(SyncEntityType.BOOK, bookUuid)
+                updateImportProgress(
+                    rawUri,
+                    if (format == BookFormat.EPUB) ImportStage.FINISHED else ImportStage.INDEXING,
+                    if (format == BookFormat.EPUB) 1f else .78f,
+                    if (format == BookFormat.EPUB) ImportItemStatus.SUCCEEDED else ImportItemStatus.RUNNING,
+                    bookUuid = bookUuid,
+                    message = if (format == BookFormat.EPUB) "已加入书架，全文索引将在后台继续" else "正在建立正文索引",
+                )
             } catch (error: CancellationException) {
                 insertedUuid?.let { removeIncompleteImport(it) }
                 storedFile?.delete()
@@ -346,6 +390,13 @@ class LocalBookRepository @Inject constructor(
                 coverFile?.delete()
                 failures += "$displayName：${error.message ?: "导入失败"}"
                 failureDiagnostics += error.toDiagnosticFailure()
+                updateImportProgress(
+                    rawUri,
+                    ImportStage.FINISHED,
+                    1f,
+                    ImportItemStatus.FAILED,
+                    message = error.message ?: "导入失败",
+                )
             } finally {
                 temp.delete()
             }
@@ -374,6 +425,13 @@ class LocalBookRepository @Inject constructor(
                         outcome = "success",
                         details = mapOf("format" to book.format.name, "chapters" to chapterCount),
                     )
+                    updateImportProgress(
+                        book.sourceId,
+                        ImportStage.FINISHED,
+                        1f,
+                        ImportItemStatus.SUCCEEDED,
+                        bookUuid = book.bookUuid,
+                    )
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -391,6 +449,14 @@ class LocalBookRepository @Inject constructor(
                     )
                     removeIncompleteImport(book.bookUuid)
                     importEvents.emit("${book.displayName}：${error.message ?: "导入失败"}")
+                    updateImportProgress(
+                        book.sourceId,
+                        ImportStage.FINISHED,
+                        1f,
+                        ImportItemStatus.FAILED,
+                        bookUuid = book.bookUuid,
+                        message = error.message ?: "导入失败",
+                    )
                 }
             }
         }
@@ -409,6 +475,81 @@ class LocalBookRepository @Inject constructor(
             ExistingWorkPolicy.APPEND_OR_REPLACE,
             request,
         )
+    }
+
+    private fun displayNameFor(uri: android.net.Uri): String =
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            ?: uri.lastPathSegment.orEmpty().substringAfterLast('/').ifBlank { "未命名小说" }
+
+    private fun updateImportProgress(
+        sourceId: String,
+        stage: ImportStage,
+        progress: Float,
+        status: ImportItemStatus,
+        bookUuid: String? = null,
+        message: String? = null,
+    ) {
+        _importProgress.update { current ->
+            current?.copy(
+                items = current.items.map { item ->
+                    if (item.id != sourceId) item else item.copy(
+                        stage = stage,
+                        progress = progress.coerceIn(0f, 1f),
+                        status = status,
+                        bookUuid = bookUuid ?: item.bookUuid,
+                        message = message,
+                    )
+                },
+            )?.let { updated ->
+                updated.copy(finished = updated.items.all { item ->
+                    item.status in setOf(
+                        ImportItemStatus.SUCCEEDED,
+                        ImportItemStatus.DUPLICATE,
+                        ImportItemStatus.FAILED,
+                    )
+                })
+            }
+        }
+    }
+
+    private fun copyImportSource(uri: android.net.Uri, sourceId: String, destination: File): String {
+        val totalBytes = runCatching {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+        }.getOrNull()?.takeIf { it > 0L }
+        val digest = MessageDigest.getInstance("SHA-256")
+        val input = context.contentResolver.openInputStream(uri) ?: error("无法读取文件")
+        input.use { source ->
+            DigestInputStream(source, digest).use { hashingInput ->
+                destination.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var copied = 0L
+                    var lastPublished = 0L
+                    while (true) {
+                        val count = hashingInput.read(buffer)
+                        if (count <= 0) break
+                        output.write(buffer, 0, count)
+                        copied += count
+                        if (copied - lastPublished >= IMPORT_PROGRESS_PUBLISH_BYTES) {
+                            lastPublished = copied
+                            val fraction = totalBytes?.let { copied.toFloat() / it } ?: .5f
+                            updateImportProgress(
+                                sourceId,
+                                ImportStage.COPYING,
+                                .02f + fraction.coerceIn(0f, 1f) * .30f,
+                                ImportItemStatus.RUNNING,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun detectFormat(name: String, file: File): BookFormat {
@@ -472,7 +613,9 @@ class LocalBookRepository @Inject constructor(
                         epubIndex.registerDirectory(book.uuid, stored, parser as EpubBookParser)
                         scheduleEpubIndex()
                     } else {
-                        enqueueBackgroundIndex(RegisteredImport(book.uuid, book.title, book.format, stored, parser))
+                        enqueueBackgroundIndex(
+                            RegisteredImport("google-drive://${book.uuid}", book.uuid, book.title, book.format, stored, parser),
+                        )
                     }
                     true
                 } catch (error: Throwable) {

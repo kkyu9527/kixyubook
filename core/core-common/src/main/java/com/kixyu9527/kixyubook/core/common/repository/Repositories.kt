@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface BookRepository {
     fun observeImportEvents(): Flow<String>
+    val importProgress: StateFlow<ImportProgress?>
+    fun clearFinishedImportProgress()
     /** Immediately promotes a book in local activity ordering without changing reading progress. */
     fun markBookOpened(bookUuid: String)
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary

@@ -22,6 +22,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
+import com.kixyu9527.kixyubook.core.common.model.ImportItemProgress
+import com.kixyu9527.kixyubook.core.common.model.ImportItemStatus
+import com.kixyu9527.kixyubook.core.common.model.ImportProgress
+import com.kixyu9527.kixyubook.core.common.model.ImportStage
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
@@ -31,6 +35,95 @@ import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
 internal fun Set<String>.toggle(value: String): Set<String> =
     if (value in this) this - value else this + value
+
+@Composable
+internal fun ImportProgressDialog(
+    progress: ImportProgress,
+    onDismiss: () -> Unit,
+    onDone: () -> Unit,
+) {
+    KixyuActionDialog(
+        show = true,
+        title = stringResource(
+            if (progress.finished) R.string.library_import_progress_done
+            else R.string.library_import_progress_title,
+        ),
+        onDismissRequest = onDismiss,
+        confirmLabel = stringResource(
+            if (progress.finished) R.string.library_action_done
+            else R.string.library_import_continue_background,
+        ),
+        onConfirm = if (progress.finished) onDone else onDismiss,
+        dismissLabel = null,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+        ) {
+            Text(
+                stringResource(
+                    R.string.library_import_summary,
+                    progress.completedCount,
+                    progress.items.size,
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LinearProgressIndicator(
+                progress = { progress.overallProgress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            progress.items.forEach { item -> ImportProgressRow(item) }
+        }
+    }
+}
+
+@Composable
+private fun ImportProgressRow(item: ImportItemProgress) {
+    val stageLabel = when (item.status) {
+        ImportItemStatus.DUPLICATE -> stringResource(R.string.library_import_duplicate)
+        ImportItemStatus.FAILED -> stringResource(R.string.library_import_failed)
+        else -> stringResource(
+            when (item.stage) {
+                ImportStage.QUEUED -> R.string.library_import_waiting
+                ImportStage.COPYING -> R.string.library_import_copying
+                ImportStage.READING_METADATA -> R.string.library_import_metadata
+                ImportStage.BUILDING_DIRECTORY -> R.string.library_import_directory
+                ImportStage.INDEXING -> R.string.library_import_indexing
+                ImportStage.FINISHED -> R.string.library_import_finished
+            },
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                item.displayName,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${(item.progress * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        LinearProgressIndicator(
+            progress = { item.progress.coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            item.message ?: stageLabel,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (item.status == ImportItemStatus.FAILED) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
 
 @Composable
 private fun LibrarySortMode.localizedLabel(): String = stringResource(

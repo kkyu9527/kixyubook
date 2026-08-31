@@ -225,6 +225,31 @@ data class ImportSummary(
     val failures: List<String> = emptyList(),
 )
 
+enum class ImportStage { QUEUED, COPYING, READING_METADATA, BUILDING_DIRECTORY, INDEXING, FINISHED }
+enum class ImportItemStatus { PENDING, RUNNING, SUCCEEDED, DUPLICATE, FAILED }
+
+data class ImportItemProgress(
+    val id: String,
+    val displayName: String,
+    val stage: ImportStage = ImportStage.QUEUED,
+    val progress: Float = 0f,
+    val status: ImportItemStatus = ImportItemStatus.PENDING,
+    val bookUuid: String? = null,
+    val message: String? = null,
+)
+
+data class ImportProgress(
+    val runId: String,
+    val items: List<ImportItemProgress>,
+    val startedTime: Long,
+    val finished: Boolean = false,
+) {
+    val completedCount: Int
+        get() = items.count { it.status in setOf(ImportItemStatus.SUCCEEDED, ImportItemStatus.DUPLICATE, ImportItemStatus.FAILED) }
+    val overallProgress: Float
+        get() = if (items.isEmpty()) 0f else items.sumOf { it.progress.toDouble() }.toFloat() / items.size
+}
+
 data class ReadingStats(
     val todayMillis: Long = 0,
     val totalMillis: Long = 0,

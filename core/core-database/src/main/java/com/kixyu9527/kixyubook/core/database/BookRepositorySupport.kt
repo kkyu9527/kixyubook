@@ -18,6 +18,7 @@ internal data class ImportRegistration(
     val failureDiagnostics: List<DiagnosticFailure>,
 )
 internal data class RegisteredImport(
+    val sourceId: String,
     val bookUuid: String,
     val displayName: String,
     val format: BookFormat,
@@ -28,6 +29,7 @@ internal data class RegisteredImport(
 internal const val CHAPTER_CACHE_SIZE = 6
 internal const val SLOW_CHAPTER_LOAD_MS = 250L
 internal const val IMPORT_CHAPTER_BATCH_SIZE = 32
+internal const val IMPORT_PROGRESS_PUBLISH_BYTES = 512L * 1024L
 internal const val IMPORT_INDEX_CONCURRENCY = 2
 internal const val DERIVED_DATA_VERSION_PREFERENCES = "derived_data_versions"
 internal const val KEY_TXT_PARSER_VERSION = "txt_parser_version"
