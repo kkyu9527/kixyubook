@@ -252,6 +252,12 @@ data class ImportSummary(
     val failures: List<String> = emptyList(),
 )
 
+data class BookExportSummary(
+    val exportedCount: Int,
+    val failedTitles: List<String> = emptyList(),
+    val directoryUri: String,
+)
+
 enum class ImportStage { QUEUED, COPYING, READING_METADATA, BUILDING_DIRECTORY, INDEXING, FINISHED }
 enum class ImportItemStatus { PENDING, RUNNING, SUCCEEDED, DUPLICATE, FAILED }
 

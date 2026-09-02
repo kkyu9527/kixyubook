@@ -15,6 +15,7 @@ import androidx.navigation3.runtime.entryProvider
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationBackTransitionActive
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuContextualBarController
 import com.kixyu9527.kixyubook.core.navigation.AppRoute
 import com.kixyu9527.kixyubook.core.navigation.Routes
 import com.kixyu9527.kixyubook.feature.home.HomeRoute
@@ -63,9 +64,11 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
             entry<AppRoute.Home> {
                 val navigationBackTransitionActive =
                     LocalKixyuNavigationBackTransitionActive.current
+                val contextualBarActive = LocalKixyuContextualBarController.current?.state != null
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = !contextualBarActive,
                     // The previous top-level page is built on the first predictive-back frame.
                     // Do not also build its adjacent sibling until the gesture has settled.
                     beyondViewportPageCount = if (navigationBackTransitionActive) 0 else 1,

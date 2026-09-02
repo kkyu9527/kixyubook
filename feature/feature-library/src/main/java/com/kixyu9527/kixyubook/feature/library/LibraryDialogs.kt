@@ -28,6 +28,7 @@ import com.kixyu9527.kixyubook.core.common.model.ImportProgress
 import com.kixyu9527.kixyubook.core.common.model.ImportStage
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
+import com.kixyu9527.kixyubook.core.common.model.correctedExportFileName
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
@@ -379,21 +380,25 @@ internal fun Modifier.revealHiddenCategoriesGesture(
 }
 
 internal fun exportFileName(item: LibraryBook): String {
-    val extension = item.book.format.name.lowercase()
-    val withoutExistingExtension = item.book.title.trim().replace(
-        Regex("\\.${Regex.escape(extension)}$", RegexOption.IGNORE_CASE),
-        "",
-    )
-    val safeTitle = withoutExistingExtension
-        .replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
-        .trim(' ', '.')
-        .take(120)
-        .ifBlank { "未命名书籍" }
-    return "$safeTitle-纠错版.txt"
+    return correctedExportFileName(item.book.title, item.book.format.name)
 }
 
 internal fun openExportLocation(context: Context, uriString: String): Boolean {
     val uri = uriString.toUri()
+    if (DocumentsContract.isTreeUri(uri)) {
+        val directoryUri = runCatching {
+            DocumentsContract.buildDocumentUriUsingTree(
+                uri,
+                DocumentsContract.getTreeDocumentId(uri),
+            )
+        }.getOrNull()
+        if (directoryUri != null) {
+            val directoryIntent = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(directoryUri, DocumentsContract.Document.MIME_TYPE_DIR)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (context.tryStartActivity(directoryIntent)) return true
+        }
+    }
     val parentUri = exportedDocumentParent(context, uri)
     if (parentUri != null) {
         val directoryIntent = Intent(Intent.ACTION_VIEW)
@@ -431,6 +436,69 @@ private fun exportedDocumentParent(context: Context, uri: Uri): Uri? {
 private fun Context.tryStartActivity(intent: Intent): Boolean = runCatching {
     startActivity(intent)
 }.isSuccess
+
+@Composable
+internal fun BatchCategoryDialog(
+    selectedCount: Int,
+    categories: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var category by rememberSaveable { mutableStateOf("") }
+    KixyuActionDialog(
+        show = true,
+        title = stringResource(R.string.library_batch_category_title, selectedCount),
+        onDismissRequest = onDismiss,
+        confirmLabel = stringResource(R.string.library_action_done),
+        onConfirm = { onConfirm(category) },
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+        ) {
+            OutlinedTextField(
+                value = category,
+                onValueChange = { category = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.library_book_category)) },
+                supportingText = { Text(stringResource(R.string.library_batch_category_hint)) },
+                singleLine = true,
+            )
+            if (categories.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                ) {
+                    categories.forEach { existing ->
+                        Surface(
+                            onClick = { category = existing },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = if (category == existing) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerLow
+                            },
+                            shape = MaterialTheme.shapes.medium,
+                        ) {
+                            Text(
+                                text = existing,
+                                modifier = Modifier.padding(
+                                    horizontal = KixyuSpacing.medium,
+                                    vertical = KixyuSpacing.small,
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 internal fun BookManagementDialog(

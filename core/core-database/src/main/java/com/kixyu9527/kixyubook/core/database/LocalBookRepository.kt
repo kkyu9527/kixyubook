@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.database
 
 import android.content.Context
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import androidx.core.content.edit
@@ -283,6 +284,51 @@ class LocalBookRepository @Inject constructor(
                 ),
             )
         }
+    }
+
+    override suspend fun exportBooks(
+        bookUuids: Set<String>,
+        directoryUriString: String,
+    ): BookExportSummary = withContext(Dispatchers.IO) {
+        val treeUri = directoryUriString.toUri()
+        val parent = DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
+        val books = dao.getBooks(bookUuids).associateBy { it.uuid }
+        val failedTitles = mutableListOf<String>()
+        var exportedCount = 0
+        bookUuids.forEach { uuid ->
+            val book = books[uuid]
+            if (book == null) {
+                failedTitles += uuid
+                return@forEach
+            }
+            val destination = runCatching {
+                DocumentsContract.createDocument(
+                    context.contentResolver,
+                    parent,
+                    "text/plain",
+                    correctedExportFileName(book.title, book.format),
+                ) ?: error("无法创建导出文件")
+            }.getOrElse {
+                failedTitles += book.title
+                return@forEach
+            }
+            exportBook(uuid, destination.toString())
+                .onSuccess { exportedCount++ }
+                .onFailure {
+                    failedTitles += book.title
+                    runCatching {
+                        DocumentsContract.deleteDocument(context.contentResolver, destination)
+                    }
+                }
+        }
+        BookExportSummary(
+            exportedCount = exportedCount,
+            failedTitles = failedTitles,
+            directoryUri = directoryUriString,
+        )
     }
 
     /**
@@ -1013,6 +1059,15 @@ class LocalBookRepository @Inject constructor(
     override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) {
         dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" })
         syncMutations.record(SyncEntityType.BOOK, bookUuid)
+    }
+
+    override suspend fun setCategories(bookUuids: Set<String>, category: String) = withContext(Dispatchers.IO) {
+        if (bookUuids.isEmpty()) return@withContext
+        val normalized = category.trim().ifBlank { "未分类" }
+        database.withTransaction {
+            dao.setCategories(bookUuids, normalized)
+            bookUuids.forEach { uuid -> syncMutations.record(SyncEntityType.BOOK, uuid) }
+        }
     }
 
     override fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>> =

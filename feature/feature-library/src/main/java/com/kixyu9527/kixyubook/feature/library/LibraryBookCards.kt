@@ -11,8 +11,14 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.verticalScroll
@@ -20,6 +26,7 @@ import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -43,7 +50,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -89,7 +95,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -128,18 +137,27 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 @Composable
 internal fun LibraryBookDetailPane(
     item: LibraryBook?,
+    modifier: Modifier = Modifier,
+    selectionCount: Int = 0,
     onOpen: (String) -> Unit,
     onManage: (String) -> Unit,
     onExport: (LibraryBook) -> Unit,
     onDelete: (String) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
     ) {
-        if (item == null) {
+        if (selectionCount > 0) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    stringResource(R.string.library_selected_count, selectionCount),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else if (item == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(stringResource(R.string.library_select_book_detail), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -214,32 +232,25 @@ internal fun LibraryBookRow(
     item: LibraryBook,
     selected: Boolean,
     selectionMode: Boolean,
-    reorderEnabled: Boolean,
-    menuExpanded: Boolean,
     onOpen: () -> Unit,
     onSelectionChange: () -> Unit,
-    onManage: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit,
-    onMenuExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     dragging: Boolean = false,
+    reorderHandle: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     val rowShape = MaterialTheme.shapes.large
-    val raised = dragging || menuExpanded
     val raisedScale by animateFloatAsState(
-        targetValue = if (raised) 1.015f else 1f,
+        targetValue = if (dragging) 1.015f else 1f,
         label = "libraryBookRowScale",
     )
     val raisedElevation by animateDpAsState(
-        targetValue = if (raised) KixyuSpacing.medium else 0.dp,
+        targetValue = if (dragging) KixyuSpacing.medium else 0.dp,
         label = "libraryBookRowElevation",
     )
     val openBookDescription = stringResource(R.string.library_open_book, item.book.title)
+    val selectedDescription = stringResource(R.string.library_book_selected)
+    val notSelectedDescription = stringResource(R.string.library_book_not_selected)
     Surface(
-        onClick = {
-            if (!reorderEnabled || !menuExpanded) onOpen()
-        },
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
@@ -250,18 +261,24 @@ internal fun LibraryBookRow(
                 shadowElevation = raisedElevation.toPx()
             }
             .pointerHoverIcon(PointerIcon.Hand)
-            .pointerInput(onManage) {
+            .pointerInput(onSelectionChange) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
                         if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
-                            onManage()
+                            onSelectionChange()
                             event.changes.forEach { it.consume() }
                         }
                     }
                 }
             }
-            .semantics { contentDescription = openBookDescription },
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (selectionMode) item.book.title else openBookDescription
+                if (selectionMode) {
+                    this.selected = selected
+                    stateDescription = if (selected) selectedDescription else notSelectedDescription
+                }
+            },
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = rowShape,
         shadowElevation = 0.dp,
@@ -269,25 +286,26 @@ internal fun LibraryBookRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .then(
-                    if (reorderEnabled) {
-                        Modifier
-                    } else {
-                        Modifier.combinedClickable(
-                            onClick = onOpen,
-                            onLongClick = if (selectionMode) null else ({ onMenuExpandedChange(true) }),
-                        )
-                    },
+                .combinedClickable(
+                    onClick = onOpen,
+                    onLongClick = if (selectionMode) null else onSelectionChange,
                 )
                 .padding(KixyuSpacing.medium),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
         ) {
-            BookCover(
-                item.book.title,
-                item.book.coverPath,
-                Modifier.size(KixyuSize.libraryCoverWidth, KixyuSize.libraryCoverHeight),
-            )
+            Box {
+                BookCover(
+                    item.book.title,
+                    item.book.coverPath,
+                    Modifier.size(KixyuSize.libraryCoverWidth, KixyuSize.libraryCoverHeight),
+                )
+                LibrarySelectionBadge(
+                    visible = selectionMode,
+                    selected = selected,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(KixyuSpacing.extraSmall),
+                )
+            }
             Column(
                 Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
@@ -308,27 +326,8 @@ internal fun LibraryBookRow(
                     )
                 }
             }
-            if (selectionMode) {
-                Checkbox(selected, onCheckedChange = { onSelectionChange() })
-            } else Column(horizontalAlignment = Alignment.End) {
-                Box {
-                    BookActionPopupMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { onMenuExpandedChange(false) },
-                        onManage = {
-                            onMenuExpandedChange(false)
-                            onManage()
-                        },
-                        onExport = {
-                            onMenuExpandedChange(false)
-                            onExport()
-                        },
-                        onDelete = {
-                            onMenuExpandedChange(false)
-                            onDelete()
-                        },
-                    )
-                }
+            Column(horizontalAlignment = Alignment.End) {
+                reorderHandle?.let { handle -> Box { handle() } }
                 Text(
                     "${((item.progress?.fraction ?: 0f) * 100).toInt()}%",
                     style = MaterialTheme.typography.labelMedium,
@@ -345,32 +344,25 @@ internal fun LibraryBookGridCard(
     item: LibraryBook,
     selected: Boolean,
     selectionMode: Boolean,
-    reorderEnabled: Boolean,
-    menuExpanded: Boolean,
     dragging: Boolean,
     onOpen: () -> Unit,
     onSelectionChange: () -> Unit,
-    onManage: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit,
-    onMenuExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    reorderHandle: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     val cardShape = MaterialTheme.shapes.large
-    val raised = dragging || menuExpanded
     val raisedScale by animateFloatAsState(
-        targetValue = if (raised) 1.025f else 1f,
+        targetValue = if (dragging) 1.025f else 1f,
         label = "libraryBookGridCardScale",
     )
     val raisedElevation by animateDpAsState(
-        targetValue = if (raised) KixyuSpacing.medium else 0.dp,
+        targetValue = if (dragging) KixyuSpacing.medium else 0.dp,
         label = "libraryBookGridCardElevation",
     )
     val openBookDescription = stringResource(R.string.library_open_book, item.book.title)
+    val selectedDescription = stringResource(R.string.library_book_selected)
+    val notSelectedDescription = stringResource(R.string.library_book_not_selected)
     Surface(
-        onClick = {
-            if (!reorderEnabled || !menuExpanded) onOpen()
-        },
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
@@ -381,7 +373,24 @@ internal fun LibraryBookGridCard(
                 shadowElevation = raisedElevation.toPx()
             }
             .pointerHoverIcon(PointerIcon.Hand)
-            .semantics { contentDescription = openBookDescription },
+            .pointerInput(onSelectionChange) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                            onSelectionChange()
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                }
+            }
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (selectionMode) item.book.title else openBookDescription
+                if (selectionMode) {
+                    this.selected = selected
+                    stateDescription = if (selected) selectedDescription else notSelectedDescription
+                }
+            },
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = cardShape,
         shadowElevation = 0.dp,
@@ -389,15 +398,9 @@ internal fun LibraryBookGridCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(
-                    if (reorderEnabled) {
-                        Modifier
-                    } else {
-                        Modifier.combinedClickable(
-                            onClick = onOpen,
-                            onLongClick = if (selectionMode) null else ({ onMenuExpandedChange(true) }),
-                        )
-                    },
+                .combinedClickable(
+                    onClick = onOpen,
+                    onLongClick = if (selectionMode) null else onSelectionChange,
                 )
                 .padding(KixyuSpacing.small),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
@@ -408,29 +411,12 @@ internal fun LibraryBookGridCard(
                     item.book.coverPath,
                     Modifier.fillMaxWidth().aspectRatio(2f / 3f),
                 )
-                if (selectionMode) {
-                    Checkbox(
-                        checked = selected,
-                        onCheckedChange = { onSelectionChange() },
-                        modifier = Modifier.align(Alignment.TopEnd),
-                    )
-                }
-                BookActionPopupMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { onMenuExpandedChange(false) },
-                    onManage = {
-                        onMenuExpandedChange(false)
-                        onManage()
-                    },
-                    onExport = {
-                        onMenuExpandedChange(false)
-                        onExport()
-                    },
-                    onDelete = {
-                        onMenuExpandedChange(false)
-                        onDelete()
-                    },
+                LibrarySelectionBadge(
+                    visible = selectionMode,
+                    selected = selected,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(KixyuSpacing.extraSmall),
                 )
+                reorderHandle?.invoke(this)
             }
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -461,72 +447,42 @@ internal fun LibraryBookGridCard(
 }
 
 @Composable
-internal fun BookActionPopupMenu(
-    expanded: Boolean,
-    onDismissRequest: () -> Unit,
-    onManage: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit,
+private fun LibrarySelectionBadge(
+    visible: Boolean,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
 ) {
-    if (!expanded) return
-    val predictiveBackState = rememberKixyuPredictiveBackState<Unit>()
-    Popup(
-        alignment = Alignment.TopEnd,
-        onDismissRequest = onDismissRequest,
-        properties = PopupProperties(
-            focusable = false,
-            dismissOnBackPress = false,
-            dismissOnClickOutside = true,
-        ),
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn() + scaleIn(initialScale = .75f),
+        exit = fadeOut() + scaleOut(targetScale = .75f),
     ) {
-        KixyuPopupSurface(
-            modifier = Modifier.width(KixyuSize.contextMenuWidth)
-                .kixyuPredictivePopupTransform(predictiveBackState.progress),
-            backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
+        Surface(
+            modifier = Modifier.size(28.dp),
+            shape = CircleShape,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.surface.copy(alpha = .88f)
+            },
+            border = BorderStroke(
+                width = 2.dp,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            ),
         ) {
-            Column(Modifier.padding(vertical = 2.dp)) {
-                BookActionPopupMenuItem(stringResource(R.string.library_action_manage), KixyuSymbols.Edit, onManage)
-                BookActionPopupMenuItem(stringResource(R.string.library_action_export), KixyuSymbols.FileUpload, onExport)
-                KixyuDivider()
-                BookActionPopupMenuItem(
-                    stringResource(R.string.library_action_delete),
-                    KixyuSymbols.DeleteOutline,
-                    onDelete,
-                    destructive = true,
+            if (selected) {
+                Icon(
+                    imageVector = KixyuSymbols.Check,
+                    contentDescription = null,
+                    modifier = Modifier.padding(4.dp),
+                    tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
         }
-    }
-    KixyuPredictiveBackHandler(
-        target = Unit,
-        state = predictiveBackState,
-        onBack = { onDismissRequest() },
-    )
-}
-
-@Composable
-internal fun BookActionPopupMenuItem(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    destructive: Boolean = false,
-) {
-    val contentColor = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = KixyuSize.contextMenuItemHeight)
-            .clickable(onClick = onClick)
-            .padding(horizontal = KixyuSpacing.medium),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, Modifier.size(KixyuSize.iconSmall), tint = contentColor)
-        Spacer(Modifier.width(KixyuSpacing.small))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            color = contentColor,
-        )
     }
 }

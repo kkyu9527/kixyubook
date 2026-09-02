@@ -38,7 +38,11 @@ data class LibraryUiState(
     val hiddenOnly: Boolean = false,
 )
 
-data class BookExportEvent(val uriString: String)
+data class BookExportEvent(
+    val uriString: String,
+    val exportedCount: Int = 1,
+    val failedCount: Int = 0,
+)
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
@@ -205,6 +209,20 @@ class LibraryViewModel @Inject constructor(
             .onFailure { messages.send(it.message ?: "书籍导出失败") }
     }
 
+    fun exportBooks(bookUuids: Set<String>, directoryUriString: String) = viewModelScope.launch {
+        runCatching { repository.exportBooks(bookUuids, directoryUriString) }
+            .onSuccess { summary ->
+                exports.send(
+                    BookExportEvent(
+                        uriString = summary.directoryUri,
+                        exportedCount = summary.exportedCount,
+                        failedCount = summary.failedTitles.size,
+                    ),
+                )
+            }
+            .onFailure { messages.send(it.message ?: "批量导出失败") }
+    }
+
     fun delete(bookUuid: String) = viewModelScope.launch { repository.deleteBook(bookUuid) }
     fun deleteBooks(bookUuids: Set<String>) = viewModelScope.launch {
         if (bookUuids.isNotEmpty()) repository.deleteBooks(bookUuids)
@@ -214,6 +232,9 @@ class LibraryViewModel @Inject constructor(
             .onFailure { messages.send(it.message ?: "修改失败") }
     }
     fun setCategory(bookUuid: String, value: String) = viewModelScope.launch { repository.setCategory(bookUuid, value) }
+    fun setCategories(bookUuids: Set<String>, value: String) = viewModelScope.launch {
+        repository.setCategories(bookUuids, value)
+    }
 }
 
 internal fun sortLibraryBooks(

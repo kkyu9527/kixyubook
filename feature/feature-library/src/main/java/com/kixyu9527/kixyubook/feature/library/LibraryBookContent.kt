@@ -223,9 +223,6 @@ internal fun LibraryBookCollection(
     isSelected: (LibraryBook) -> Boolean,
     onOpen: (LibraryBook) -> Unit,
     onSelectionChange: (LibraryBook) -> Unit,
-    onManage: (LibraryBook) -> Unit,
-    onExport: (LibraryBook) -> Unit,
-    onDelete: (LibraryBook) -> Unit,
     onMoveBook: (String, String) -> Unit,
     onFinishReorder: () -> Unit,
 ) {
@@ -242,9 +239,6 @@ internal fun LibraryBookCollection(
             isSelected = isSelected,
             onOpen = onOpen,
             onSelectionChange = onSelectionChange,
-            onManage = onManage,
-            onExport = onExport,
-            onDelete = onDelete,
             onMoveBook = onMoveBook,
             onFinishReorder = onFinishReorder,
         )
@@ -252,13 +246,11 @@ internal fun LibraryBookCollection(
     }
     val lazyListState = rememberLazyListState()
     val hapticFeedback = LocalHapticFeedback.current
-    var menuBookUuid by remember { mutableStateOf<String?>(null) }
     var reorderMoved by remember { mutableStateOf(false) }
     val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val fromUuid = from.key as? String ?: return@rememberReorderableLazyListState
         val toUuid = to.key as? String ?: return@rememberReorderableLazyListState
         reorderMoved = true
-        menuBookUuid = null
         onMoveBook(fromUuid, toUuid)
         hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
@@ -275,59 +267,38 @@ internal fun LibraryBookCollection(
         items(books, key = { it.book.uuid }, contentType = { "book" }) { item ->
             ReorderableItem(reorderState, key = item.book.uuid, enabled = reorderEnabled) { dragging ->
                 val dragModifier = if (reorderEnabled) {
-                    val menuWasExpanded = menuBookUuid == item.book.uuid
                     val onDragStarted: (Offset) -> Unit = {
                         reorderMoved = false
-                        menuBookUuid = item.book.uuid
-                        hapticFeedback.performHapticFeedback(
-                            if (menuWasExpanded) {
-                                HapticFeedbackType.GestureThresholdActivate
-                            } else {
-                                HapticFeedbackType.LongPress
-                            },
-                        )
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                     }
-                    if (menuWasExpanded) {
-                        Modifier.draggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                } else {
-                                    menuBookUuid = null
-                                    onOpen(item)
-                                }
-                            },
-                        )
-                    } else {
-                        Modifier.longPressDraggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                }
-                            },
-                        )
-                    }
+                    Modifier.draggableHandle(
+                        onDragStarted = onDragStarted,
+                        onDragStopped = {
+                            if (reorderMoved) {
+                                onFinishReorder()
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                            }
+                        },
+                    )
                 } else Modifier
                 LibraryBookRow(
                     item = item,
                     selected = isSelected(item),
                     selectionMode = selectionMode,
-                    reorderEnabled = reorderEnabled,
-                    menuExpanded = menuBookUuid == item.book.uuid,
                     dragging = dragging,
                     onOpen = { onOpen(item) },
                     onSelectionChange = { onSelectionChange(item) },
-                    onManage = { onManage(item) },
-                    onExport = { onExport(item) },
-                    onDelete = { onDelete(item) },
-                    onMenuExpandedChange = { expanded ->
-                        menuBookUuid = item.book.uuid.takeIf { expanded }
+                    modifier = Modifier.animateItem(),
+                    reorderHandle = if (!reorderEnabled) null else {
+                        {
+                            Icon(
+                                imageVector = KixyuSymbols.DragHandle,
+                                contentDescription = stringResource(R.string.library_custom_sort_hint),
+                                modifier = dragModifier.size(48.dp).padding(KixyuSpacing.medium),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     },
-                    modifier = Modifier.animateItem().then(dragModifier),
                 )
             }
         }
@@ -348,26 +319,21 @@ internal fun LibraryBookGrid(
     isSelected: (LibraryBook) -> Boolean,
     onOpen: (LibraryBook) -> Unit,
     onSelectionChange: (LibraryBook) -> Unit,
-    onManage: (LibraryBook) -> Unit,
-    onExport: (LibraryBook) -> Unit,
-    onDelete: (LibraryBook) -> Unit,
     onMoveBook: (String, String) -> Unit,
     onFinishReorder: () -> Unit,
 ) {
     val lazyGridState = rememberLazyGridState()
     val hapticFeedback = LocalHapticFeedback.current
-    var menuBookUuid by remember { mutableStateOf<String?>(null) }
     var reorderMoved by remember { mutableStateOf(false) }
     val reorderState = rememberReorderableLazyGridState(lazyGridState) { from, to ->
         val fromUuid = from.key as? String ?: return@rememberReorderableLazyGridState
         val toUuid = to.key as? String ?: return@rememberReorderableLazyGridState
         reorderMoved = true
-        menuBookUuid = null
         onMoveBook(fromUuid, toUuid)
         hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
     LazyVerticalGrid(
-        columns = if (adaptiveGrid) GridCells.Adaptive(112.dp) else GridCells.Fixed(2),
+        columns = if (adaptiveGrid) GridCells.Adaptive(112.dp) else GridCells.Fixed(3),
         modifier = modifier,
         state = lazyGridState,
         contentPadding = contentPadding,
@@ -383,59 +349,41 @@ internal fun LibraryBookGrid(
         gridItems(books, key = { it.book.uuid }, contentType = { "book_grid" }) { item ->
             ReorderableItem(reorderState, key = item.book.uuid, enabled = reorderEnabled) { dragging ->
                 val dragModifier = if (reorderEnabled) {
-                    val menuWasExpanded = menuBookUuid == item.book.uuid
                     val onDragStarted: (Offset) -> Unit = {
                         reorderMoved = false
-                        menuBookUuid = item.book.uuid
-                        hapticFeedback.performHapticFeedback(
-                            if (menuWasExpanded) {
-                                HapticFeedbackType.GestureThresholdActivate
-                            } else {
-                                HapticFeedbackType.LongPress
-                            },
-                        )
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                     }
-                    if (menuWasExpanded) {
-                        Modifier.draggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                } else {
-                                    menuBookUuid = null
-                                    onOpen(item)
-                                }
-                            },
-                        )
-                    } else {
-                        Modifier.longPressDraggableHandle(
-                            onDragStarted = onDragStarted,
-                            onDragStopped = {
-                                if (reorderMoved) {
-                                    onFinishReorder()
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                }
-                            },
-                        )
-                    }
+                    Modifier.draggableHandle(
+                        onDragStarted = onDragStarted,
+                        onDragStopped = {
+                            if (reorderMoved) {
+                                onFinishReorder()
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                            }
+                        },
+                    )
                 } else Modifier
                 LibraryBookGridCard(
                     item = item,
                     selected = isSelected(item),
                     selectionMode = selectionMode,
-                    reorderEnabled = reorderEnabled,
-                    menuExpanded = menuBookUuid == item.book.uuid,
                     dragging = dragging,
                     onOpen = { onOpen(item) },
                     onSelectionChange = { onSelectionChange(item) },
-                    onManage = { onManage(item) },
-                    onExport = { onExport(item) },
-                    onDelete = { onDelete(item) },
-                    onMenuExpandedChange = { expanded ->
-                        menuBookUuid = item.book.uuid.takeIf { expanded }
+                    modifier = Modifier.animateItem(),
+                    reorderHandle = if (!reorderEnabled) null else {
+                        {
+                            Icon(
+                                imageVector = KixyuSymbols.DragHandle,
+                                contentDescription = stringResource(R.string.library_custom_sort_hint),
+                                modifier = dragModifier
+                                    .align(Alignment.TopStart)
+                                    .size(48.dp)
+                                    .padding(KixyuSpacing.medium),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     },
-                    modifier = Modifier.animateItem().then(dragModifier),
                 )
             }
         }

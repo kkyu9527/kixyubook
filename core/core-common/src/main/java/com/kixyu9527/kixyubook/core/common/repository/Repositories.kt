@@ -13,6 +13,8 @@ interface BookRepository {
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
     /** Exports a UTF-8 reading copy with every valid personal correction applied. */
     suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit>
+    /** Exports multiple corrected reading copies into one user-selected document tree. */
+    suspend fun exportBooks(bookUuids: Set<String>, directoryUriString: String): BookExportSummary
     /** Restores an immutable source blob while preserving its permanent book UUID. */
     suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean
     suspend fun deleteBook(bookUuid: String)
@@ -39,6 +41,7 @@ interface BookRepository {
     suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String)
     suspend fun reparseTxt(bookUuid: String): Result<Unit>
     suspend fun setCategory(bookUuid: String, category: String)
+    suspend fun setCategories(bookUuids: Set<String>, category: String)
     fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>>
     suspend fun addBookmark(bookmark: Bookmark)
     suspend fun deleteBookmark(bookmarkUuid: String)

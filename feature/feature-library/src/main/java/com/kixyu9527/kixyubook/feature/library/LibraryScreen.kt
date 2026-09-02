@@ -60,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -104,6 +105,8 @@ import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuContextualAction
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuContextualBarState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
@@ -116,6 +119,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuContextualBarController
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
@@ -142,6 +146,8 @@ fun LibraryRoute(
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val exportedMessage = stringResource(R.string.library_exported)
+    val exportedManyMessage = stringResource(R.string.library_exported_many)
+    val exportedPartialMessage = stringResource(R.string.library_exported_partial)
     val viewExportAction = stringResource(R.string.library_open_export_location)
     val openExportFailedMessage = stringResource(R.string.library_open_export_failed)
     val snackbar = remember { SnackbarHostState() }
@@ -149,6 +155,12 @@ fun LibraryRoute(
         viewModel.import(uris.map { it.toString() })
     }
     var pendingExportBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    val stringSetSaver = remember {
+        Saver<Set<String>, List<String>>(save = { it.toList() }, restore = { it.toSet() })
+    }
+    var pendingBatchExportBookUuids by rememberSaveable(stateSaver = stringSetSaver) {
+        mutableStateOf(emptySet())
+    }
     val exportTxt = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         val bookUuid = pendingExportBookUuid
         pendingExportBookUuid = null
@@ -158,6 +170,23 @@ fun LibraryRoute(
         pendingExportBookUuid = item.book.uuid
         val fileName = exportFileName(item)
         exportTxt.launch(fileName)
+    }
+    val exportDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        val bookUuids = pendingBatchExportBookUuids
+        pendingBatchExportBookUuids = emptySet()
+        if (uri != null && bookUuids.isNotEmpty()) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.exportBooks(bookUuids, uri.toString())
+        }
+    }
+    val beginBatchExport: (Set<String>) -> Unit = { bookUuids ->
+        pendingBatchExportBookUuids = bookUuids
+        exportDirectory.launch(null)
     }
     LaunchedEffect(externalImportRequestId) {
         val requestId = externalImportRequestId ?: return@LaunchedEffect
@@ -170,8 +199,13 @@ fun LibraryRoute(
     LaunchedEffect(Unit) { viewModel.messageEvents.collect { if (it.isNotBlank()) snackbar.showSnackbar(it) } }
     LaunchedEffect(Unit) {
         viewModel.exportEvents.collect { event ->
+            val message = when {
+                event.failedCount > 0 -> exportedPartialMessage.format(event.exportedCount, event.failedCount)
+                event.exportedCount > 1 -> exportedManyMessage.format(event.exportedCount)
+                else -> exportedMessage
+            }
             val result = snackbar.showSnackbar(
-                message = exportedMessage,
+                message = message,
                 actionLabel = viewExportAction,
                 withDismissAction = true,
                 duration = SnackbarDuration.Long,
@@ -199,8 +233,10 @@ fun LibraryRoute(
         onDelete = viewModel::delete,
         onDeleteMany = viewModel::deleteBooks,
         onExport = beginExport,
+        onExportMany = beginBatchExport,
         onUpdateMetadata = viewModel::updateMetadata,
         onSetCategory = viewModel::setCategory,
+        onSetCategories = viewModel::setCategories,
         onDropDocuments = { uris, releasePermission ->
             viewModel.import(uris) { releasePermission?.invoke() }
         },
@@ -228,8 +264,10 @@ private fun LibraryScreen(
     onDelete: (String) -> Unit,
     onDeleteMany: (Set<String>) -> Unit,
     onExport: (LibraryBook) -> Unit,
+    onExportMany: (Set<String>) -> Unit,
     onUpdateMetadata: (String, String, String, String) -> Unit,
     onSetCategory: (String, String) -> Unit,
+    onSetCategories: (Set<String>, String) -> Unit,
     onDropDocuments: (List<String>, (() -> Unit)?) -> Unit,
     onClearImportProgress: () -> Unit,
 ) {
@@ -238,18 +276,24 @@ private fun LibraryScreen(
     var optionsExpanded by rememberSaveable { mutableStateOf(false) }
     var displayDialogVisible by rememberSaveable { mutableStateOf(false) }
     var categoryDialogVisible by rememberSaveable { mutableStateOf(false) }
-    var selectionMode by rememberSaveable { mutableStateOf(false) }
     val stringSetSaver = remember {
         Saver<Set<String>, List<String>>(save = { it.toList() }, restore = { it.toSet() })
     }
     var selectedBookUuids by rememberSaveable(stateSaver = stringSetSaver) { mutableStateOf(emptySet()) }
     var confirmingBatchDelete by rememberSaveable { mutableStateOf(false) }
+    var batchCategoryDialogVisible by rememberSaveable { mutableStateOf(false) }
     var importDialogVisible by rememberSaveable { mutableStateOf(false) }
     var previewBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
     val managing = state.books.firstOrNull { it.book.uuid == managingUuid }
     val deleting = state.books.firstOrNull { it.book.uuid == deletingUuid }
     val visibleBookUuids = state.books.mapTo(linkedSetOf()) { it.book.uuid }
+    val selectionMode = selectedBookUuids.isNotEmpty()
+    val selectedBooks = state.books.filter { it.book.uuid in selectedBookUuids }
+    val clearSelection: () -> Unit = { selectedBookUuids = emptySet() }
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
+    val contextualBarController = LocalKixyuContextualBarController.current
+    val contextualBarOwner = remember { Any() }
+    val selectionBackState = rememberKixyuPredictiveBackState<Unit>()
     val expanded = kixyuWindowSizeClass().supportsTwoPane
     val activity = LocalContext.current.findActivity()
     val latestDropDocuments by rememberUpdatedState(onDropDocuments)
@@ -260,6 +304,77 @@ private fun LibraryScreen(
         selectionMode -> stringResource(R.string.library_selected_count, selectedBookUuids.size)
         state.hiddenOnly -> stringResource(R.string.library_hidden_title)
         else -> stringResource(R.string.library_title)
+    }
+    val categoryActionLabel = stringResource(R.string.library_action_category)
+    val exportActionLabel = stringResource(R.string.library_action_export)
+    val editActionLabel = stringResource(R.string.library_action_edit)
+    val deleteActionLabel = stringResource(R.string.library_action_delete)
+    val categoryActionIcon = KixyuSymbols.Category
+    val exportActionIcon = KixyuSymbols.FileUpload
+    val editActionIcon = KixyuSymbols.Edit
+    val deleteActionIcon = KixyuSymbols.DeleteOutline
+    val contextualBarState = remember(
+        selectedBookUuids,
+        selectedBooks,
+        categoryActionLabel,
+        exportActionLabel,
+        editActionLabel,
+        deleteActionLabel,
+        categoryActionIcon,
+        exportActionIcon,
+        editActionIcon,
+        deleteActionIcon,
+    ) {
+        if (!selectionMode) return@remember null
+        KixyuContextualBarState(
+            actions = buildList {
+                if (selectedBookUuids.size == 1) {
+                    add(
+                        KixyuContextualAction(
+                            key = "edit",
+                            label = editActionLabel,
+                            icon = editActionIcon,
+                        ) {
+                            managingUuid = selectedBookUuids.single()
+                            clearSelection()
+                        },
+                    )
+                }
+                add(
+                    KixyuContextualAction(
+                        key = "category",
+                        label = categoryActionLabel,
+                        icon = categoryActionIcon,
+                    ) { batchCategoryDialogVisible = true },
+                )
+                add(
+                    KixyuContextualAction(
+                        key = "export",
+                        label = exportActionLabel,
+                        icon = exportActionIcon,
+                    ) {
+                        if (selectedBooks.size == 1) onExport(selectedBooks.single())
+                        else onExportMany(selectedBookUuids)
+                        clearSelection()
+                    },
+                )
+                add(
+                    KixyuContextualAction(
+                        key = "delete",
+                        label = deleteActionLabel,
+                        icon = deleteActionIcon,
+                        destructive = true,
+                    ) { confirmingBatchDelete = true },
+                )
+            },
+            backProgress = { selectionBackState.progress },
+        )
+    }
+    if (contextualBarController != null && contextualBarState != null) {
+        DisposableEffect(contextualBarController, contextualBarOwner, contextualBarState) {
+            contextualBarController.show(contextualBarOwner, contextualBarState)
+            onDispose { contextualBarController.clear(contextualBarOwner) }
+        }
     }
     val dropTarget = remember(activity) {
         object : DragAndDropTarget {
@@ -280,7 +395,6 @@ private fun LibraryScreen(
     }
     LaunchedEffect(visibleBookUuids) {
         selectedBookUuids = selectedBookUuids.intersect(visibleBookUuids)
-        if (visibleBookUuids.isEmpty()) selectionMode = false
         if (previewBookUuid !in visibleBookUuids) previewBookUuid = state.books.firstOrNull()?.book?.uuid
     }
     KixyuPageScaffold(
@@ -306,10 +420,7 @@ private fun LibraryScreen(
         navigationIcon = {
             when {
                 selectionMode -> KixyuIconButton(
-                    onClick = {
-                        selectionMode = false
-                        selectedBookUuids = emptySet()
-                    },
+                    onClick = clearSelection,
                 ) {
                     Icon(KixyuSymbols.Close, stringResource(R.string.library_exit_selection))
                 }
@@ -327,10 +438,6 @@ private fun LibraryScreen(
                         } else visibleBookUuids
                     },
                 ) { Icon(KixyuSymbols.SelectAll, stringResource(R.string.library_select_all)) }
-                KixyuIconButton(
-                    onClick = { confirmingBatchDelete = true },
-                    enabled = selectedBookUuids.isNotEmpty(),
-                ) { Icon(KixyuSymbols.DeleteSweep, stringResource(R.string.library_delete_selected)) }
             } else {
                 if (importProgress != null) {
                     KixyuIconButton(onClick = { importDialogVisible = true }) {
@@ -371,15 +478,6 @@ private fun LibraryScreen(
                             ) {
                                 optionsExpanded = false
                                 categoryDialogVisible = true
-                            },
-                            KixyuPopupMenuItem(
-                                label = stringResource(R.string.library_bulk_select),
-                                icon = KixyuSymbols.SelectAll,
-                                enabled = state.books.isNotEmpty(),
-                            ) {
-                                optionsExpanded = false
-                                selectedBookUuids = emptySet()
-                                selectionMode = true
                             },
                         ),
                     )
@@ -424,22 +522,15 @@ private fun LibraryScreen(
                             else previewBookUuid = item.book.uuid
                         },
                         onSelectionChange = { item ->
-                            if (selectionMode) {
-                                selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
-                            } else {
-                                selectionMode = true
-                                selectedBookUuids = setOf(item.book.uuid)
-                            }
+                            selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
                         },
-                        onManage = { managingUuid = it.book.uuid },
-                        onExport = onExport,
-                        onDelete = { deletingUuid = it.book.uuid },
                         onMoveBook = onMoveBook,
                         onFinishReorder = onFinishReorder,
                     )
                 }
                 LibraryBookDetailPane(
                     item = state.books.firstOrNull { it.book.uuid == previewBookUuid },
+                    selectionCount = selectedBookUuids.size,
                     onOpen = onOpenBook,
                     onManage = { managingUuid = it },
                     onExport = { book -> onExport(book) },
@@ -469,22 +560,19 @@ private fun LibraryScreen(
                     else onOpenBook(item.book.uuid)
                 },
                 onSelectionChange = { item ->
-                    if (selectionMode) {
-                        selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
-                    } else {
-                        selectionMode = true
-                        selectedBookUuids = setOf(item.book.uuid)
-                    }
+                    selectedBookUuids = selectedBookUuids.toggle(item.book.uuid)
                 },
-                onManage = { managingUuid = it.book.uuid },
-                onExport = onExport,
-                onDelete = { deletingUuid = it.book.uuid },
                 onMoveBook = onMoveBook,
                 onFinishReorder = onFinishReorder,
             )
         }
     }
 
+    KixyuPredictiveBackHandler(
+        target = Unit.takeIf { selectionMode },
+        state = selectionBackState,
+        onBack = { clearSelection() },
+    )
     managing?.let { item ->
         BookManagementDialog(
             item = item,
@@ -514,10 +602,21 @@ private fun LibraryScreen(
             onConfirm = {
                 onDeleteMany(selectedBookUuids)
                 confirmingBatchDelete = false
-                selectionMode = false
-                selectedBookUuids = emptySet()
+                clearSelection()
             },
         ) { Text(stringResource(R.string.library_delete_explanation)) }
+    }
+    if (batchCategoryDialogVisible) {
+        BatchCategoryDialog(
+            selectedCount = selectedBookUuids.size,
+            categories = state.allCategories,
+            onDismiss = { batchCategoryDialogVisible = false },
+            onConfirm = { category ->
+                onSetCategories(selectedBookUuids, category)
+                batchCategoryDialogVisible = false
+                clearSelection()
+            },
+        )
     }
     if (displayDialogVisible) {
         LibraryDisplayDialog(

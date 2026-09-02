@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -8,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -38,15 +40,19 @@ import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuContextualActionBar
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuContextualBarController
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBar
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuContextualBarController
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageEnterTransition
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageExitTransition
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdrop
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
 import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuPredictiveBackState
@@ -113,6 +119,8 @@ internal fun KixyuNavDisplay(
     var bookReorderAfterReaderExitJob by remember { mutableStateOf<Job?>(null) }
     var releaseNotesVisible by rememberSaveable { mutableStateOf(false) }
     var diagnosticOnlyFailures by rememberSaveable { mutableStateOf(false) }
+    val contextualBarController = remember { KixyuContextualBarController() }
+    val contextualBarState = contextualBarController.state
     LaunchedEffect(pagerState, top) {
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
@@ -131,7 +139,7 @@ internal fun KixyuNavDisplay(
     // Home, Library and Settings are sibling pages inside the single HOME destination. At that
     // level Back exits the task; it must never pop an accidentally restored detail/reader entry.
     KixyuPredictiveBackHandler(
-        target = Unit.takeIf { topLevelActive },
+        target = Unit.takeIf { topLevelActive && contextualBarState == null },
         state = topLevelBackState,
         onBack = { onExitApp() },
     )
@@ -184,7 +192,7 @@ internal fun KixyuNavDisplay(
     // The bar is an overlay outside NavDisplay. During predictive back the
     // destination underneath can therefore occupy the full window; the bar is
     // introduced only after the pop has committed to a top-level destination.
-    val showBar = topLevelActive
+    val showBar = topLevelActive || contextualBarState != null
     // Delay its return until the top-level destination has committed. On exit,
     // AnimatedVisibility removes the bar after the short transition so an
     // invisible navigation item cannot intercept touches on secondary pages.
@@ -251,6 +259,7 @@ internal fun KixyuNavDisplay(
     }
     CompositionLocalProvider(
         LocalKixyuGlassBackdrop provides navigationBackdrop,
+        LocalKixyuContextualBarController provides contextualBarController,
         LocalKixyuNavigationContentPadding provides KixyuSize.bottomNavigationContentHeight,
     ) {
         // Keep task content opaque while Android owns the app-to-home predictive animation.
@@ -334,13 +343,32 @@ internal fun KixyuNavDisplay(
                 exit = fadeOut(tween(100)) + slideOutVertically(tween(100)) { height -> height / 8 },
             ) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    KixyuNavigationBar(
-                        items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
-                        selectedKey = top.getOrNull(pagerState.settledPage)?.route,
-                        enabled = bottomBarPresented,
-                        onSelected = selectTopDestination,
-                        backdrop = navigationBackdrop,
-                    )
+                    AnimatedContent(
+                        targetState = contextualBarState,
+                        transitionSpec = {
+                            fadeIn(tween(140)) togetherWith fadeOut(tween(100))
+                        },
+                        contentKey = { it != null },
+                        label = "bottomBarMode",
+                    ) { contextual ->
+                        if (contextual == null) {
+                            KixyuNavigationBar(
+                                items = top.map { KixyuNavigationItem(it.route, it.label, it.icon) },
+                                selectedKey = top.getOrNull(pagerState.settledPage)?.route,
+                                enabled = bottomBarPresented,
+                                onSelected = selectTopDestination,
+                                backdrop = navigationBackdrop,
+                            )
+                        } else {
+                            KixyuContextualActionBar(
+                                actions = contextual.actions,
+                                backdrop = navigationBackdrop,
+                                modifier = Modifier.kixyuPredictivePopupTransform(
+                                    contextual.backProgress(),
+                                ),
+                            )
+                        }
+                    }
                 }
             }
             ReleaseNotesModal(
