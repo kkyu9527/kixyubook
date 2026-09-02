@@ -114,7 +114,7 @@ internal fun PagedReader(
         }
     }
     val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
-    val nextPagination = nextChapter?.takeUnless { resourcePriorityActive }?.let {
+    val nextPagination = nextChapter?.let {
         rememberMeasuredReaderPages(
             chapter = it,
             contentHash = state.book?.contentHash.orEmpty(),
@@ -131,7 +131,7 @@ internal fun PagedReader(
     } ?: ReaderPaginationSnapshot()
     val nextPages = nextPagination.pages
     val previousChapter = state.prefetchedChapters[state.chapterIndex - 1]
-    val previousPagination = previousChapter?.takeUnless { resourcePriorityActive }?.let {
+    val previousPagination = previousChapter?.let {
         rememberMeasuredReaderPages(
             chapter = it,
             contentHash = state.book?.contentHash.orEmpty(),
@@ -210,7 +210,10 @@ internal fun PagedReader(
         initialPage = desiredSpreadIndex,
         pageCount = { pagerSpreads.size },
     )
-    val turnRequests = remember { Channel<Int>(Channel.UNLIMITED) }
+    // Programmatic turns intentionally have no backlog. Mature readers keep finger dragging
+    // interruptible and ignore repeated tap/key turns while an accepted animation is running;
+    // replaying an unlimited queue after the finger has taken over makes the page feel sticky.
+    val turnRequests = remember { Channel<Int>(Channel.RENDEZVOUS) }
     var lastWheelTurnAt by remember { mutableLongStateOf(0L) }
     var settledSpreadKey by remember { mutableStateOf(desiredSpreadKey) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
@@ -318,7 +321,7 @@ internal fun PagedReader(
     }
     LaunchedEffect(pager, volumeTurns, turnRequests) {
         launch {
-            volumeTurns.collect { direction -> turnRequests.send(direction) }
+            volumeTurns.collect { direction -> turnRequests.trySend(direction) }
         }
         for (direction in turnRequests) {
             dismissControls()
@@ -327,20 +330,13 @@ internal fun PagedReader(
             val target = (pager.settledPage + direction).coerceIn(0, spreads.lastIndex)
             when {
                 target != pager.settledPage -> {
-                    var settled = false
-                    while (!settled) {
-                        try {
-                            pager.animateScrollToPage(target)
-                            settled = true
-                        } catch (cancellation: CancellationException) {
-                            if (!currentCoroutineContext().isActive) throw cancellation
-                            // Pointer input owns Pager's MutatorMutex until that gesture finishes.
-                            // Retry this accepted turn on the next frame instead of racing it with
-                            // scrollToPage (which can be cancelled a second time and kill the
-                            // consumer). Newer turns remain ordered in the channel behind it.
-                            withFrameNanos { }
-                            settled = pager.settledPage == target
-                        }
+                    try {
+                        pager.animateScrollToPage(target)
+                    } catch (cancellation: CancellationException) {
+                        if (!currentCoroutineContext().isActive) throw cancellation
+                        // A direct finger gesture has higher priority than a tap/key animation.
+                        // Leave the Pager at the user's gesture state instead of retrying a stale
+                        // destination and fighting the next rapid swipe.
                     }
                 }
                 direction < 0 && readerState.chapterIndex > 0 -> Unit
@@ -402,9 +398,11 @@ internal fun PagedReader(
                 .observePagerTap(
                     onTapFraction = { fraction -> pagerTap(fraction) },
                 ),
-            // Only one already-measured neighbour is precomposed. This keeps the gesture surface
-            // continuous without laying out the entire retained chapter window.
-            beyondViewportPageCount = if (resourcePriorityActive) 0 else 1,
+            // Keep exactly one measured neighbour attached even while a turn is running. Dropping
+            // this to zero in response to isScrollInProgress changes the Pager's composition
+            // window during the gesture and makes a fast follow-up turn stick or spring back.
+            // Parsing and distant prefetch are paused separately; this leaf is already prepared.
+            beyondViewportPageCount = 1,
             key = { virtualPage -> pagerSpreads[virtualPage].key },
         ) { virtualPage ->
             val spread = pagerSpreads[virtualPage]
