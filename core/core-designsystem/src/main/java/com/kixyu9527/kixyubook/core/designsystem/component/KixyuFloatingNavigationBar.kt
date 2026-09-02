@@ -199,19 +199,22 @@ internal fun KixyuFloatingNavigationBar(
                             highlight = {
                                 kixyuFrostedGlassHighlight(
                                     frostLevel = frostLevel,
-                                    alphaMultiplier = pressProgress,
+                                    // A resting selection is still a raised glass lens. Pressing
+                                    // only strengthens the highlight and refraction.
+                                    alphaMultiplier = lerp(.55f, 1f, pressProgress),
                                 )
                             },
                             onDrawSurface = {
                                 drawKixyuGlassIndicatorVeil(
                                     isDark = isDark,
+                                    accentColor = accentColor,
                                     frostFraction = frostFraction,
                                     pressProgress = pressProgress,
                                 )
                             },
                         )
                     } else {
-                        Modifier.background(accentColor.copy(alpha = 0.15f), shape)
+                        Modifier.background(accentColor.copy(alpha = 0.18f), shape)
                     },
                 ),
         )

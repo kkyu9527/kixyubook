@@ -64,6 +64,8 @@ private object KixyuGlassStyle {
     const val PopupHighlightBottomAlpha = .04f
     const val DarkIndicatorVeilAlpha = .14f
     const val LightIndicatorVeilAlpha = .22f
+    const val DarkIndicatorAccentAlpha = .20f
+    const val LightIndicatorAccentAlpha = .14f
     const val PressedIndicatorShadeAlpha = .03f
     val ShadowRadius = 10.dp
 
@@ -140,9 +142,23 @@ internal fun kixyuFrostedGlassHighlight(
 /** Shared interaction veil for the navigation selection lens; no visual tokens live at call sites. */
 internal fun DrawScope.drawKixyuGlassIndicatorVeil(
     isDark: Boolean,
+    accentColor: Color,
     frostFraction: Float,
     pressProgress: Float,
 ) {
+    // The selected tab must remain identifiable even when the user sets frost to 0%. Keep this
+    // tint independent from the blur/veil amount: it behaves like colored glass rather than an
+    // opaque Material selection pill, while the page still remains visible through it.
+    drawRect(
+        color = accentColor.copy(
+            alpha = if (isDark) {
+                KixyuGlassStyle.DarkIndicatorAccentAlpha
+            } else {
+                KixyuGlassStyle.LightIndicatorAccentAlpha
+            },
+        ),
+        alpha = 1f - pressProgress * .18f,
+    )
     drawRect(
         color = Color.White.copy(
             alpha = (if (isDark) {
