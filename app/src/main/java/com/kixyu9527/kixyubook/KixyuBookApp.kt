@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook
 
+import android.os.Build
 import android.view.ViewTreeObserver
 import android.view.Window
 import androidx.compose.animation.core.Animatable
@@ -46,6 +47,15 @@ import kotlinx.coroutines.delay
 
 private const val NAVIGATION_PREFERENCES = "navigation_state"
 private const val LAST_TOP_LEVEL_ROUTE = "last_top_level_route"
+
+@Suppress("DEPRECATION")
+internal fun Window.disableSystemBarContrastProtection() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+    // Deprecated on newer platform releases because edge-to-edge is enforced there, but still
+    // required on API 29-34 and by some vendor SystemUI implementations during transient reveal.
+    isStatusBarContrastEnforced = false
+    isNavigationBarContrastEnforced = false
+}
 
 @Composable
 internal fun KixyuBookApp(
@@ -147,6 +157,10 @@ internal fun KixyuBookApp(
     }
     val applySystemBars by rememberUpdatedState(newValue = {
         val policy = systemBarPolicy
+        // HyperOS can restore contrast protection when transient bars are revealed from an
+        // immersive screen. Reassert the window contract together with every visibility update,
+        // so an edge swipe and an in-app controls tap render the same transparent system bars.
+        window.disableSystemBarContrastProtection()
         systemBarController.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         systemBarController.isAppearanceLightStatusBars = policy?.useDarkIcons ?: !darkTheme

@@ -47,9 +47,7 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.auto(Color.Transparent.toArgb(), Color.Transparent.toArgb()),
             navigationBarStyle = SystemBarStyle.auto(Color.Transparent.toArgb(), Color.Transparent.toArgb()),
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isNavigationBarContrastEnforced = false
-        }
+        window.disableSystemBarContrastProtection()
         super.onCreate(savedInstanceState)
         splashScreen.setKeepOnScreenCondition { appViewModel.settings.value == null }
         // Suppress action-needed notifications while this new window is becoming visible. The
