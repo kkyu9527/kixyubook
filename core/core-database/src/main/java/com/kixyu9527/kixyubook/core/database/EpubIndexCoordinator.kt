@@ -36,6 +36,8 @@ internal class EpubIndexCoordinator(
     // Background indexing owns a separate parser so a cooperatively cancelled XML parse can never
     // mutate the foreground reader's package or stylesheet caches.
     private val backgroundParser = EpubBookParser()
+    private val searchParser = EpubBookParser()
+    private val searchIndexMutex = Mutex()
 
     /** EPUB outlines are derived data. Add newly recognized publisher volume pages in place. */
     suspend fun upgradeDirectoryDataIfNeeded() {
@@ -146,7 +148,7 @@ internal class EpubIndexCoordinator(
         val startedAt = SystemClock.elapsedRealtime()
         val initialBook = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name }
             ?: return@withContext
-        val requested = dao.getUnindexedChapters(bookUuid).size
+        val requested = dao.getUnindexedChapterCount(bookUuid)
         if (requested == 0) return@withContext
         var indexed = 0
         var preempted = 0
@@ -154,7 +156,7 @@ internal class EpubIndexCoordinator(
         try {
             while (true) {
                 val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name } ?: break
-                val target = dao.getUnindexedChapters(bookUuid).firstOrNull() ?: break
+                val target = dao.getNextUnindexedChapter(bookUuid) ?: break
                 activeChapterIndex = target.chapterIndex
                 var parsed: DocumentChapter? = null
                 val completed = parseCoordinator.background {
@@ -233,11 +235,67 @@ internal class EpubIndexCoordinator(
             val nextBook = dao.getBooksPendingEpubIndex().firstOrNull() ?: return@withContext
             continueIndex(nextBook)
         }
-    }}
+    }
+
+    /** Makes one reading-order resource searchable without blocking on the rest of the book. */
+    suspend fun ensureChapterIndexedForSearch(
+        bookUuid: String,
+        chapterIndex: Int,
+    ): ChapterEntity? = withContext(Dispatchers.IO) {
+        searchIndexMutex.withLock {
+            val initialBook = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name }
+                ?: return@withLock dao.getChapter(bookUuid, chapterIndex)
+            val target = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
+            if (target.indexed) return@withLock target
+            val cached = chapterCache.read(bookUuid, initialBook.contentHash, chapterIndex)
+            val parsed = try {
+                cached ?: parseCoordinator.interactive {
+                    searchParser.readChapter(
+                        File(initialBook.storagePath),
+                        chapterIndex,
+                        target.title,
+                        purpose = "search",
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                val failure = error.toDiagnosticFailure()
+                DiagnosticLog.record(
+                    Category.EPUB_PARSE,
+                    "search_index_chapter_failed",
+                    outcome = failure.outcome,
+                    details = mapOf(
+                        "book" to bookUuid.shortIndexDiagnosticId(),
+                        "chapter" to chapterIndex,
+                        "reason" to failure.reason,
+                    ),
+                )
+                return@withLock target
+            }
+            val committed = chapterLoadMutex.withLock {
+                val currentBook = dao.getBook(bookUuid)
+                val current = dao.getChapter(bookUuid, chapterIndex)
+                if (currentBook?.contentHash != initialBook.contentHash || current == null) {
+                    return@withLock false
+                }
+                if (!current.indexed) {
+                    if (parsed == null) dao.markChapterIndexed(current.id, current.title)
+                    else dao.replaceChapterIndex(current.id, parsed.title, parsed.paragraphs)
+                }
+                true
+            }
+            if (!committed) return@withLock null
+            if (parsed != null && cached == null) {
+                chapterCache.write(bookUuid, initialBook.contentHash, chapterIndex, parsed)
+            }
+            dao.getChapter(bookUuid, chapterIndex)
+        }
+    }
+}
 
 private const val KEY_EPUB_DIRECTORY_VERSION = "epub_directory_version"
 private const val EPUB_DIRECTORY_VERSION = 2
-
 private fun String.shortIndexDiagnosticId(): String = take(8)
 
 private fun stableIndexChapterKey(bookUuid: String, index: Int, title: String): String {

@@ -5,4 +5,8 @@
     <include domain="file" path="datastore/" />
     <include domain="file" path="fonts/" />
     <include domain="sharedpref" path="." />
+    <!-- Never restore per-install sync identity, Drive cursors, or resumable upload URLs onto a
+         different installation. User content is restored by the app-owned Drive protocol. -->
+    <exclude domain="file" path="datastore/cloud_sync.preferences_pb" />
+    <exclude domain="sharedpref" path="drive_resumable_uploads.xml" />
 </full-backup-content>

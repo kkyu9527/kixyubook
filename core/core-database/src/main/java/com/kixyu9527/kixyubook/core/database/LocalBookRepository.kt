@@ -10,6 +10,7 @@ import androidx.room.withTransaction
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.CompleteLibraryRepository
@@ -26,6 +27,7 @@ import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
+import com.kixyu9527.kixyubook.core.database.dao.ImportDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
 import com.kixyu9527.kixyubook.core.reader.engine.BookParser
@@ -35,23 +37,20 @@ import com.kixyu9527.kixyubook.core.reader.engine.ReaderPaginationCacheMaintenan
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -73,6 +72,7 @@ class LocalBookRepository @Inject constructor(
     private val syncMutations: SyncMutationRecorder,
     private val textCorrections: TextCorrectionRepository,
     private val annotations: ReaderAnnotationRepository,
+    private val importDao: ImportDao,
 ) : BookRepository, CompleteLibraryRepository, MemoryPressureListener {
     private val parsers = BookParserRegistry()
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
@@ -84,12 +84,14 @@ class LocalBookRepository @Inject constructor(
     private val chapterCacheLock = Any()
     private val chapterLoadMutex = Mutex()
     private val storageMutationMutex = Mutex()
-    private val importIndexSemaphore = Semaphore(IMPORT_INDEX_CONCURRENCY)
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val importIndexJobs = ConcurrentHashMap<String, Job>()
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
-    private val _importProgress = MutableStateFlow<ImportProgress?>(null)
-    override val importProgress = _importProgress.asStateFlow()
+    private val canceledImportRuns = ConcurrentHashMap.newKeySet<String>()
+    override val importProgress = importDao.observeLatestRun()
+        .map { items ->
+            items.toImportRuns().firstOrNull()
+        }
+        .stateIn(importScope, SharingStarted.Eagerly, null)
     private val openedAtOverrides = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val activityClock = LibraryActivityClock()
     private val workManager by lazy(LazyThreadSafetyMode.NONE) { WorkManager.getInstance(context) }
@@ -158,8 +160,47 @@ class LocalBookRepository @Inject constructor(
 
     override fun observeImportEvents(): Flow<String> = importEvents.asSharedFlow()
 
+    override fun observeImportHistory(): Flow<List<ImportProgress>> =
+        importDao.observeHistory().map(List<ImportItemEntity>::toImportRuns)
+
     override fun clearFinishedImportProgress() {
-        _importProgress.update { current -> current?.takeUnless(ImportProgress::finished) }
+        val current = importProgress.value?.takeIf(ImportProgress::finished) ?: return
+        importScope.launch { importDao.deleteRun(current.runId) }
+    }
+
+    override suspend fun clearImportHistory() = withContext(Dispatchers.IO) {
+        require(importProgress.value?.finished != false) { "导入进行中，不能清空记录" }
+        importDao.deleteAll()
+    }
+
+    override suspend fun retryImport(runId: String): ImportSummary = withContext(Dispatchers.IO) {
+        val retryUris = importDao.getRun(runId)
+            .filter { it.status in setOf(ImportItemStatus.FAILED.name, ImportItemStatus.CANCELED.name) }
+            .map(ImportItemEntity::sourceId)
+        if (retryUris.isEmpty()) return@withContext ImportSummary(0)
+        importDocuments(retryUris)
+    }
+
+    override suspend fun cancelImport(runId: String) = withContext(Dispatchers.IO) {
+        canceledImportRuns += runId
+        val active = importDao.getRun(runId).filterNot { it.status.isTerminalImportStatus() }
+        importDao.upsert(
+            active.map { item ->
+                item.copy(
+                    stage = ImportStage.FINISHED.name,
+                    progress = 1f,
+                    status = ImportItemStatus.CANCELED.name,
+                    message = context.getString(R.string.import_status_canceled),
+                    updatedTime = System.currentTimeMillis(),
+                )
+            },
+        )
+        active.mapNotNull(ImportItemEntity::bookUuid).forEach { uuid ->
+            workManager.cancelUniqueWork(TxtIndexWorker.uniqueName(uuid))
+        }
+        storageMutationMutex.withLock {
+            active.mapNotNull(ImportItemEntity::bookUuid).forEach { uuid -> removeIncompleteImport(uuid) }
+        }
     }
 
     override fun markBookOpened(bookUuid: String) {
@@ -204,20 +245,24 @@ class LocalBookRepository @Inject constructor(
                 displayName = displayNameFor(rawUri.toUri()),
             )
         }
-        _importProgress.value = ImportProgress(
-            runId = importRun,
-            items = sources,
-            startedTime = System.currentTimeMillis(),
-        )
+        val importStartedTime = System.currentTimeMillis()
+        importDao.upsert(sources.mapIndexed { index, item ->
+            item.toEntity(importRun, index, importStartedTime)
+        })
+        importDao.pruneHistory()
         DiagnosticLog.record(
             Category.IMPORT,
             "documents_selected",
             details = mapOf("run" to importRun, "count" to uriStrings.size),
         )
-        val registration = storageMutationMutex.withLock {
-            cleanupImportArtifacts()
-            pruneUnreferencedBookFiles()
-            registerDocuments(sources)
+        val registration = try {
+            storageMutationMutex.withLock {
+                cleanupImportArtifacts()
+                pruneUnreferencedBookFiles()
+                registerDocuments(importRun, sources)
+            }
+        } finally {
+            canceledImportRuns -= importRun
         }
         registration.imports.forEach(::enqueueBackgroundIndex)
         ImportSummary(registration.imports.size, registration.duplicateCount, registration.failures).also { summary ->
@@ -336,7 +381,10 @@ class LocalBookRepository @Inject constructor(
      * therefore show the complete selection in the library immediately instead of waiting for the
      * preceding book's full-text index.
      */
-    private suspend fun registerDocuments(sources: List<ImportItemProgress>): ImportRegistration {
+    private suspend fun registerDocuments(
+        importRun: String,
+        sources: List<ImportItemProgress>,
+    ): ImportRegistration {
         val imports = mutableListOf<RegisteredImport>()
         var duplicates = 0
         val failures = mutableListOf<String>()
@@ -351,20 +399,21 @@ class LocalBookRepository @Inject constructor(
             var storedFile: File? = null
             var coverFile: File? = null
             try {
-                updateImportProgress(rawUri, ImportStage.COPYING, .02f, ImportItemStatus.RUNNING)
-                val hash = copyImportSource(uri, rawUri, temp)
+                ensureImportActive(importRun)
+                updateImportProgress(importRun, rawUri, ImportStage.COPYING, .02f, ImportItemStatus.RUNNING)
+                val hash = copyImportSource(importRun, uri, rawUri, temp)
                 if (dao.findUuidByHash(hash) != null) {
                     duplicates++
                     updateImportProgress(
-                        rawUri,
+                        importRun, rawUri,
                         ImportStage.FINISHED,
                         1f,
                         ImportItemStatus.DUPLICATE,
-                        message = "已存在相同内容",
+                        message = context.getString(R.string.import_status_duplicate_content),
                     )
                     return@forEach
                 }
-                updateImportProgress(rawUri, ImportStage.READING_METADATA, .36f, ImportItemStatus.RUNNING)
+                updateImportProgress(importRun, rawUri, ImportStage.READING_METADATA, .36f, ImportItemStatus.RUNNING)
                 val format = detectFormat(displayName, temp)
                 val parser = parsers.parserFor(format)
                 val metadata = parser.readMetadata(temp, displayName)
@@ -377,11 +426,11 @@ class LocalBookRepository @Inject constructor(
                 ) {
                     duplicates++
                     updateImportProgress(
-                        rawUri,
+                        importRun, rawUri,
                         ImportStage.FINISHED,
                         1f,
                         ImportItemStatus.DUPLICATE,
-                        message = "已存在同一本 EPUB",
+                        message = context.getString(R.string.import_status_duplicate_epub),
                     )
                     return@forEach
                 }
@@ -405,7 +454,7 @@ class LocalBookRepository @Inject constructor(
                 )
                 insertedUuid = bookUuid
                 updateImportProgress(
-                    rawUri,
+                    importRun, rawUri,
                     ImportStage.BUILDING_DIRECTORY,
                     .62f,
                     ImportItemStatus.RUNNING,
@@ -417,15 +466,27 @@ class LocalBookRepository @Inject constructor(
                 } else {
                     emptyList()
                 }
-                imports += RegisteredImport(rawUri, bookUuid, displayName, format, stored, parser)
+                imports += RegisteredImport(importRun, rawUri, bookUuid, displayName, format, stored, parser)
                 syncMutations.record(SyncEntityType.BOOK, bookUuid)
                 updateImportProgress(
-                    rawUri,
+                    importRun, rawUri,
                     if (format == BookFormat.EPUB) ImportStage.FINISHED else ImportStage.INDEXING,
                     if (format == BookFormat.EPUB) 1f else .78f,
                     if (format == BookFormat.EPUB) ImportItemStatus.SUCCEEDED else ImportItemStatus.RUNNING,
                     bookUuid = bookUuid,
                     message = if (format == BookFormat.EPUB) "已加入书架，全文索引将在后台继续" else "正在建立正文索引",
+                )
+            } catch (error: ImportCanceledException) {
+                insertedUuid?.let { removeIncompleteImport(it) }
+                storedFile?.delete()
+                coverFile?.delete()
+                updateImportProgress(
+                    importRun,
+                    rawUri,
+                    ImportStage.FINISHED,
+                    1f,
+                    ImportItemStatus.CANCELED,
+                    message = context.getString(R.string.import_status_canceled),
                 )
             } catch (error: CancellationException) {
                 insertedUuid?.let { removeIncompleteImport(it) }
@@ -439,7 +500,7 @@ class LocalBookRepository @Inject constructor(
                 failures += "$displayName：${error.message ?: "导入失败"}"
                 failureDiagnostics += error.toDiagnosticFailure()
                 updateImportProgress(
-                    rawUri,
+                    importRun, rawUri,
                     ImportStage.FINISHED,
                     1f,
                     ImportItemStatus.FAILED,
@@ -458,59 +519,87 @@ class LocalBookRepository @Inject constructor(
             scheduleEpubIndex()
             return
         }
-        val job = importScope.launch(start = CoroutineStart.LAZY) {
-            importIndexSemaphore.withPermit {
-                val startedAt = SystemClock.elapsedRealtime()
-                try {
-                    val chapterCount = importStreamingChapters(book.bookUuid, book.source, book.parser)
-                    if (chapterCount == 0) {
-                        error("未找到可阅读章节")
-                    }
-                    DiagnosticLog.record(
-                        Category.IMPORT,
-                        "background_index_finished",
-                        elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                        outcome = "success",
-                        details = mapOf("format" to book.format.name, "chapters" to chapterCount),
-                    )
-                    updateImportProgress(
-                        book.sourceId,
-                        ImportStage.FINISHED,
-                        1f,
-                        ImportItemStatus.SUCCEEDED,
-                        bookUuid = book.bookUuid,
-                    )
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    val failure = error.toDiagnosticFailure()
-                    DiagnosticLog.record(
-                        Category.IMPORT,
-                        "background_index_finished",
-                        elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                        outcome = failure.outcome,
-                        details = mapOf(
-                            "format" to book.format.name,
-                            "book" to book.bookUuid.shortDiagnosticId(),
-                            "reason" to failure.reason,
-                        ),
-                    )
-                    removeIncompleteImport(book.bookUuid)
-                    importEvents.emit("${book.displayName}：${error.message ?: "导入失败"}")
-                    updateImportProgress(
-                        book.sourceId,
-                        ImportStage.FINISHED,
-                        1f,
-                        ImportItemStatus.FAILED,
-                        bookUuid = book.bookUuid,
-                        message = error.message ?: "导入失败",
-                    )
-                }
+        val request = OneTimeWorkRequestBuilder<TxtIndexWorker>()
+            .setInputData(
+                workDataOf(
+                    TxtIndexWorker.KEY_BOOK_UUID to book.bookUuid,
+                    TxtIndexWorker.KEY_RUN_ID to book.runId,
+                    TxtIndexWorker.KEY_SOURCE_ID to book.sourceId,
+                    TxtIndexWorker.KEY_DISPLAY_NAME to book.displayName,
+                ),
+            )
+            .build()
+        workManager.enqueueUniqueWork(
+            TxtIndexWorker.uniqueName(book.bookUuid),
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
+
+    suspend fun continueTxtIndex(
+        bookUuid: String,
+        runId: String?,
+        sourceId: String?,
+        displayName: String,
+    ) = withContext(Dispatchers.IO) {
+        val startedAt = SystemClock.elapsedRealtime()
+        val book = dao.getBook(bookUuid) ?: return@withContext
+        val source = File(book.storagePath)
+        try {
+            // A worker can be stopped after any committed batch. Restart from the immutable TXT
+            // source so retries never leave duplicate or half-indexed chapters.
+            database.withTransaction {
+                dao.deleteBookParagraphFts(setOf(bookUuid))
+                dao.deleteChapters(bookUuid)
+            }
+            val chapterCount = importStreamingChapters(bookUuid, source, parsers.parserFor(BookFormat.TXT))
+            if (chapterCount == 0) error("未找到可阅读章节")
+            DiagnosticLog.record(
+                Category.IMPORT,
+                "background_index_finished",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = "success",
+                details = mapOf("format" to BookFormat.TXT.name, "chapters" to chapterCount),
+            )
+            if (runId != null && sourceId != null) {
+                updateImportProgress(
+                    runId,
+                    sourceId,
+                    ImportStage.FINISHED,
+                    1f,
+                    ImportItemStatus.SUCCEEDED,
+                    bookUuid = bookUuid,
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            val failure = error.toDiagnosticFailure()
+            DiagnosticLog.record(
+                Category.IMPORT,
+                "background_index_finished",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = failure.outcome,
+                details = mapOf(
+                    "format" to BookFormat.TXT.name,
+                    "book" to bookUuid.shortDiagnosticId(),
+                    "reason" to failure.reason,
+                ),
+            )
+            removeIncompleteImport(bookUuid)
+            importEvents.emit("$displayName：${error.message ?: "导入失败"}")
+            if (runId != null && sourceId != null) {
+                updateImportProgress(
+                    runId,
+                    sourceId,
+                    ImportStage.FINISHED,
+                    1f,
+                    ImportItemStatus.FAILED,
+                    bookUuid = bookUuid,
+                    message = error.message ?: "导入失败",
+                )
             }
         }
-        importIndexJobs.put(book.bookUuid, job)?.cancel()
-        job.invokeOnCompletion { importIndexJobs.remove(book.bookUuid, job) }
-        job.start()
     }
 
     private fun scheduleEpubIndex() {
@@ -535,7 +624,8 @@ class LocalBookRepository @Inject constructor(
         )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
             ?: uri.lastPathSegment.orEmpty().substringAfterLast('/').ifBlank { "未命名小说" }
 
-    private fun updateImportProgress(
+    private suspend fun updateImportProgress(
+        runId: String,
         sourceId: String,
         stage: ImportStage,
         progress: Float,
@@ -543,30 +633,25 @@ class LocalBookRepository @Inject constructor(
         bookUuid: String? = null,
         message: String? = null,
     ) {
-        _importProgress.update { current ->
-            current?.copy(
-                items = current.items.map { item ->
-                    if (item.id != sourceId) item else item.copy(
-                        stage = stage,
-                        progress = progress.coerceIn(0f, 1f),
-                        status = status,
-                        bookUuid = bookUuid ?: item.bookUuid,
-                        message = message,
-                    )
-                },
-            )?.let { updated ->
-                updated.copy(finished = updated.items.all { item ->
-                    item.status in setOf(
-                        ImportItemStatus.SUCCEEDED,
-                        ImportItemStatus.DUPLICATE,
-                        ImportItemStatus.FAILED,
-                    )
-                })
-            }
-        }
+        val current = importDao.get(runId, sourceId) ?: return
+        importDao.upsert(
+            current.copy(
+                stage = stage.name,
+                progress = progress.coerceIn(0f, 1f),
+                status = status.name,
+                bookUuid = bookUuid ?: current.bookUuid,
+                message = message,
+                updatedTime = System.currentTimeMillis(),
+            ),
+        )
     }
 
-    private fun copyImportSource(uri: android.net.Uri, sourceId: String, destination: File): String {
+    private suspend fun copyImportSource(
+        runId: String,
+        uri: android.net.Uri,
+        sourceId: String,
+        destination: File,
+    ): String {
         val totalBytes = runCatching {
             context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
         }.getOrNull()?.takeIf { it > 0L }
@@ -579,6 +664,7 @@ class LocalBookRepository @Inject constructor(
                     var copied = 0L
                     var lastPublished = 0L
                     while (true) {
+                        ensureImportActive(runId)
                         val count = hashingInput.read(buffer)
                         if (count <= 0) break
                         output.write(buffer, 0, count)
@@ -587,7 +673,7 @@ class LocalBookRepository @Inject constructor(
                             lastPublished = copied
                             val fraction = totalBytes?.let { copied.toFloat() / it } ?: .5f
                             updateImportProgress(
-                                sourceId,
+                                runId, sourceId,
                                 ImportStage.COPYING,
                                 .02f + fraction.coerceIn(0f, 1f) * .30f,
                                 ImportItemStatus.RUNNING,
@@ -598,6 +684,10 @@ class LocalBookRepository @Inject constructor(
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun ensureImportActive(runId: String) {
+        if (runId in canceledImportRuns) throw ImportCanceledException()
     }
 
     private fun detectFormat(name: String, file: File): BookFormat {
@@ -662,7 +752,7 @@ class LocalBookRepository @Inject constructor(
                         scheduleEpubIndex()
                     } else {
                         enqueueBackgroundIndex(
-                            RegisteredImport("google-drive://${book.uuid}", book.uuid, book.title, book.format, stored, parser),
+                            RegisteredImport(null, "google-drive://${book.uuid}", book.uuid, book.title, book.format, stored, parser),
                         )
                     }
                     true
@@ -681,9 +771,7 @@ class LocalBookRepository @Inject constructor(
         openedAtOverrides.update { current -> current - bookUuids }
         val startedAt = SystemClock.elapsedRealtime()
         storageMutationMutex.withLock {
-            bookUuids.mapNotNull(importIndexJobs::remove).forEach { job ->
-                job.cancelAndJoin()
-            }
+            bookUuids.forEach { uuid -> workManager.cancelUniqueWork(TxtIndexWorker.uniqueName(uuid)) }
             val books = dao.getBooks(bookUuids)
             val progressCount = bookUuids.count { uuid -> dao.getProgress(uuid) != null }
             val correctionUuids = bookUuids.flatMap { uuid ->
@@ -694,6 +782,7 @@ class LocalBookRepository @Inject constructor(
             }
             database.withTransaction {
                 dao.deleteMetadataEdits(bookUuids)
+                dao.deleteBookParagraphFts(bookUuids)
                 dao.deleteBooks(bookUuids)
                 bookUuids.forEach { uuid ->
                     // Progress and bookmarks are independent Drive objects. Deleting only the
@@ -965,6 +1054,7 @@ class LocalBookRepository @Inject constructor(
             }
             database.withTransaction {
                 dao.deleteProgress(bookUuid)
+                dao.deleteBookParagraphFts(setOf(bookUuid))
                 dao.deleteChapters(bookUuid)
                 var chapterIndex = 0
                 val chapterIds = mutableListOf<Long>()
@@ -1094,27 +1184,63 @@ class LocalBookRepository @Inject constructor(
         Unit
     }
 
-    override suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult> = withContext(Dispatchers.IO) {
-        val escaped = query.trim().replace("~", "~~").replace("%", "~%").replace("_", "~_")
-        if (escaped.isBlank()) return@withContext emptyList()
-        val rawCandidates = dao.searchBook(bookUuid, escaped).map { it.toModel() }
-        val correctedCandidates = textCorrections.getBookCorrections(bookUuid)
-            .filter { it.status == TextCorrectionStatus.ACTIVE && it.replacementText.contains(query, ignoreCase = true) }
-            .mapNotNull { correction ->
-                val chapter = dao.getChapterByKey(bookUuid, correction.chapterKey)
-                    ?: dao.getChapter(bookUuid, correction.chapterIndex)
-                    ?: return@mapNotNull null
-                BookSearchResult(chapter.id, chapter.title, chapter.chapterIndex, correction.paragraphIndex, "")
+    override suspend fun searchBook(
+        bookUuid: String,
+        query: String,
+        onProgress: suspend (BookSearchProgress) -> Unit,
+        onResults: suspend (List<BookSearchResult>) -> Unit,
+    ): List<BookSearchResult> = withContext(Dispatchers.IO) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isBlank()) return@withContext emptyList()
+        val chapters = dao.getChapters(bookUuid)
+        onProgress(BookSearchProgress(BookSearchStage.SEARCHING, 0, chapters.size))
+        val corrections = textCorrections.getBookCorrections(bookUuid)
+            .filter { it.status == TextCorrectionStatus.ACTIVE }
+        val correctionsByParagraph = corrections.groupBy { it.chapterIndex to it.paragraphIndex }
+        val resultsByLocation = linkedMapOf<Pair<Long, Int>, BookSearchResult>()
+
+        // Readium and Foliate search one reading-order resource at a time. Our paragraphs are
+        // already normalized in Room, so a chapter is the equivalent resource: load it through
+        // the chapterId index, match in memory, then publish that chapter's results immediately.
+        chapters.forEachIndexed { chapterOffset, storedChapter ->
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val chapter = if (storedChapter.indexed) {
+                storedChapter
+            } else {
+                onProgress(BookSearchProgress(BookSearchStage.INDEXING, chapterOffset, chapters.size))
+                epubIndex.ensureChapterIndexedForSearch(bookUuid, storedChapter.chapterIndex)
+                    ?: storedChapter
             }
-        (rawCandidates + correctedCandidates).distinctBy { it.chapterId to it.paragraphIndex }
-            .mapNotNull { candidate ->
-                val content = getChapter(bookUuid, candidate.chapterIndex) ?: return@mapNotNull null
-                val paragraph = content.paragraphs.firstOrNull { it.index == candidate.paragraphIndex }
-                    ?: return@mapNotNull null
-                candidate.copy(text = paragraph.text)
-                    .takeIf { paragraph.text.contains(query, ignoreCase = true) }
+            var chapterAddedResults = false
+            if (resultsByLocation.size < MAX_BOOK_SEARCH_RESULTS) {
+                dao.getParagraphs(chapter.id).forEach { paragraph ->
+                    val displayedText = applyCorrections(
+                        paragraph.text,
+                        correctionsByParagraph[chapter.chapterIndex to paragraph.paragraphIndex].orEmpty(),
+                    )
+                    if (displayedText.contains(normalizedQuery, ignoreCase = true)) {
+                        resultsByLocation[chapter.id to paragraph.paragraphIndex] = BookSearchResult(
+                            chapterId = chapter.id,
+                            chapterTitle = chapter.title,
+                            chapterIndex = chapter.chapterIndex,
+                            paragraphIndex = paragraph.paragraphIndex,
+                            text = displayedText,
+                        )
+                        chapterAddedResults = true
+                    }
+                }
             }
-            .take(1000)
+            if (chapterAddedResults) onResults(resultsByLocation.values.toList())
+            onProgress(
+                BookSearchProgress(
+                    BookSearchStage.SEARCHING,
+                    completed = chapterOffset + 1,
+                    total = chapters.size,
+                ),
+            )
+            kotlinx.coroutines.yield()
+        }
+        resultsByLocation.values.toList()
     }
 
     override suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult? =
@@ -1173,6 +1299,7 @@ class LocalBookRepository @Inject constructor(
         ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, bookUuid)
         database.withTransaction {
             dao.deleteMetadataEdits(setOf(bookUuid))
+            dao.deleteBookParagraphFts(setOf(bookUuid))
             dao.deleteBook(bookUuid)
         }
     }
@@ -1190,3 +1317,7 @@ class LocalBookRepository @Inject constructor(
 
     suspend fun continueAllEpubIndexes() = epubIndex.continueAll()
 }
+
+private class ImportCanceledException : Exception()
+
+private const val MAX_BOOK_SEARCH_RESULTS = 1_000

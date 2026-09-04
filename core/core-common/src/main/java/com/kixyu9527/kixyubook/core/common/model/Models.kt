@@ -46,6 +46,8 @@ enum class ReaderInlineStyle {
     SMALL_CAPS,
     SUPERSCRIPT,
     SUBSCRIPT,
+    /** User note marker layered on top of the underlying highlight decoration. */
+    NOTE,
 }
 
 /** Stable reader color roles. Publisher shades are classified into these roles before rendering. */
@@ -138,6 +140,18 @@ data class BookSearchResult(
     val paragraphIndex: Int,
     val text: String,
 )
+
+enum class BookSearchStage { INDEXING, SEARCHING }
+
+/** Measured work for one search stage; unlike a weighted percentage this never stalls at 72%. */
+data class BookSearchProgress(
+    val stage: BookSearchStage,
+    val completed: Int,
+    val total: Int,
+) {
+    val fraction: Float
+        get() = if (total <= 0) 1f else completed.toFloat().div(total).coerceIn(0f, 1f)
+}
 
 enum class TextCorrectionStatus { ACTIVE, UNRESOLVED, CONFLICT }
 
@@ -259,7 +273,7 @@ data class BookExportSummary(
 )
 
 enum class ImportStage { QUEUED, COPYING, READING_METADATA, BUILDING_DIRECTORY, INDEXING, FINISHED }
-enum class ImportItemStatus { PENDING, RUNNING, SUCCEEDED, DUPLICATE, FAILED }
+enum class ImportItemStatus { PENDING, RUNNING, SUCCEEDED, DUPLICATE, FAILED, CANCELED }
 
 data class ImportItemProgress(
     val id: String,
@@ -278,7 +292,14 @@ data class ImportProgress(
     val finished: Boolean = false,
 ) {
     val completedCount: Int
-        get() = items.count { it.status in setOf(ImportItemStatus.SUCCEEDED, ImportItemStatus.DUPLICATE, ImportItemStatus.FAILED) }
+        get() = items.count {
+            it.status in setOf(
+                ImportItemStatus.SUCCEEDED,
+                ImportItemStatus.DUPLICATE,
+                ImportItemStatus.FAILED,
+                ImportItemStatus.CANCELED,
+            )
+        }
     val overallProgress: Float
         get() = if (items.isEmpty()) 0f else items.sumOf { it.progress.toDouble() }.toFloat() / items.size
 }

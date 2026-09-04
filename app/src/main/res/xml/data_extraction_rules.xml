@@ -6,6 +6,8 @@
         <include domain="file" path="datastore/" />
         <include domain="file" path="fonts/" />
         <include domain="sharedpref" path="." />
+        <exclude domain="file" path="datastore/cloud_sync.preferences_pb" />
+        <exclude domain="sharedpref" path="drive_resumable_uploads.xml" />
     </cloud-backup>
     <device-transfer>
         <!-- Direct device transfer has no Auto Backup quota and can preserve the full library. -->
@@ -13,5 +15,7 @@
         <include domain="file" path="." />
         <include domain="sharedpref" path="." />
         <exclude domain="file" path="diagnostics/" />
+        <exclude domain="file" path="datastore/cloud_sync.preferences_pb" />
+        <exclude domain="sharedpref" path="drive_resumable_uploads.xml" />
     </device-transfer>
 </data-extraction-rules>

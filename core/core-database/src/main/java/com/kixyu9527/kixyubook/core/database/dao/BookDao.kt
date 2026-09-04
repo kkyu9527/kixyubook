@@ -21,6 +21,12 @@ interface BookDao {
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND chapterIndex = :index LIMIT 1") suspend fun getChapter(uuid: String, index: Int): ChapterEntity?
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND chapterKey = :chapterKey LIMIT 1") suspend fun getChapterByKey(uuid: String, chapterKey: String): ChapterEntity?
     @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND indexed = 0 ORDER BY chapterIndex") suspend fun getUnindexedChapters(uuid: String): List<ChapterEntity>
+    @Query("SELECT COUNT(*) FROM chapters WHERE bookUuid = :uuid") suspend fun getChapterCount(uuid: String): Int
+    @Query("SELECT COUNT(*) FROM chapters WHERE bookUuid = :uuid AND indexed = 0") suspend fun getUnindexedChapterCount(uuid: String): Int
+    @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND indexed = 0 ORDER BY chapterIndex LIMIT 1")
+    suspend fun getNextUnindexedChapter(uuid: String): ChapterEntity?
+    @Query("SELECT * FROM chapters WHERE bookUuid = :uuid AND indexed = 0 AND chapterIndex > :afterIndex ORDER BY chapterIndex LIMIT 1")
+    suspend fun getNextUnindexedChapterAfter(uuid: String, afterIndex: Int): ChapterEntity?
     @Query("SELECT DISTINCT b.uuid FROM books b JOIN chapters c ON c.bookUuid = b.uuid WHERE b.format = 'EPUB' AND c.indexed = 0") suspend fun getBooksPendingEpubIndex(): List<String>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId ORDER BY paragraphIndex") suspend fun getParagraphs(chapterId: Long): List<ParagraphEntity>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId AND paragraphIndex = :index") suspend fun getParagraph(chapterId: Long, index: Int): ParagraphEntity?
@@ -35,15 +41,32 @@ interface BookDao {
     suspend fun getBookmarks(uuid: String): List<BookmarkRow>
     @Query("SELECT * FROM bookmarks") suspend fun getAllBookmarkEntities(): List<BookmarkEntity>
     @Query("""SELECT c.id AS chapterId, c.title AS chapterTitle, c.chapterIndex,
-        p.paragraphIndex, p.text FROM paragraphs p JOIN chapters c ON c.id = p.chapterId
-        WHERE c.bookUuid = :uuid AND p.text LIKE '%' || :query || '%' ESCAPE '~'
+        p.paragraphIndex, p.text
+        FROM paragraphs_fts f
+        JOIN paragraphs p ON p.id = f.rowid
+        JOIN chapters c ON c.id = p.chapterId
+        WHERE c.bookUuid = :uuid AND paragraphs_fts MATCH :matchQuery
         ORDER BY c.chapterIndex, p.paragraphIndex LIMIT 1000""")
-    suspend fun searchBook(uuid: String, query: String): List<BookSearchResultRow>
+    suspend fun searchBook(uuid: String, matchQuery: String): List<BookSearchResultRow>
+    @Query("""SELECT c.id AS chapterId, c.title AS chapterTitle, c.chapterIndex,
+        p.paragraphIndex, p.text
+        FROM paragraphs p
+        JOIN chapters c ON c.id = p.chapterId
+        WHERE c.bookUuid = :uuid AND c.chapterIndex IN (:chapterIndexes)
+            AND instr(lower(p.text), lower(:literalQuery)) > 0
+        ORDER BY c.chapterIndex, p.paragraphIndex LIMIT :limit""")
+    suspend fun searchBookLiteralChapters(
+        uuid: String,
+        literalQuery: String,
+        chapterIndexes: List<Int>,
+        limit: Int,
+    ): List<BookSearchResultRow>
 
     @Insert suspend fun insertBook(book: BookEntity)
     @Insert suspend fun insertChapter(chapter: ChapterEntity): Long
     @Insert suspend fun insertChapters(chapters: List<ChapterEntity>): List<Long>
-    @Insert suspend fun insertParagraphs(paragraphs: List<ParagraphEntity>)
+    @Insert suspend fun insertParagraphs(paragraphs: List<ParagraphEntity>): List<Long>
+    @Insert suspend fun insertParagraphFts(paragraphs: List<ParagraphFtsEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveProgress(progress: ReadingProgressEntity)
     @Query("SELECT updatedTime FROM reading_progress WHERE bookUuid = :bookUuid")
     suspend fun getProgressUpdatedTime(bookUuid: String): Long?
@@ -72,6 +95,17 @@ interface BookDao {
     suspend fun updateChapterOutline(chapterId: Long, title: String, volumeTitle: String?, volumeIndex: Int?)
     @Query("UPDATE chapters SET title = :title, indexed = 1 WHERE id = :chapterId") suspend fun markChapterIndexed(chapterId: Long, title: String)
     @Query("DELETE FROM paragraphs WHERE chapterId = :chapterId") suspend fun deleteParagraphs(chapterId: Long)
+    @Query("DELETE FROM paragraphs_fts WHERE rowid IN (SELECT id FROM paragraphs WHERE chapterId = :chapterId)")
+    suspend fun deleteParagraphFts(chapterId: Long)
+    @Query(
+        """
+        DELETE FROM paragraphs_fts WHERE rowid IN (
+            SELECT p.id FROM paragraphs p JOIN chapters c ON c.id = p.chapterId
+            WHERE c.bookUuid IN (:bookUuids)
+        )
+        """,
+    )
+    suspend fun deleteBookParagraphFts(bookUuids: Set<String>)
     @Query("DELETE FROM books WHERE uuid = :uuid") suspend fun deleteBook(uuid: String)
     @Query("DELETE FROM books WHERE uuid IN (:uuids)") suspend fun deleteBooks(uuids: Set<String>)
     @Query("DELETE FROM metadata_edits WHERE bookUuid IN (:uuids)") suspend fun deleteMetadataEdits(uuids: Set<String>)
@@ -87,12 +121,17 @@ interface BookDao {
     @Transaction
     suspend fun insertParagraphsChunked(chapterId: Long, values: List<String>) {
         values.chunked(250).forEachIndexed { chunkIndex, chunk ->
-            insertParagraphs(chunk.mapIndexed { index, text -> ParagraphEntity(chapterId = chapterId, paragraphIndex = chunkIndex * 250 + index, text = text) })
+            val entities = chunk.mapIndexed { index, text ->
+                ParagraphEntity(chapterId = chapterId, paragraphIndex = chunkIndex * 250 + index, text = text)
+            }
+            val ids = insertParagraphs(entities)
+            insertParagraphFts(ids.zip(entities) { id, entity -> ParagraphFtsEntity(id, entity.text) })
         }
     }
 
     @Transaction
     suspend fun replaceChapterIndex(chapterId: Long, title: String, values: List<String>) {
+        deleteParagraphFts(chapterId)
         deleteParagraphs(chapterId)
         insertParagraphsChunked(chapterId, values)
         markChapterIndexed(chapterId, title)

@@ -41,6 +41,33 @@ data class ChapterEntity(
 )
 data class ParagraphEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val chapterId: Long, val paragraphIndex: Int, val text: String)
 
+/** Full-text projection kept in the same DAO transaction as [ParagraphEntity]. */
+@Fts4
+@Entity(tableName = "paragraphs_fts")
+data class ParagraphFtsEntity(
+    @PrimaryKey @ColumnInfo(name = "rowid") val rowId: Long,
+    val text: String,
+)
+
+@Entity(
+    tableName = "import_items",
+    primaryKeys = ["runId", "sourceId"],
+    indices = [Index("runId"), Index("status"), Index("bookUuid")],
+)
+data class ImportItemEntity(
+    val runId: String,
+    val sourceId: String,
+    val displayName: String,
+    val itemOrder: Int,
+    val stage: String,
+    val progress: Float,
+    val status: String,
+    val bookUuid: String?,
+    val message: String?,
+    val startedTime: Long,
+    val updatedTime: Long,
+)
+
 @Entity(
     tableName = "reading_progress",
     foreignKeys = [ForeignKey(entity = BookEntity::class, parentColumns = ["uuid"], childColumns = ["bookUuid"], onDelete = ForeignKey.CASCADE)],

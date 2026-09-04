@@ -296,8 +296,8 @@ class CloudSyncEngine @Inject constructor(
             if (pending.isNotEmpty()) {
                 onProgress(
                     CloudSyncProgress(
-                        title = "正在上传云端更改",
-                        text = "已处理 0/${pending.size} 项",
+                        title = context.getString(R.string.sync_uploading_changes),
+                        text = context.getString(R.string.sync_processed_items, 0, pending.size),
                         completed = 0,
                         total = pending.size,
                     ),
@@ -319,8 +319,8 @@ class CloudSyncEngine @Inject constructor(
                 uploadedCount += batchSize
                 onProgress(
                     CloudSyncProgress(
-                        title = "正在上传云端更改",
-                        text = "已处理 $uploadedCount/${pending.size} 项",
+                        title = context.getString(R.string.sync_uploading_changes),
+                        text = context.getString(R.string.sync_processed_items, uploadedCount, pending.size),
                         completed = uploadedCount,
                         total = pending.size,
                     ),
@@ -334,8 +334,8 @@ class CloudSyncEngine @Inject constructor(
                         uploadedCount++
                         onProgress(
                             CloudSyncProgress(
-                                title = "正在上传云端更改",
-                                text = "已处理 $uploadedCount/${pending.size} 项",
+                                title = context.getString(R.string.sync_uploading_changes),
+                                text = context.getString(R.string.sync_processed_items, uploadedCount, pending.size),
                                 completed = uploadedCount,
                                 total = pending.size,
                             ),

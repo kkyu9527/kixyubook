@@ -109,6 +109,7 @@ class LocalBackupRepositoryTest {
 
         override val settings: Flow<ReaderSettings> = currentSettings
         override val readingGoalMinutes: Flow<Int> = currentGoal
+        override val searchHistory: Flow<List<String>> = MutableStateFlow(emptyList())
 
         override suspend fun update(transform: (ReaderSettings) -> ReaderSettings) {
             currentSettings.value = transform(currentSettings.value)
@@ -117,6 +118,10 @@ class LocalBackupRepositoryTest {
         override suspend fun setReadingGoalMinutes(minutes: Int) {
             currentGoal.value = minutes
         }
+
+        override suspend fun addSearchHistory(query: String) = Unit
+
+        override suspend fun clearSearchHistory() = Unit
     }
 
     private companion object {

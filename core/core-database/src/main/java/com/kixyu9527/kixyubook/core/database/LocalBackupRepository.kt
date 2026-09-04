@@ -10,6 +10,7 @@ import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.legacyGlassBlurRadiusToFrostLevel
 import com.kixyu9527.kixyubook.core.common.repository.BackupRepository
+import com.kixyu9527.kixyubook.core.common.repository.BackupPreview
 import com.kixyu9527.kixyubook.core.common.repository.BackupResult
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -21,6 +22,7 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
+import java.security.MessageDigest
 import java.util.Properties
 import java.util.UUID
 import java.util.zip.ZipEntry
@@ -37,6 +39,34 @@ class LocalBackupRepository @Inject constructor(
 ) : BackupRepository {
     private val operationMutex = Mutex()
 
+    override suspend fun inspect(uriString: String): Result<BackupPreview> = withContext(Dispatchers.IO) {
+        operationMutex.withLock { runCatching {
+            cleanupBackupWorkDirectories()
+            val work = File(context.cacheDir, "$INSPECT_WORK_PREFIX${UUID.randomUUID()}").apply { mkdirs() }
+            val extracted = File(work, "payload").apply { mkdirs() }
+            try {
+                val totalBytes = extractArchive(uriString, extracted, work)
+                val properties = loadManifest(extracted)
+                val formatVersion = requireSupportedFormat(properties)
+                val snapshot = File(extracted, DATABASE_ENTRY).also {
+                    require(it.isFile) { "备份缺少数据库" }
+                }
+                val integrityProtected = verifyIntegrity(properties, extracted)
+                validateAndRebase(snapshot, File(extracted, "files"))
+                BackupPreview(
+                    uriString = uriString,
+                    createdTime = properties.getProperty("createdTime")?.toLongOrNull() ?: 0L,
+                    bookCount = countBooks(snapshot),
+                    totalBytes = totalBytes,
+                    formatVersion = formatVersion,
+                    integrityProtected = integrityProtected,
+                )
+            } finally {
+                work.deleteRecursively()
+            }
+        } }
+    }
+
     override suspend fun exportTo(uriString: String): Result<BackupResult> = withContext(Dispatchers.IO) {
         operationMutex.withLock { runCatching {
             cleanupBackupWorkDirectories()
@@ -47,9 +77,21 @@ class LocalBackupRepository @Inject constructor(
                 database.openHelper.writableDatabase.execSQL("VACUUM INTO '$escapedSnapshotPath'")
                 val settings = settingsRepository.settings.first()
                 val goal = settingsRepository.readingGoalMinutes.first()
+                val assets = collectReferencedAssets(snapshot)
+                val bookCount = countBooks(snapshot)
+                val totalBytes = snapshot.length() + assets.sumOf { it.file.length() }
                 val properties = Properties().apply {
                     setProperty("formatVersion", BACKUP_VERSION.toString())
                     setProperty("createdTime", System.currentTimeMillis().toString())
+                    setProperty("bookCount", bookCount.toString())
+                    setProperty("totalBytes", totalBytes.toString())
+                    setProperty("integrityVersion", INTEGRITY_VERSION.toString())
+                    setProperty("databaseSha256", snapshot.sha256())
+                    setProperty("assetCount", assets.size.toString())
+                    assets.forEachIndexed { index, asset ->
+                        setProperty("asset.$index.path", asset.entryName)
+                        setProperty("asset.$index.sha256", asset.file.sha256())
+                    }
                     setProperty("fontSize", settings.fontSize.toString())
                     setProperty("lineHeight", settings.lineHeight.toString())
                     setProperty("letterSpacing", settings.letterSpacing.toString())
@@ -85,13 +127,12 @@ class LocalBackupRepository @Inject constructor(
                     setProperty("readingGoalMinutes", goal.toString())
                 }
                 val output = context.contentResolver.openOutputStream(uriString.toUri(), "w") ?: error("无法创建备份文件")
-                val assets = collectReferencedAssets(snapshot)
                 output.use { raw -> ZipOutputStream(BufferedOutputStream(raw)).use { zip ->
                     zip.putNextEntry(ZipEntry(MANIFEST_ENTRY)); properties.store(zip, "KixyuBook full backup") ; zip.closeEntry()
                     zip.putFile(snapshot, DATABASE_ENTRY)
                     assets.forEach { asset -> zip.putFile(asset.file, asset.entryName) }
                 } }
-                BackupResult(countBooks(snapshot), snapshot.length() + assets.sumOf { it.file.length() })
+                BackupResult(bookCount, totalBytes)
             } finally {
                 work.deleteRecursively()
             }
@@ -104,42 +145,12 @@ class LocalBackupRepository @Inject constructor(
             val work = File(context.cacheDir, "restore-${UUID.randomUUID()}").apply { mkdirs() }
             val extracted = File(work, "payload").apply { mkdirs() }
             try {
-                var totalBytes = 0L
-                var entries = 0
-                val input = context.contentResolver.openInputStream(uriString.toUri()) ?: error("无法读取备份文件")
-                input.use { raw -> ZipInputStream(BufferedInputStream(raw)).use { zip ->
-                    while (true) {
-                        val entry = zip.nextEntry ?: break
-                        require(++entries <= MAX_ENTRIES) { "备份条目过多" }
-                        val target = File(extracted, entry.name).canonicalFile
-                        require(target.path.startsWith(extracted.canonicalPath + File.separator)) { "备份包含非法路径" }
-                        if (entry.isDirectory) target.mkdirs() else {
-                            target.parentFile?.mkdirs()
-                            target.outputStream().buffered().use { output ->
-                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                                while (true) {
-                                    val read = zip.read(buffer)
-                                    if (read <= 0) break
-                                    totalBytes += read
-                                    require(totalBytes <= MAX_UNCOMPRESSED_BYTES) { "备份解压后体积异常" }
-                                    if (totalBytes % RESTORE_SPACE_CHECK_INTERVAL_BYTES < read) {
-                                        require(allocatableBytes(work) >= RESTORE_WORKING_SPACE_RESERVE_BYTES) {
-                                            "设备存储空间不足，无法继续解压备份"
-                                        }
-                                    }
-                                    output.write(buffer, 0, read)
-                                }
-                            }
-                        }
-                        zip.closeEntry()
-                    }
-                } }
-                val properties = Properties().apply {
-                    File(extracted, MANIFEST_ENTRY).takeIf(File::isFile)?.inputStream()?.use(::load) ?: error("不是有效的 KixyuBook 备份")
-                }
-                require(properties.getProperty("formatVersion")?.toIntOrNull() == BACKUP_VERSION) { "不支持此备份版本" }
+                val totalBytes = extractArchive(uriString, extracted, work)
+                val properties = loadManifest(extracted)
+                requireSupportedFormat(properties)
                 val snapshot = File(extracted, DATABASE_ENTRY)
                 require(snapshot.isFile) { "备份缺少数据库" }
+                verifyIntegrity(properties, extracted)
                 validateAndRebase(snapshot, File(extracted, "files"))
                 ensureRestoreInstallSpace(snapshot, File(extracted, "files"))
                 val bookCount = countBooks(snapshot)
@@ -150,6 +161,73 @@ class LocalBackupRepository @Inject constructor(
                 work.deleteRecursively()
             }
         } }
+    }
+
+    private fun extractArchive(uriString: String, extracted: File, work: File): Long {
+        var totalBytes = 0L
+        var entries = 0
+        val names = hashSetOf<String>()
+        val input = context.contentResolver.openInputStream(uriString.toUri()) ?: error("无法读取备份文件")
+        input.use { raw -> ZipInputStream(BufferedInputStream(raw)).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                require(++entries <= MAX_ENTRIES) { "备份条目过多" }
+                require(names.add(entry.name)) { "备份包含重复条目：${entry.name}" }
+                val target = File(extracted, entry.name).canonicalFile
+                require(target.path.startsWith(extracted.canonicalPath + File.separator)) { "备份包含非法路径" }
+                if (entry.isDirectory) target.mkdirs() else {
+                    target.parentFile?.mkdirs()
+                    target.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val read = zip.read(buffer)
+                            if (read <= 0) break
+                            totalBytes += read
+                            require(totalBytes <= MAX_UNCOMPRESSED_BYTES) { "备份解压后体积异常" }
+                            if (totalBytes % RESTORE_SPACE_CHECK_INTERVAL_BYTES < read) {
+                                require(allocatableBytes(work) >= RESTORE_WORKING_SPACE_RESERVE_BYTES) {
+                                    "设备存储空间不足，无法继续解压备份"
+                                }
+                            }
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+                zip.closeEntry()
+            }
+        } }
+        return totalBytes
+    }
+
+    private fun loadManifest(extracted: File): Properties = Properties().apply {
+        File(extracted, MANIFEST_ENTRY).takeIf(File::isFile)?.inputStream()?.use(::load)
+            ?: error("不是有效的 KixyuBook 备份")
+    }
+
+    private fun requireSupportedFormat(properties: Properties): Int =
+        properties.getProperty("formatVersion")?.toIntOrNull()?.also { version ->
+            require(version == BACKUP_VERSION) { "不支持此备份版本" }
+        } ?: error("备份缺少格式版本")
+
+    /** Legacy v5 backups remain restorable; newly exported v5 backups carry a complete hash list. */
+    private fun verifyIntegrity(properties: Properties, extracted: File): Boolean {
+        val integrityVersion = properties.getProperty("integrityVersion")?.toIntOrNull() ?: return false
+        require(integrityVersion == INTEGRITY_VERSION) { "不支持此备份校验格式" }
+        val snapshot = File(extracted, DATABASE_ENTRY)
+        require(snapshot.sha256() == properties.getProperty("databaseSha256")) { "备份数据库校验失败" }
+        val assetCount = properties.getProperty("assetCount")?.toIntOrNull()
+            ?: error("备份缺少资源校验清单")
+        require(assetCount in 0..MAX_ENTRIES) { "备份资源校验清单异常" }
+        repeat(assetCount) { index ->
+            val path = properties.getProperty("asset.$index.path") ?: error("备份资源清单不完整")
+            val expected = properties.getProperty("asset.$index.sha256") ?: error("备份资源清单不完整")
+            val file = File(extracted, path).canonicalFile
+            require(file.path.startsWith(extracted.canonicalPath + File.separator) && file.isFile) {
+                "备份缺少资源：$path"
+            }
+            require(file.sha256() == expected) { "备份资源校验失败：$path" }
+        }
+        return true
     }
 
     private fun validateAndRebase(snapshot: File, assets: File) {
@@ -220,7 +298,11 @@ class LocalBackupRepository @Inject constructor(
 
     private fun cleanupBackupWorkDirectories() {
         context.cacheDir.listFiles().orEmpty().forEach { file ->
-            if (file.name.startsWith(BACKUP_WORK_PREFIX) || file.name.startsWith(RESTORE_WORK_PREFIX)) {
+            if (
+                file.name.startsWith(BACKUP_WORK_PREFIX) ||
+                file.name.startsWith(RESTORE_WORK_PREFIX) ||
+                file.name.startsWith(INSPECT_WORK_PREFIX)
+            ) {
                 file.deleteRecursively()
             }
         }
@@ -344,6 +426,8 @@ class LocalBackupRepository @Inject constructor(
         const val EPUB_CACHE_DIRECTORY = "epub-chapters"
         const val BACKUP_WORK_PREFIX = "backup-"
         const val RESTORE_WORK_PREFIX = "restore-"
+        const val INSPECT_WORK_PREFIX = "inspect-"
+        const val INTEGRITY_VERSION = 1
         const val MAX_ENTRIES = 100_000
         const val MAX_UNCOMPRESSED_BYTES = 16L * 1024 * 1024 * 1024
         const val BYTES_PER_MEBIBYTE = 1024L * 1024
@@ -358,6 +442,16 @@ private data class BackupAsset(val file: File, val entryName: String)
 
 private fun ZipOutputStream.putFile(file: File, entryName: String) {
     putNextEntry(ZipEntry(entryName)); file.inputStream().buffered().use { it.copyTo(this) }; closeEntry()
+}
+private fun File.sha256(): String = inputStream().buffered().use { input ->
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val read = input.read(buffer)
+        if (read <= 0) break
+        digest.update(buffer, 0, read)
+    }
+    digest.digest().joinToString("") { "%02x".format(it) }
 }
 private fun Properties.float(key: String, fallback: Float) = getProperty(key)?.toFloatOrNull() ?: fallback
 private fun Properties.boolean(key: String, fallback: Boolean) = getProperty(key)?.toBooleanStrictOrNull() ?: fallback

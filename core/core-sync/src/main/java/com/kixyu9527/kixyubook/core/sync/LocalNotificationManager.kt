@@ -81,8 +81,8 @@ class LocalNotificationManager @Inject constructor(
             NOTIFICATION_SYNC_CONFLICT,
             NotificationCompat.Builder(context, CHANNEL_ACTION_REQUIRED)
                 .setSmallIcon(R.drawable.ic_stat_cloud_sync)
-                .setContentTitle("同步冲突等待处理")
-                .setContentText("$count 项内容需要选择本机或云端版本")
+                .setContentTitle(context.getString(R.string.notification_sync_conflict_title))
+                .setContentText(context.getString(R.string.notification_sync_conflict_text, count))
                 .setContentIntent(contentIntent(DESTINATION_CLOUD_SYNC, NOTIFICATION_SYNC_CONFLICT))
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_ERROR)
@@ -133,8 +133,8 @@ class LocalNotificationManager @Inject constructor(
     fun backupProgressNotification(operation: BackupOperationType, workerId: java.util.UUID): Notification =
         NotificationCompat.Builder(context, CHANNEL_TRANSFERS)
             .setSmallIcon(R.drawable.ic_stat_cloud_sync)
-            .setContentTitle(if (operation == BackupOperationType.EXPORT) "正在导出完整备份" else "正在恢复完整备份")
-            .setContentText("可离开此页面，任务会在后台继续")
+            .setContentTitle(context.getString(if (operation == BackupOperationType.EXPORT) R.string.notification_backup_export_title else R.string.notification_backup_restore_title))
+            .setContentText(context.getString(R.string.notification_background_task))
             .setContentIntent(contentIntent(DESTINATION_DATA_BACKUP, NOTIFICATION_BACKUP_PROGRESS))
             .setProgress(0, 0, true)
             .setOngoing(true)
@@ -142,7 +142,7 @@ class LocalNotificationManager @Inject constructor(
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(0, "取消", WorkManager.getInstance(context).createCancelPendingIntent(workerId))
+            .addAction(0, context.getString(R.string.notification_cancel), WorkManager.getInstance(context).createCancelPendingIntent(workerId))
             .build()
 
     fun showBackupResult(operation: BackupOperationType, bookCount: Int?, error: String?) {
@@ -181,8 +181,8 @@ class LocalNotificationManager @Inject constructor(
             NOTIFICATION_READING_REMINDER,
             NotificationCompat.Builder(context, CHANNEL_REMINDERS)
                 .setSmallIcon(R.drawable.ic_stat_book)
-                .setContentTitle("今天还差 $remaining 分钟")
-                .setContentText("继续阅读，完成每日 $goalMinutes 分钟目标")
+                .setContentTitle(context.getString(R.string.notification_reading_remaining, remaining))
+                .setContentText(context.getString(R.string.notification_reading_goal, goalMinutes))
                 .setContentIntent(contentIntent(DESTINATION_HOME, NOTIFICATION_READING_REMINDER))
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)

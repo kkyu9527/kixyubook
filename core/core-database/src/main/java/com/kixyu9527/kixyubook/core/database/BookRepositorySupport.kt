@@ -18,12 +18,58 @@ internal data class ImportRegistration(
     val failureDiagnostics: List<DiagnosticFailure>,
 )
 internal data class RegisteredImport(
+    val runId: String?,
     val sourceId: String,
     val bookUuid: String,
     val displayName: String,
     val format: BookFormat,
     val source: File,
     val parser: BookParser,
+)
+
+internal fun ImportItemEntity.toModel() = ImportItemProgress(
+    id = sourceId,
+    displayName = displayName,
+    stage = runCatching { ImportStage.valueOf(stage) }.getOrDefault(ImportStage.QUEUED),
+    progress = progress,
+    status = runCatching { ImportItemStatus.valueOf(status) }.getOrDefault(ImportItemStatus.FAILED),
+    bookUuid = bookUuid,
+    message = message,
+)
+
+internal fun List<ImportItemEntity>.toImportRuns(): List<ImportProgress> =
+    groupBy(ImportItemEntity::runId).values.map { values ->
+        ImportProgress(
+            runId = values.first().runId,
+            items = values.sortedBy(ImportItemEntity::itemOrder).map(ImportItemEntity::toModel),
+            startedTime = values.minOf(ImportItemEntity::startedTime),
+            finished = values.all { item -> item.status.isTerminalImportStatus() },
+        )
+    }.sortedByDescending(ImportProgress::startedTime)
+
+internal fun String.isTerminalImportStatus(): Boolean = this in setOf(
+    ImportItemStatus.SUCCEEDED.name,
+    ImportItemStatus.DUPLICATE.name,
+    ImportItemStatus.FAILED.name,
+    ImportItemStatus.CANCELED.name,
+)
+
+internal fun ImportItemProgress.toEntity(
+    runId: String,
+    itemOrder: Int,
+    startedTime: Long,
+) = ImportItemEntity(
+    runId = runId,
+    sourceId = id,
+    displayName = displayName,
+    itemOrder = itemOrder,
+    stage = stage.name,
+    progress = progress,
+    status = status.name,
+    bookUuid = bookUuid,
+    message = message,
+    startedTime = startedTime,
+    updatedTime = startedTime,
 )
 
 internal const val CHAPTER_CACHE_SIZE = 6

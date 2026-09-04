@@ -11,6 +11,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -73,6 +76,9 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         )
     }
     override val readingGoalMinutes: Flow<Int> = context.readerSettingsDataStore.data.map { it[READING_GOAL] ?: 30 }
+    override val searchHistory: Flow<List<String>> = context.readerSettingsDataStore.data.map { values ->
+        decodeSearchHistory(values[SEARCH_HISTORY].orEmpty())
+    }
 
     override suspend fun update(transform: (ReaderSettings) -> ReaderSettings) {
         val updated = transform(settings.first())
@@ -117,6 +123,21 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         syncMutations.record(SyncEntityType.SETTINGS, "global")
     }
 
+    override suspend fun addSearchHistory(query: String) {
+        val normalized = query.trim()
+        if (normalized.isEmpty()) return
+        context.readerSettingsDataStore.edit { values ->
+            val updated = (listOf(normalized) + decodeSearchHistory(values[SEARCH_HISTORY].orEmpty()))
+                .distinct()
+                .take(MAX_SEARCH_HISTORY)
+            values[SEARCH_HISTORY] = encodeSearchHistory(updated)
+        }
+    }
+
+    override suspend fun clearSearchHistory() {
+        context.readerSettingsDataStore.edit { it.remove(SEARCH_HISTORY) }
+    }
+
     private companion object {
         val FONT_SIZE = floatPreferencesKey("font_size"); val LINE_HEIGHT = floatPreferencesKey("line_height")
         val LETTER_SPACING = floatPreferencesKey("letter_spacing"); val MARGIN = floatPreferencesKey("margin")
@@ -149,5 +170,23 @@ class DataStoreReaderSettingsRepository @Inject constructor(
         val SHOW_BATTERY_LEVEL = booleanPreferencesKey("show_battery_level")
         val BRIGHTNESS_MODE = stringPreferencesKey("brightness_mode")
         val BRIGHTNESS = floatPreferencesKey("brightness")
+        val SEARCH_HISTORY = stringPreferencesKey("reader_search_history")
     }
 }
+
+internal const val MAX_SEARCH_HISTORY = 10
+
+internal fun encodeSearchHistory(values: List<String>): String = values.joinToString("\n") {
+    URLEncoder.encode(it, StandardCharsets.UTF_8.name())
+}
+
+internal fun decodeSearchHistory(value: String): List<String> = value
+    .lineSequence()
+    .filter(String::isNotBlank)
+    .mapNotNull { encoded ->
+        runCatching { URLDecoder.decode(encoded, StandardCharsets.UTF_8.name()) }.getOrNull()
+    }
+    .filter(String::isNotBlank)
+    .distinct()
+    .take(MAX_SEARCH_HISTORY)
+    .toList()

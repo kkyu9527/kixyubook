@@ -7,7 +7,11 @@ import kotlinx.coroutines.flow.StateFlow
 interface BookRepository {
     fun observeImportEvents(): Flow<String>
     val importProgress: StateFlow<ImportProgress?>
+    fun observeImportHistory(): Flow<List<ImportProgress>>
     fun clearFinishedImportProgress()
+    suspend fun clearImportHistory()
+    suspend fun retryImport(runId: String): ImportSummary
+    suspend fun cancelImport(runId: String)
     /** Immediately promotes a book in local activity ordering without changing reading progress. */
     fun markBookOpened(bookUuid: String)
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
@@ -45,7 +49,12 @@ interface BookRepository {
     fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>>
     suspend fun addBookmark(bookmark: Bookmark)
     suspend fun deleteBookmark(bookmarkUuid: String)
-    suspend fun searchBook(bookUuid: String, query: String): List<BookSearchResult>
+    suspend fun searchBook(
+        bookUuid: String,
+        query: String,
+        onProgress: suspend (BookSearchProgress) -> Unit = {},
+        onResults: suspend (List<BookSearchResult>) -> Unit = {},
+    ): List<BookSearchResult>
     suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult?
 }
 
@@ -109,6 +118,10 @@ interface ReaderSettingsRepository {
     suspend fun update(transform: (ReaderSettings) -> ReaderSettings)
     val readingGoalMinutes: Flow<Int>
     suspend fun setReadingGoalMinutes(minutes: Int)
+    /** Device-local reader search history, ordered newest first. */
+    val searchHistory: Flow<List<String>>
+    suspend fun addSearchHistory(query: String)
+    suspend fun clearSearchHistory()
 }
 
 interface LibraryPreferencesRepository {
@@ -175,8 +188,19 @@ data class BackupResult(
     val requiresRestart: Boolean = false,
 )
 
+data class BackupPreview(
+    val uriString: String,
+    val createdTime: Long,
+    val bookCount: Int,
+    val totalBytes: Long,
+    val formatVersion: Int,
+    val integrityProtected: Boolean,
+)
+
 /** Streaming full backup suitable for SAF documents and cross-device restoration. */
 interface BackupRepository {
+    /** Reads and verifies a backup without changing the live database or files. */
+    suspend fun inspect(uriString: String): Result<BackupPreview>
     suspend fun exportTo(uriString: String): Result<BackupResult>
     suspend fun restoreFrom(uriString: String): Result<BackupResult>
 }
