@@ -92,13 +92,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
 import com.kixyu9527.kixyubook.core.common.model.ImportProgress
+import com.kixyu9527.kixyubook.core.common.model.ImportItemStatus
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
@@ -144,6 +143,7 @@ fun LibraryRoute(
     val stateFlow = if (hiddenOnly) viewModel.hiddenUiState else viewModel.uiState
     val state by stateFlow.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
+    val importHistory by viewModel.importHistory.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val exportedMessage = stringResource(R.string.library_exported)
     val exportedManyMessage = stringResource(R.string.library_exported_many)
@@ -152,6 +152,11 @@ fun LibraryRoute(
     val openExportFailedMessage = stringResource(R.string.library_open_export_failed)
     val snackbar = remember { SnackbarHostState() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        uris.forEach { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
         viewModel.import(uris.map { it.toString() })
     }
     var pendingExportBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -218,6 +223,7 @@ fun LibraryRoute(
     LibraryScreen(
         state = state,
         importProgress = importProgress,
+        importHistory = importHistory,
         snackbar = snackbar,
         onSearch = viewModel::search,
         onCategory = viewModel::selectCategory,
@@ -241,6 +247,9 @@ fun LibraryRoute(
             viewModel.import(uris) { releasePermission?.invoke() }
         },
         onClearImportProgress = viewModel::clearFinishedImportProgress,
+        onCancelImport = viewModel::cancelImport,
+        onRetryImport = viewModel::retryImport,
+        onClearImportHistory = viewModel::clearImportHistory,
     )
 }
 
@@ -249,6 +258,7 @@ fun LibraryRoute(
 private fun LibraryScreen(
     state: LibraryUiState,
     importProgress: ImportProgress?,
+    importHistory: List<ImportProgress>,
     snackbar: SnackbarHostState,
     onSearch: (String) -> Unit,
     onCategory: (String) -> Unit,
@@ -270,6 +280,9 @@ private fun LibraryScreen(
     onSetCategories: (Set<String>, String) -> Unit,
     onDropDocuments: (List<String>, (() -> Unit)?) -> Unit,
     onClearImportProgress: () -> Unit,
+    onCancelImport: (String) -> Unit,
+    onRetryImport: (String) -> Unit,
+    onClearImportHistory: () -> Unit,
 ) {
     var managingUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var deletingUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -283,6 +296,7 @@ private fun LibraryScreen(
     var confirmingBatchDelete by rememberSaveable { mutableStateOf(false) }
     var batchCategoryDialogVisible by rememberSaveable { mutableStateOf(false) }
     var importDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var importHistoryVisible by rememberSaveable { mutableStateOf(false) }
     var previewBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
     val managing = state.books.firstOrNull { it.book.uuid == managingUuid }
     val deleting = state.books.firstOrNull { it.book.uuid == deletingUuid }
@@ -439,8 +453,10 @@ private fun LibraryScreen(
                     },
                 ) { Icon(KixyuSymbols.SelectAll, stringResource(R.string.library_select_all)) }
             } else {
-                if (importProgress != null) {
-                    KixyuIconButton(onClick = { importDialogVisible = true }) {
+                if (importHistory.isNotEmpty()) {
+                    KixyuIconButton(onClick = {
+                        if (importProgress != null) importDialogVisible = true else importHistoryVisible = true
+                    }) {
                         Icon(KixyuSymbols.Schedule, stringResource(R.string.library_import_progress))
                     }
                 }
@@ -645,10 +661,37 @@ private fun LibraryScreen(
         ImportProgressDialog(
             progress = importProgress,
             onDismiss = { importDialogVisible = false },
+            onCancel = if (importProgress.finished) null else {
+                {
+                    importDialogVisible = false
+                    onCancelImport(importProgress.runId)
+                }
+            },
+            onRetry = if (importProgress.items.any { it.status in setOf(ImportItemStatus.FAILED, ImportItemStatus.CANCELED) }) {
+                {
+                    importDialogVisible = false
+                    onRetryImport(importProgress.runId)
+                }
+            } else null,
+            onHistory = {
+                importDialogVisible = false
+                importHistoryVisible = true
+            },
             onDone = {
                 importDialogVisible = false
                 onClearImportProgress()
             },
+        )
+    }
+    if (importHistoryVisible) {
+        ImportHistoryDialog(
+            history = importHistory,
+            onRetry = onRetryImport,
+            onClear = {
+                importHistoryVisible = false
+                onClearImportHistory()
+            },
+            onDismiss = { importHistoryVisible = false },
         )
     }
 }

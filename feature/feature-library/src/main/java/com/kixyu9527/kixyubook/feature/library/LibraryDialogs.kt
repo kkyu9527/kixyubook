@@ -30,9 +30,13 @@ import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
 import com.kixyu9527.kixyubook.core.common.model.correctedExportFileName
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
+import java.text.DateFormat
+import java.util.Date
 
 internal fun Set<String>.toggle(value: String): Set<String> =
     if (value in this) this - value else this + value
@@ -42,6 +46,9 @@ internal fun ImportProgressDialog(
     progress: ImportProgress,
     onDismiss: () -> Unit,
     onDone: () -> Unit,
+    onCancel: (() -> Unit)?,
+    onRetry: (() -> Unit)?,
+    onHistory: () -> Unit,
 ) {
     KixyuActionDialog(
         show = true,
@@ -56,6 +63,12 @@ internal fun ImportProgressDialog(
         ),
         onConfirm = if (progress.finished) onDone else onDismiss,
         dismissLabel = null,
+        alternativeLabel = when {
+            onRetry != null -> stringResource(R.string.library_import_retry_failed)
+            onCancel != null -> stringResource(R.string.library_import_cancel)
+            else -> null
+        },
+        onAlternative = onRetry ?: onCancel,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
@@ -75,6 +88,11 @@ internal fun ImportProgressDialog(
                 modifier = Modifier.fillMaxWidth(),
             )
             progress.items.forEach { item -> ImportProgressRow(item) }
+            KixyuTextButton(
+                text = stringResource(R.string.library_import_history),
+                onClick = onHistory,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -84,6 +102,7 @@ private fun ImportProgressRow(item: ImportItemProgress) {
     val stageLabel = when (item.status) {
         ImportItemStatus.DUPLICATE -> stringResource(R.string.library_import_duplicate)
         ImportItemStatus.FAILED -> stringResource(R.string.library_import_failed)
+        ImportItemStatus.CANCELED -> stringResource(R.string.library_import_canceled)
         else -> stringResource(
             when (item.stage) {
                 ImportStage.QUEUED -> R.string.library_import_waiting
@@ -123,6 +142,53 @@ private fun ImportProgressRow(item: ImportItemProgress) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
+    }
+}
+
+@Composable
+internal fun ImportHistoryDialog(
+    history: List<ImportProgress>,
+    onRetry: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    KixyuActionDialog(
+        show = true,
+        title = stringResource(R.string.library_import_history),
+        onDismissRequest = onDismiss,
+        confirmLabel = stringResource(R.string.library_action_done),
+        onConfirm = onDismiss,
+        alternativeLabel = stringResource(R.string.library_import_clear_history),
+        onAlternative = onClear,
+        dismissLabel = null,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
+        ) {
+            history.forEach { run ->
+                Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                    Text(
+                        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                            .format(Date(run.startedTime)),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        stringResource(R.string.library_import_summary, run.completedCount, run.items.size),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    run.items.forEach { item -> ImportProgressRow(item) }
+                    if (run.items.any { it.status in setOf(ImportItemStatus.FAILED, ImportItemStatus.CANCELED) }) {
+                        KixyuTextButton(
+                            text = stringResource(R.string.library_import_retry_failed),
+                            onClick = { onRetry(run.runId) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                KixyuDivider()
+            }
+        }
     }
 }
 

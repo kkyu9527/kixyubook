@@ -66,6 +66,8 @@ class LibraryViewModel @Inject constructor(
     private val exports = Channel<BookExportEvent>(Channel.BUFFERED)
     val exportEvents = exports.receiveAsFlow()
     val importProgress = repository.importProgress
+    val importHistory = repository.observeImportHistory()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -202,6 +204,23 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun clearFinishedImportProgress() = repository.clearFinishedImportProgress()
+
+    fun cancelImport(runId: String) = viewModelScope.launch {
+        repository.cancelImport(runId)
+        messages.send("已取消未完成的导入")
+    }
+
+    fun retryImport(runId: String) = viewModelScope.launch {
+        val result = repository.retryImport(runId)
+        if (result.importedCount == 0 && result.failures.isEmpty()) {
+            messages.send("没有可重试的文件")
+        }
+    }
+
+    fun clearImportHistory() = viewModelScope.launch {
+        runCatching { repository.clearImportHistory() }
+            .onFailure { messages.send(it.message ?: "无法清空导入记录") }
+    }
 
     fun export(bookUuid: String, uriString: String) = viewModelScope.launch {
         repository.exportBook(bookUuid, uriString)

@@ -70,5 +70,10 @@
     <string name="library_import_finished">已完成</string>
     <string name="library_import_duplicate">已跳过重复书籍</string>
     <string name="library_import_failed">导入失败</string>
+    <string name="library_import_canceled">已取消</string>
     <string name="library_import_continue_background">后台继续</string>
+    <string name="library_import_history">导入记录</string>
+    <string name="library_import_retry_failed">重试失败项</string>
+    <string name="library_import_cancel">取消导入</string>
+    <string name="library_import_clear_history">清空记录</string>
 </resources>
