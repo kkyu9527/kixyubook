@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -58,6 +59,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -527,6 +529,10 @@ fun KixyuTonalIconButton(
     disabledContentColor: Color = Color.Unspecified,
     content: @Composable () -> Unit,
 ) {
+    val accessibleMinSize = maxOf(minSize, 48.dp)
+    val interactiveModifier = modifier
+        .minimumInteractiveComponentSize()
+        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
     val materialColors = MaterialTheme.colorScheme
     val useMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val resolvedContainer = if (containerColor == Color.Unspecified) {
@@ -544,11 +550,11 @@ fun KixyuTonalIconButton(
     if (useMiuix) {
         MiuixIconButton(
             onClick = onClick,
-            modifier = modifier,
+            modifier = interactiveModifier,
             enabled = enabled,
             backgroundColor = if (enabled) resolvedContainer else resolvedDisabledContainer,
-            minWidth = minSize,
-            minHeight = minSize,
+            minWidth = accessibleMinSize,
+            minHeight = accessibleMinSize,
         ) {
             CompositionLocalProvider(
                 LocalContentColor provides if (enabled) resolvedContent else resolvedDisabledContent,
@@ -558,7 +564,7 @@ fun KixyuTonalIconButton(
     } else {
         FilledTonalIconButton(
             onClick = onClick,
-            modifier = modifier,
+            modifier = interactiveModifier,
             enabled = enabled,
             colors = IconButtonDefaults.filledTonalIconButtonColors(
                 containerColor = resolvedContainer,
@@ -578,12 +584,15 @@ fun KixyuIconButton(
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val interactiveModifier = modifier
+        .minimumInteractiveComponentSize()
+        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
     val contentColor = MaterialTheme.colorScheme.primary
     val disabledContentColor = contentColor.copy(alpha = .38f)
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixIconButton(
             onClick = onClick,
-            modifier = modifier,
+            modifier = interactiveModifier,
             enabled = enabled,
         ) {
             CompositionLocalProvider(
@@ -594,7 +603,7 @@ fun KixyuIconButton(
     } else {
         IconButton(
             onClick = onClick,
-            modifier = modifier,
+            modifier = interactiveModifier,
             enabled = enabled,
             colors = IconButtonDefaults.iconButtonColors(
                 contentColor = contentColor,

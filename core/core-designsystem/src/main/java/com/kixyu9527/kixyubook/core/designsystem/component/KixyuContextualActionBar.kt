@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,6 +136,7 @@ private fun ContextualActionItem(
     action: KixyuContextualAction,
     contentColor: Color,
 ) {
+    val showLabel = kixyuNavigationShowsLabels(LocalDensity.current.fontScale)
     Column(
         modifier = Modifier
             .width(KixyuSize.bottomNavigationItemWidth)
@@ -149,17 +151,18 @@ private fun ContextualActionItem(
     ) {
         Icon(
             imageVector = action.icon,
-            contentDescription = null,
+            contentDescription = action.label.takeUnless { showLabel },
             modifier = Modifier.size(24.dp),
             tint = contentColor,
         )
-        Text(
-            text = action.label,
-            color = contentColor,
-            fontSize = 11.sp,
-            lineHeight = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Clip,
-        )
+        if (showLabel) {
+            Text(
+                text = action.label,
+                color = contentColor,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

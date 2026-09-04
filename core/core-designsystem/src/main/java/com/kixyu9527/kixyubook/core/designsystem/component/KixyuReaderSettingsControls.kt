@@ -52,7 +52,7 @@ import com.kixyu9527.kixyubook.core.designsystem.R
 fun KixyuReaderThemeControls(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
-    modeTitle: String = "显示模式",
+    modeTitle: String? = null,
 ) {
     var editingTheme by remember { mutableStateOf<ReaderTheme?>(null) }
     LaunchedEffect(settings.customThemeEnabled) {
@@ -61,7 +61,7 @@ fun KixyuReaderThemeControls(
     KixyuThemeModeControl(settings, onSettingsChange, modeTitle)
     KixyuDivider()
     KixyuSettingsRow(
-        title = "自定义配色",
+        title = stringResource(R.string.kixyu_custom_colors),
         onClick = {
             val enabled = !settings.customThemeEnabled
             if (!enabled) editingTheme = null
@@ -82,11 +82,11 @@ fun KixyuReaderThemeControls(
             KixyuDivider()
             val expanded = editingTheme == theme
             KixyuSettingsRow(
-                title = "${theme.displayName()}配色",
+                title = stringResource(R.string.kixyu_theme_colors, theme.displayName()),
                 onClick = { editingTheme = theme.takeUnless { expanded } },
                 trailing = {
                     Text(
-                        text = if (expanded) "收起" else "修改",
+                        text = stringResource(if (expanded) R.string.kixyu_collapse else R.string.kixyu_edit),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
@@ -122,10 +122,10 @@ fun KixyuReaderThemeControls(
 fun KixyuThemeModeControl(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
-    title: String = "显示模式",
+    title: String? = null,
 ) {
     KixyuDropdownRow(
-        title = title,
+        title = title ?: stringResource(R.string.kixyu_display_mode),
         selected = settings.theme,
         options = listOf(ReaderTheme.SYSTEM, ReaderTheme.DAY, ReaderTheme.NIGHT),
         optionLabel = ReaderTheme::displayName,
@@ -139,7 +139,7 @@ fun KixyuAppColorControl(
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
     KixyuDropdownRow(
-        title = "主题色",
+        title = stringResource(R.string.kixyu_theme_color),
         selected = settings.appColorTheme,
         options = AppColorTheme.entries.filter {
             settings.appUiStyle == AppUiStyle.MATERIAL || it != AppColorTheme.WHITE
@@ -155,7 +155,7 @@ fun KixyuAppUiStyleControl(
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
     KixyuDropdownRow(
-        title = "界面风格",
+        title = stringResource(R.string.kixyu_ui_style),
         selected = settings.appUiStyle,
         options = AppUiStyle.entries,
         optionLabel = AppUiStyle::displayName,
@@ -184,8 +184,8 @@ fun KixyuGlassEffectControls(
         if (!dragging) previewLevel = settings.glassFrostLevel
     }
     KixyuSettingsRow(
-        title = "玻璃效果",
-        supportingText = "低版本 Android 不支持",
+        title = stringResource(R.string.kixyu_glass_effect),
+        supportingText = stringResource(R.string.kixyu_glass_unsupported),
         onClick = {
             onSettingsChange(settings.copy(glassEffectEnabled = !settings.glassEffectEnabled))
         },
@@ -199,7 +199,7 @@ fun KixyuGlassEffectControls(
     }
     KixyuDivider()
     KixyuSliderRow(
-        title = "磨砂程度",
+        title = stringResource(R.string.kixyu_frost_level),
         value = previewLevel,
         valueLabel = "${previewLevel.roundToInt()}%",
         onValueChange = { value ->
@@ -234,10 +234,12 @@ fun KixyuFontControls(
     onDeleteFont: (UserFont) -> Unit,
     onManageFonts: (() -> Unit)? = null,
 ) {
-    val options = remember(fonts) {
+    val addFontLabel = stringResource(R.string.kixyu_add_font)
+    val systemDefaultLabel = stringResource(R.string.kixyu_system_default)
+    val options = remember(fonts, addFontLabel, systemDefaultLabel) {
         buildList {
-            add(KixyuFontOption(uuid = null, label = "新增字体", addFont = true))
-            add(KixyuFontOption(uuid = null, label = "系统默认"))
+            add(KixyuFontOption(uuid = null, label = addFontLabel, addFont = true))
+            add(KixyuFontOption(uuid = null, label = systemDefaultLabel))
             fonts.forEach { add(KixyuFontOption(uuid = it.uuid, label = it.name)) }
         }
     }
@@ -245,8 +247,8 @@ fun KixyuFontControls(
     val selectedUserFont = fonts.firstOrNull { it.uuid == selectedFontUuid }
     if (onManageFonts != null) {
         KixyuSettingsRow(
-            title = "阅读字体",
-            supportingText = selectedUserFont?.name ?: "系统默认",
+            title = stringResource(R.string.kixyu_reading_font),
+            supportingText = selectedUserFont?.name ?: systemDefaultLabel,
             icon = KixyuSymbols.FontDownload,
             onClick = onManageFonts,
         ) {
@@ -255,7 +257,7 @@ fun KixyuFontControls(
         return
     }
     KixyuDropdownRow(
-        title = "阅读字体",
+        title = stringResource(R.string.kixyu_reading_font),
         selected = selected,
         options = options,
         optionLabel = KixyuFontOption::label,
@@ -267,7 +269,7 @@ fun KixyuFontControls(
     selectedUserFont?.let { font ->
         KixyuDivider()
         KixyuSettingsRow(
-            title = "删除当前字体",
+            title = stringResource(R.string.kixyu_delete_current_font),
             supportingText = font.name,
             icon = KixyuSymbols.DeleteOutline,
             onClick = { onDeleteFont(font) },
@@ -288,7 +290,7 @@ fun KixyuPageModeControl(
         else -> ReaderReadingMode.HORIZONTAL_SLIDE
     }
     KixyuDropdownRow(
-        title = "阅读方式",
+        title = stringResource(R.string.kixyu_reading_mode),
         selected = selected,
         options = ReaderReadingMode.entries,
         optionLabel = ReaderReadingMode::displayName,
@@ -318,22 +320,22 @@ fun KixyuReaderLayoutControls(
     KixyuPageModeControl(settings, onSettingsChange)
     KixyuDivider()
     ReaderStepper(
-        title = "字号",
+        title = stringResource(R.string.kixyu_font_size),
         value = settings.fontSize,
         step = .5f,
         range = 15f..30f,
         suffix = "sp",
     ) { onSettingsChange(settings.copy(fontSize = it)) }
     KixyuDivider()
-    ReaderStepper("行间距", settings.lineHeight, .1f, 1.2f..2.2f) {
+    ReaderStepper(stringResource(R.string.kixyu_line_spacing), settings.lineHeight, .1f, 1.2f..2.2f) {
         onSettingsChange(settings.copy(lineHeight = it))
     }
     KixyuDivider()
-    ReaderStepper("字间距", settings.letterSpacing, .1f, 0f..0.2f, "em") {
+    ReaderStepper(stringResource(R.string.kixyu_letter_spacing), settings.letterSpacing, .1f, 0f..0.2f, "em") {
         onSettingsChange(settings.copy(letterSpacing = it))
     }
     KixyuDivider()
-    ReaderStepper("页边距", settings.margin, .1f, 12f..52f, "dp") {
+    ReaderStepper(stringResource(R.string.kixyu_page_margin), settings.margin, .1f, 12f..52f, "dp") {
         onSettingsChange(settings.copy(margin = it))
     }
 }
@@ -344,8 +346,8 @@ fun KixyuReaderBehaviorControls(
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
     ReaderSwitch(
-        title = "音量键翻页",
-        supportingText = "音量加键上一页，音量减键下一页",
+        title = stringResource(R.string.kixyu_volume_page_turn),
+        supportingText = stringResource(R.string.kixyu_volume_page_turn_hint),
         checked = settings.volumeKeyPageTurn,
     ) { onSettingsChange(settings.copy(volumeKeyPageTurn = it)) }
 }
@@ -356,38 +358,38 @@ fun KixyuReaderInformationControls(
     onSettingsChange: (ReaderSettings) -> Unit,
 ) {
     ReaderSwitch(
-        title = "显示状态栏",
-        supportingText = "关闭后仅随阅读控制层临时显示",
+        title = stringResource(R.string.kixyu_show_status_bar),
+        supportingText = stringResource(R.string.kixyu_show_status_bar_hint),
         checked = settings.showStatusBar,
     ) { onSettingsChange(settings.copy(showStatusBar = it)) }
     KixyuDivider()
     ReaderSwitch(
-        title = "隐藏小白条",
-        supportingText = "开启后仅随阅读控制层临时显示",
+        title = stringResource(R.string.kixyu_hide_navigation_bar),
+        supportingText = stringResource(R.string.kixyu_hide_navigation_bar_hint),
         checked = settings.hideNavigationBar,
     ) { onSettingsChange(settings.copy(hideNavigationBar = it)) }
     KixyuDivider()
     ReaderSwitch(
-        title = "显示章节名",
-        supportingText = "非章节首页顶部显示当前章节名",
+        title = stringResource(R.string.kixyu_show_chapter_title),
+        supportingText = stringResource(R.string.kixyu_show_chapter_title_hint),
         checked = settings.showChapterTitle,
     ) { onSettingsChange(settings.copy(showChapterTitle = it)) }
     KixyuDivider()
     ReaderSwitch(
-        title = "显示页码",
-        supportingText = "翻页模式底部显示当前页/总页数",
+        title = stringResource(R.string.kixyu_show_page_number),
+        supportingText = stringResource(R.string.kixyu_show_page_number_hint),
         checked = settings.showPageNumber,
     ) { onSettingsChange(settings.copy(showPageNumber = it)) }
     KixyuDivider()
     ReaderSwitch(
-        title = "显示时间",
-        supportingText = "翻页模式底部显示当前时间",
+        title = stringResource(R.string.kixyu_show_time),
+        supportingText = stringResource(R.string.kixyu_show_time_hint),
         checked = settings.showReadingTime,
     ) { onSettingsChange(settings.copy(showReadingTime = it)) }
     KixyuDivider()
     ReaderSwitch(
-        title = "显示电量",
-        supportingText = "翻页模式底部显示设备剩余电量",
+        title = stringResource(R.string.kixyu_show_battery),
+        supportingText = stringResource(R.string.kixyu_show_battery_hint),
         checked = settings.showBatteryLevel,
     ) { onSettingsChange(settings.copy(showBatteryLevel = it)) }
 }
@@ -480,7 +482,7 @@ fun KixyuReaderBrightnessControls(
                 steps = 18,
             )
             Text(
-                text = if (automatic) "自动" else "${(previewBrightness * 100).roundToInt()}%",
+                text = if (automatic) stringResource(R.string.kixyu_automatic) else "${(previewBrightness * 100).roundToInt()}%",
                 modifier = Modifier.width(44.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -490,8 +492,8 @@ fun KixyuReaderBrightnessControls(
     }
     KixyuDivider()
     ReaderSwitch(
-        title = "保持屏幕常亮",
-        supportingText = "阅读期间不自动熄屏",
+        title = stringResource(R.string.kixyu_keep_screen_on),
+        supportingText = stringResource(R.string.kixyu_keep_screen_on_hint),
         checked = settings.keepScreenOn,
     ) { onSettingsChange(settings.copy(keepScreenOn = it)) }
 }

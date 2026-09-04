@@ -1,6 +1,7 @@
 <resources>
     <string name="app_logo_description">Kixyu Book Logo</string>
     <string name="app_name">Kixyu Book</string>
+    <string name="app_syncing_cloud_data">正在同步云端数据</string>
     <string name="update_download_start_failed">下载启动失败，请稍后重试</string>
     <string name="update_downloading">正在下载应用更新</string>
     <string name="update_download_started">已在后台下载，完成并校验后将打开安装页面</string>

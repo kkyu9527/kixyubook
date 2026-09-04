@@ -155,6 +155,10 @@ internal fun KixyuNavDisplay(
     }
     var previousRoute by remember { mutableStateOf(route) }
     LaunchedEffect(route) {
+        // A posted open request is no longer pending once Navigation publishes either its target
+        // or a competing route. This also self-heals a request interrupted by an overlay/state
+        // update instead of leaving the library unable to open books until process restart.
+        bookNavigationPending = false
         if (previousRoute != route) {
             previousRoute = route
             prioritizeAnimation()
@@ -179,13 +183,17 @@ internal fun KixyuNavDisplay(
             // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
             // from a Compose frame callback. withFrameNanos resumed at the beginning of the next
             // VSYNC and placed destination creation directly inside that frame's 8.3 ms budget.
-            view.post {
-                if (navigator.current() == sourceRoute) {
-                    prioritizeAnimation()
-                    navigator.push(AppRoute.Reader(bookUuid))
+            val posted = view.post {
+                try {
+                    if (navigator.current() == sourceRoute) {
+                        prioritizeAnimation()
+                        navigator.push(AppRoute.Reader(bookUuid))
+                    }
+                } finally {
+                    bookNavigationPending = false
                 }
-                bookNavigationPending = false
             }
+            if (!posted) bookNavigationPending = false
         }
     }
 

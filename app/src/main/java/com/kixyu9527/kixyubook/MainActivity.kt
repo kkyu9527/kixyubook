@@ -13,12 +13,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.sync.LocalNotificationManager
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
@@ -63,12 +63,12 @@ class MainActivity : ComponentActivity() {
         // relayout and a visible 60 -> 120 Hz hitch during cold start.
         requestHighestRefreshRate(window.decorView)
         setContent {
-            val settings by appViewModel.settings.collectAsState()
-            val updateState by appViewModel.updateState.collectAsState()
-            val releaseNotesState by appViewModel.releaseNotesState.collectAsState()
-            val cloudSyncState by appViewModel.cloudSyncState.collectAsState()
-            val pendingNotificationDestination by notificationDestination.collectAsState()
-            val pendingExternalBookImport by externalBookImport.collectAsState()
+            val settings by appViewModel.settings.collectAsStateWithLifecycle()
+            val updateState by appViewModel.updateState.collectAsStateWithLifecycle()
+            val releaseNotesState by appViewModel.releaseNotesState.collectAsStateWithLifecycle()
+            val cloudSyncState by appViewModel.cloudSyncState.collectAsStateWithLifecycle()
+            val pendingNotificationDestination by notificationDestination.collectAsStateWithLifecycle()
+            val pendingExternalBookImport by externalBookImport.collectAsStateWithLifecycle()
             val loadedSettings = settings
             if (loadedSettings == null) {
                 // This surface normally exists for only a few milliseconds. It

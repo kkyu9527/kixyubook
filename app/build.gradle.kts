@@ -38,6 +38,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (System.getenv("KIXYU_DEBUG_WITH_RELEASE_SIGNING") == "true") {
+                signingConfig = signingConfigs.findByName("release")
+            }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -70,6 +75,7 @@ dependencies {
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.process)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)

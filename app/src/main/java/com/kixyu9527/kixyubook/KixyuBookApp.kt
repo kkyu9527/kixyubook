@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.edit
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -225,7 +226,7 @@ internal fun KixyuBookApp(
                     }
                     KixyuTransientStatusPopup(
                         visible = showGlobalSync,
-                        message = "正在同步云端数据",
+                        message = stringResource(R.string.app_syncing_cloud_data),
                     )
                 }
                 AvailableUpdateModal(

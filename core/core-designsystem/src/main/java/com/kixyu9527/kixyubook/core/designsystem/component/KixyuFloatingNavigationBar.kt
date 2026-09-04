@@ -49,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalDensity
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassFrostLevel
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -92,6 +93,7 @@ internal fun KixyuFloatingNavigationBar(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val showLabels = kixyuNavigationShowsLabels(LocalDensity.current.fontScale)
     if (items.isEmpty()) return
 
     val selectedIndex = items.indexOfFirst { it.route == selectedKey }.coerceAtLeast(0)
@@ -296,23 +298,29 @@ internal fun KixyuFloatingNavigationBar(
                 ) {
                     Icon(
                         imageVector = item.icon,
-                        contentDescription = null,
+                        contentDescription = item.label.takeUnless { showLabels },
                         modifier = Modifier.size(24.dp),
                         tint = itemColor,
                     )
-                    Text(
-                        text = item.label,
-                        color = itemColor,
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Clip,
-                    )
+                    if (showLabels) {
+                        Text(
+                            text = item.label,
+                            color = itemColor,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
     }
 }
+
+internal const val KIXYU_NAVIGATION_LABEL_MAX_FONT_SCALE = 1.3f
+
+internal fun kixyuNavigationShowsLabels(fontScale: Float): Boolean =
+    fontScale <= KIXYU_NAVIGATION_LABEL_MAX_FONT_SCALE
 
 internal fun updateNavigationDragPosition(
     currentPosition: Float,

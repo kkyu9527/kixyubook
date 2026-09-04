@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
@@ -258,6 +259,43 @@ fun KixyuGlassSurface(
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor) {
             content()
+        }
+    }
+}
+
+/**
+ * Unified in-page floating surface. Reader overlays can sample the same backdrop as navigation;
+ * destinations without an in-page backdrop transparently fall back to the safe popup recipe.
+ * Keeping the choice here guarantees both Material and MIUIX use the configured frost level and
+ * the same hit-test boundary.
+ */
+@Composable
+fun KixyuBackdropAwareInteractiveSurface(
+    modifier: Modifier = Modifier,
+    shape: Shape = MaterialTheme.shapes.extraLarge,
+    fallbackContainerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val backdrop = LocalKixyuGlassBackdrop.current
+    val interactiveModifier = modifier.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) awaitPointerEvent()
+        }
+    }
+    if (backdrop != null) {
+        KixyuGlassSurface(
+            backdrop = backdrop,
+            modifier = interactiveModifier,
+            shape = shape,
+            fallbackContainerColor = fallbackContainerColor,
+            content = content,
+        )
+    } else {
+        KixyuInteractivePopupSurface(
+            modifier = modifier,
+            shadowElevation = 0.dp,
+        ) {
+            Box(content = content)
         }
     }
 }

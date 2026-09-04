@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -20,8 +19,6 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAdaptiveModal
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowWidthClass
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
 
 @Composable
@@ -31,14 +28,12 @@ internal fun AvailableUpdateModal(
     onDownload: (AppUpdateInfo) -> Boolean,
 ) {
     val uriHandler = LocalUriHandler.current
-    val usesBottomSheet = kixyuWindowWidthClass() == KixyuWindowWidthClass.COMPACT
     KixyuAdaptiveModal(
         show = update != null,
         onDismissRequest = onDismiss,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth()
-                .then(if (usesBottomSheet) Modifier.navigationBarsPadding() else Modifier)
                 .padding(
                     start = KixyuSpacing.large,
                     end = KixyuSpacing.large,

@@ -99,8 +99,11 @@ fun kixyuWindowWidthClass(): KixyuWindowWidthClass {
  */
 @Composable
 fun kixyuUsesNavigationRail(): Boolean {
-    return kixyuWindowSizeClass().isLandscape
+    return kixyuWindowSizeClass().usesNavigationRail
 }
+
+/** Product contract: navigation is bottom-aligned in portrait and a compact rail in landscape. */
+val KixyuWindowSizeClass.usesNavigationRail: Boolean get() = isLandscape
 
 /**
  * Keeps list-based pages readable on wide windows while preserving a full-size scroll surface.
@@ -136,7 +139,8 @@ fun KixyuNavigationRail(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val showLabels = kixyuWindowSizeClass().showNavigationLabels
+    val showLabels = kixyuWindowSizeClass().showNavigationLabels &&
+        kixyuNavigationShowsLabels(LocalDensity.current.fontScale)
     val itemHeight = if (showLabels) {
         KixyuSize.navigationRailLabeledItemHeight
     } else {
@@ -206,10 +210,9 @@ fun KixyuNavigationRail(
                             Text(
                                 text = item.label,
                                 color = itemColor,
-                                fontSize = 11.sp,
-                                lineHeight = 14.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 maxLines = 1,
-                                overflow = TextOverflow.Clip,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }

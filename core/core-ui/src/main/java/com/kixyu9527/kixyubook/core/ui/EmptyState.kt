@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -24,10 +25,10 @@ fun LibraryEmptyState(modifier: Modifier = Modifier) {
     ) {
         Icon(KixyuSymbols.AutoStories, null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(16.dp))
-        Text("你的静谧书架", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.library_empty_title), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
         Text(
-            "导入 TXT 或 EPUB，开始一段不被打扰的阅读。",
+            stringResource(R.string.library_empty_description),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )

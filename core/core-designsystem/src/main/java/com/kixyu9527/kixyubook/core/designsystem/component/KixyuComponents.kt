@@ -145,7 +145,7 @@ object KixyuSize {
     val readerBookTitleMinHeight = 48.dp
     val readerBookTitleMaxWidth = 360.dp
     const val readerBookTitleWidthFraction = .76f
-    val stepperButton = 36.dp
+    val stepperButton = 48.dp
     val stepperValueWidth = 64.dp
     val readerMenuBottomOffset = 68.dp
     val readerSheetMaxContent = 620.dp
@@ -354,6 +354,7 @@ fun KixyuListRow(
     modifier: Modifier = Modifier,
     supportingText: String? = null,
     titleStyle: TextStyle? = null,
+    titleMaxLines: Int = 1,
     supportingTextStyle: TextStyle? = null,
     selected: Boolean = false,
     highlighted: Boolean = false,
@@ -371,7 +372,7 @@ fun KixyuListRow(
     if (isMiuix) {
         val selectedContentColor = MaterialTheme.colorScheme.onPrimary
         val selectedSupportingColor = selectedContentColor.copy(alpha = .78f)
-        if (titleStyle != null || supportingTextStyle != null) {
+        if (titleStyle != null || supportingTextStyle != null || titleMaxLines != 1) {
             MiuixBasicComponent(
                 modifier = modifier.fillMaxWidth()
                     .clip(MaterialTheme.shapes.large)
@@ -407,7 +408,7 @@ fun KixyuListRow(
                     text = title,
                     style = titleStyle ?: MaterialTheme.typography.bodyLarge,
                     color = if (selected) selectedContentColor else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
+                    maxLines = titleMaxLines,
                     overflow = TextOverflow.Ellipsis,
                 )
                 supportingText?.let { summary ->
@@ -475,7 +476,7 @@ fun KixyuListRow(
                 Text(
                     title,
                     style = titleStyle ?: MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
+                    maxLines = titleMaxLines,
                     overflow = TextOverflow.Ellipsis,
                 )
             },
@@ -504,7 +505,7 @@ fun KixyuListRow(
 fun KixyuSearchField(
     query: String,
     onQueryChange: (String) -> Unit,
-    onSearch: () -> Unit,
+    onSearch: (String) -> Unit,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -529,7 +530,10 @@ fun KixyuSearchField(
         MiuixInputField(
             query = query,
             onQueryChange = onQueryChange,
-            onSearch = { onSearch() },
+            // MIUIX passes the text committed by the IME directly. Do not read [query] again here:
+            // a Chinese IME can send Search in the same frame as its final composition update, so
+            // the composable parameter may still contain the preceding value (or be blank).
+            onSearch = onSearch,
             expanded = expanded,
             onExpandedChange = onExpandedChange,
             modifier = modifier.fillMaxWidth().heightIn(min = KixyuSize.rowMinHeight),
@@ -547,7 +551,7 @@ fun KixyuSearchField(
             trailingIcon = trailingIcon,
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+            keyboardActions = KeyboardActions(onSearch = { onSearch(query) }),
         )
     }
 }
