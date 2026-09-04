@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -8,6 +9,7 @@ android {
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     buildFeatures { compose = true }
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 
 dependencies {
@@ -20,5 +22,14 @@ dependencies {
     implementation(libs.miuix.blur.android)
     implementation(libs.miuix.preference.android)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+roborazzi {
+    outputDir.set(file("src/test/screenshots"))
 }

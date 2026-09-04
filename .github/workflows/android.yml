@@ -37,6 +37,18 @@ jobs:
       - name: Verify JVM tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
+      - name: Verify UI and accessibility resources
+        run: ./gradlew verifyAccessibilityResources verifyUiTextResources --stacktrace
+
+      - name: Verify dual-theme screenshots
+        run: ./gradlew :core:core-designsystem:verifyRoborazziDebug --stacktrace
+
+      - name: Verify Compose performance budget
+        run: >-
+          ./gradlew verifyComposePerformanceBudget
+          -Pkixyu.compose.reports=true
+          --stacktrace
+
       - name: Verify Android lint
         run: ./gradlew lintDebug --stacktrace
 
@@ -56,3 +68,11 @@ jobs:
           ./gradlew :core:core-database:pixel2Api35DebugAndroidTest
           -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
           --stacktrace
+
+      - name: Upload screenshot comparisons
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-comparisons
+          path: '**/build/outputs/roborazzi/*_compare.png'
+          if-no-files-found: ignore

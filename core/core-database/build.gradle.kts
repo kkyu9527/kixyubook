@@ -24,7 +24,7 @@ android.testOptions.managedDevices {
             device = "Pixel 2"
             apiLevel = 35
             systemImageSource = "aosp-atd"
-            testedAbi = "x86_64"
+            testedAbi = if (System.getProperty("os.arch") == "aarch64") "arm64-v8a" else "x86_64"
         }
     }
 }
