@@ -39,7 +39,7 @@ fun ReadingInformationRoute(
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
 
     KixyuPageScaffold(
-        title = "阅读信息栏",
+        title = stringResource(R.string.settings_reading_information_bar),
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
@@ -66,7 +66,7 @@ fun ReadingInformationRoute(
         ) {
             item {
                 KixyuSection(
-                    title = "显示内容",
+                    title = stringResource(R.string.settings_display_content_section),
                     action = {
                         KixyuTextButton(text = "重置", onClick = viewModel::resetReaderInformation)
                     },

@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.UserFont
+import com.kixyu9527.kixyubook.core.common.repository.BackupPreview
+import com.kixyu9527.kixyubook.core.common.repository.BackupRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.sync.BackupOperationType
@@ -38,6 +40,7 @@ class SettingsViewModel @Inject constructor(
     private val repository: ReaderSettingsRepository,
     private val fonts: FontRepository,
     private val backups: BackupWorkScheduler,
+    private val backupRepository: BackupRepository,
     private val cloudSync: CloudSyncManager,
     private val readingReminders: ReadingReminderScheduler,
 ) : ViewModel() {
@@ -73,6 +76,10 @@ class SettingsViewModel @Inject constructor(
     val messages = _messages.asSharedFlow()
     private val _restoreCompleted = MutableSharedFlow<Unit>()
     val restoreCompleted = _restoreCompleted.asSharedFlow()
+    private val _backupPreview = MutableStateFlow<BackupPreview?>(null)
+    val backupPreview = _backupPreview.asStateFlow()
+    private val _backupInspectionActive = MutableStateFlow(false)
+    val backupInspectionActive = _backupInspectionActive.asStateFlow()
     private val _authorizationRequests = Channel<PendingIntent>(Channel.BUFFERED)
     val authorizationRequests = _authorizationRequests.receiveAsFlow()
 
@@ -174,6 +181,18 @@ class SettingsViewModel @Inject constructor(
     fun exportBackup(uri: String) = backups.enqueue(BackupOperationType.EXPORT, uri)
 
     fun restoreBackup(uri: String) = backups.enqueue(BackupOperationType.RESTORE, uri)
+
+    fun inspectBackup(uri: String) = viewModelScope.launch {
+        _backupInspectionActive.value = true
+        backupRepository.inspect(uri)
+            .onSuccess { _backupPreview.value = it }
+            .onFailure { _messages.emit(it.message ?: "无法读取备份信息") }
+        _backupInspectionActive.value = false
+    }
+
+    fun clearBackupPreview() {
+        _backupPreview.value = null
+    }
 
     fun setReadingReminderEnabled(enabled: Boolean) = viewModelScope.launch {
         readingReminders.setEnabled(enabled)

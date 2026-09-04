@@ -104,10 +104,11 @@ fun SettingsRoute(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val backupPreview by viewModel.backupPreview.collectAsStateWithLifecycle()
+    val backupInspectionActive by viewModel.backupInspectionActive.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val requestNotificationPermission = rememberNotificationPermissionAction()
-    var pendingRestore by rememberSaveable { mutableStateOf<String?>(null) }
     var restored by rememberSaveable { mutableStateOf(false) }
     val backupCreator = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
@@ -130,7 +131,7 @@ fun SettingsRoute(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
-            pendingRestore = it.toString()
+            viewModel.inspectBackup(it.toString())
         }
     }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
@@ -145,9 +146,9 @@ fun SettingsRoute(
     }
 
     val accountSection: @Composable () -> Unit = {
-        KixyuSection(title = "账号") {
+        KixyuSection(title = stringResource(R.string.settings_account_section)) {
             KixyuSettingsRow(
-                title = "Google 同步",
+                title = stringResource(R.string.settings_google_sync),
                 supportingText = when {
                     syncAccount == null -> "登录后在设备间增量同步"
                     state.cloudSync.initialSyncDecision != null -> "需要处理同步冲突 · ${syncAccount.email}"
@@ -166,9 +167,9 @@ fun SettingsRoute(
         }
     }
     val preferenceSection: @Composable () -> Unit = {
-        KixyuSection(title = "偏好设置") {
+        KixyuSection(title = stringResource(R.string.settings_preferences_section)) {
             KixyuSettingsRow(
-                title = "阅读",
+                title = stringResource(R.string.settings_reading),
                 supportingText = buildString {
                     append(state.settings.pageMode.displayName())
                     append(" · ")
@@ -180,8 +181,13 @@ fun SettingsRoute(
             ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
             KixyuDivider()
             KixyuSettingsRow(
-                title = "外观",
-                supportingText = "${state.settings.theme.displayName()} · ${state.settings.appUiStyle.displayName()} · ${state.settings.appColorTheme.displayName()}",
+                title = stringResource(R.string.settings_appearance),
+                supportingText = stringResource(
+                    R.string.settings_appearance_summary,
+                    state.settings.theme.displayName(),
+                    state.settings.appUiStyle.displayName(),
+                    state.settings.appColorTheme.displayName(),
+                ),
                 icon = KixyuSymbols.Palette,
                 selected = if (twoPane) selectedPane == SettingsPane.APPEARANCE else null,
                 onClick = { openPane(SettingsPane.APPEARANCE, onAppearance) },
@@ -189,99 +195,28 @@ fun SettingsRoute(
         }
     }
     val dataSection: @Composable () -> Unit = {
-        KixyuSection(title = "数据") {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(
-                    horizontal = KixyuSpacing.rowHorizontal,
-                    vertical = KixyuSpacing.medium,
-                ),
-                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Surface(
-                        modifier = Modifier.size(44.dp),
-                        shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                KixyuSymbols.Backup,
-                                null,
-                                Modifier.size(KixyuSize.icon),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-                    ) {
-                        Text(
-                            "本地完整备份",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            when (state.backupOperation) {
-                                BackupOperationType.EXPORT -> "正在整理并导出完整数据…"
-                                BackupOperationType.RESTORE -> "正在恢复书库与设置…"
-                                null -> "包含书籍、阅读进度、设置与用户字体"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+        SettingsBackupSection(
+            operation = state.backupOperation,
+            inspectionActive = backupInspectionActive,
+            onRestore = {
+                requestNotificationPermission(false) {
+                    backupPicker.launch(arrayOf("application/zip", "application/octet-stream"))
                 }
-                Row(
-                    modifier = Modifier
-                        .widthIn(max = 520.dp)
-                        .fillMaxWidth()
-                        .align(Alignment.End),
-                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                ) {
-                    KixyuSecondaryButton(
-                        text = if (state.backupOperation == BackupOperationType.RESTORE) {
-                            "正在恢复…"
-                        } else {
-                            "恢复备份"
-                        },
-                        onClick = {
-                            requestNotificationPermission(false) {
-                                backupPicker.launch(arrayOf("application/zip", "application/octet-stream"))
-                            }
-                        },
-                        enabled = state.backupOperation == null,
-                        modifier = Modifier.weight(1f),
-                    )
-                    KixyuButton(
-                        text = if (state.backupOperation == BackupOperationType.EXPORT) {
-                            "正在导出…"
-                        } else {
-                            "导出备份"
-                        },
-                        onClick = {
-                            requestNotificationPermission(false) {
-                                backupCreator.launch(
-                                    "KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup",
-                                )
-                            }
-                        },
-                        enabled = state.backupOperation == null,
-                        modifier = Modifier.weight(1f),
+            },
+            onExport = {
+                requestNotificationPermission(false) {
+                    backupCreator.launch(
+                        "KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup",
                     )
                 }
-            }
-        }
+            },
+        )
     }
     val aboutSection: @Composable () -> Unit = {
-        KixyuSection(title = "关于") {
+        KixyuSection(title = stringResource(R.string.settings_about_section)) {
             KixyuSettingsRow(
-                title = "关于 Kixyu Book",
-                supportingText = "版本 $currentVersion · 更新与项目信息",
+                title = stringResource(R.string.settings_about_app),
+                supportingText = stringResource(R.string.settings_about_summary, currentVersion),
                 icon = KixyuSymbols.Info,
                 selected = if (twoPane) selectedPane == SettingsPane.ABOUT else null,
                 onClick = { openPane(SettingsPane.ABOUT, onAbout) },
@@ -290,7 +225,7 @@ fun SettingsRoute(
     }
 
     KixyuPageScaffold(
-        title = "设置",
+        title = stringResource(R.string.settings_title),
         modifier = Modifier.fillMaxSize(),
         snackbarHost = {
             KixyuSnackbarHost(
@@ -347,33 +282,19 @@ fun SettingsRoute(
         }
     }
 
-    pendingRestore?.let { uri ->
-        KixyuActionDialog(
-            show = true,
-            title = "恢复完整备份？",
-            onDismissRequest = { pendingRestore = null },
-            confirmLabel = "开始恢复",
-            onConfirm = {
-                pendingRestore = null
-                viewModel.restoreBackup(uri)
-            },
-        ) {
-            Text("当前书库和设置将被备份内容替换，完成后需要重新启动应用。")
-        }
-    }
-    KixyuActionDialog(
-        show = restored,
-        title = "恢复完成",
-        onDismissRequest = {},
-        confirmLabel = "关闭应用",
-        dismissLabel = null,
-        onConfirm = {
+    SettingsBackupDialogs(
+        preview = backupPreview,
+        restored = restored,
+        onDismissPreview = viewModel::clearBackupPreview,
+        onRestore = { preview ->
+            viewModel.clearBackupPreview()
+            viewModel.restoreBackup(preview.uriString)
+        },
+        onCloseApp = {
             (context as? Activity)?.finishAffinity()
             exitProcess(0)
         },
-    ) {
-        Text("请关闭后重新打开应用，以加载恢复后的书库。")
-    }
+    )
 }
 
 @Composable
@@ -431,10 +352,10 @@ fun CloudSyncRoute(
         )
     }
     val syncBehaviorSection: @Composable () -> Unit = {
-        KixyuSection(title = "同步") {
+        KixyuSection(title = stringResource(R.string.settings_sync_section)) {
             KixyuSettingsRow(
-                title = "自动同步",
-                supportingText = "有变更时在后台安静地增量同步",
+                title = stringResource(R.string.settings_auto_sync),
+                supportingText = stringResource(R.string.settings_auto_sync_summary),
                 icon = KixyuSymbols.CloudSync,
                 onClick = {
                     if (state.cloudSync.initialSyncDecision != null) {
@@ -460,7 +381,7 @@ fun CloudSyncRoute(
             }
             KixyuDivider()
             KixyuDropdownRow(
-                title = "大文件同步网络",
+                title = stringResource(R.string.settings_large_file_network),
                 selected = state.cloudSync.wifiOnlyForLargeFiles,
                 options = listOf(true, false),
                 optionLabel = { wifiOnly ->
@@ -473,10 +394,10 @@ fun CloudSyncRoute(
     }
     val syncContentSection: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-            KixyuSection(title = "同步内容") {
+            KixyuSection(title = stringResource(R.string.settings_sync_content_section)) {
                 KixyuSettingsRow(
-                    title = "原始书籍文件",
-                    supportingText = "同步 TXT / EPUB，供其他设备完整恢复",
+                    title = stringResource(R.string.settings_original_book_files),
+                    supportingText = stringResource(R.string.settings_sync_books_summary),
                     icon = KixyuSymbols.Backup,
                     onClick = {
                         val enabled = !state.cloudSync.syncOriginalFiles
@@ -496,8 +417,8 @@ fun CloudSyncRoute(
                 }
                 KixyuDivider()
                 KixyuSettingsRow(
-                    title = "用户字体",
-                    supportingText = "同步已导入的 TTF / OTF",
+                    title = stringResource(R.string.settings_user_fonts),
+                    supportingText = stringResource(R.string.settings_sync_fonts_summary),
                     icon = KixyuSymbols.Tune,
                     onClick = {
                         val enabled = !state.cloudSync.syncFonts
@@ -526,7 +447,7 @@ fun CloudSyncRoute(
     }
 
     KixyuPageScaffold(
-        title = "Google Drive 同步",
+        title = stringResource(R.string.settings_google_drive_sync),
         largeTitle = false,
         showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
@@ -572,7 +493,7 @@ fun CloudSyncRoute(
     val syncConflict = state.cloudSync.initialSyncDecision
     KixyuActionDialog(
         show = syncConflict != null && !conflictDeferred,
-        title = "发现同步冲突",
+        title = stringResource(R.string.settings_sync_conflict_title),
         onDismissRequest = { conflictDeferred = true },
         confirmLabel = "使用本机更改",
         onConfirm = {
@@ -587,7 +508,7 @@ fun CloudSyncRoute(
         dismissLabel = "稍后处理",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-            Text("有 ${syncConflict?.conflicts?.size ?: 0} 项内容在本机和云端都发生了修改。")
+            Text(stringResource(R.string.settings_sync_conflict_count, syncConflict?.conflicts?.size ?: 0))
             Text(
                 "阅读进度、阅读记录和删除操作会自动合并；这里只列出无法安全判断的书籍信息、书签或阅读设置。",
                 style = MaterialTheme.typography.bodyMedium,
@@ -615,7 +536,7 @@ private fun GoogleStorageSection(
     val limitText = quota?.limitBytes?.let { Formatter.formatShortFileSize(context, it) }
     val remainingText = quota?.remainingBytes?.let { Formatter.formatShortFileSize(context, it) }
 
-    KixyuSection(title = "云空间") {
+    KixyuSection(title = stringResource(R.string.settings_cloud_storage_section)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -740,7 +661,7 @@ private fun CloudSyncOverviewCard(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
                     ) {
-                        Text("在每台设备继续阅读", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.settings_sync_continue_title), style = MaterialTheme.typography.titleMedium)
                         Text(
                             "同步书库、进度、书签和个性化设置",
                             style = MaterialTheme.typography.bodySmall,
@@ -893,7 +814,7 @@ fun GoogleAccountRoute(
 
     if (account == null) {
         KixyuPageScaffold(
-            title = "管理 Google 账号",
+            title = stringResource(R.string.settings_manage_google_account),
             largeTitle = false,
             modifier = Modifier.fillMaxSize(),
             navigationIcon = {
@@ -957,7 +878,7 @@ fun GoogleAccountRoute(
 
     KixyuActionDialog(
         show = confirmDelete,
-        title = "删除云端同步数据？",
+        title = stringResource(R.string.settings_delete_cloud_data_question),
         onDismissRequest = { confirmDelete = false },
         confirmLabel = "永久删除",
         onConfirm = {
@@ -965,7 +886,7 @@ fun GoogleAccountRoute(
             activity?.let(viewModel::deleteCloudData)
         },
     ) {
-        Text("此操作不会删除本机数据，但无法从 Google Drive 恢复。")
+        Text(stringResource(R.string.settings_delete_cloud_warning))
     }
 }
 
@@ -982,7 +903,7 @@ private fun GoogleAccountPage(
     onDeleteCloudData: () -> Unit,
 ) {
     KixyuPageScaffold(
-        title = "管理 Google 账号",
+        title = stringResource(R.string.settings_manage_google_account),
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
@@ -1024,10 +945,10 @@ private fun GoogleAccountPage(
                 }
             }
             item {
-                KixyuSection(title = "账号授权") {
+                KixyuSection(title = stringResource(R.string.settings_account_authorization_section)) {
                     KixyuSettingsRow(
-                        title = "管理你的 Google 账号",
-                        supportingText = "个人信息、安全、隐私和设备",
+                        title = stringResource(R.string.settings_manage_your_google_account),
+                        supportingText = stringResource(R.string.settings_manage_account_summary),
                         icon = KixyuSymbols.AccountCircle,
                         onClick = onManageGoogleAccount,
                     ) {
@@ -1039,8 +960,8 @@ private fun GoogleAccountPage(
                     }
                     KixyuDivider()
                     KixyuSettingsRow(
-                        title = "切换 Google 账号",
-                        supportingText = "选择这台设备上的其他 Google 账号",
+                        title = stringResource(R.string.settings_switch_google_account),
+                        supportingText = stringResource(R.string.settings_switch_account_summary),
                         icon = KixyuSymbols.SwitchAccount,
                         onClick = onSwitchAccount,
                     ) {
@@ -1052,26 +973,26 @@ private fun GoogleAccountPage(
                     }
                     KixyuDivider()
                     KixyuSettingsRow(
-                        title = "重新授权 Google Drive",
-                        supportingText = "重新确认账号和应用访问权限",
+                        title = stringResource(R.string.settings_reauthorize_google_drive),
+                        supportingText = stringResource(R.string.settings_reauthorize_summary),
                         icon = KixyuSymbols.Refresh,
                         onClick = onReconnect,
                     )
                 }
             }
             item {
-                KixyuSection(title = "账号操作") {
+                KixyuSection(title = stringResource(R.string.settings_account_actions_section)) {
                     KixyuSettingsRow(
-                        title = "断开 Google 账号",
-                        supportingText = "停止同步并撤销 Kixyu Book 的访问权限",
+                        title = stringResource(R.string.settings_disconnect_google_account),
+                        supportingText = stringResource(R.string.settings_disconnect_account_summary),
                         icon = KixyuSymbols.Cloud,
                         contentColor = MaterialTheme.colorScheme.error,
                         onClick = onDisconnect,
                     )
                     KixyuDivider()
                     KixyuSettingsRow(
-                        title = "删除云端同步数据",
-                        supportingText = "不会删除本机书籍和阅读数据",
+                        title = stringResource(R.string.settings_delete_cloud_data),
+                        supportingText = stringResource(R.string.settings_delete_cloud_summary),
                         icon = KixyuSymbols.DeleteOutline,
                         contentColor = MaterialTheme.colorScheme.error,
                         onClick = onDeleteCloudData,
@@ -1185,64 +1106,64 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
     }
     return when {
         conflict != null -> CloudSyncStatusUi(
-            title = "等待处理同步冲突",
+            title = stringResource(R.string.settings_sync_status_waiting_conflict),
             detail = "${conflict.conflicts.size} 项内容在本机和云端都已修改",
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         state.inspectingInitialSync -> CloudSyncStatusUi(
-            title = "正在检查云端书库",
+            title = stringResource(R.string.settings_sync_status_checking_library),
             detail = "正在识别本机与云端数据",
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         !state.enabled -> CloudSyncStatusUi(
-            title = "同步已暂停",
+            title = stringResource(R.string.settings_sync_status_paused),
             detail = lastSync?.let { "上次同步于 $it" } ?: "开启自动同步后开始上传数据",
             icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.MUTED,
         )
         state.phase == CloudSyncPhase.AUTHORIZING -> CloudSyncStatusUi(
-            title = "正在连接 Google Drive",
+            title = stringResource(R.string.settings_sync_status_connecting),
             detail = "正在确认账号与访问权限",
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         state.phase == CloudSyncPhase.AUTH_REQUIRED -> CloudSyncStatusUi(
-            title = "需要重新授权",
+            title = stringResource(R.string.settings_sync_status_reauthorize),
             detail = "进入应用后会自动恢复 Google Drive 连接",
             icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         state.phase == CloudSyncPhase.SYNCING -> CloudSyncStatusUi(
-            title = "正在同步",
+            title = stringResource(R.string.settings_sync_status_syncing),
             detail = if (state.pendingCount > 0) "${state.pendingCount} 项本地变更等待完成" else "正在检查云端变更",
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         state.phase == CloudSyncPhase.ERROR -> CloudSyncStatusUi(
-            title = "同步遇到问题",
+            title = stringResource(R.string.settings_sync_status_error),
             detail = state.errorMessage ?: "请检查网络后重试",
             icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.ERROR,
         )
         state.pendingCount > 0 -> CloudSyncStatusUi(
-            title = "等待同步",
+            title = stringResource(R.string.settings_sync_status_waiting),
             detail = "${state.pendingCount} 项本地变更等待上传",
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         lastSync != null -> CloudSyncStatusUi(
-            title = "所有数据均已同步",
+            title = stringResource(R.string.settings_sync_status_complete),
             detail = "上次同步于 $lastSync",
             icon = KixyuSymbols.CloudDone,
             tone = CloudSyncStatusTone.SUCCESS,
         )
         else -> CloudSyncStatusUi(
-            title = "等待首次同步",
+            title = stringResource(R.string.settings_sync_status_initial),
             detail = "连接网络后将自动开始",
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,

@@ -70,7 +70,7 @@ fun ReadingSettingsRoute(
     var reminderTimeVisible by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     KixyuPageScaffold(
-        title = "阅读",
+        title = stringResource(R.string.settings_reading),
         largeTitle = false,
         showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
@@ -100,7 +100,7 @@ fun ReadingSettingsRoute(
         ) {
             item {
                 KixyuSection(
-                    title = "阅读外观",
+                    title = stringResource(R.string.settings_reading_appearance),
                     action = { ReadingSectionResetAction(viewModel::resetReaderTheme) },
                 ) {
                     KixyuReaderThemeControls(
@@ -116,7 +116,7 @@ fun ReadingSettingsRoute(
             }
             item {
                 KixyuSection(
-                    title = "排版与翻页",
+                    title = stringResource(R.string.settings_layout_and_page_turn),
                     action = { ReadingSectionResetAction(viewModel::resetReaderLayout) },
                 ) {
                     KixyuFontControls(
@@ -135,7 +135,7 @@ fun ReadingSettingsRoute(
             }
             item {
                 KixyuSection(
-                    title = "阅读控制",
+                    title = stringResource(R.string.settings_reading_controls),
                     action = { ReadingSectionResetAction(viewModel::resetReaderBehavior) },
                 ) {
                     KixyuReaderBehaviorControls(state.settings) { updated ->
@@ -144,9 +144,9 @@ fun ReadingSettingsRoute(
                 }
             }
             item {
-                KixyuSection(title = "阅读信息") {
+                KixyuSection(title = stringResource(R.string.settings_reading_information_section)) {
                     KixyuSettingsRow(
-                        title = "阅读信息栏",
+                        title = stringResource(R.string.settings_reading_information_bar),
                         supportingText = listOfNotNull(
                             "章节名".takeIf { state.settings.showChapterTitle },
                             "页码".takeIf { state.settings.showPageNumber },
@@ -160,9 +160,9 @@ fun ReadingSettingsRoute(
                 }
             }
             item {
-                KixyuSection(title = "阅读习惯") {
+                KixyuSection(title = stringResource(R.string.settings_reading_habits_section)) {
                     KixyuStepperRow(
-                        title = "每日目标",
+                        title = stringResource(R.string.settings_daily_goal),
                         valueLabel = "${state.goalMinutes} 分钟",
                         onDecrease = { viewModel.setGoal((state.goalMinutes - 5).coerceAtLeast(5)) },
                         onIncrease = { viewModel.setGoal((state.goalMinutes + 5).coerceAtMost(120)) },
@@ -171,7 +171,7 @@ fun ReadingSettingsRoute(
                     )
                     KixyuDivider()
                     KixyuSettingsRow(
-                        title = "每日目标提醒",
+                        title = stringResource(R.string.settings_daily_goal_reminder),
                         supportingText = if (state.readingReminder.enabled) {
                             "目标未完成时，在 ${state.readingReminder.hour.toString().padStart(2, '0')}:" +
                                 state.readingReminder.minute.toString().padStart(2, '0') + " 提醒"
@@ -188,8 +188,8 @@ fun ReadingSettingsRoute(
                     if (state.readingReminder.enabled) {
                         KixyuDivider()
                         KixyuSettingsRow(
-                            title = "提醒时间",
-                            supportingText = "系统可能根据省电策略延后少量时间",
+                            title = stringResource(R.string.settings_reminder_time),
+                            supportingText = stringResource(R.string.settings_reminder_delay_summary),
                             onClick = { reminderTimeVisible = true },
                         ) {
                             Text(
@@ -205,10 +205,10 @@ fun ReadingSettingsRoute(
                 }
             }
             item {
-                KixyuSection(title = "重置") {
+                KixyuSection(title = stringResource(R.string.settings_reset_section)) {
                     KixyuSettingsRow(
-                        title = "恢复全部阅读设置",
-                        supportingText = "不会修改应用外观、书籍内容和阅读记录",
+                        title = stringResource(R.string.settings_reset_all_reader_settings),
+                        supportingText = stringResource(R.string.settings_reset_reader_summary),
                         icon = KixyuSymbols.Refresh,
                         onClick = { resetAllVisible = true },
                     ) {
@@ -222,7 +222,7 @@ fun ReadingSettingsRoute(
     KixyuActionDialog(
         show = resetAllVisible,
         onDismissRequest = { resetAllVisible = false },
-        title = "恢复全部阅读设置",
+        title = stringResource(R.string.settings_reset_all_reader_settings),
         confirmLabel = "恢复默认",
         onConfirm = {
             resetAllVisible = false
@@ -230,7 +230,7 @@ fun ReadingSettingsRoute(
         },
         dismissLabel = "取消",
     ) {
-        Text("将重置全局排版、阅读外观、阅读控制、信息栏和阅读目标。")
+        Text(stringResource(R.string.settings_reset_reader_warning))
     }
     ReadingReminderTimeDialog(
         show = reminderTimeVisible,
@@ -257,7 +257,7 @@ private fun ReadingReminderTimeDialog(
     var minute by rememberSaveable(initialMinute) { mutableStateOf(initialMinute) }
     KixyuActionDialog(
         show = true,
-        title = "提醒时间",
+        title = stringResource(R.string.settings_reminder_time),
         onDismissRequest = onDismissRequest,
         confirmLabel = "确定",
         onConfirm = { onConfirm(hour, minute) },
@@ -270,14 +270,14 @@ private fun ReadingReminderTimeDialog(
                 color = MaterialTheme.colorScheme.primary,
             )
             KixyuStepperRow(
-                title = "小时",
+                title = stringResource(R.string.settings_hour),
                 valueLabel = hour.toString().padStart(2, '0'),
                 onDecrease = { hour = (hour + 23) % 24 },
                 onIncrease = { hour = (hour + 1) % 24 },
             )
             KixyuDivider()
             KixyuStepperRow(
-                title = "分钟",
+                title = stringResource(R.string.settings_minute),
                 valueLabel = minute.toString().padStart(2, '0'),
                 onDecrease = { minute = (minute + 59) % 60 },
                 onIncrease = { minute = (minute + 1) % 60 },

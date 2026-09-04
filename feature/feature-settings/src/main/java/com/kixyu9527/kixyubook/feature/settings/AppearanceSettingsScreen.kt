@@ -40,7 +40,7 @@ fun AppearanceRoute(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     KixyuPageScaffold(
-        title = "外观",
+        title = stringResource(R.string.settings_appearance),
         largeTitle = false,
         showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
@@ -63,7 +63,7 @@ fun AppearanceRoute(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
             item {
-                KixyuSection(title = "应用界面") {
+                KixyuSection(title = stringResource(R.string.settings_app_interface_section)) {
                     KixyuThemeModeControl(
                         settings = state.settings,
                         onSettingsChange = { updated -> viewModel.update { updated } },
@@ -75,7 +75,7 @@ fun AppearanceRoute(
                     )
                     KixyuDivider()
                     KixyuSettingsRow(
-                        title = "可预测返回",
+                        title = stringResource(R.string.settings_predictive_back),
                         supportingText = if (state.settings.predictiveBackEnabled) {
                             "返回手势会跟随手指显示关闭过程"
                         } else {

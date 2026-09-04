@@ -69,7 +69,7 @@ fun FontManagementRoute(
     }
 
     KixyuPageScaffold(
-        title = "阅读字体",
+        title = stringResource(R.string.settings_reader_fonts_title),
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
@@ -96,7 +96,7 @@ fun FontManagementRoute(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
             item {
-                KixyuSection(title = "字体") {
+                KixyuSection(title = stringResource(R.string.settings_fonts_section)) {
                     FontChoiceRow(
                         name = "系统默认",
                         description = "跟随设备字体，体积最小",
@@ -107,10 +107,10 @@ fun FontManagementRoute(
                 }
             }
             item {
-                KixyuSection(title = "我的字体") {
+                KixyuSection(title = stringResource(R.string.settings_my_fonts_section)) {
                     KixyuSettingsRow(
-                        title = "导入字体",
-                        supportingText = "支持 TTF / OTF，导入后自动应用",
+                        title = stringResource(R.string.settings_import_font),
+                        supportingText = stringResource(R.string.settings_import_font_summary),
                         icon = KixyuSymbols.Add,
                         onClick = { fontPicker.launch(FONT_MIME_TYPES) },
                     ) {
@@ -136,7 +136,7 @@ fun FontManagementRoute(
     val fontToDelete = pendingDeletion
     KixyuActionDialog(
         show = fontToDelete != null,
-        title = "删除字体",
+        title = stringResource(R.string.settings_delete_font),
         onDismissRequest = { pendingDeletion = null },
         confirmLabel = "删除",
         onConfirm = {
@@ -144,7 +144,7 @@ fun FontManagementRoute(
             pendingDeletion = null
         },
     ) {
-        Text("将从设备和同步数据中删除“${fontToDelete?.name.orEmpty()}”。")
+        Text(stringResource(R.string.settings_delete_font_warning, fontToDelete?.name.orEmpty()))
     }
 }
 

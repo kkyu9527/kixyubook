@@ -75,7 +75,7 @@ fun AboutRoute(
         }
     }
     KixyuPageScaffold(
-        title = "关于",
+        title = stringResource(R.string.settings_about_title),
         largeTitle = false,
         showTopBar = !embedded,
         modifier = Modifier.fillMaxSize(),
@@ -104,13 +104,13 @@ fun AboutRoute(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
             item {
-                KixyuSection(title = "应用") {
+                KixyuSection(title = stringResource(R.string.settings_application_section)) {
                     KixyuSettingsRow(
-                        title = "Kixyu Book",
-                        supportingText = "本地离线小说阅读器",
+                        title = stringResource(R.string.settings_app_name),
+                        supportingText = stringResource(R.string.settings_app_summary),
                         leading = appLogo,
                     ) {
-                        Text("v$currentVersion", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        Text(stringResource(R.string.settings_version, currentVersion), style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                     KixyuDivider()
                     Row(
@@ -132,10 +132,10 @@ fun AboutRoute(
                 }
             }
             item {
-                KixyuSection(title = "诊断") {
+                KixyuSection(title = stringResource(R.string.settings_diagnostics_section)) {
                     KixyuSettingsRow(
-                        title = "日志详情",
-                        supportingText = "查看同步、导入、解析与阅读性能记录",
+                        title = stringResource(R.string.settings_log_details),
+                        supportingText = stringResource(R.string.settings_log_details_summary),
                         icon = KixyuSymbols.Storage,
                         onClick = onOpenDiagnosticLog,
                     ) {
@@ -144,10 +144,10 @@ fun AboutRoute(
                 }
             }
             item {
-                KixyuSection(title = "项目与联系") {
+                KixyuSection(title = stringResource(R.string.settings_project_contact_section)) {
                     KixyuSettingsRow(
-                        title = "项目源码",
-                        supportingText = "github.com/kkyu9527/kixyubook",
+                        title = stringResource(R.string.settings_project_source),
+                        supportingText = stringResource(R.string.settings_project_url),
                         onClick = {
                             openExternal(onOpenProjectSource, "无法打开 GitHub，请检查可用的浏览器")
                         },
@@ -164,8 +164,8 @@ fun AboutRoute(
                     }
                     KixyuDivider()
                     KixyuSettingsRow(
-                        title = "Telegram 联系",
-                        supportingText = "@kkyu9527s_bot",
+                        title = stringResource(R.string.settings_telegram_contact),
+                        supportingText = stringResource(R.string.settings_telegram_handle),
                         onClick = {
                             openExternal(onContactTelegram, "无法打开 Telegram 联系链接")
                         },

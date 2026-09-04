@@ -255,11 +255,15 @@ private fun DiagnosticLogScreen(
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
             ) {
                 item {
-                    KixyuSection(title = "日志分类") {
+                    KixyuSection(title = stringResource(R.string.settings_log_categories_section)) {
                         categorySummaries.forEachIndexed { index, summary ->
                             KixyuSettingsRow(
                                 title = summary.label,
-                                supportingText = "${summary.count} 条记录 · 最新 ${summary.latestTime}",
+                            supportingText = stringResource(
+                                R.string.settings_log_category_summary,
+                                summary.count,
+                                summary.latestTime,
+                            ),
                                 onClick = { onOpenCategory(summary.key) },
                                 leading = {
                                     Icon(
