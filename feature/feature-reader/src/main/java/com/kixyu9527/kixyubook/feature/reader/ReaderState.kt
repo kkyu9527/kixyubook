@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.feature.reader
 import androidx.compose.runtime.Immutable
 import com.kixyu9527.kixyubook.core.common.model.Book
 import com.kixyu9527.kixyubook.core.common.model.BookSearchResult
+import com.kixyu9527.kixyubook.core.common.model.BookSearchStage
 import com.kixyu9527.kixyubook.core.common.model.Bookmark
 import com.kixyu9527.kixyubook.core.common.model.Chapter
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
@@ -17,6 +18,8 @@ enum class ReaderLoadStage {
     READING_CONTENT,
     PAGINATING_FIRST_PAGE,
 }
+
+enum class ReaderSearchScope { BOOK, CURRENT_CHAPTER }
 
 data class ReaderUiState(
     val book: Book? = null,
@@ -34,9 +37,17 @@ data class ReaderUiState(
     val corrections: List<TextCorrection> = emptyList(),
     val annotations: List<ReaderAnnotation> = emptyList(),
     val searchQuery: String = "",
+    val searchScope: ReaderSearchScope = ReaderSearchScope.BOOK,
+    val searchHistory: List<String> = emptyList(),
     val searchResults: List<BookSearchResult> = emptyList(),
     val selectedSearchIndex: Int = -1,
     val searchReturnAvailable: Boolean = false,
+    val searchInProgress: Boolean = false,
+    val searchProgress: Float = 0f,
+    val searchStage: BookSearchStage = BookSearchStage.INDEXING,
+    val searchCompleted: Int = 0,
+    val searchTotal: Int = 0,
+    val searchError: String? = null,
     val canNavigateBack: Boolean = false,
     val canNavigateForward: Boolean = false,
     val epubFootnote: EpubLinkResult.Footnote? = null,
@@ -50,6 +61,8 @@ data class ReaderUiState(
 data class ReaderPositionState(
     val paragraphIndex: Int = 0,
     val charOffset: Int = 0,
+    /** Last source paragraph represented by the visible page or scroll viewport. */
+    val visibleEndParagraphIndex: Int = paragraphIndex,
 )
 
 /**

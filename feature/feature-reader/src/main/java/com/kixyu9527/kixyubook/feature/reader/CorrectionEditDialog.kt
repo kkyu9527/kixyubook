@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.common.model.TextCorrection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
@@ -39,12 +40,12 @@ internal fun CorrectionEditDialog(
         onAlternative = onDelete,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium)) {
-            Text("原文", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.reader_correction_original), style = MaterialTheme.typography.labelLarge)
             Text(original, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(
                 value = replacement,
                 onValueChange = { replacement = it },
-                label = { Text("纠正后") },
+                label = { Text(stringResource(R.string.reader_correction_replacement)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
                 maxLines = 10,

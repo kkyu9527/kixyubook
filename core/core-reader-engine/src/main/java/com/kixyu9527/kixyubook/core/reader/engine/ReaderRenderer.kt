@@ -574,7 +574,7 @@ private fun ReaderChapterOpeningTitle(
                 color = palette.title,
                 style = MaterialTheme.typography.headlineMedium,
                 fontFamily = family,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
             )
@@ -672,12 +672,14 @@ private fun annotationSpans(
             ReaderTextSpan(
                 start = start - textStart,
                 end = end - textStart,
-                styles = setOf(
+                styles = buildSet {
+                    add(
                     when (annotation.style) {
                         ReaderAnnotationStyle.HIGHLIGHT -> ReaderInlineStyle.HIGHLIGHT
                         ReaderAnnotationStyle.UNDERLINE -> ReaderInlineStyle.UNDERLINE
-                    },
-                ),
+                    })
+                    if (annotation.note.isNotBlank()) add(ReaderInlineStyle.NOTE)
+                },
                 background = ReaderSemanticColor.YELLOW.takeIf {
                     annotation.style == ReaderAnnotationStyle.HIGHLIGHT
                 },

@@ -41,14 +41,17 @@ import kotlinx.coroutines.Job
 import kotlin.math.roundToInt
 
 
-internal enum class DirectoryView { CHAPTERS, BOOKMARKS }
+internal enum class DirectoryView { CHAPTERS, BOOKMARKS, ANNOTATIONS }
 
 @Composable
 internal fun DirectorySheet(
     state: ReaderUiState,
     selectChapter: (Int) -> Unit,
     selectBookmark: (Bookmark) -> Unit,
+    selectAnnotation: (ReaderAnnotation) -> Unit,
     deleteBookmark: (String) -> Unit,
+    updateAnnotationNote: (String, String) -> Unit,
+    deleteAnnotation: (String) -> Unit,
     expandedLayout: Boolean = false,
 ) {
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
@@ -116,27 +119,55 @@ internal fun DirectorySheet(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (directoryView == DirectoryView.CHAPTERS) {
-                    stringResource(R.string.reader_directory_title, state.chapters.size)
-                } else {
-                    stringResource(R.string.reader_bookmarks_title, state.bookmarks.size)
+                when (directoryView) {
+                    DirectoryView.CHAPTERS -> stringResource(R.string.reader_directory_title, state.chapters.size)
+                    DirectoryView.BOOKMARKS -> stringResource(R.string.reader_bookmarks_title, state.bookmarks.size)
+                    DirectoryView.ANNOTATIONS -> stringResource(R.string.reader_annotations_title, state.annotations.size)
                 },
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
             )
             KixyuIconButton(onClick = {
-                directoryView = if (directoryView == DirectoryView.CHAPTERS) DirectoryView.BOOKMARKS else DirectoryView.CHAPTERS
+                directoryView = if (directoryView == DirectoryView.ANNOTATIONS) {
+                    DirectoryView.CHAPTERS
+                } else {
+                    DirectoryView.ANNOTATIONS
+                }
             }) {
                 Icon(
-                    if (directoryView == DirectoryView.CHAPTERS) KixyuSymbols.Bookmarks else KixyuSymbols.Toc,
+                    if (directoryView == DirectoryView.ANNOTATIONS) KixyuSymbols.Toc
+                    else KixyuSymbols.EditNoteRounded,
                     stringResource(
-                        if (directoryView == DirectoryView.CHAPTERS) {
-                            R.string.reader_view_bookmarks
-                        } else {
-                            R.string.reader_view_directory
-                        },
+                        if (directoryView == DirectoryView.ANNOTATIONS) R.string.reader_view_directory
+                        else R.string.reader_view_annotations,
                     ),
+                    tint = if (directoryView == DirectoryView.ANNOTATIONS) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            KixyuIconButton(onClick = {
+                directoryView = if (directoryView == DirectoryView.BOOKMARKS) {
+                    DirectoryView.CHAPTERS
+                } else {
+                    DirectoryView.BOOKMARKS
+                }
+            }) {
+                Icon(
+                    if (directoryView == DirectoryView.BOOKMARKS) KixyuSymbols.Toc
+                    else KixyuSymbols.Bookmarks,
+                    stringResource(
+                        if (directoryView == DirectoryView.BOOKMARKS) R.string.reader_view_directory
+                        else R.string.reader_view_bookmarks,
+                    ),
+                    tint = if (directoryView == DirectoryView.BOOKMARKS) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }
@@ -188,6 +219,7 @@ internal fun DirectorySheet(
                                             stringResource(R.string.reader_volume_content)
                                         },
                                         titleStyle = MaterialTheme.typography.bodyMedium,
+                                        titleMaxLines = 2,
                                         supportingTextStyle = MaterialTheme.typography.bodySmall,
                                         selected = current,
                                         highlighted = hasBookmark,
@@ -236,6 +268,7 @@ internal fun DirectorySheet(
                                     KixyuListRow(
                                         title = chapter.title,
                                         titleStyle = MaterialTheme.typography.bodyMedium,
+                                        titleMaxLines = 2,
                                         selected = current,
                                         highlighted = hasBookmark,
                                         onClick = { selectChapter(row.index) },
@@ -312,6 +345,7 @@ internal fun DirectorySheet(
                                         volume.chapterCount,
                                     ),
                                     titleStyle = MaterialTheme.typography.bodyMedium,
+                                    titleMaxLines = 2,
                                     supportingTextStyle = MaterialTheme.typography.bodySmall,
                                     onClick = {
                                         if (expanded) {
@@ -346,7 +380,7 @@ internal fun DirectorySheet(
                         }
                     }
                 }
-            } else if (state.bookmarks.isEmpty()) {
+            } else if (view == DirectoryView.BOOKMARKS && state.bookmarks.isEmpty()) {
                 Box(
                     if (expandedLayout) Modifier.fillMaxSize()
                     else Modifier.fillMaxWidth().height(KixyuSize.readerSheetMaxContent),
@@ -354,7 +388,7 @@ internal fun DirectorySheet(
                 ) {
                     Text(stringResource(R.string.reader_no_bookmarks), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else {
+            } else if (view == DirectoryView.BOOKMARKS) {
                 androidx.compose.foundation.lazy.LazyColumn(
                     if (expandedLayout) Modifier.fillMaxSize()
                     else Modifier.fillMaxWidth().height(KixyuSize.readerSheetMaxContent),
@@ -382,6 +416,14 @@ internal fun DirectorySheet(
                         )
                     }
                 }
+            } else {
+                ReaderAnnotationDirectory(
+                    state = state,
+                    expandedLayout = expandedLayout,
+                    selectAnnotation = selectAnnotation,
+                    updateAnnotationNote = updateAnnotationNote,
+                    deleteAnnotation = deleteAnnotation,
+                )
             }
         }
     }

@@ -32,10 +32,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuFontControls
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBackdropAwareInteractiveSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuInteractivePopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
@@ -124,12 +125,17 @@ internal fun ReaderSearchOverlay(
     progress: Float,
     state: ReaderUiState,
     onDismiss: () -> Unit,
-    onSearch: (String) -> Unit,
+    onSearch: (String, ReaderSearchScope) -> Unit,
+    onClearHistory: () -> Unit,
     onMove: (Int) -> Unit,
     onReturn: () -> Unit,
     onSelect: (Int) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf(state.searchQuery) }
+    var scopeName by rememberSaveable { mutableStateOf(state.searchScope.name) }
+    val searchScope = ReaderSearchScope.entries.firstOrNull { it.name == scopeName } ?: ReaderSearchScope.BOOK
+    val bookScopeLabel = stringResource(R.string.reader_search_scope_book)
+    val chapterScopeLabel = stringResource(R.string.reader_search_scope_chapter)
     var expanded by rememberSaveable { mutableStateOf(true) }
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
@@ -143,8 +149,10 @@ internal fun ReaderSearchOverlay(
             focusManager.clearFocus()
         }
     }
-    fun submit() {
-        onSearch(query.trim())
+    fun submit(submittedQuery: String = query) {
+        val normalized = submittedQuery.trim()
+        query = submittedQuery
+        onSearch(normalized, searchScope)
         focusManager.clearFocus()
         expanded = true
     }
@@ -177,13 +185,12 @@ internal fun ReaderSearchOverlay(
                 .padding(horizontal = KixyuSpacing.medium, vertical = KixyuSpacing.small),
             contentAlignment = Alignment.BottomCenter,
         ) {
-            KixyuInteractivePopupSurface(
+            KixyuBackdropAwareInteractiveSurface(
                 modifier = Modifier.fillMaxWidth()
                     .widthIn(max = KixyuSize.readerSearchPanelMaxWidth)
                     .heightIn(max = KixyuSize.readerSearchPanelMaxHeight)
                     .animateContentSize(tween(KixyuMotion.ReaderSearchEnterMillis))
                     .kixyuPredictivePopupTransform(progress),
-                shadowElevation = 0.dp,
             ) {
                 Column(
                     Modifier.fillMaxWidth().padding(KixyuSpacing.large),
@@ -217,11 +224,83 @@ internal fun ReaderSearchOverlay(
                         placeholder = stringResource(R.string.reader_search_hint),
                         leadingIcon = { Icon(KixyuSymbols.Search, null) },
                         trailingIcon = {
-                            KixyuIconButton(onClick = ::submit, enabled = query.isNotBlank()) {
+                            KixyuIconButton(onClick = { submit(query) }, enabled = query.isNotBlank()) {
                                 Icon(KixyuSymbols.ArrowForward, stringResource(R.string.reader_search))
                             }
                         },
                     )
+                    AnimatedVisibility(visible = expanded) {
+                        KixyuDropdownRow(
+                            title = stringResource(R.string.reader_search_scope),
+                            selected = searchScope,
+                            options = ReaderSearchScope.entries,
+                            optionLabel = { selected ->
+                                if (selected == ReaderSearchScope.BOOK) bookScopeLabel else chapterScopeLabel
+                            },
+                            onSelected = { scopeName = it.name },
+                        )
+                    }
+                    if (expanded && query.isBlank() && state.searchHistory.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.reader_search_history),
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                KixyuTextButton(
+                                    text = stringResource(R.string.reader_clear_search_history),
+                                    onClick = onClearHistory,
+                                )
+                            }
+                            state.searchHistory.forEach { previousQuery ->
+                                KixyuTextButton(
+                                    text = previousQuery,
+                                    onClick = {
+                                        query = previousQuery
+                                        onSearch(previousQuery, searchScope)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                    if (query.trim() == state.searchQuery && state.searchInProgress) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (state.searchStage == BookSearchStage.INDEXING) {
+                                        R.string.reader_search_indexing_progress
+                                    } else {
+                                        R.string.reader_search_scanning_progress
+                                    },
+                                    state.searchCompleted,
+                                    state.searchTotal,
+                                    (state.searchProgress * 100f).toInt(),
+                                ),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            LinearProgressIndicator(
+                                progress = { state.searchProgress.coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                    state.searchError?.takeIf { query.trim() == state.searchQuery }?.let { error ->
+                        Text(
+                            error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     if (state.searchResults.isNotEmpty() && query.trim() == state.searchQuery) {
                 if (!expanded) {
                     Row(
@@ -262,7 +341,9 @@ internal fun ReaderSearchOverlay(
                 )
                 androidx.compose.foundation.lazy.LazyColumn(
                     Modifier.fillMaxWidth().weight(1f, fill = false),
-                    contentPadding = PaddingValues(bottom = KixyuSpacing.small),
+                    // Keep the final row above the popup's rounded bottom edge. The popup itself
+                    // remains edge-to-edge; only scrollable content reserves its visual safe area.
+                    contentPadding = PaddingValues(bottom = KixyuSpacing.extraLarge),
                 ) {
                     items(state.searchResults.size) { index ->
                         val result = state.searchResults[index]
@@ -281,7 +362,11 @@ internal fun ReaderSearchOverlay(
                     }
                 }
                 }
-                    } else if (query.trim() == state.searchQuery && state.searchQuery.isNotBlank()) {
+                    } else if (
+                        !state.searchInProgress &&
+                        query.trim() == state.searchQuery &&
+                        state.searchQuery.isNotBlank()
+                    ) {
                 Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) {
                     Text(stringResource(R.string.reader_no_search_result), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

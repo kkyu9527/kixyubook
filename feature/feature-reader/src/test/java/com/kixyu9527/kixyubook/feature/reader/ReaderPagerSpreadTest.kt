@@ -56,12 +56,35 @@ class ReaderPagerSpreadTest {
             hasNext = true,
             currentPlaceholderPageIndex = 0,
             chapterCount = 4,
-            neighbourLeafCount = 2,
         )
 
-        val nextSpread = buildReaderPagerSpreads(window, true).last()
+        val nextSpreads = buildReaderPagerSpreads(window, true).filter {
+            it.items.first().chapterIndex == 3
+        }
+        val nextSpread = nextSpreads.first()
         assertEquals(listOf(0, 1), nextSpread.items.map { it.pageIndex })
         assertEquals("3:spread:0", nextSpread.key)
+        assertEquals(listOf(2, 3), nextSpreads.last().items.map { it.pageIndex })
+    }
+
+    @Test
+    fun rapidSecondTurnCanReachNextChapterSecondPageBeforeRecentering() {
+        val window = buildReaderPagerWindow(
+            currentChapterIndex = 2,
+            currentPages = chapterPages(chapter = 2, count = 1).mapNotNull { it.page },
+            previousPages = chapterPages(chapter = 1, count = 2).mapNotNull { it.page },
+            nextPages = chapterPages(chapter = 3, count = 4).mapNotNull { it.page },
+            hasPrevious = true,
+            hasNext = true,
+            currentPlaceholderPageIndex = 0,
+            chapterCount = 4,
+        )
+        val spreads = buildReaderPagerSpreads(window, false)
+
+        assertEquals(
+            listOf("3:0", "3:1", "3:2", "3:3"),
+            spreads.filter { it.items.first().chapterIndex == 3 }.map { it.key },
+        )
     }
 
     @Test
@@ -84,7 +107,7 @@ class ReaderPagerSpreadTest {
 
     @Test
     fun nextChapterAppearsOnlyAfterItsRealPagesAreReady() {
-        fun nextSpread(nextPages: List<ReaderPage>): ReaderPagerSpread {
+        fun nextSpreads(nextPages: List<ReaderPage>): List<ReaderPagerSpread> {
             val window = buildReaderPagerWindow(
                 currentChapterIndex = 2,
                 currentPages = chapterPages(chapter = 2, count = 2).mapNotNull { it.page },
@@ -94,13 +117,13 @@ class ReaderPagerSpreadTest {
                 hasNext = true,
                 currentPlaceholderPageIndex = 0,
                 chapterCount = 4,
-                neighbourLeafCount = 2,
             )
-            return buildReaderPagerSpreads(window, true).last()
+            return buildReaderPagerSpreads(window, true)
         }
 
-        val pending = nextSpread(emptyList())
-        val loaded = nextSpread(chapterPages(chapter = 3, count = 3).mapNotNull { it.page })
+        val pending = nextSpreads(emptyList()).last()
+        val loaded = nextSpreads(chapterPages(chapter = 3, count = 3).mapNotNull { it.page })
+            .first { it.items.first().chapterIndex == 3 }
 
         assertEquals("2:spread:0", pending.key)
         assertTrue(pending.items.all { it.chapterIndex == 2 && it.page != null })
@@ -120,7 +143,6 @@ class ReaderPagerSpreadTest {
             hasNext = false,
             currentPlaceholderPageIndex = 0,
             chapterCount = 3,
-            neighbourLeafCount = 2,
         )
         val oddWindow = buildReaderPagerWindow(
             currentChapterIndex = 2,
@@ -131,17 +153,68 @@ class ReaderPagerSpreadTest {
             hasNext = false,
             currentPlaceholderPageIndex = 0,
             chapterCount = 3,
-            neighbourLeafCount = 2,
         )
 
-        val evenPreviousSpread = buildReaderPagerSpreads(evenWindow, true).first {
+        val evenPreviousSpread = buildReaderPagerSpreads(evenWindow, true).last {
             it.items.first().chapterIndex == 1
         }
-        val oddPreviousSpread = buildReaderPagerSpreads(oddWindow, true).first {
+        val oddPreviousSpread = buildReaderPagerSpreads(oddWindow, true).last {
             it.items.first().chapterIndex == 1
         }
         assertEquals(listOf(2, 3), evenPreviousSpread.items.map { it.pageIndex })
         assertEquals(listOf(4), oddPreviousSpread.items.map { it.pageIndex })
+    }
+
+    @Test
+    fun chapterButtonsTargetFirstPageInsideStablePagerWindow() {
+        val window = buildReaderPagerWindow(
+            currentChapterIndex = 2,
+            currentPages = chapterPages(chapter = 2, count = 3).mapNotNull { it.page },
+            previousPages = chapterPages(chapter = 1, count = 4).mapNotNull { it.page },
+            nextPages = chapterPages(chapter = 3, count = 2).mapNotNull { it.page },
+            hasPrevious = true,
+            hasNext = true,
+            currentPlaceholderPageIndex = 0,
+            chapterCount = 4,
+        )
+        val spreads = buildReaderPagerSpreads(window, false)
+
+        assertEquals(
+            "1:0",
+            spreads[directChapterTargetSpreadIndex(spreads, 2, -1)].key,
+        )
+        assertEquals(
+            "3:0",
+            spreads[directChapterTargetSpreadIndex(spreads, 2, 1)].key,
+        )
+        assertEquals(false, chapterTransitionOpensAtEnd(-1, directChapterTurn = true))
+        assertEquals(true, chapterTransitionOpensAtEnd(-1, directChapterTurn = false))
+        assertEquals(false, chapterTransitionOpensAtEnd(1, directChapterTurn = false))
+    }
+
+    @Test
+    fun idleCoverAnimationTracksStableKeyAcrossWindowRecentering() {
+        val before = buildReaderPagerSpreads(
+            chapterPages(chapter = 1, count = 4) +
+                chapterPages(chapter = 2, count = 3).take(1),
+            false,
+        )
+        val settledKey = before[4].key
+        val after = buildReaderPagerSpreads(
+            chapterPages(chapter = 1, count = 4).takeLast(1) +
+                chapterPages(chapter = 2, count = 3) +
+                chapterPages(chapter = 3, count = 1),
+            false,
+        )
+
+        assertEquals(
+            after.indexOfFirst { it.key == settledKey },
+            readerPagerVisualCurrentIndex(after, settledKey, pagerCurrentPage = 4, scrolling = false),
+        )
+        assertEquals(
+            4,
+            readerPagerVisualCurrentIndex(after, settledKey, pagerCurrentPage = 4, scrolling = true),
+        )
     }
 
     private fun chapterPages(chapter: Int, count: Int): List<ReaderPagerItem> =

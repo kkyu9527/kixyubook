@@ -65,20 +65,21 @@ internal fun ReaderScreen(
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     jumpChapter: (Int) -> Unit,
     jumpPosition: (Int, Int) -> Unit,
-    savePosition: (Int, Int, Boolean) -> Unit,
+    savePosition: (Int, Int, Boolean, Int) -> Unit,
     updateSettings: ((ReaderSettings) -> ReaderSettings) -> Unit,
     addBookmark: () -> Unit,
     deleteBookmark: (String) -> Unit,
-    search: (String) -> Unit,
+    search: (String, ReaderSearchScope) -> Unit,
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
     returnFromSearchResult: () -> Unit,
     navigateHistoryBack: () -> Unit,
     navigateHistoryForward: () -> Unit,
     clearSearch: () -> Unit,
+    clearSearchHistory: () -> Unit,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
-    prioritizeNextChapter: (Int) -> Unit,
+    prioritizeAdjacentChapter: (Int, Int) -> Unit,
     addFont: () -> Unit,
     deleteFont: (UserFont) -> Unit,
     saveCorrection: (Int, Int, String, String) -> Unit,
@@ -86,6 +87,7 @@ internal fun ReaderScreen(
     saveHighlight: (Int, Int, String, Int, Int) -> Unit,
     saveUnderline: (Int, Int, String, Int, Int) -> Unit,
     saveNote: (Int, Int, String, Int, Int, String) -> Unit,
+    updateAnnotationNote: (String, String) -> Unit,
     deleteAnnotation: (String) -> Unit,
     openDocumentLink: (String) -> Unit,
     closeFootnote: () -> Unit,
@@ -111,6 +113,7 @@ internal fun ReaderScreen(
     val sheetBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET)
     val bookInfoBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.BOOK_INFO)
     val volumeTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
+    val chapterTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val focusRequester = remember { FocusRequester() }
     val context = LocalContext.current
     val view = LocalView.current
@@ -147,10 +150,22 @@ internal fun ReaderScreen(
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val palette = readerPalette(state.settings, systemDark)
     val readerBackdrop = rememberKixyuNavigationBackdrop(palette.background)
-    val overlayVisible = controls || menu || toolsMenu || searchVisible ||
-        bookInfoVisible || sheet != null || directoryPanelComposed
-    val statusBarVisible = state.settings.showStatusBar || overlayVisible
-    val navigationBarVisible = !state.settings.hideNavigationBar || overlayVisible
+    val chromeState = ReaderChromeState(
+        controlsVisible = controls,
+        menuVisible = menu,
+        toolsMenuVisible = toolsMenu,
+        searchVisible = searchVisible,
+        bookInfoVisible = bookInfoVisible,
+        sheet = sheet,
+        directoryPanelComposed = directoryPanelComposed,
+        hasSearchResults = state.searchResults.isNotEmpty(),
+    )
+    val overlayVisible = chromeState.overlayVisible
+    val systemBars = readerSystemBarVisibility(
+        showStatusBar = state.settings.showStatusBar,
+        hideNavigationBar = state.settings.hideNavigationBar,
+        overlayVisible = overlayVisible,
+    )
     val overlayMotionKey = listOf(
         controls,
         menu,
@@ -199,8 +214,8 @@ internal fun ReaderScreen(
         systemBarHost?.update(
             owner = systemBarOwner,
             value = KixyuSystemBarPolicy(
-                statusBarVisible = statusBarVisible,
-                navigationBarVisible = navigationBarVisible,
+                statusBarVisible = systemBars.statusBarVisible,
+                navigationBarVisible = systemBars.navigationBarVisible,
                 useDarkIcons = palette.background.luminance() > .5f,
             ),
         )
@@ -253,15 +268,7 @@ internal fun ReaderScreen(
     LaunchedEffect(searchVisible, sheet, bookInfoVisible) {
         if (!searchVisible && sheet == null && !bookInfoVisible) focusRequester.requestFocus()
     }
-    val predictiveBackTarget = when {
-        bookInfoVisible -> ReaderPredictiveBackTarget.BOOK_INFO
-        sheet != null -> ReaderPredictiveBackTarget.SHEET
-        searchVisible -> ReaderPredictiveBackTarget.SEARCH
-        menu || toolsMenu -> ReaderPredictiveBackTarget.POPUP_MENU
-        controls -> ReaderPredictiveBackTarget.CONTROLS
-        state.searchResults.isNotEmpty() -> ReaderPredictiveBackTarget.SEARCH_RESULTS
-        else -> null
-    }
+    val predictiveBackTarget = chromeState.predictiveBackTarget()
     ReaderPredictiveBackHandler(
         target = predictiveBackTarget,
         state = predictiveBackState,
@@ -269,7 +276,7 @@ internal fun ReaderScreen(
             when (target) {
                 ReaderPredictiveBackTarget.BOOK_INFO -> bookInfoVisible = false
                 ReaderPredictiveBackTarget.SHEET -> {
-                    if (sheet in READER_SETTINGS_SHEETS) {
+                    if (sheet.returnsToSettingsMenu()) {
                         returnFromSettingsSheet()
                     } else {
                         sheet = null
@@ -290,9 +297,7 @@ internal fun ReaderScreen(
     )
 
     val currentPageBookmark = state.chapter?.let { chapter ->
-        state.bookmarks.firstOrNull { bookmark ->
-            bookmark.chapterId == chapter.id && bookmark.position == position.paragraphIndex
-        }
+        currentVisiblePageBookmark(state.bookmarks, chapter.id, position)
     }
     val exitReader: () -> Unit = {
         if (!exitRequested) {
@@ -429,9 +434,10 @@ internal fun ReaderScreen(
                         middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
                         dismissControls = { controls = false; menu = false; toolsMenu = false },
                         volumeTurns = volumeTurns,
+                        chapterTurns = chapterTurns,
                         chapterRendered = chapterRendered,
                         setPageInteractionActive = { pageInteractionActive = it },
-                        prioritizeNextChapter = prioritizeNextChapter,
+                        prioritizeAdjacentChapter = prioritizeAdjacentChapter,
                         // A page drag needs the already-started previous/next page layouts. Only
                         // overlays may cancel pagination; the drag still pauses unrelated EPUB work
                         // through setPageInteractionActive above.
@@ -467,8 +473,14 @@ internal fun ReaderScreen(
                 currentPageBookmarked = currentPageBookmark != null,
                 hasPreviousChapter = state.chapterIndex > 0,
                 hasNextChapter = state.chapterIndex < state.chapters.lastIndex,
-                onPreviousChapter = { moveChapter(-1, false) },
-                onNextChapter = { moveChapter(1, false) },
+                onPreviousChapter = {
+                    if (state.settings.pageMode == PageMode.SCROLL) moveChapter(-1, false)
+                    else chapterTurns.tryEmit(-1)
+                },
+                onNextChapter = {
+                    if (state.settings.pageMode == PageMode.SCROLL) moveChapter(1, false)
+                    else chapterTurns.tryEmit(1)
+                },
                 onExit = exitReader,
                 onDirectory = {
                     controls = false
@@ -576,6 +588,7 @@ internal fun ReaderScreen(
                 clearSearch()
             },
             onSearch = search,
+            onClearHistory = clearSearchHistory,
             onMove = moveSearchResult,
             onReturn = returnFromSearchResult,
             onSelect = { index ->
@@ -591,7 +604,7 @@ internal fun ReaderScreen(
             show = sheet != null && !(directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY),
             progress = sheetBackProgress,
             onDismissRequest = {
-                if (sheet in READER_SETTINGS_SHEETS) {
+                if (sheet.returnsToSettingsMenu()) {
                     returnFromSettingsSheet()
                 } else {
                     sheet = null
@@ -621,7 +634,16 @@ internal fun ReaderScreen(
                         toolsMenu = false
                         jumpPosition(bookmark.chapterIndex, bookmark.position)
                     },
+                    selectAnnotation = { annotation ->
+                        sheet = null
+                        controls = false
+                        menu = false
+                        toolsMenu = false
+                        jumpPosition(annotation.chapterIndex, annotation.paragraphIndex)
+                    },
                     deleteBookmark = deleteBookmark,
+                    updateAnnotationNote = updateAnnotationNote,
+                    deleteAnnotation = deleteAnnotation,
                 )
                 ReaderSheet.THEME -> ThemeSheet(
                     state.settings,
@@ -700,7 +722,16 @@ internal fun ReaderScreen(
                                 toolsMenu = false
                                 jumpPosition(bookmark.chapterIndex, bookmark.position)
                             },
+                            selectAnnotation = { annotation ->
+                                sheet = null
+                                controls = false
+                                menu = false
+                                toolsMenu = false
+                                jumpPosition(annotation.chapterIndex, annotation.paragraphIndex)
+                            },
                             deleteBookmark = deleteBookmark,
+                            updateAnnotationNote = updateAnnotationNote,
+                            deleteAnnotation = deleteAnnotation,
                             expandedLayout = true,
                         )
                     }
@@ -718,8 +749,11 @@ internal fun ReaderScreen(
     }
 }
 
-private val READER_SETTINGS_SHEETS = setOf(
-    ReaderSheet.THEME,
-    ReaderSheet.LAYOUT,
-    ReaderSheet.INFORMATION,
-)
+internal fun currentVisiblePageBookmark(
+    bookmarks: List<Bookmark>,
+    chapterId: Long,
+    position: ReaderPositionState,
+): Bookmark? = bookmarks.firstOrNull { bookmark ->
+    bookmark.chapterId == chapterId &&
+        bookmark.position in position.paragraphIndex..position.visibleEndParagraphIndex
+}

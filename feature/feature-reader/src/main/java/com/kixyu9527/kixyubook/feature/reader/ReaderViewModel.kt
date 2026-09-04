@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
+import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.*
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
@@ -20,9 +21,14 @@ import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -64,8 +70,7 @@ class ReaderViewModel @AssistedInject constructor(
     private var initialRetryJob: Job? = null
     private var chapterPrefetchJob: Job? = null
     private var criticalNeighborPublishJob: Job? = null
-    private var criticalReadAheadJob: Job? = null
-    private var criticalReadAheadIndex: Int? = null
+    private val criticalNeighbourJobs = mutableMapOf<Int, Job>()
     private var pendingChapterIndex: Int? = null
     private var prefetchedAroundChapterIndex: Int? = null
     private var pageInteractionActive = false
@@ -84,6 +89,7 @@ class ReaderViewModel @AssistedInject constructor(
         bookUuid = bookUuid,
         books = books,
         state = _uiState,
+        recordHistory = settingsRepository::addSearchHistory,
         recordOrigin = ::recordNavigationOrigin,
         jumpToPosition = ::jumpToPositionRaw,
         returnToOrigin = ::navigateHistoryBack,
@@ -98,7 +104,7 @@ class ReaderViewModel @AssistedInject constructor(
             // are also folded into that first atomic state publication so the destination does
             // not rebuild once for settings and again for content during its enter transition.
             loadInitial()
-            launch {
+            launchReaderObserver("presentation") {
                 combine(settingsRepository.settings, fonts.observeFonts()) { settings, fontList ->
                     Triple(
                         settings,
@@ -119,7 +125,14 @@ class ReaderViewModel @AssistedInject constructor(
                     }
                 }
             }
-            launch {
+            launchReaderObserver("search_history") {
+                settingsRepository.searchHistory.collect { history ->
+                    _uiState.update { current ->
+                        if (current.searchHistory == history) current else current.copy(searchHistory = history)
+                    }
+                }
+            }
+            launchReaderObserver("chapters") {
                 books.observeChapters(bookUuid).collect { chapters ->
                     if (chapters.isEmpty()) return@collect
                     _uiState.update { current ->
@@ -127,25 +140,25 @@ class ReaderViewModel @AssistedInject constructor(
                     }
                 }
             }
-            launch {
+            launchReaderObserver("bookmarks") {
                 books.observeBookmarks(bookUuid).collect { bookmarks ->
                     _uiState.update { it.copy(bookmarks = bookmarks) }
                 }
             }
-            launch {
+            launchReaderObserver("corrections") {
                 textCorrections.observeBookCorrections(bookUuid).collectLatest { corrections ->
                     applyCorrectionSnapshot(corrections)
                 }
             }
-            launch {
+            launchReaderObserver("annotations") {
                 annotations.observeBookAnnotations(bookUuid).collect { values ->
                     _uiState.update { it.copy(annotations = values) }
                 }
             }
-            launch {
+            launchReaderObserver("progress") {
                 books.observeProgress(bookUuid).filterNotNull().collect(::applySyncedProgress)
             }
-            launch {
+            launchReaderObserver("priority_sync") {
                 cloudSync.priorityBookSync
                     .filter { it.bookUuid == bookUuid }
                     .collect { priority ->
@@ -155,6 +168,34 @@ class ReaderViewModel @AssistedInject constructor(
                             else -> Unit
                         }
                     }
+            }
+        }
+    }
+
+    /** One failing optional data stream must never cancel the reader's other live features. */
+    private fun CoroutineScope.launchReaderObserver(
+        name: String,
+        collect: suspend () -> Unit,
+    ) = launch {
+        while (currentCoroutineContext().isActive) {
+            try {
+                collect()
+                return@launch
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                val failure = error.toDiagnosticFailure()
+                DiagnosticLog.record(
+                    Category.READER,
+                    "reader_observer_failed",
+                    outcome = failure.outcome,
+                    details = mapOf(
+                        "book" to bookUuid.take(8),
+                        "observer" to name,
+                        "reason" to failure.reason,
+                    ),
+                )
+                delay(READER_OBSERVER_RETRY_MILLIS)
             }
         }
     }
@@ -219,11 +260,11 @@ class ReaderViewModel @AssistedInject constructor(
                 error = null,
             )
         }
-        // Parsing the next chapter must overlap the user's first page, not begin near the
-        // boundary. Pagination is promoted separately as soon as the first visible leaf exists.
-        // Together these two stages make the next chapter enter the same Pager as an ordinary
-        // measured page before the reader can reach it, including one-page imported chapters.
-        prioritizeNextChapter(index)
+        // A reader session owns a real previous/current/next chapter window. Both neighbours start
+        // loading with the first visible chapter so opening a book at a saved position can move in
+        // either direction immediately; pagination promotes them after the first leaf is visible.
+        prioritizeAdjacentChapter(index, -1)
+        prioritizeAdjacentChapter(index, 1)
     }.onFailure { error -> _uiState.update { it.copy(loading = false, error = error.message) } }
 
     fun retryInitialLoad() {
@@ -348,6 +389,10 @@ class ReaderViewModel @AssistedInject constructor(
 
     fun deleteAnnotation(uuid: String) {
         viewModelScope.launch { annotations.deleteAnnotation(uuid) }
+    }
+
+    fun updateAnnotationNote(uuid: String, note: String) {
+        viewModelScope.launch { annotations.updateNote(uuid, note.trim()) }
     }
 
     private fun saveAnnotation(
@@ -493,8 +538,8 @@ class ReaderViewModel @AssistedInject constructor(
         chapterNavigationJob?.cancel()
         chapterPrefetchJob?.cancel()
         criticalNeighborPublishJob?.cancel()
-        criticalReadAheadJob?.cancel()
-        criticalReadAheadIndex = null
+        criticalNeighbourJobs.values.forEach(Job::cancel)
+        criticalNeighbourJobs.clear()
         prefetchedAroundChapterIndex = null
         cancelPendingChapterLoadsExcept(index)
 
@@ -600,10 +645,10 @@ class ReaderViewModel @AssistedInject constructor(
                 error = null,
             )
         }
-        // Every activated chapter immediately opens a new forward read-ahead window. Boundary
-        // activation itself is synchronous from prefetchedChapters, so this never participates in
-        // the turn that just completed and cannot delay its animation.
-        prioritizeNextChapter(index)
+        // Rotate the same three-chapter window after activation. Cached neighbours are published
+        // synchronously, while missing ones are decoded outside the page-turn animation.
+        prioritizeAdjacentChapter(index, -1)
+        prioritizeAdjacentChapter(index, 1)
         if (persistProgress) savePosition(lastPosition, lastCharOffset)
     }
 
@@ -755,22 +800,27 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     /**
-     * Prepare the next readable chapter from the moment the current chapter becomes visible.
+     * Prepare one side of the reader's previous/current/next navigation window.
      *
-     * Ordinary speculative work still yields to page animation. This forward-only lane survives
-     * page drags at background priority so a newly imported EPUB can be decoded well before its
-     * first leaf joins the current Pager.
+     * These two immediate neighbours are navigation state, not speculative indexing. Their loads
+     * therefore survive page drags and overlay animation, while the wider prefetch queue still
+     * yields the frame budget. TXT and EPUB both enter the reader through this same chapter API;
+     * only their repository parsing strategy differs.
      */
-    fun prioritizeNextChapter(sourceChapterIndex: Int) {
+    fun prioritizeAdjacentChapter(sourceChapterIndex: Int, direction: Int) {
+        val step = when {
+            direction < 0 -> -1
+            direction > 0 -> 1
+            else -> return
+        }
         val state = _uiState.value
         if (state.chapterIndex != sourceChapterIndex) return
-        val targetIndex = sourceChapterIndex + 1
+        val targetIndex = sourceChapterIndex + step
         if (targetIndex !in state.chapters.indices || targetIndex in state.prefetchedChapters) return
-        if (criticalReadAheadIndex == targetIndex && criticalReadAheadJob?.isActive == true) return
+        if (criticalNeighbourJobs[targetIndex]?.isActive == true) return
 
-        criticalReadAheadJob?.cancel()
-        criticalReadAheadIndex = targetIndex
-        criticalReadAheadJob = viewModelScope.launch {
+        criticalNeighbourJobs.remove(targetIndex)?.cancel()
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val chapter = chapterLoad(
                     targetIndex,
@@ -793,12 +843,14 @@ class ReaderViewModel @AssistedInject constructor(
             } catch (error: CancellationException) {
                 throw error
             } finally {
-                if (criticalReadAheadIndex == targetIndex) {
-                    criticalReadAheadIndex = null
-                    criticalReadAheadJob = null
+                val currentJob = currentCoroutineContext()[Job]
+                if (criticalNeighbourJobs[targetIndex] === currentJob) {
+                    criticalNeighbourJobs.remove(targetIndex)
                 }
             }
         }
+        criticalNeighbourJobs[targetIndex] = job
+        job.start()
     }
 
     /**
@@ -890,7 +942,12 @@ class ReaderViewModel @AssistedInject constructor(
         }
     }
 
-    fun savePosition(position: Int, charOffset: Int = 0, chapterComplete: Boolean = false) {
+    fun savePosition(
+        position: Int,
+        charOffset: Int = 0,
+        chapterComplete: Boolean = false,
+        visibleEndPosition: Int = position,
+    ) {
         val state = _uiState.value
         val chapter = state.chapter ?: return
         val content = chapter.contentParagraphs()
@@ -898,9 +955,12 @@ class ReaderViewModel @AssistedInject constructor(
         val paragraph = content.getOrNull(paragraphOffset)
         val safePosition = paragraph?.index ?: 0
         val safeCharOffset = charOffset.coerceIn(0, paragraph?.text?.length ?: 0)
+        val safeVisibleEnd = content.lastOrNull { it.index <= visibleEndPosition }?.index
+            ?.coerceAtLeast(safePosition)
+            ?: safePosition
         lastPosition = safePosition
         lastCharOffset = safeCharOffset
-        _positionState.value = ReaderPositionState(safePosition, safeCharOffset)
+        _positionState.value = ReaderPositionState(safePosition, safeCharOffset, safeVisibleEnd)
         val total = positions.bookFraction(
             chapterIndex = state.chapterIndex,
             chapterCount = state.chapters.size,
@@ -996,7 +1056,7 @@ class ReaderViewModel @AssistedInject constructor(
                 bookUuid = bookUuid,
                 chapterId = chapter.id,
                 chapterTitle = chapter.title,
-                chapterIndex = state.chapterIndex,
+                chapterIndex = chapter.index,
                 position = position,
                 preview = preview,
                 createdTime = System.currentTimeMillis(),
@@ -1006,7 +1066,7 @@ class ReaderViewModel @AssistedInject constructor(
 
     fun deleteBookmark(uuid: String) = viewModelScope.launch { books.deleteBookmark(uuid) }
 
-    fun search(query: String) = searchController.search(query)
+    fun search(query: String, scope: ReaderSearchScope) = searchController.search(query, scope)
 
     fun selectSearchResult(index: Int) = searchController.select(index)
 
@@ -1015,6 +1075,11 @@ class ReaderViewModel @AssistedInject constructor(
     fun moveSearchResult(delta: Int) = searchController.move(delta)
 
     fun clearSearch() = searchController.clear()
+
+    fun clearSearchHistory() {
+        _uiState.update { it.copy(searchHistory = emptyList()) }
+        viewModelScope.launch { settingsRepository.clearSearchHistory() }
+    }
 
     /** Counts only time during which this reader destination is resumed with readable content. */
     fun setReadingActive(active: Boolean) {
@@ -1112,7 +1177,8 @@ class ReaderViewModel @AssistedInject constructor(
     override fun onCleared() {
         MemoryPressureRegistry.unregister(this)
         chapterPrefetchJob?.cancel()
-        criticalReadAheadJob?.cancel()
+        criticalNeighbourJobs.values.forEach(Job::cancel)
+        criticalNeighbourJobs.clear()
         chapterLoads.values.forEach { request ->
             if (!request.deferred.isCompleted) request.deferred.cancel()
         }
@@ -1124,3 +1190,5 @@ class ReaderViewModel @AssistedInject constructor(
         books.releaseReaderMemory(bookUuid)
     }
 }
+
+private const val READER_OBSERVER_RETRY_MILLIS = 1_000L

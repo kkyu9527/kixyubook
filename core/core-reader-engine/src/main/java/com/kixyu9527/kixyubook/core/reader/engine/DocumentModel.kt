@@ -87,8 +87,6 @@ fun ReaderChapter.contentParagraphs(): List<Paragraph> {
 
 private fun readerChapterTitle(rawTitle: String): String {
     val fullTitle = rawTitle.singleLineBookHeading()
-    if (CHAPTER_ORDINAL_PATTERN.matches(fullTitle)) return fullTitle
-
     // Some legacy entries combine a volume and chapter as "卷名 · 第一章 标题". Only strip
     // that prefix when the suffix is independently a chapter heading; a middle dot may also be
     // part of the actual title or a transliterated name, for example "催眠钱宁·卢".
@@ -99,7 +97,7 @@ private fun readerChapterTitle(rawTitle: String): String {
 private fun String.normalizedReaderHeading(): String = trim().replace(Regex("[\\s　]+"), "").trim('：', ':', '-', '—')
 
 private val CHAPTER_ORDINAL_PATTERN = Regex(
-    "^(?:正文\\s+)?((?:第\\s*[\\p{N}〇零一二三四五六七八九十百千万两]+\\s*[章节回话集幕])|" +
+    "^(?:正文\\s+)?((?:第\\s*[\\p{N}〇零一二三四五六七八九十百千万两]+\\s*[卷章节回话集幕])|" +
         "(?:(?i:chapter)\\s*[\\p{L}\\p{N}]+))" +
         "\\s*(?:[：:、.．\\-—]\\s*)?(.*)$",
 )

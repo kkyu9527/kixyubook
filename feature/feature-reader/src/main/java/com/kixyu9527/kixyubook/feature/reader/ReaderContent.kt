@@ -49,14 +49,15 @@ private fun rememberReaderFoldingFeature(): FoldingFeature? {
 internal fun ReaderContent(
     state: ReaderContentState,
     palette: ReaderRenderPalette,
-    savePosition: (Int, Int, Boolean) -> Unit,
+    savePosition: (Int, Int, Boolean, Int) -> Unit,
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
     volumeTurns: SharedFlow<Int>,
+    chapterTurns: SharedFlow<Int>,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
-    prioritizeNextChapter: (Int) -> Unit,
+    prioritizeAdjacentChapter: (Int, Int) -> Unit,
     resourcePriorityActive: Boolean,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
     onDocumentLink: (String) -> Unit,
@@ -125,9 +126,12 @@ internal fun ReaderContent(
                                 ?: contentParagraphs.firstOrNull()?.index
                                 ?: 0
                         }
-                        position to chapterComplete
-                    }.distinctUntilChanged().debounce(500).collect { (position, complete) ->
-                        savePosition(position, 0, complete)
+                        val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                            ?.minus(1)?.takeIf(contentParagraphs.indices::contains)
+                        val visibleEnd = contentParagraphs.getOrNull(lastVisibleItem ?: 0)?.index ?: position
+                        Triple(position, visibleEnd, chapterComplete)
+                    }.distinctUntilChanged().debounce(500).collect { (position, visibleEnd, complete) ->
+                        savePosition(position, 0, complete, visibleEnd)
                     }
                 }
                 LaunchedEffect(listState) {
@@ -184,9 +188,10 @@ internal fun ReaderContent(
             Box(Modifier.fillMaxSize()) {
                 PagedReader(
                     state, chapter, spec, palette, savePosition, moveChapterFromPage,
-                    middleTap, dismissControls, volumeTurns, paginationCoordinator, paginationMeasurer,
+                    middleTap, dismissControls, volumeTurns, chapterTurns,
+                    paginationCoordinator, paginationMeasurer,
                     chapterRendered, setPageInteractionActive, resourcePriorityActive, twoPageSpread,
-                    prioritizeNextChapter,
+                    prioritizeAdjacentChapter,
                     spreadGutter,
                     topInsetDp,
                     bottomInsetDp,

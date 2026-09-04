@@ -38,3 +38,55 @@ internal enum class ReaderPredictiveBackTarget {
     CONTROLS,
     SEARCH_RESULTS,
 }
+
+/** Snapshot of reader-owned chrome used by both system-bar and Back priority decisions. */
+internal data class ReaderChromeState(
+    val controlsVisible: Boolean = false,
+    val menuVisible: Boolean = false,
+    val toolsMenuVisible: Boolean = false,
+    val searchVisible: Boolean = false,
+    val bookInfoVisible: Boolean = false,
+    val sheet: ReaderSheet? = null,
+    val directoryPanelComposed: Boolean = false,
+    val hasSearchResults: Boolean = false,
+) {
+    val overlayVisible: Boolean
+        get() = controlsVisible || menuVisible || toolsMenuVisible || searchVisible ||
+            bookInfoVisible || sheet != null || directoryPanelComposed
+}
+
+/**
+ * Reader Back order is a public UX contract: dismiss the topmost owned surface before navigation.
+ * Keeping it pure makes ordinary and predictive Back use the same priority and regression tests.
+ */
+internal fun ReaderChromeState.predictiveBackTarget(): ReaderPredictiveBackTarget? = when {
+    bookInfoVisible -> ReaderPredictiveBackTarget.BOOK_INFO
+    sheet != null -> ReaderPredictiveBackTarget.SHEET
+    searchVisible -> ReaderPredictiveBackTarget.SEARCH
+    menuVisible || toolsMenuVisible -> ReaderPredictiveBackTarget.POPUP_MENU
+    controlsVisible -> ReaderPredictiveBackTarget.CONTROLS
+    hasSearchResults -> ReaderPredictiveBackTarget.SEARCH_RESULTS
+    else -> null
+}
+
+internal fun ReaderSheet?.returnsToSettingsMenu(): Boolean = this in READER_SETTINGS_SHEETS
+
+internal data class ReaderSystemBarVisibility(
+    val statusBarVisible: Boolean,
+    val navigationBarVisible: Boolean,
+)
+
+internal fun readerSystemBarVisibility(
+    showStatusBar: Boolean,
+    hideNavigationBar: Boolean,
+    overlayVisible: Boolean,
+): ReaderSystemBarVisibility = ReaderSystemBarVisibility(
+    statusBarVisible = showStatusBar || overlayVisible,
+    navigationBarVisible = !hideNavigationBar || overlayVisible,
+)
+
+internal val READER_SETTINGS_SHEETS = setOf(
+    ReaderSheet.THEME,
+    ReaderSheet.LAYOUT,
+    ReaderSheet.INFORMATION,
+)

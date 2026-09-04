@@ -7,6 +7,9 @@ import java.nio.CharBuffer
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.yield
 
 class TxtBookParser : BookParser {
     override val format = BookFormat.TXT
@@ -22,21 +25,26 @@ class TxtBookParser : BookParser {
             var volumeIndex = -1
             var emitted = false
             var lineIndex = 0
+            var segmentIndex = 1
+            var bufferedChars = 0
             val paragraphs = mutableListOf<String>()
-            suspend fun flush() {
+            suspend fun flush(continuesSameChapter: Boolean = false) {
                 if (paragraphs.isEmpty()) return
                 emit(
                     DocumentChapter(
-                        title = title,
+                        title = title.segmentTitle(segmentIndex),
                         paragraphs = paragraphs.toList(),
                         volumeTitle = volumeTitle,
                         volumeIndex = volumeIndex.takeIf { it >= 0 },
                     ),
                 )
                 paragraphs.clear()
+                bufferedChars = 0
                 emitted = true
+                segmentIndex = if (continuesSameChapter) segmentIndex + 1 else 1
             }
             while (true) {
+                currentCoroutineContext().ensureActive()
                 val rawLine = reader.readLine() ?: break
                 val currentIndex = lineIndex++
                 if (currentIndex in frontMatter.excludedLines) continue
@@ -48,15 +56,27 @@ class TxtBookParser : BookParser {
                         volumeTitle = checkNotNull(volumeTitleOrNull(line))
                         volumeIndex++
                         title = volumeTitle
+                        segmentIndex = 1
                     }
                     chapterTitleOrNull(line) != null -> {
                         flush()
                         // Volume boundaries still split content, but the volume name
                         // is not repeated in every chapter title shown to the reader.
                         title = checkNotNull(chapterTitleOrNull(line))
+                        segmentIndex = 1
                     }
-                    else -> paragraphs += line
+                    else -> line.readableChunks(MAX_TXT_PARAGRAPH_CHARS).forEach { paragraph ->
+                        if (
+                            paragraphs.isNotEmpty() &&
+                            bufferedChars + paragraph.length > MAX_TXT_CHAPTER_CHARS
+                        ) {
+                            flush(continuesSameChapter = true)
+                        }
+                        paragraphs += paragraph
+                        bufferedChars += paragraph.length
+                    }
                 }
+                if (lineIndex % TXT_PARSE_YIELD_LINES == 0) yield()
             }
             flush()
             if (!emitted) emit(DocumentChapter("正文", listOf("这本书没有可显示的文本。")))
@@ -229,6 +249,11 @@ class TxtBookParser : BookParser {
         const val MAX_DESCRIPTION_LINES = 16
         const val MAX_CHAPTER_TITLE_LENGTH = 88
         const val CHARSET_SAMPLE_BYTES = 128 * 1024
+        // Keep import memory bounded even for a minified file or a book without recognizable TOC
+        // headings. Database batching then persists one readable segment before scanning onward.
+        const val MAX_TXT_PARAGRAPH_CHARS = 64 * 1024
+        const val MAX_TXT_CHAPTER_CHARS = 512 * 1024
+        const val TXT_PARSE_YIELD_LINES = 256
         val TITLE_PATTERN = Regex("^\\s*(?:书名|書名|作品名|作品名称|作品名稱|小说名|小說名|小说名称|小說名稱)\\s*[：:]\\s*(.+?)\\s*$", RegexOption.IGNORE_CASE)
         val AUTHOR_PATTERN = Regex("^\\s*(?:作者|著者|作\\s*者)\\s*[：:]\\s*(.+?)\\s*$", RegexOption.IGNORE_CASE)
         val DESCRIPTION_PATTERN = Regex("^\\s*(?:内容简介|內容簡介|作品简介|作品簡介|小说简介|小說簡介|简介|簡介|文案)\\s*[：:]?\\s*(.*?)\\s*$", RegexOption.IGNORE_CASE)
@@ -261,6 +286,9 @@ class TxtBookParser : BookParser {
         const val GB18030_TIE_BREAKER = 120
     }
 }
+
+private fun String.segmentTitle(segmentIndex: Int): String =
+    if (segmentIndex <= 1) this else "$this（$segmentIndex）"
 
 private fun ByteArray.startsWith(vararg values: Int): Boolean =
     size >= values.size && values.indices.all { this[it] == values[it].toByte() }

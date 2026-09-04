@@ -31,7 +31,9 @@ internal fun readerAnnotatedText(
             return@forEach
         }
         val decorations = buildList {
-            if (ReaderInlineStyle.UNDERLINE in span.styles) add(TextDecoration.Underline)
+            if (ReaderInlineStyle.UNDERLINE in span.styles || ReaderInlineStyle.NOTE in span.styles) {
+                add(TextDecoration.Underline)
+            }
             if (ReaderInlineStyle.STRIKETHROUGH in span.styles) add(TextDecoration.LineThrough)
         }
         val elevated = ReaderInlineStyle.SUPERSCRIPT in span.styles
@@ -46,7 +48,9 @@ internal fun readerAnnotatedText(
                 background = (span.background?.readerHighlightColor(accentColor, backgroundColor)
                     ?: accentColor.takeIf {
                         ReaderInlineStyle.HIGHLIGHT in span.styles && it != Color.Unspecified
-                    })?.takeUnless { it == Color.Unspecified }?.copy(alpha = .18f) ?: Color.Unspecified,
+                    })?.takeUnless { it == Color.Unspecified }?.copy(
+                        alpha = if (ReaderInlineStyle.NOTE in span.styles) .30f else .18f,
+                    ) ?: Color.Unspecified,
                 fontWeight = FontWeight.Bold.takeIf { ReaderInlineStyle.BOLD in span.styles },
                 fontStyle = FontStyle.Italic.takeIf { ReaderInlineStyle.ITALIC in span.styles },
                 fontFamily = FontFamily.Monospace.takeIf { ReaderInlineStyle.MONOSPACE in span.styles },

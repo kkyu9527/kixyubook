@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
@@ -104,7 +105,7 @@ fun rememberMeasuredReaderPages(
     }
     var snapshot by remember(cacheKey) {
         mutableStateOf(
-            coordinator.cached(cacheKey)?.let { ReaderPaginationSnapshot(it, isComplete = true) }
+            coordinator.currentSnapshot(cacheKey)
                 ?: ReaderPaginationSnapshot(),
         )
     }
@@ -199,6 +200,20 @@ class ReaderPaginationCoordinator internal constructor(
     }
 
     internal fun cached(key: PaginationCacheKey): List<ReaderPage>? = synchronized(lock) { pages[key] }
+
+    /**
+     * Returns the best page set already owned by this reader session.
+     *
+     * A prefetched chapter can become current while its pagination is still publishing readable
+     * batches. Returning only the completed LRU entry made the new current composition briefly
+     * start from an empty list, even though the same coordinator already held visible pages. That
+     * empty frame covered the Pager at chapter boundaries and looked like a full-screen flash.
+     */
+    internal fun currentSnapshot(key: PaginationCacheKey): ReaderPaginationSnapshot? =
+        synchronized(lock) {
+            pages[key]?.let { ReaderPaginationSnapshot(it, isComplete = true) }
+                ?: inFlight[key]?.snapshots?.value?.takeIf { it.pages.isNotEmpty() }
+        }
 
     /** Pauses current pagination at page boundaries and cancels disposable speculative layouts. */
     fun setPaused(value: Boolean) {
@@ -400,8 +415,29 @@ private class MeasuredReaderPaginator(
         var usedHeightPx = 0f
         var opening = true
         val openingHeading = splitReaderChapterHeading(chapter.title)
+        val openingTitleLineCount = if (openingHeading.name.isEmpty()) {
+            0
+        } else {
+            measurer.measure(
+                text = openingHeading.name,
+                style = TextStyle(
+                    fontSize = OPENING_TITLE_FONT_SIZE_SP.sp,
+                    lineHeight = OPENING_TITLE_LINE_HEIGHT_SP.sp,
+                    fontFamily = family,
+                ),
+                softWrap = true,
+                maxLines = OPENING_TITLE_MAX_LINES,
+                constraints = Constraints(maxWidth = widthPx),
+            ).lineCount
+        }
 
-        fun bodyHeightPx(): Float = availableBodyHeightPx(spec, opening, openingHeading, showRegularChapterTitle)
+        fun bodyHeightPx(): Float = availableBodyHeightPx(
+            spec = spec,
+            opening = opening,
+            heading = openingHeading,
+            openingTitleLineCount = openingTitleLineCount,
+            showRegularChapterTitle = showRegularChapterTitle,
+        )
         fun flush() {
             if (blocks.isEmpty()) return
             pages += ReaderPage(pages.size, chapter.index, chapter.title, opening, blocks.toList())
@@ -578,6 +614,7 @@ private class MeasuredReaderPaginator(
         spec: ReaderLayoutSpec,
         opening: Boolean,
         heading: ReaderChapterHeading,
+        openingTitleLineCount: Int,
         showRegularChapterTitle: Boolean,
     ): Float = with(density) {
         val hasOrdinalAndName = heading.ordinal != null && heading.name.isNotEmpty()
@@ -596,7 +633,7 @@ private class MeasuredReaderPaginator(
         }
         val headerSp = if (opening) {
             (if (heading.ordinal != null) OPENING_ORDINAL_LINE_HEIGHT_SP else 0f) +
-                (if (heading.name.isNotEmpty()) OPENING_TITLE_LINE_HEIGHT_SP else 0f)
+                OPENING_TITLE_LINE_HEIGHT_SP * openingTitleLineCount
         } else if (showRegularChapterTitle) {
             REGULAR_TITLE_LINE_HEIGHT_SP
         } else {
@@ -614,5 +651,7 @@ private const val MIN_BODY_WIDTH_DP = 160f
 private const val MIN_BODY_HEIGHT_DP = 120f
 private const val PARAGRAPH_SPACING_EM = 0.9f
 private const val OPENING_ORDINAL_LINE_HEIGHT_SP = 22f
+private const val OPENING_TITLE_FONT_SIZE_SP = 28f
 private const val OPENING_TITLE_LINE_HEIGHT_SP = 36f
+private const val OPENING_TITLE_MAX_LINES = 2
 private const val REGULAR_TITLE_LINE_HEIGHT_SP = 20f

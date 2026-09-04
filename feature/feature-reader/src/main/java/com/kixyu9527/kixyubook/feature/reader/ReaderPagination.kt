@@ -44,18 +44,19 @@ internal fun PagedReader(
     chapter: ReaderChapter,
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
-    savePosition: (Int, Int, Boolean) -> Unit,
+    savePosition: (Int, Int, Boolean, Int) -> Unit,
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
     volumeTurns: SharedFlow<Int>,
+    chapterTurns: SharedFlow<Int>,
     paginationCoordinator: ReaderPaginationCoordinator,
     paginationMeasurer: androidx.compose.ui.text.TextMeasurer,
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
     resourcePriorityActive: Boolean,
     twoPageSpread: Boolean,
-    prioritizeNextChapter: (Int) -> Unit,
+    prioritizeAdjacentChapter: (Int, Int) -> Unit,
     spreadGutter: Dp,
     topInsetDp: Float,
     bottomInsetDp: Float,
@@ -103,14 +104,15 @@ internal fun PagedReader(
     }
     val hasPrevious = state.chapterIndex > 0
     val hasNext = state.chapterIndex < state.chapters.lastIndex
-    var criticalNextChapter by remember(chapter.id) { mutableStateOf(false) }
-    LaunchedEffect(chapter.id, pages.isNotEmpty(), hasNext) {
-        if (hasNext && pages.isNotEmpty()) {
-            // Cross-chapter navigation is part of the ordinary page stream. Start decoding and
-            // measuring the next chapter as soon as the visible page is ready, not when the user
-            // has already reached the final few leaves.
-            criticalNextChapter = true
-            prioritizeNextChapter(state.chapterIndex)
+    var criticalNeighbours by remember(chapter.id) { mutableStateOf(false) }
+    LaunchedEffect(chapter.id, pages.isNotEmpty(), hasPrevious, hasNext) {
+        if (pages.isNotEmpty()) {
+            // Cross-chapter navigation is part of the ordinary page stream. Promote both sides
+            // after the visible leaf is ready so opening at a saved location can move backward as
+            // reliably as normal forward reading.
+            criticalNeighbours = true
+            if (hasPrevious) prioritizeAdjacentChapter(state.chapterIndex, -1)
+            if (hasNext) prioritizeAdjacentChapter(state.chapterIndex, 1)
         }
     }
     val nextChapter = state.prefetchedChapters[state.chapterIndex + 1]
@@ -125,8 +127,9 @@ internal fun PagedReader(
             measurer = paginationMeasurer,
             // Once parsing publishes the next chapter its first measured leaves are foreground
             // reader work, not a late speculative task. Reuse any in-flight layout in place.
-            prefetch = !criticalNextChapter,
+            prefetch = !criticalNeighbours,
             paused = resourcePriorityActive,
+            allowPartialResults = false,
         )
     } ?: ReaderPaginationSnapshot()
     val nextPages = nextPagination.pages
@@ -140,7 +143,7 @@ internal fun PagedReader(
             showRegularChapterTitle = state.settings.showChapterTitle,
             coordinator = paginationCoordinator,
             measurer = paginationMeasurer,
-            prefetch = true,
+            prefetch = !criticalNeighbours,
             paused = resourcePriorityActive,
             allowPartialResults = false,
         )
@@ -175,7 +178,6 @@ internal fun PagedReader(
             currentPagesComplete = pagination.isComplete,
             currentPlaceholderPageIndex = if (state.restorePosition > 0) Int.MIN_VALUE else 0,
             chapterCount = state.chapters.size,
-            neighbourLeafCount = if (twoPageSpread) 2 else 1,
         )
     }
     val pagerSpreads = remember(pagerWindow, twoPageSpread) {
@@ -216,11 +218,19 @@ internal fun PagedReader(
     val turnRequests = remember { Channel<Int>(Channel.RENDEZVOUS) }
     var lastWheelTurnAt by remember { mutableLongStateOf(0L) }
     var settledSpreadKey by remember { mutableStateOf(desiredSpreadKey) }
+    var pendingDirectChapterTurn by remember { mutableStateOf<Int?>(null) }
+    val directChapterTargetKey = remember { mutableStateOf<String?>(null) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
     val latestReaderState by rememberUpdatedState(state)
     val latestPaginationComplete by rememberUpdatedState(pagination.isComplete)
     val prefetchDensity = LocalDensity.current.density
     val epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath
+    val visualCurrentPage = readerPagerVisualCurrentIndex(
+        pagerSpreads = pagerSpreads,
+        settledSpreadKey = settledSpreadKey,
+        pagerCurrentPage = pager.currentPage,
+        scrolling = pager.isScrollInProgress,
+    )
 
     LaunchedEffect(pager, pagerSpreads, epubPath, resourcePriorityActive, prefetchDensity) {
         if (epubPath == null || resourcePriorityActive) return@LaunchedEffect
@@ -265,15 +275,21 @@ internal fun PagedReader(
             val spread = spreads.getOrNull(pageIndex) ?: return@collect
             val item = spread.items.firstOrNull() ?: return@collect
             settledSpreadKey = spread.key
+            val directChapterTurn = spread.key == directChapterTargetKey.value
             when {
                 item.chapterIndex < readerState.chapterIndex -> {
+                    if (directChapterTurn) directChapterTargetKey.value = null
                     moveChapterFromPage(
                         readerState.chapterIndex,
                         item.chapterIndex - readerState.chapterIndex,
-                        true,
+                        chapterTransitionOpensAtEnd(
+                            direction = item.chapterIndex - readerState.chapterIndex,
+                            directChapterTurn = directChapterTurn,
+                        ),
                     )
                 }
                 item.chapterIndex > readerState.chapterIndex -> {
+                    if (directChapterTurn) directChapterTargetKey.value = null
                     moveChapterFromPage(
                         readerState.chapterIndex,
                         item.chapterIndex - readerState.chapterIndex,
@@ -291,15 +307,55 @@ internal fun PagedReader(
                     val anchor = item.page.blocks.firstOrNull { block ->
                         block.kind == ParagraphKind.TEXT
                     }
+                    val visibleEnd = spread.items
+                        .filter { visible -> visible.chapterIndex == item.chapterIndex }
+                        .flatMap { visible -> visible.page?.blocks.orEmpty() }
+                        .filter { block -> block.kind == ParagraphKind.TEXT }
+                        .maxOfOrNull(DocumentBlock::paragraphIndex)
+                        ?: anchor?.paragraphIndex
+                        ?: item.page.startParagraph
                     savePosition(
                         anchor?.paragraphIndex ?: item.page.startParagraph,
                         anchor?.textStart ?: 0,
                         latestPaginationComplete &&
                             lastVisible.pageCount > 0 &&
                             lastVisible.pageIndex == lastVisible.pageCount - 1,
+                        visibleEnd,
                     )
                 }
             }
+        }
+    }
+    LaunchedEffect(chapterTurns) {
+        chapterTurns.collectLatest { direction ->
+            if (direction != 0) pendingDirectChapterTurn = if (direction < 0) -1 else 1
+        }
+    }
+    LaunchedEffect(
+        pendingDirectChapterTurn,
+        pagerSpreads,
+        state.chapterIndex,
+        pagination.isComplete,
+    ) {
+        val direction = pendingDirectChapterTurn ?: return@LaunchedEffect
+        if (pager.isScrollInProgress || !pagination.isComplete) return@LaunchedEffect
+        val target = directChapterTargetSpreadIndex(
+            pagerSpreads = pagerSpreads,
+            currentChapterIndex = state.chapterIndex,
+            direction = direction,
+        )
+        if (target >= 0) {
+            // Chapter buttons use the same physical Pager path as a boundary turn. The already
+            // measured neighbour becomes visible first; snapshotFlow then commits the logical
+            // chapter exactly once. This avoids rebuilding the window and correcting its anchor
+            // in a second frame.
+            directChapterTargetKey.value = pagerSpreads[target].key
+            pager.scrollToPage(target)
+            pendingDirectChapterTurn = null
+        } else {
+            // Stay on the current page until the real next page joins this Pager. Never replace
+            // readable content with a loading surface or let cache state become a visible target.
+            prioritizeAdjacentChapter(state.chapterIndex, direction)
         }
     }
     LaunchedEffect(pager) {
@@ -339,14 +395,16 @@ internal fun PagedReader(
                         // destination and fighting the next rapid swipe.
                     }
                 }
-                direction < 0 && readerState.chapterIndex > 0 -> Unit
+                direction < 0 && readerState.chapterIndex > 0 -> {
+                    prioritizeAdjacentChapter(readerState.chapterIndex, -1)
+                }
                 direction > 0 &&
                     latestPaginationComplete &&
                     readerState.chapterIndex < readerState.chapters.lastIndex -> {
                     // A chapter boundary is never a loading command. The read-ahead task will add
                     // the real neighbouring page to this same Pager; until then the settled page
                     // remains unchanged without a placeholder, spinner or partial transition.
-                    prioritizeNextChapter(readerState.chapterIndex)
+                    prioritizeAdjacentChapter(readerState.chapterIndex, 1)
                 }
             }
         }
@@ -423,7 +481,7 @@ internal fun PagedReader(
                     .readerPageTurnEffect(
                         animation = state.settings.pageTurnAnimation,
                         pageOffset = {
-                            (pager.currentPage - virtualPage) + pager.currentPageOffsetFraction
+                            (visualCurrentPage - virtualPage) + pager.currentPageOffsetFraction
                         },
                     ),
             ) {
@@ -549,6 +607,24 @@ private fun Modifier.readerPageTurnEffect(
             clip = true
         }
     }
+}
+
+/**
+ * Pager reconciles a stable key with its new numeric index during measure. Chapter-window
+ * recentering can therefore expose the old numeric index to one composition before measure runs.
+ * Keep active drags fully controlled by Pager, but use the last settled stable key while idle so
+ * custom cover alpha never hides the newly active leaf during that reconciliation frame.
+ */
+internal fun readerPagerVisualCurrentIndex(
+    pagerSpreads: List<ReaderPagerSpread>,
+    settledSpreadKey: String,
+    pagerCurrentPage: Int,
+    scrolling: Boolean,
+): Int {
+    if (scrolling) return pagerCurrentPage.coerceIn(0, pagerSpreads.lastIndex.coerceAtLeast(0))
+    return pagerSpreads.indexOfFirst { it.key == settledSpreadKey }
+        .takeIf { it >= 0 }
+        ?: pagerCurrentPage.coerceIn(0, pagerSpreads.lastIndex.coerceAtLeast(0))
 }
 
 @Composable
@@ -708,21 +784,13 @@ internal fun buildReaderPagerWindow(
     currentPagesComplete: Boolean = true,
     currentPlaceholderPageIndex: Int,
     chapterCount: Int,
-    neighbourLeafCount: Int = 1,
 ): List<ReaderPagerItem> = buildList {
-    if (hasPrevious) {
-        // A landscape spread must already contain the same final leaf pair before and after the
-        // chapter boundary is crossed. For an odd page count the final spread contains one leaf;
-        // for an even page count it contains the final two leaves.
-        val previousLeafCount = when {
-            previousPages.isEmpty() -> 0
-            neighbourLeafCount < 2 -> 1
-            previousPages.size % 2 == 0 -> 2
-            else -> 1
-        }
-        val visiblePreviousPages = previousPages.takeLast(previousLeafCount)
-        if (visiblePreviousPages.isNotEmpty()) {
-            visiblePreviousPages.forEach { page ->
+    if (hasPrevious && currentChapterIndex > 0) {
+        // Keep the previous chapter's complete lightweight page index in the stable Pager. Only
+        // beyondViewportPageCount pages are composed, but the chapter button can now target its
+        // first page without rebuilding the Pager around a new ViewModel chapter first.
+        if (previousPages.isNotEmpty()) {
+            previousPages.forEach { page ->
                 add(
                     ReaderPagerItem(
                         chapterIndex = currentChapterIndex - 1,
@@ -755,10 +823,12 @@ internal fun buildReaderPagerWindow(
             )
         }
     }
-    if (hasNext && currentPagesComplete) {
-        val visibleNextPages = nextPages.take(neighbourLeafCount.coerceAtLeast(1))
-        if (visibleNextPages.isNotEmpty()) {
-            visibleNextPages.forEach { page ->
+    if (hasNext && currentChapterIndex < chapterCount - 1 && currentPagesComplete) {
+        // Keep the complete next chapter index in the same Pager. HorizontalPager still composes
+        // only its configured viewport neighbour, but a rapid second gesture can now target page
+        // two (or later) without waiting for the ViewModel's chapter-window recentering frame.
+        if (nextPages.isNotEmpty()) {
+            nextPages.forEach { page ->
                 add(
                     ReaderPagerItem(
                         chapterIndex = currentChapterIndex + 1,
@@ -771,6 +841,25 @@ internal fun buildReaderPagerWindow(
         }
     }
 }
+
+/** Returns the first page of the adjacent chapter for an explicit chapter-skip action. */
+internal fun directChapterTargetSpreadIndex(
+    pagerSpreads: List<ReaderPagerSpread>,
+    currentChapterIndex: Int,
+    direction: Int,
+): Int {
+    if (direction == 0) return -1
+    val targetChapterIndex = currentChapterIndex + if (direction < 0) -1 else 1
+    return pagerSpreads.indexOfFirst { spread ->
+        spread.items.any { item ->
+            item.chapterIndex == targetChapterIndex && item.pageIndex == 0 && item.page != null
+        }
+    }
+}
+
+/** A backward page-boundary gesture continues from the prior chapter's end; a skip does not. */
+internal fun chapterTransitionOpensAtEnd(direction: Int, directChapterTurn: Boolean): Boolean =
+    direction < 0 && !directChapterTurn
 
 internal data class RetainedReaderPage(
     val page: ReaderPage,

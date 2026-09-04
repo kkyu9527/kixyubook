@@ -11,13 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +41,7 @@ import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.assisted.Assisted
@@ -90,7 +88,6 @@ class CorrectionManagementViewModel @AssistedInject constructor(
     fun resolve(uuid: String) = viewModelScope.launch { repository.resolveConflict(uuid) }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CorrectionManagementRoute(
     bookUuid: String,
@@ -105,16 +102,13 @@ fun CorrectionManagementRoute(
     var editing by remember { mutableStateOf<TextCorrection?>(null) }
     // System Back belongs to NavDisplay here so the previous reader destination participates in the
     // platform predictive preview. The explicit callback remains only for the toolbar button.
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.reader_corrections_title)) },
-                navigationIcon = {
-                    KixyuIconButton(onClick = onBack) {
-                        Icon(KixyuSymbols.ArrowBack, stringResource(R.string.reader_back))
-                    }
-                },
-            )
+    KixyuPageScaffold(
+        title = stringResource(R.string.reader_corrections_title),
+        largeTitle = false,
+        navigationIcon = {
+            KixyuIconButton(onClick = onBack) {
+                Icon(KixyuSymbols.ArrowBack, stringResource(R.string.reader_back))
+            }
         },
     ) { padding ->
         if (state.corrections.isEmpty()) {

@@ -36,6 +36,7 @@ class ReaderPaginationCoordinatorTest {
             val partial = withTimeout(1_000) { snapshots.first { it.pages.isNotEmpty() } }
             assertEquals(listOf(first), partial.pages)
             assertFalse(partial.isComplete)
+            assertEquals(partial, coordinator.currentSnapshot(key(chapter)))
             delay(25)
             assertFalse(snapshots.value.isComplete)
 
@@ -43,6 +44,7 @@ class ReaderPaginationCoordinatorTest {
             val complete = withTimeout(1_000) { snapshots.first { it.isComplete } }
             assertEquals(listOf(first, second), complete.pages)
             assertTrue(complete.isComplete)
+            assertEquals(complete, coordinator.currentSnapshot(key(chapter)))
         } finally {
             coordinator.close()
         }

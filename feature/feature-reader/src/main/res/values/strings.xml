@@ -1,4 +1,17 @@
 <resources>
+    <string name="reader_annotations_title">批注（%1$d）</string>
+    <string name="reader_view_annotations">查看批注</string>
+    <string name="reader_search_annotations">搜索批注或笔记</string>
+    <string name="reader_annotation_filter">批注类型</string>
+    <string name="reader_annotation_filter_all">全部</string>
+    <string name="reader_no_annotations">还没有批注</string>
+    <string name="reader_delete_annotation">删除批注</string>
+    <string name="reader_edit_annotation_note">编辑批注笔记</string>
+    <string name="reader_search_scope">搜索范围</string>
+    <string name="reader_search_scope_book">全书</string>
+    <string name="reader_search_scope_chapter">当前章节</string>
+    <string name="reader_search_history">最近搜索</string>
+    <string name="reader_clear_search_history">清除</string>
     <string name="reader_content_pane">阅读正文</string>
     <string name="reader_opening_book">正在打开书籍</string>
     <string name="reader_parsing_epub">正在解析 EPUB</string>
@@ -28,6 +41,8 @@
     <string name="reader_more_actions">更多</string>
     <string name="reader_back_to_actions">返回操作</string>
     <string name="reader_correction_action">纠错</string>
+    <string name="reader_correction_original">原文</string>
+    <string name="reader_correction_replacement">纠正后</string>
     <string name="reader_annotation_note_hint">记录想法</string>
     <string name="reader_annotation_save">保存</string>
     <string name="reader_annotation_delete">删除批注</string>
@@ -66,6 +81,8 @@
     <string name="reader_paragraph_number">第 %1$d 段</string>
     <string name="reader_search_hint">搜索书中内容</string>
     <string name="reader_search_result_count">%1$d 个匹配结果</string>
+    <string name="reader_search_indexing_progress">正在建立搜索索引 · %1$d/%2$d 章 · %3$d%%</string>
+    <string name="reader_search_scanning_progress">正在搜索正文 · %1$d/%2$d 章 · %3$d%%</string>
     <string name="reader_no_search_result">没有找到匹配内容</string>
     <string name="reader_search_query_changed">修改后按搜索更新结果</string>
     <string name="reader_display_and_colors">显示与配色</string>

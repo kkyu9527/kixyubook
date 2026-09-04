@@ -2,6 +2,9 @@ package com.kixyu9527.kixyubook.core.reader.engine
 
 import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
 import com.kixyu9527.kixyubook.core.common.model.singleLineBookHeading
+import java.io.FilterInputStream
+import java.io.InputStream
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
@@ -155,6 +158,10 @@ internal val CSS_HUE_COLOR = Regex("(hsl|hsla|hwb|lch|oklch)\\((.*)\\)", RegexOp
 
 internal const val MAX_IMAGE_HEADER_BYTES = 512 * 1024
 internal const val MAX_NAVIGATION_TITLE_LENGTH = 160
+// These are DOM memory budgets, not EPUB acceptance limits. Crossing either budget must switch
+// to the streaming compatibility path; it must never reject an otherwise readable book.
+internal const val MAX_EPUB_XML_BYTES = 2 * 1024 * 1024
+internal const val MAX_EPUB_XHTML_BYTES = 8 * 1024 * 1024
 internal const val NCX_MEDIA_TYPE = "application/x-dtbncx+xml"
 internal val JPEG_START_OF_FRAME = setOf(0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF)
 
@@ -222,6 +229,40 @@ private val GENERATED_EPUB_TITLE = Regex("^第\\s*\\d+\\s*章$")
 
 internal fun ZipFile.findEntry(path: String): ZipEntry? = getEntry(path) ?: entries().asSequence()
     .firstOrNull { it.name.equals(path, ignoreCase = true) }
+
+/** Enforces the uncompressed size even when the archive omits or falsifies [ZipEntry.size]. */
+internal fun ZipFile.openBoundedEntry(
+    entry: ZipEntry,
+    maxBytes: Int,
+    label: String = entry.name,
+): InputStream {
+    if (entry.size > maxBytes.toLong()) throw EpubDomLimitExceeded(label)
+    return SizeLimitedInputStream(getInputStream(entry), maxBytes.toLong(), label)
+}
+
+internal class EpubDomLimitExceeded(label: String) : IOException("$label 需要流式解析")
+
+private class SizeLimitedInputStream(
+    source: InputStream,
+    private val maxBytes: Long,
+    private val label: String,
+) : FilterInputStream(source) {
+    private var consumed = 0L
+
+    override fun read(): Int = super.read().also { value ->
+        if (value >= 0) account(1)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+        super.read(buffer, offset, length).also { count ->
+            if (count > 0) account(count.toLong())
+        }
+
+    private fun account(count: Long) {
+        consumed += count
+        if (consumed > maxBytes) throw EpubDomLimitExceeded(label)
+    }
+}
 
 internal fun mediaTypeFor(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
     "jpg", "jpeg" -> "image/jpeg"

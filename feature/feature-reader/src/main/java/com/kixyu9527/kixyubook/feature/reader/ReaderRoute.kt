@@ -166,9 +166,10 @@ private fun LoadedReaderRoute(
         navigateHistoryBack = viewModel::navigateHistoryBack,
         navigateHistoryForward = viewModel::navigateHistoryForward,
         clearSearch = viewModel::clearSearch,
+        clearSearchHistory = viewModel::clearSearchHistory,
         chapterRendered = viewModel::chapterRendered,
         setPageInteractionActive = viewModel::setPageInteractionActive,
-        prioritizeNextChapter = viewModel::prioritizeNextChapter,
+        prioritizeAdjacentChapter = viewModel::prioritizeAdjacentChapter,
         addFont = {
             fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
         },
@@ -178,6 +179,7 @@ private fun LoadedReaderRoute(
         saveHighlight = viewModel::saveParagraphHighlight,
         saveUnderline = viewModel::saveParagraphUnderline,
         saveNote = viewModel::saveParagraphNote,
+        updateAnnotationNote = viewModel::updateAnnotationNote,
         deleteAnnotation = viewModel::deleteAnnotation,
         openDocumentLink = viewModel::openEpubLink,
         closeFootnote = viewModel::closeEpubFootnote,

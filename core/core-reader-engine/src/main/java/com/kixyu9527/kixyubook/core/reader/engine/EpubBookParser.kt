@@ -60,7 +60,13 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         val fragment = target.substringAfter('#', "").trim()
         if (fragment.isEmpty()) return@use EpubLinkResult.Location(chapterIndex)
         val entry = zip.findEntry(path) ?: return@use EpubLinkResult.Location(chapterIndex)
-        val document = zip.getInputStream(entry).use { newDocumentBuilder().parse(it) }
+        val document = try {
+            zip.openBoundedEntry(entry, MAX_EPUB_XHTML_BYTES).use { input ->
+                newDocumentBuilder().parse(input).also(::validateXmlDocument)
+            }
+        } catch (_: EpubDomLimitExceeded) {
+            return@use EpubLinkResult.Location(chapterIndex)
+        }
         val nodes = document.getElementsByTagNameNS("*", "*")
         val targetElement = (0 until nodes.length).asSequence()
             .mapNotNull { nodes.item(it) as? Element }
@@ -277,9 +283,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         val id = pkg.spine.getOrNull(index) ?: return null
         val item = pkg.manifest[id] ?: return null
         val entry = zip.findEntry(item.path) ?: return null
-        val content = zip.getInputStream(entry).use { input ->
-            readXhtml(input, zip, item.path, pkg.manifest.values)
-        }
+        val content = readXhtmlWithFallback(zip, entry, item.path, pkg.manifest.values)
         if (content.blocks.isEmpty()) return null
         // XHTML headings can contain <br>, line separators or zero-width formatting characters.
         // Never let those leak back into the directory after lazy body indexing.
@@ -316,9 +320,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         val id = pkg.spine.getOrNull(index) ?: return null
         val item = pkg.manifest[id] ?: return null
         val entry = zip.findEntry(item.path) ?: return null
-        val content = zip.getInputStream(entry).use { input ->
-            readXhtml(input, zip, item.path, pkg.manifest.values)
-        }
+        val content = readXhtmlWithFallback(zip, entry, item.path, pkg.manifest.values)
         val heading = content.heading?.singleLineBookHeading()
             ?.takeIf(String::isMeaningfulShortEpubHeading)
         val shortFrontMatter = content.blocks.asSequence()
@@ -351,14 +353,33 @@ class EpubBookParser : BookParser, MemoryPressureListener {
     }
 
     private fun parsePackage(zip: ZipFile): PackageDocument {
-        val container = parseXml(zip, "META-INF/container.xml")
-        val root = container.getElementsByTagNameNS("*", "rootfile").item(0) as? Element
-            ?: error("EPUB 缺少 container rootfile")
-        val opfPath = root.getAttribute("full-path")
+        val containerEntry = zip.findEntry("META-INF/container.xml")
+            ?: error("EPUB 缺少 META-INF/container.xml")
+        val opfPath = try {
+            val container = zip.openBoundedEntry(containerEntry, MAX_EPUB_XML_BYTES).use { input ->
+                newDocumentBuilder().parse(input).also(::validateXmlDocument)
+            }
+            (container.getElementsByTagNameNS("*", "rootfile").item(0) as? Element)
+                ?.getAttribute("full-path")
+                ?.takeIf(String::isNotBlank)
+                ?: error("EPUB 缺少 container rootfile")
+        } catch (_: EpubDomLimitExceeded) {
+            zip.getInputStream(containerEntry).use(::readContainerRootfileStreaming)
+        }
+        val opfEntry = zip.findEntry(opfPath) ?: error("EPUB 缺少 $opfPath")
+        return try {
+            parsePackageDom(zip, opfPath)
+        } catch (_: EpubDomLimitExceeded) {
+            zip.getInputStream(opfEntry).use { input -> readPackageStreaming(input, opfPath) }
+        }
+    }
+
+    private fun parsePackageDom(zip: ZipFile, opfPath: String): PackageDocument {
         val document = parseXml(zip, opfPath)
         val metadata = document.getElementsByTagNameNS("*", "metadata").item(0) as? Element
         val manifest = linkedMapOf<String, ManifestItem>()
         val items = document.getElementsByTagNameNS("*", "item")
+        if (items.length > MAX_MANIFEST_ITEMS) throw EpubDomLimitExceeded("EPUB manifest")
         for (i in 0 until items.length) (items.item(i) as? Element)?.let { item ->
             manifest[item.getAttribute("id")] = ManifestItem(
                 resolveArchivePath(opfPath, item.getAttribute("href")),
@@ -368,6 +389,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         }
         val spine = buildList {
             val refs = document.getElementsByTagNameNS("*", "itemref")
+            if (refs.length > MAX_SPINE_ITEMS) throw EpubDomLimitExceeded("EPUB spine")
             for (i in 0 until refs.length) {
                 (refs.item(i) as? Element)?.getAttribute("idref")?.takeIf(String::isNotBlank)?.let(::add)
             }
@@ -466,9 +488,18 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         return null
     }
 
-    private fun parseXml(zip: ZipFile, path: String) = newDocumentBuilder().parse(
-        zip.getInputStream(zip.findEntry(path) ?: error("EPUB 缺少 $path")),
-    )
+    private fun parseXml(zip: ZipFile, path: String): org.w3c.dom.Document {
+        val entry = zip.findEntry(path) ?: error("EPUB 缺少 $path")
+        return zip.openBoundedEntry(entry, MAX_EPUB_XML_BYTES, path).use { input ->
+            newDocumentBuilder().parse(input).also(::validateXmlDocument)
+        }
+    }
+
+    private fun validateXmlDocument(document: org.w3c.dom.Document) {
+        if (document.getElementsByTagNameNS("*", "*").length > MAX_XML_ELEMENTS) {
+            throw EpubDomLimitExceeded("EPUB XML")
+        }
+    }
 
     private fun newDocumentBuilder() = DocumentBuilderFactory.newInstance().run {
         isNamespaceAware = true
@@ -488,10 +519,11 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         xhtmlPath: String,
         manifest: Collection<ManifestItem>,
     ): XhtmlContent {
-        val document = newDocumentBuilder().parse(input)
+        val document = newDocumentBuilder().parse(input).also(::validateXmlDocument)
         val stylesheet = readStylesheet(document, zip, xhtmlPath)
         val nodes = document.getElementsByTagNameNS("*", "*")
         var heading: String? = null
+        var accumulatedTextChars = 0
         val blocks = buildList {
             for (index in 0 until nodes.length) {
                 val element = nodes.item(index) as? Element ?: continue
@@ -505,6 +537,10 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                             ?: element.textContent?.singleLineBookHeading()?.takeIf(String::isNotBlank)
                     }
                     if (styledText.text.isBlank()) continue
+                    accumulatedTextChars += styledText.text.length
+                    if (accumulatedTextChars > MAX_CHAPTER_TEXT_CHARS || size >= MAX_CHAPTER_BLOCKS) {
+                        throw EpubDomLimitExceeded(xhtmlPath)
+                    }
                     add(XhtmlBlock.Text(styledText))
                     continue
                 }
@@ -544,6 +580,26 @@ class EpubBookParser : BookParser, MemoryPressureListener {
             blocks
         }
         return XhtmlContent(heading, presentedBlocks)
+    }
+
+    private fun readXhtmlWithFallback(
+        zip: ZipFile,
+        entry: java.util.zip.ZipEntry,
+        xhtmlPath: String,
+        manifest: Collection<ManifestItem>,
+    ): XhtmlContent = try {
+        zip.openBoundedEntry(entry, MAX_EPUB_XHTML_BYTES).use { input ->
+            readXhtml(input, zip, xhtmlPath, manifest)
+        }
+    } catch (_: EpubDomLimitExceeded) {
+        DiagnosticLog.record(
+            Category.EPUB_PARSE,
+            "xhtml_streaming_fallback",
+            details = mapOf("entry" to entry.name.takeLast(96), "size" to entry.size),
+        )
+        zip.getInputStream(entry).use { input ->
+            readXhtmlStreaming(input, zip, xhtmlPath, manifest)
+        }
     }
 
     private fun org.w3c.dom.Document.fullPageBackgroundImage(
@@ -654,6 +710,11 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         const val CSS_SOURCE_CACHE_SIZE = 48
         const val FRONT_MATTER_INSPECTION_LIMIT = 16
         const val MAX_COVER_BYTES = 8 * 1024 * 1024
+        const val MAX_MANIFEST_ITEMS = 20_000
+        const val MAX_SPINE_ITEMS = 10_000
+        const val MAX_XML_ELEMENTS = 100_000
+        const val MAX_CHAPTER_BLOCKS = 50_000
+        const val MAX_CHAPTER_TEXT_CHARS = 4_000_000
     }
 
 }

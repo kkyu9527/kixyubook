@@ -1,7 +1,13 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import com.kixyu9527.kixyubook.core.common.model.BookSearchResult
+import com.kixyu9527.kixyubook.core.common.model.BookSearchStage
+import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
+import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -17,30 +23,109 @@ internal class ReaderSearchController(
     private val bookUuid: String,
     private val books: BookRepository,
     private val state: MutableStateFlow<ReaderUiState>,
+    private val recordHistory: suspend (String) -> Unit,
     private val recordOrigin: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
     private val jumpToPosition: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
     private val returnToOrigin: () -> Unit,
 ) {
     private var originRecorded = false
+    private var searchJob: Job? = null
 
-    fun search(query: String) {
-        scope.launch {
-            val normalized = query.trim()
-            originRecorded = false
-            if (normalized.isBlank()) {
-                clearState()
-                return@launch
-            }
-            val results = books.searchBook(bookUuid, normalized)
-            state.update {
-                it.copy(
-                    searchQuery = normalized,
-                    searchResults = results,
-                    selectedSearchIndex = if (results.isEmpty()) -1 else 0,
-                    searchReturnAvailable = false,
+    fun search(query: String, searchScope: ReaderSearchScope) {
+        val normalized = query.trim()
+        searchJob?.cancel()
+        originRecorded = false
+        if (normalized.isBlank()) {
+            clearState()
+            return
+        }
+        val immediateResults = currentChapterResults(normalized)
+        state.update {
+            it.copy(
+                searchQuery = normalized,
+                searchScope = searchScope,
+                searchHistory = (listOf(normalized) + it.searchHistory)
+                    .distinct().take(MAX_SEARCH_HISTORY),
+                searchResults = immediateResults,
+                selectedSearchIndex = if (immediateResults.isEmpty()) -1 else 0,
+                searchReturnAvailable = false,
+                searchInProgress = searchScope == ReaderSearchScope.BOOK,
+                searchProgress = if (searchScope == ReaderSearchScope.BOOK) 0f else 1f,
+                searchStage = BookSearchStage.INDEXING,
+                searchCompleted = 0,
+                searchTotal = 0,
+                searchError = null,
+            )
+        }
+        searchJob = scope.launch {
+            try {
+                recordHistory(normalized)
+                if (searchScope == ReaderSearchScope.CURRENT_CHAPTER) return@launch
+                val results = books.searchBook(
+                    bookUuid = bookUuid,
+                    query = normalized,
+                    onProgress = { progress ->
+                        state.update { current ->
+                            if (current.searchQuery != normalized || current.searchScope != searchScope) current
+                            else current.copy(
+                                searchProgress = progress.fraction,
+                                searchStage = progress.stage,
+                                searchCompleted = progress.completed,
+                                searchTotal = progress.total,
+                            )
+                        }
+                    },
+                    onResults = { partialResults ->
+                        publishResults(normalized, searchScope, immediateResults + partialResults)
+                    },
                 )
+                val merged = mergeResults(immediateResults + results)
+                state.update { current ->
+                    if (current.searchQuery != normalized || current.searchScope != searchScope) current
+                    else current.withSearchResults(merged).copy(
+                        searchInProgress = false,
+                        searchProgress = 1f,
+                        searchCompleted = current.searchTotal,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                state.update { current ->
+                    if (current.searchQuery != normalized || current.searchScope != searchScope) current
+                    else current.copy(
+                        searchInProgress = false,
+                        searchError = error.message ?: "全文搜索失败",
+                    )
+                }
             }
         }
+    }
+
+    private fun currentChapterResults(query: String): List<BookSearchResult> {
+        val snapshot = state.value
+        val chapter = snapshot.chapter ?: return emptyList()
+        val chapterIndex = snapshot.chapters
+            .getOrNull(snapshot.chapterIndex)
+            ?.index
+            ?: snapshot.chapterIndex
+        return chapter.contentParagraphs()
+            .asSequence()
+            .filter { paragraph ->
+                paragraph.kind == ParagraphKind.TEXT &&
+                    paragraph.text.contains(query, ignoreCase = true)
+            }
+            .map { paragraph ->
+                BookSearchResult(
+                    chapterId = chapter.id,
+                    chapterTitle = chapter.title,
+                    chapterIndex = chapterIndex,
+                    paragraphIndex = paragraph.index,
+                    text = paragraph.text,
+                )
+            }
+            .take(MAX_SEARCH_RESULTS)
+            .toList()
     }
 
     fun select(index: Int) {
@@ -73,6 +158,8 @@ internal class ReaderSearchController(
     }
 
     fun clear() {
+        searchJob?.cancel()
+        searchJob = null
         originRecorded = false
         clearState()
     }
@@ -84,7 +171,45 @@ internal class ReaderSearchController(
                 searchResults = emptyList(),
                 selectedSearchIndex = -1,
                 searchReturnAvailable = false,
+                searchInProgress = false,
+                searchProgress = 0f,
+                searchStage = BookSearchStage.INDEXING,
+                searchCompleted = 0,
+                searchTotal = 0,
+                searchError = null,
             )
         }
+    }
+
+    private fun publishResults(
+        query: String,
+        searchScope: ReaderSearchScope,
+        candidates: List<BookSearchResult>,
+    ) {
+        val merged = mergeResults(candidates)
+        state.update { current ->
+            if (current.searchQuery != query || current.searchScope != searchScope) current
+            else current.withSearchResults(merged)
+        }
+    }
+
+    private fun mergeResults(candidates: List<BookSearchResult>): List<BookSearchResult> = candidates
+        .distinctBy { it.chapterId to it.paragraphIndex }
+        .sortedWith(compareBy(BookSearchResult::chapterIndex, BookSearchResult::paragraphIndex))
+        .take(MAX_SEARCH_RESULTS)
+
+    private fun ReaderUiState.withSearchResults(results: List<BookSearchResult>): ReaderUiState {
+        val selected = searchResults.getOrNull(selectedSearchIndex)
+        val selectedIndex = selected?.let { target ->
+            results.indexOfFirst {
+                it.chapterId == target.chapterId && it.paragraphIndex == target.paragraphIndex
+            }.takeIf { it >= 0 }
+        } ?: if (results.isEmpty()) -1 else 0
+        return copy(searchResults = results, selectedSearchIndex = selectedIndex)
+    }
+
+    private companion object {
+        const val MAX_SEARCH_HISTORY = 10
+        const val MAX_SEARCH_RESULTS = 1000
     }
 }

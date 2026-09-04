@@ -166,9 +166,8 @@ private fun String.safePathSegment() = replace(Regex("[^a-zA-Z0-9._-]"), "_")
 
 private const val CACHE_ROOT_NAME = "reader-pages"
 private const val MAGIC = 0x4B585047
-// Version 3 adds dedicated full-page image pagination and invalidates constrained illustration
-// dimensions previously cached for image-only spine items.
-private const val VERSION = 3
+// Version 4 accounts for wrapped chapter and volume opening titles in available page height.
+private const val VERSION = 4
 private const val MAX_PAGES = 100_000
 private const val MAX_BLOCKS_PER_PAGE = 10_000
 private const val MAX_CACHE_FILES = 1_500

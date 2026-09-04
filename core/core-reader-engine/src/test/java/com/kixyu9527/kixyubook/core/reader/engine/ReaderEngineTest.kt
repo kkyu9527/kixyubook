@@ -24,6 +24,28 @@ class ReaderEngineTest {
         assertEquals(listOf("正文", "第一章 开始", "第二章 继续"), chapters.map { it.title })
     }
 
+    @Test fun txtParserBoundsBooksWithoutARecognizableToc() = runBlocking {
+        val paragraph = "这是一段没有目录的正文。".repeat(12_000)
+        val file = folder.newFile("no-toc-large.txt").apply {
+            bufferedWriter().use { writer ->
+                repeat(5) { writer.appendLine(paragraph) }
+            }
+        }
+        val chapters = mutableListOf<DocumentChapter>()
+
+        TxtBookParser().readChapters(file, chapters::add)
+
+        assertTrue(chapters.size > 1)
+        assertEquals("正文", chapters.first().title)
+        assertEquals("正文（2）", chapters[1].title)
+        assertTrue(chapters.all { chapter ->
+            chapter.paragraphs.sumOf(String::length) <= 512 * 1024
+        })
+        assertEquals(paragraph.length * 5, chapters.sumOf { chapter ->
+            chapter.paragraphs.sumOf(String::length)
+        })
+    }
+
     @Test fun paginationDiskCacheRestoresPageBoundariesAndRichSpans() {
         val noBackupRoot = folder.newFolder("no-backup")
         val paragraph = Paragraph(
@@ -397,6 +419,10 @@ class ReaderEngineTest {
     }
 
     @Test fun chapterHeadingSeparatesOrdinalFromNameAndDropsLegacyVolumePrefix() {
+        assertEquals(
+            ReaderChapterHeading("第五十四卷", "曙光废墟：漫长而完整的卷名"),
+            splitReaderChapterHeading("第五十四卷 曙光废墟：漫长而完整的卷名"),
+        )
         assertEquals(
             ReaderChapterHeading("第一章", "初见"),
             splitReaderChapterHeading("第二卷 云涌 · 第一章 初见"),
