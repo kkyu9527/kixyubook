@@ -22,6 +22,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -45,7 +47,7 @@ internal fun PagedReader(
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
     savePosition: (Int, Int, Boolean, Int) -> Unit,
-    moveChapterFromPage: (Int, Int, Boolean) -> Unit,
+    settlePage: (ReaderPageDestination) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
     volumeTurns: SharedFlow<Int>,
@@ -70,6 +72,14 @@ internal fun PagedReader(
         state.settings.showChapterTitle,
     ) { mutableStateOf<RetainedReaderPage?>(null) }
     var textSelectionActive by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    // These are references to the three displayed chapter layouts, not another global cache.
+    // A cache eviction must not withdraw a leaf already handed to Pager during role rotation.
+    val measuredWindow = remember(
+        spec, state.fontPath, state.settings.showChapterTitle, state.book?.contentHash,
+        density.density, density.fontScale, layoutDirection,
+    ) { java.util.IdentityHashMap<ReaderChapter, ReaderPaginationSnapshot>() }
     // Always finish the requested chapter first. EPUB pagination includes rich spans and image
     // blocks, so starting three layouts together made the visible chapter compete with prefetch.
     val pagination = rememberMeasuredReaderPages(
@@ -82,6 +92,7 @@ internal fun PagedReader(
         measurer = paginationMeasurer,
         paused = resourcePriorityActive,
         minimumVisibleParagraphIndex = state.restorePosition,
+        retainedSnapshot = measuredWindow[chapter],
     )
     val pages = pagination.pages
     LaunchedEffect(resourcePriorityActive) {
@@ -130,6 +141,7 @@ internal fun PagedReader(
             prefetch = !criticalNeighbours,
             paused = resourcePriorityActive,
             allowPartialResults = false,
+            retainedSnapshot = measuredWindow[it],
         )
     } ?: ReaderPaginationSnapshot()
     val nextPages = nextPagination.pages
@@ -146,9 +158,17 @@ internal fun PagedReader(
             prefetch = !criticalNeighbours,
             paused = resourcePriorityActive,
             allowPartialResults = false,
+            retainedSnapshot = measuredWindow[it],
         )
     } ?: ReaderPaginationSnapshot()
     val previousPages = previousPagination.pages
+    SideEffect {
+        // Identity lookup avoids hashing every paragraph on each reader recomposition.
+        measuredWindow.keys.removeAll { it !== chapter && it !== previousChapter && it !== nextChapter }
+        if (pagination.isComplete) measuredWindow[chapter] = pagination
+        if (previousChapter != null && previousPagination.isComplete) measuredWindow[previousChapter] = previousPagination
+        if (nextChapter != null && nextPagination.isComplete) measuredWindow[nextChapter] = nextPagination
+    }
     val positions = remember { ReaderPositionManager() }
     // Keep one physical Pager alive across chapter changes. Its stable page keys let Compose retain
     // the page that crossed the boundary while the three-chapter window is recentered around it.
@@ -187,12 +207,18 @@ internal fun PagedReader(
         it.chapterIndex == state.chapterIndex
     }.coerceAtLeast(0)
     val selectedSearchResult = state.searchResults.getOrNull(state.selectedSearchIndex)
+    val layoutIdentity = listOf(spec, state.fontPath, state.settings.showChapterTitle,
+        density.density, density.fontScale, layoutDirection)
+    val entryLayoutIdentity = remember(state.navigationVersion) { layoutIdentity }
+    val acknowledgingVisibleLeaf = state.settledPageIndex != null && layoutIdentity == entryLayoutIdentity
     val targetSearchQuery = state.searchQuery.takeIf {
         selectedSearchResult?.chapterId == chapter.id &&
             selectedSearchResult.paragraphIndex == state.restorePosition
     }
     val initialActual = if (pages.isEmpty()) {
         if (state.restorePosition > 0) Int.MIN_VALUE else 0
+    } else if (acknowledgingVisibleLeaf) {
+        checkNotNull(state.settledPageIndex).coerceIn(pages.indices)
     } else {
         positions.pageFor(
             pages,
@@ -218,8 +244,8 @@ internal fun PagedReader(
     val turnRequests = remember { Channel<Int>(Channel.RENDEZVOUS) }
     var lastWheelTurnAt by remember { mutableLongStateOf(0L) }
     var settledSpreadKey by remember { mutableStateOf(desiredSpreadKey) }
+    var appliedNavigationVersion by remember { mutableIntStateOf(state.navigationVersion) }
     var pendingDirectChapterTurn by remember { mutableStateOf<Int?>(null) }
-    val directChapterTargetKey = remember { mutableStateOf<String?>(null) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
     val latestReaderState by rememberUpdatedState(state)
     val latestPaginationComplete by rememberUpdatedState(pagination.isComplete)
@@ -259,6 +285,10 @@ internal fun PagedReader(
     // page back to the chapter opening whenever the controls appeared. Only an explicit logical
     // destination change may drive this positioning effect.
     LaunchedEffect(state.navigationVersion, desiredSpreadKey) {
+        if (acknowledgingVisibleLeaf) {
+            appliedNavigationVersion = state.navigationVersion
+            return@LaunchedEffect
+        }
         if (settledSpreadKey != desiredSpreadKey) {
             val target = pagerSpreads.indexOfFirst { it.key == desiredSpreadKey }
             if (target >= 0) {
@@ -266,34 +296,36 @@ internal fun PagedReader(
                 settledSpreadKey = desiredSpreadKey
             }
         }
+        appliedNavigationVersion = state.navigationVersion
     }
 
     LaunchedEffect(pager) {
-        snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { pageIndex ->
+        pager.settledReaderLeaves(
+            navigationVersion = { latestReaderState.navigationVersion },
+            appliedNavigationVersion = { appliedNavigationVersion },
+        ).collect { settled ->
+            val key = settled?.first ?: return@collect
             val spreads = latestPagerSpreads
             val readerState = latestReaderState
-            val spread = spreads.getOrNull(pageIndex) ?: return@collect
+            // Resolve the measured leaf's stable identity, never an index from a different
+            // chapter-window generation. Remeasure alone is not a navigation command.
+            val spread = spreads.firstOrNull { it.key == key } ?: return@collect
             val item = spread.items.firstOrNull() ?: return@collect
             settledSpreadKey = spread.key
-            val directChapterTurn = spread.key == directChapterTargetKey.value
             when {
-                item.chapterIndex < readerState.chapterIndex -> {
-                    if (directChapterTurn) directChapterTargetKey.value = null
-                    moveChapterFromPage(
-                        readerState.chapterIndex,
-                        item.chapterIndex - readerState.chapterIndex,
-                        chapterTransitionOpensAtEnd(
-                            direction = item.chapterIndex - readerState.chapterIndex,
-                            directChapterTurn = directChapterTurn,
-                        ),
+                item.chapterIndex != readerState.chapterIndex && item.page != null -> {
+                    val anchor = item.page.blocks.firstOrNull { it.kind == ParagraphKind.TEXT }
+                    retainedPage = RetainedReaderPage(
+                        item.page, readerPageNumber(readerState, item.pageIndex, item.pageCount),
                     )
-                }
-                item.chapterIndex > readerState.chapterIndex -> {
-                    if (directChapterTurn) directChapterTargetKey.value = null
-                    moveChapterFromPage(
-                        readerState.chapterIndex,
-                        item.chapterIndex - readerState.chapterIndex,
-                        false,
+                    settlePage(
+                        ReaderPageDestination(
+                            sourceChapterIndex = readerState.chapterIndex,
+                            chapterIndex = item.chapterIndex,
+                            pageIndex = item.pageIndex,
+                            paragraphIndex = anchor?.paragraphIndex ?: item.page.startParagraph,
+                            charOffset = anchor?.textStart ?: 0,
+                        ),
                     )
                 }
                 item.page != null -> {
@@ -349,7 +381,6 @@ internal fun PagedReader(
             // measured neighbour becomes visible first; snapshotFlow then commits the logical
             // chapter exactly once. This avoids rebuilding the window and correcting its anchor
             // in a second frame.
-            directChapterTargetKey.value = pagerSpreads[target].key
             pager.scrollToPage(target)
             pendingDirectChapterTurn = null
         } else {
@@ -668,7 +699,8 @@ internal fun ReaderPagerLeaf(
         fontPath = state.fontPath,
         onTapFraction = { fraction -> if (fraction in .33f..67f) middleTap() },
         epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
-        modifier = Modifier.readerPageViewportModifier(renderedPage, topInsetDp, bottomInsetDp),
+        modifier = Modifier.readerPageViewportModifier(renderedPage, topInsetDp, bottomInsetDp)
+            .testTag("reader-leaf:${item.key}"),
         fullPageViewportHeightDp = physicalViewportHeightDp,
         showRegularChapterTitle = state.settings.showChapterTitle,
         highlightQuery = state.searchQuery,
@@ -728,7 +760,7 @@ internal data class ReaderPagerItem(
     val page: ReaderPage?,
 ) {
     // Pager/LazyLayout keys participate in saveable state and therefore must be Bundle-compatible.
-    val key = "$chapterIndex:$pageIndex"
+    val key = "${page?.chapterIndex ?: chapterIndex}:$pageIndex"
 }
 
 internal data class ReaderPagerSpread(
@@ -770,7 +802,7 @@ internal fun readerPagerSpread(items: List<ReaderPagerItem>): ReaderPagerSpread 
     val spreadIndex = if (first.pageIndex >= 0) first.pageIndex / 2 else first.pageIndex
     return ReaderPagerSpread(
         items = items,
-        key = "${first.chapterIndex}:spread:$spreadIndex",
+        key = "${first.page?.chapterIndex ?: first.chapterIndex}:spread:$spreadIndex",
     )
 }
 

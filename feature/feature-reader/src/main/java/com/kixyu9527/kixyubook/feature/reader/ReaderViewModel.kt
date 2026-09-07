@@ -341,6 +341,21 @@ class ReaderViewModel @AssistedInject constructor(
         navigateToChapter(index = target, position = 0)
     }
 
+    /** Commit the leaf already shown by Pager without issuing another text-position jump. */
+    fun settlePage(destination: ReaderPageDestination) {
+        val state = _uiState.value
+        if (state.chapterIndex != destination.sourceChapterIndex ||
+            destination.chapterIndex == state.chapterIndex ||
+            destination.chapterIndex !in state.chapters.indices
+        ) return
+        navigateToChapter(
+            index = destination.chapterIndex,
+            position = destination.paragraphIndex,
+            charOffset = destination.charOffset,
+            settledPageIndex = destination.pageIndex,
+        )
+    }
+
     fun saveParagraphCorrection(
         chapterIndex: Int,
         paragraphIndex: Int,
@@ -543,6 +558,7 @@ class ReaderViewModel @AssistedInject constructor(
                     restorePosition = anchorPosition,
                     restoreCharOffset = anchorOffset,
                     navigationVersion = state.navigationVersion + 1,
+                    settledPageIndex = null,
                 )
             }
         }
@@ -554,6 +570,7 @@ class ReaderViewModel @AssistedInject constructor(
         position: Int,
         charOffset: Int = 0,
         persistProgress: Boolean = true,
+        settledPageIndex: Int? = null,
     ) {
         val state = _uiState.value
         if (index == state.chapterIndex && state.chapter != null) {
@@ -578,7 +595,7 @@ class ReaderViewModel @AssistedInject constructor(
         // newly active Pager.
         state.prefetchedChapters[index]?.let { cached ->
             pendingChapterIndex = null
-            activateChapter(index, position, charOffset, cached, persistProgress)
+            activateChapter(index, position, charOffset, cached, persistProgress, settledPageIndex)
             return
         }
 
@@ -590,7 +607,7 @@ class ReaderViewModel @AssistedInject constructor(
         }
         chapterNavigationJob = viewModelScope.launch {
             try {
-                loadChapter(index, position, charOffset, persistProgress)
+                loadChapter(index, position, charOffset, persistProgress, settledPageIndex)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -610,6 +627,7 @@ class ReaderViewModel @AssistedInject constructor(
         position: Int,
         charOffset: Int,
         persistProgress: Boolean,
+        settledPageIndex: Int? = null,
     ): Boolean {
         val startedAt = SystemClock.elapsedRealtime()
         val currentState = _uiState.value
@@ -631,7 +649,7 @@ class ReaderViewModel @AssistedInject constructor(
             )
             return false
         }
-        activateChapter(index, position, charOffset, readerChapter, persistProgress)
+        activateChapter(index, position, charOffset, readerChapter, persistProgress, settledPageIndex)
         val elapsedMs = SystemClock.elapsedRealtime() - startedAt
         if (prefetched == null || elapsedMs >= SLOW_NAVIGATION_MS) {
             DiagnosticLog.record(
@@ -655,6 +673,7 @@ class ReaderViewModel @AssistedInject constructor(
         charOffset: Int,
         readerChapter: ReaderChapter,
         persistProgress: Boolean,
+        settledPageIndex: Int? = null,
     ) {
         lastPosition = if (position == Int.MAX_VALUE) readerChapter.contentParagraphs().lastOrNull()?.index ?: 0 else position
         lastCharOffset = if (position == Int.MAX_VALUE) Int.MAX_VALUE else charOffset.coerceAtLeast(0)
@@ -668,6 +687,7 @@ class ReaderViewModel @AssistedInject constructor(
                 restorePosition = lastPosition,
                 restoreCharOffset = lastCharOffset,
                 navigationVersion = it.navigationVersion + 1,
+                settledPageIndex = settledPageIndex,
                 loading = false,
                 error = null,
             )
@@ -697,6 +717,7 @@ class ReaderViewModel @AssistedInject constructor(
                 restorePosition = lastPosition,
                 restoreCharOffset = lastCharOffset,
                 navigationVersion = current.navigationVersion + 1,
+                settledPageIndex = null,
             )
         }
         if (persistProgress) savePosition(lastPosition, lastCharOffset)
@@ -736,6 +757,7 @@ class ReaderViewModel @AssistedInject constructor(
                     restorePosition = targetPosition,
                     restoreCharOffset = targetCharOffset,
                     navigationVersion = current.navigationVersion + 1,
+                    settledPageIndex = null,
                 )
             }
         } else {

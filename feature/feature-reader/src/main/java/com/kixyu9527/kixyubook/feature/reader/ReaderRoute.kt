@@ -153,6 +153,7 @@ private fun LoadedReaderRoute(
         onExit = onExit,
         moveChapter = viewModel::moveChapter,
         moveChapterFromPage = viewModel::moveChapterFromPage,
+        settlePage = viewModel::settlePage,
         jumpChapter = viewModel::jumpToChapter,
         jumpPosition = viewModel::jumpToPosition,
         savePosition = viewModel::savePosition,

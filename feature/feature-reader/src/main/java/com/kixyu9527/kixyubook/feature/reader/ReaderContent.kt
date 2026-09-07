@@ -51,6 +51,7 @@ internal fun ReaderContent(
     palette: ReaderRenderPalette,
     savePosition: (Int, Int, Boolean, Int) -> Unit,
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
+    settlePage: (ReaderPageDestination) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
     volumeTurns: SharedFlow<Int>,
@@ -187,7 +188,7 @@ internal fun ReaderContent(
         } else {
             Box(Modifier.fillMaxSize()) {
                 PagedReader(
-                    state, chapter, spec, palette, savePosition, moveChapterFromPage,
+                    state, chapter, spec, palette, savePosition, settlePage,
                     middleTap, dismissControls, volumeTurns, chapterTurns,
                     paginationCoordinator, paginationMeasurer,
                     chapterRendered, setPageInteractionActive, resourcePriorityActive, twoPageSpread,

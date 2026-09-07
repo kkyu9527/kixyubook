@@ -64,6 +64,7 @@ fun rememberMeasuredReaderPages(
     paused: Boolean = false,
     allowPartialResults: Boolean = true,
     minimumVisibleParagraphIndex: Int? = null,
+    retainedSnapshot: ReaderPaginationSnapshot? = null,
 ): ReaderPaginationSnapshot {
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
@@ -75,7 +76,7 @@ fun rememberMeasuredReaderPages(
     // the effective chapter text in the cache identity so stale page boundaries can never be
     // reused after a correction, regardless of layout or screen size.
     val effectiveTextRevision = remember(chapter) {
-        chapter.paragraphs.fold(1) { hash, paragraph -> 31 * hash + paragraph.text.hashCode() }
+        chapter.layoutRevision()
     }
     val cacheKey = remember(
         chapter.id,
@@ -106,6 +107,7 @@ fun rememberMeasuredReaderPages(
     var snapshot by remember(cacheKey) {
         mutableStateOf(
             coordinator.currentSnapshot(cacheKey)
+                ?: retainedSnapshot
                 ?: ReaderPaginationSnapshot(),
         )
     }

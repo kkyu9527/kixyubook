@@ -54,6 +54,8 @@ data class ReaderUiState(
     val canNavigateForward: Boolean = false,
     val epubFootnote: EpubLinkResult.Footnote? = null,
     val navigationVersion: Int = 0,
+    /** An already displayed physical leaf; null means an explicit text-location restore. */
+    val settledPageIndex: Int? = null,
     val loading: Boolean = true,
     val loadStage: ReaderLoadStage? = ReaderLoadStage.OPENING_BOOK,
     val error: String? = null,
@@ -87,6 +89,15 @@ internal data class ReaderContentState(
     val annotations: List<ReaderAnnotation>,
     val selectedSearchIndex: Int,
     val navigationVersion: Int,
+    val settledPageIndex: Int? = null,
+)
+
+data class ReaderPageDestination(
+    val sourceChapterIndex: Int,
+    val chapterIndex: Int,
+    val pageIndex: Int,
+    val paragraphIndex: Int,
+    val charOffset: Int,
 )
 
 /** Directory enrichment changes list positions, never the identity of an open chapter. */
@@ -118,4 +129,5 @@ internal fun ReaderUiState.toReaderContentState() = ReaderContentState(
     annotations = annotations,
     selectedSearchIndex = selectedSearchIndex,
     navigationVersion = navigationVersion,
+    settledPageIndex = settledPageIndex,
 )
