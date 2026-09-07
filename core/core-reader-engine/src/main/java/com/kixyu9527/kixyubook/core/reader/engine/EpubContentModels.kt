@@ -30,6 +30,7 @@ internal data class NavigationEntry(
     val title: String,
     val volumeTitle: String?,
     val volumeIndex: Int?,
+    val depth: Int = 0,
 )
 
 internal sealed interface XhtmlBlock {

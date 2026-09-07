@@ -88,7 +88,31 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 EpubLinkResult.Footnote(noteContainer.getAttribute("title").ifBlank { "注释" }, it)
             }
         }
-        EpubLinkResult.Location(chapterIndex)
+        val textElements = mutableListOf<Pair<Element, StyledText>>()
+        val content = try {
+            readXhtml(document, zip, path, pkg.manifest.values) { element, text ->
+                textElements += element to text
+            }
+        } catch (_: EpubDomLimitExceeded) {
+            return@use EpubLinkResult.Location(chapterIndex)
+        }
+        val heading = content.heading?.singleLineBookHeading()?.takeIf(String::isMeaningfulShortEpubHeading)
+        var removedHeading = false
+        val body = textElements.filterNot { (_, text) ->
+            val duplicate = !removedHeading && heading != null &&
+                text.text.normalizedHeading() == heading.normalizedHeading()
+            if (duplicate) removedHeading = true
+            duplicate
+        }
+        val nodeIndices = java.util.IdentityHashMap<org.w3c.dom.Node, Int>().apply {
+            for (index in 0 until nodes.length) put(nodes.item(index), index)
+        }
+        val targetNodeIndex = checkNotNull(nodeIndices[targetElement])
+        val paragraph = body.indexOfFirst { (element, _) ->
+            generateSequence(targetElement as org.w3c.dom.Node?) { it.parentNode }.any { it === element } ||
+                checkNotNull(nodeIndices[element]) >= targetNodeIndex
+        }.takeIf { it >= 0 } ?: body.lastIndex.coerceAtLeast(0)
+        EpubLinkResult.Location(chapterIndex, paragraph)
     }
 
     override fun onMemoryPressure(level: MemoryPressureLevel) {
@@ -123,7 +147,11 @@ class EpubBookParser : BookParser, MemoryPressureListener {
      */
     fun readChapterOutlines(file: File): List<DocumentChapterOutline> = ZipFile(file).use { zip ->
         val pkg = readPackage(file, zip)
-        val navigationEntries = readNavigationEntries(zip, pkg)
+        val navigationEntries = linkedMapOf<String, NavigationEntry>().apply {
+            readNavigationEntries(zip, pkg).forEach { (target, entry) ->
+                putIfAbsent(target.normalizedArchivePath(), entry)
+            }
+        }
         val rawCandidates = pkg.spine.mapIndexedNotNull { sourceIndex, id ->
             val item = pkg.manifest[id] ?: return@mapIndexedNotNull null
             val navigation = navigationEntries[item.path.normalizedArchivePath()]
@@ -134,7 +162,6 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 volumeIndex = navigation?.volumeIndex,
             )
         }
-        val inferredVolumePages = hashSetOf<Int>()
         val candidates = rawCandidates.mapIndexed { position, outline ->
             val item = pkg.manifest[pkg.spine[outline.sourceIndex]] ?: return@mapIndexed outline
             val semanticTitle = outline.title.semanticEpubSectionTitle()
@@ -154,17 +181,23 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 null
             }
             val inferredVolumeTitle = nextVolume?.takeIf { inspection?.isImageOnly == true }
-            if (inferredVolumeTitle != null) inferredVolumePages += outline.sourceIndex
             outline.copy(title = inspection?.title ?: inferredVolumeTitle ?: item.path.fallbackChapterTitle(outline.sourceIndex))
         }
-        val navigated = candidates.filter { outline ->
-            val item = pkg.manifest[pkg.spine[outline.sourceIndex]] ?: return@filter false
-            item.path.normalizedArchivePath() in navigationEntries || outline.sourceIndex in inferredVolumePages
+        // The publisher's TOC is navigation, not a whitelist of readable spine resources.
+        // Keep every source index so unlisted prologues/interludes remain readable and searchable.
+        candidates
+    }
+
+    fun readNavigation(file: File): List<com.kixyu9527.kixyubook.core.common.model.EpubNavigationEntry> = ZipFile(file).use { zip ->
+        val pkg = readPackage(file, zip)
+        val sourceIndices = pkg.spine.mapIndexedNotNull { index, id ->
+            pkg.manifest[id]?.path?.normalizedArchivePath()?.let { it to index }
+        }.toMap()
+        readNavigationEntries(zip, pkg).mapNotNull { (target, entry) ->
+            sourceIndices[target.normalizedArchivePath()]?.let { index ->
+                com.kixyu9527.kixyubook.core.common.model.EpubNavigationEntry(index, entry.title, target, entry.depth)
+            }
         }
-        // Prefer the official TOC when it describes a meaningful part of the spine. This omits
-        // publisher-only cover/copyright containers while retaining a safe fallback for EPUBs
-        // with missing or incomplete navigation documents.
-        if (navigated.size >= 2 && navigated.size * 3 >= candidates.size) navigated else candidates
     }
 
     /** Parses selected spine entries in one ZipFile session for background search indexing. */
@@ -417,8 +450,10 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         }
         val navigationItems = pkg.manifest.values.filter { item ->
             "nav" in item.properties || item.mediaType.equals(NCX_MEDIA_TYPE, ignoreCase = true)
-        }
+        }.sortedBy { if ("nav" in it.properties) 0 else 1 }
         navigationItems.forEach { item ->
+            // EPUB 3 TOC takes precedence; NCX is a fallback, not a second directory to merge.
+            if (isNotEmpty()) return@forEach
             val document = runCatching { parseXml(zip, item.path) }.getOrNull() ?: return@forEach
             if (item.mediaType.equals(NCX_MEDIA_TYPE, ignoreCase = true)) {
                 val points = document.getElementsByTagNameNS("*", "navPoint")
@@ -435,13 +470,20 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                     putNavigationEntry(
                         item.path,
                         source,
-                        NavigationEntry(title, volumeTitle, volumeIndex(volumeTitle)),
+                        NavigationEntry(title, volumeTitle, volumeIndex(volumeTitle),
+                            generateSequence(point.parentNode) { it.parentNode }.filterIsInstance<Element>()
+                                .count { it.localName == "navPoint" }),
                     )
                 }
             } else {
                 val anchors = document.getElementsByTagNameNS("*", "a")
                 for (index in 0 until anchors.length) {
                     val anchor = anchors.item(index) as? Element ?: continue
+                    val nav = generateSequence(anchor.parentNode) { it.parentNode }.filterIsInstance<Element>()
+                        .firstOrNull { it.localName == "nav" }
+                    val navType = nav?.getAttributeNS("http://www.idpf.org/2007/ops", "type")
+                        .orEmpty().ifBlank { nav?.getAttribute("epub:type").orEmpty() }
+                    if (navType.isNotBlank() && "toc" !in navType.split(' ')) continue
                     val ownListItem = generateSequence(anchor.parentNode) { it.parentNode }
                         .filterIsInstance<Element>()
                         .firstOrNull { it.localName.orEmpty().equals("li", true) }
@@ -458,6 +500,8 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                             anchor.textContent.normalizedNavigationTitle(),
                             volumeTitle,
                             volumeIndex(volumeTitle),
+                            (generateSequence(anchor.parentNode) { it.parentNode }.filterIsInstance<Element>()
+                                .count { it.localName == "li" } - 1).coerceAtLeast(0),
                         ),
                     )
                 }
@@ -471,8 +515,9 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         entry: NavigationEntry,
     ) {
         if (reference.isBlank() || entry.title.length !in 1..MAX_NAVIGATION_TITLE_LENGTH) return
-        val resolved = resolveArchivePath(navigationPath, reference).normalizedArchivePath()
-        putIfAbsent(resolved, entry)
+        val resolved = resolveArchivePath(navigationPath, reference)
+        val fragment = reference.substringAfter('#', "")
+        putIfAbsent(resolved + if (fragment.isBlank()) "" else "#$fragment", entry)
     }
 
     private fun Element.directNavigationLabel(): String? {
@@ -520,6 +565,16 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         manifest: Collection<ManifestItem>,
     ): XhtmlContent {
         val document = newDocumentBuilder().parse(input).also(::validateXmlDocument)
+        return readXhtml(document, zip, xhtmlPath, manifest)
+    }
+
+    private fun readXhtml(
+        document: org.w3c.dom.Document,
+        zip: ZipFile,
+        xhtmlPath: String,
+        manifest: Collection<ManifestItem>,
+        onText: (Element, StyledText) -> Unit = { _, _ -> },
+    ): XhtmlContent {
         val stylesheet = readStylesheet(document, zip, xhtmlPath)
         val nodes = document.getElementsByTagNameNS("*", "*")
         var heading: String? = null
@@ -537,6 +592,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                             ?: element.textContent?.singleLineBookHeading()?.takeIf(String::isNotBlank)
                     }
                     if (styledText.text.isBlank()) continue
+                    onText(element, styledText)
                     accumulatedTextChars += styledText.text.length
                     if (accumulatedTextChars > MAX_CHAPTER_TEXT_CHARS || size >= MAX_CHAPTER_BLOCKS) {
                         throw EpubDomLimitExceeded(xhtmlPath)

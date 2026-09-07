@@ -79,6 +79,14 @@ sealed interface EpubLinkResult {
     data class Location(val chapterIndex: Int, val paragraphIndex: Int = 0) : EpubLinkResult
 }
 
+/** Display-only EPUB navigation; it never replaces a persisted chapter or text anchor. */
+data class EpubNavigationEntry(
+    val sourceIndex: Int,
+    val title: String,
+    val target: String,
+    val depth: Int = 0,
+)
+
 data class Paragraph(
     val id: Long,
     val chapterId: Long,

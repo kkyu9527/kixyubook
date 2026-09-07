@@ -9,6 +9,7 @@ import com.kixyu9527.kixyubook.core.common.model.Chapter
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderAnnotation
 import com.kixyu9527.kixyubook.core.common.model.EpubLinkResult
+import com.kixyu9527.kixyubook.core.common.model.EpubNavigationEntry
 import com.kixyu9527.kixyubook.core.common.model.TextCorrection
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
@@ -24,6 +25,7 @@ enum class ReaderSearchScope { BOOK, CURRENT_CHAPTER }
 data class ReaderUiState(
     val book: Book? = null,
     val chapters: List<Chapter> = emptyList(),
+    val epubNavigation: List<EpubNavigationEntry> = emptyList(),
     val chapter: ReaderChapter? = null,
     val prefetchedChapters: Map<Int, ReaderChapter> = emptyMap(),
     val chapterIndex: Int = 0,
@@ -86,6 +88,20 @@ internal data class ReaderContentState(
     val selectedSearchIndex: Int,
     val navigationVersion: Int,
 )
+
+/** Directory enrichment changes list positions, never the identity of an open chapter. */
+internal fun ReaderUiState.withChapters(updated: List<Chapter>): ReaderUiState {
+    val activeIndex = updated.indexOfFirst { it.id == chapter?.id }
+        .takeIf { it >= 0 } ?: chapterIndex.coerceIn(0, updated.lastIndex.coerceAtLeast(0))
+    val positions = updated.mapIndexed { index, item -> item.id to index }.toMap()
+    return copy(
+        chapters = updated,
+        chapterIndex = activeIndex,
+        prefetchedChapters = prefetchedChapters.values.mapNotNull { content ->
+            positions[content.id]?.let { it to content }
+        }.toMap(),
+    )
+}
 
 internal fun ReaderUiState.toReaderContentState() = ReaderContentState(
     book = book,

@@ -1251,6 +1251,12 @@ class LocalBookRepository @Inject constructor(
                 .resolveLink(File(book.storagePath), target)
         }
 
+    override suspend fun readEpubNavigation(bookUuid: String): List<EpubNavigationEntry> = withContext(Dispatchers.IO) {
+        val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name }
+            ?: return@withContext emptyList()
+        (parsers.parserFor(BookFormat.EPUB) as EpubBookParser).readNavigation(File(book.storagePath))
+    }
+
     private suspend fun importStreamingChapters(
         bookUuid: String,
         source: File,

@@ -620,6 +620,13 @@ internal fun ReaderScreen(
             when (activeSheet) {
                 ReaderSheet.DIRECTORY -> DirectorySheet(
                     state = state,
+                    selectNavigation = { target ->
+                        sheet = null
+                        controls = false
+                        menu = false
+                        toolsMenu = false
+                        openDocumentLink(target)
+                    },
                     selectChapter = { index ->
                         sheet = null
                         controls = false
@@ -708,6 +715,13 @@ internal fun ReaderScreen(
                     ) {
                         DirectorySheet(
                             state = state,
+                            selectNavigation = { target ->
+                                sheet = null
+                                controls = false
+                                menu = false
+                                toolsMenu = false
+                                openDocumentLink(target)
+                            },
                             selectChapter = { index ->
                                 sheet = null
                                 controls = false

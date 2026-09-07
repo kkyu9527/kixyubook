@@ -135,8 +135,25 @@ class ReaderViewModel @AssistedInject constructor(
             launchReaderObserver("chapters") {
                 books.observeChapters(bookUuid).collect { chapters ->
                     if (chapters.isEmpty()) return@collect
+                    val previous = _uiState.value
+                    val orderingChanged = previous.chapters.map(Chapter::id) != chapters.map(Chapter::id)
+                    if (orderingChanged) {
+                        chapterNavigationJob?.cancel()
+                        pendingChapterIndex = null
+                        chapterPrefetchJob?.cancel()
+                        criticalNeighborPublishJob?.cancel()
+                        criticalNeighbourJobs.values.forEach(Job::cancel)
+                        criticalNeighbourJobs.clear()
+                        chapterLoads.values.forEach { it.deferred.cancel() }
+                        chapterLoads.clear()
+                        prefetchedAroundChapterIndex = null
+                    }
                     _uiState.update { current ->
-                        if (current.chapters == chapters) current else current.copy(chapters = chapters)
+                        if (current.chapters == chapters) current else current.withChapters(chapters)
+                    }
+                    if (orderingChanged) {
+                        prioritizeAdjacentChapter(_uiState.value.chapterIndex, -1)
+                        prioritizeAdjacentChapter(_uiState.value.chapterIndex, 1)
                     }
                 }
             }
@@ -265,6 +282,16 @@ class ReaderViewModel @AssistedInject constructor(
         // either direction immediately; pagination promotes them after the first leaf is visible.
         prioritizeAdjacentChapter(index, -1)
         prioritizeAdjacentChapter(index, 1)
+        viewModelScope.launch {
+            try {
+                val navigation = books.readEpubNavigation(bookUuid)
+                _uiState.update { it.copy(epubNavigation = navigation) }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // Publisher navigation is optional. The complete spine directory stays usable.
+            }
+        }
     }.onFailure { error -> _uiState.update { it.copy(loading = false, error = error.message) } }
 
     fun retryInitialLoad() {

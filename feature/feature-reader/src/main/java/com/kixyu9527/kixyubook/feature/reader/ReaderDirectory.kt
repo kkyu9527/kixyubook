@@ -47,6 +47,7 @@ internal enum class DirectoryView { CHAPTERS, BOOKMARKS, ANNOTATIONS }
 internal fun DirectorySheet(
     state: ReaderUiState,
     selectChapter: (Int) -> Unit,
+    selectNavigation: (String) -> Unit,
     selectBookmark: (Bookmark) -> Unit,
     selectAnnotation: (ReaderAnnotation) -> Unit,
     deleteBookmark: (String) -> Unit,
@@ -59,8 +60,8 @@ internal fun DirectorySheet(
     val bookmarkedChapterIds = remember(state.bookmarks) { state.bookmarks.mapTo(mutableSetOf(), Bookmark::chapterId) }
     val currentIndex = state.chapterIndex.coerceIn(0, state.chapters.lastIndex.coerceAtLeast(0))
     val currentChapterId = state.chapters.getOrNull(currentIndex)?.id
-    val collapsedDirectoryRows = remember(state.chapters) {
-        buildDirectoryRows(state.chapters, emptyMap())
+    val collapsedDirectoryRows = remember(state.chapters, state.epubNavigation) {
+        buildDirectoryRows(state.chapters, emptyMap(), state.epubNavigation)
     }
     val currentVolumeRow = remember(collapsedDirectoryRows, currentChapterId) {
         collapsedDirectoryRows.filterIsInstance<DirectoryRow.Volume>()
@@ -72,8 +73,8 @@ internal fun DirectorySheet(
             currentVolume?.let { this[it] = true }
         }
     }
-    val directoryRows = remember(state.chapters, expandedVolumes.toMap()) {
-        buildDirectoryRows(state.chapters, expandedVolumes)
+    val directoryRows = remember(state.chapters, expandedVolumes.toMap(), state.epubNavigation) {
+        buildDirectoryRows(state.chapters, expandedVolumes, state.epubNavigation)
     }
     val currentRowIndex = directoryRows.indexOfFirst { row ->
         when (row) {
@@ -97,7 +98,7 @@ internal fun DirectorySheet(
     LaunchedEffect(currentIndex, directoryView) {
         if (directoryView == DirectoryView.CHAPTERS && state.chapters.isNotEmpty()) {
             currentVolume?.let { expandedVolumes[it] = true }
-            val targetRows = buildDirectoryRows(state.chapters, expandedVolumes)
+            val targetRows = buildDirectoryRows(state.chapters, expandedVolumes, state.epubNavigation)
             val target = targetRows.indexOfFirst { row ->
                 when (row) {
                     is DirectoryRow.ChapterRow -> row.index == currentIndex
@@ -266,12 +267,14 @@ internal fun DirectorySheet(
                                     val current = row.index == state.chapterIndex
                                     val hasBookmark = chapter.id in bookmarkedChapterIds
                                     KixyuListRow(
-                                        title = chapter.title,
+                                        title = row.navigationTitle ?: chapter.title,
                                         titleStyle = MaterialTheme.typography.bodyMedium,
                                         titleMaxLines = 2,
                                         selected = current,
                                         highlighted = hasBookmark,
-                                        onClick = { selectChapter(row.index) },
+                                        onClick = {
+                                            row.navigationTarget?.let(selectNavigation) ?: selectChapter(row.index)
+                                        },
                                         leading = {
                                             Box(Modifier.size(KixyuSize.icon), contentAlignment = Alignment.Center) {
                                                 if (current) Icon(
@@ -447,8 +450,10 @@ internal sealed interface DirectoryRow {
         val index: Int,
         val id: Long,
         val volumeIndex: Int? = null,
+        val navigationTitle: String? = null,
+        val navigationTarget: String? = null,
     ) : DirectoryRow {
-        override val key = "chapter:$id"
+        override val key = "chapter:$id" + navigationTarget?.let { ":$it" }.orEmpty()
     }
 }
 
@@ -498,6 +503,20 @@ internal fun stickyVolumeFor(
 }
 
 internal fun buildDirectoryRows(
+    chapters: List<Chapter>,
+    expandedVolumes: Map<Int, Boolean>,
+    navigation: List<EpubNavigationEntry> = emptyList(),
+): List<DirectoryRow> {
+    val bySource = navigation.groupBy(EpubNavigationEntry::sourceIndex)
+    return buildSpineDirectoryRows(chapters, expandedVolumes).flatMap { row ->
+        val entries = (row as? DirectoryRow.ChapterRow)?.let { bySource[chapters[it.index].index] }.orEmpty()
+        if (row is DirectoryRow.ChapterRow && entries.isNotEmpty()) {
+            entries.map { row.copy(navigationTitle = it.title, navigationTarget = it.target) }
+        } else listOf(row)
+    }
+}
+
+private fun buildSpineDirectoryRows(
     chapters: List<Chapter>,
     expandedVolumes: Map<Int, Boolean>,
 ): List<DirectoryRow> {

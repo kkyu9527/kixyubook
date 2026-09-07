@@ -56,6 +56,7 @@ interface BookRepository {
         onResults: suspend (List<BookSearchResult>) -> Unit = {},
     ): List<BookSearchResult>
     suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult?
+    suspend fun readEpubNavigation(bookUuid: String): List<EpubNavigationEntry> = emptyList()
 }
 
 interface TextCorrectionRepository {
