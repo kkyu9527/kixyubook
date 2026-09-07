@@ -24,7 +24,7 @@ class TxtBookParser : BookParser {
             var volumeTitle: String? = null
             var volumeIndex = -1
             var emitted = false
-            var lineIndex = 0
+            var fragmentCount = 0
             var segmentIndex = 1
             var bufferedChars = 0
             val paragraphs = mutableListOf<String>()
@@ -43,22 +43,23 @@ class TxtBookParser : BookParser {
                 emitted = true
                 segmentIndex = if (continuesSameChapter) segmentIndex + 1 else 1
             }
-            while (true) {
+            for (fragment in reader.boundedLines(MAX_TXT_PARAGRAPH_CHARS)) {
                 currentCoroutineContext().ensureActive()
-                val rawLine = reader.readLine() ?: break
-                val currentIndex = lineIndex++
+                val rawLine = fragment.text
+                val currentIndex = fragment.lineIndex
+                if (++fragmentCount % TXT_PARSE_YIELD_LINES == 0) yield()
                 if (currentIndex in frontMatter.excludedLines) continue
                 val line = rawLine.trim().removePrefix("\uFEFF").trim()
                 if (line.isBlank()) continue
                 when {
-                    volumeTitleOrNull(line) != null -> {
+                    !fragment.continuation && volumeTitleOrNull(line) != null -> {
                         flush()
                         volumeTitle = checkNotNull(volumeTitleOrNull(line))
                         volumeIndex++
                         title = volumeTitle
                         segmentIndex = 1
                     }
-                    chapterTitleOrNull(line) != null -> {
+                    !fragment.continuation && chapterTitleOrNull(line) != null -> {
                         flush()
                         // Volume boundaries still split content, but the volume name
                         // is not repeated in every chapter title shown to the reader.
@@ -76,7 +77,6 @@ class TxtBookParser : BookParser {
                         bufferedChars += paragraph.length
                     }
                 }
-                if (lineIndex % TXT_PARSE_YIELD_LINES == 0) yield()
             }
             flush()
             if (!emitted) emit(DocumentChapter("正文", listOf("这本书没有可显示的文本。")))
@@ -86,12 +86,13 @@ class TxtBookParser : BookParser {
     private fun inspectFrontMatter(file: File, fallbackTitle: String): TxtFrontMatter {
         val charset = detectCharset(file)
         val lines = file.bufferedReader(charset).use { reader ->
-            buildList {
-                repeat(MAX_FRONT_MATTER_LINES) {
-                    val line = reader.readLine() ?: return@repeat
-                    add(line.removePrefix("\uFEFF").trim())
-                }
-            }
+            // Bound metadata probing by characters as well as line count. A minified book may
+            // contain its entire body on line one; inspecting metadata must not read it all.
+            reader.boundedLines(MAX_TXT_PARAGRAPH_CHARS)
+                .take(MAX_FRONT_MATTER_LINES)
+                .takeWhile { !it.continuation }
+                .map { it.text.removePrefix("\uFEFF").trim() }
+                .toList()
         }
         val excluded = mutableSetOf<Int>()
         var title = fallbackTitle.substringBeforeLast('.').ifBlank { "未命名书籍" }
