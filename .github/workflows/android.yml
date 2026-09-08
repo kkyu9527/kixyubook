@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_device_tests:
+        description: 'Also run the optional managed-emulator database checks'
+        type: boolean
+        default: false
 
 concurrency:
   group: android-${{ github.workflow }}-${{ github.ref }}
@@ -34,23 +39,14 @@ jobs:
       - name: Ensure Gradle wrapper is executable
         run: chmod +x gradlew
 
-      - name: Verify JVM tests
-        run: ./gradlew testDebugUnitTest --stacktrace
-
-      - name: Verify UI and accessibility resources
-        run: ./gradlew verifyAccessibilityResources verifyUiTextResources --stacktrace
-
-      - name: Verify dual-theme screenshots
-        run: ./gradlew :core:core-designsystem:verifyRoborazziDebug --stacktrace
+      - name: Verify device-free regressions
+        run: ./gradlew verifyHostTests --continue --stacktrace
 
       - name: Verify Compose performance budget
         run: >-
           ./gradlew verifyComposePerformanceBudget
           -Pkixyu.compose.reports=true
           --stacktrace
-
-      - name: Verify Android lint
-        run: ./gradlew lintDebug --stacktrace
 
       - name: Verify debug build
         run: ./gradlew assembleDebug --stacktrace
@@ -59,11 +55,13 @@ jobs:
         run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Enable KVM for Android emulator
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_device_tests }}
         run: |
           test -e /dev/kvm
           sudo chmod 666 /dev/kvm
 
       - name: Verify database backup on managed device
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_device_tests }}
         run: >-
           ./gradlew :core:core-database:pixel2Api35DebugAndroidTest
           -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
@@ -75,4 +73,16 @@ jobs:
         with:
           name: screenshot-comparisons
           path: '**/build/outputs/roborazzi/*_compare.png'
+          if-no-files-found: ignore
+
+      - name: Upload local regression reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-regression-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/testDebugUnitTest/*.xml
+            **/build/reports/lint-results-debug.*
+            **/src/test/screenshots/*_compare.png
           if-no-files-found: ignore

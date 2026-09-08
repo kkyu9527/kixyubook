@@ -11,6 +11,26 @@ plugins {
     alias(libs.plugins.roborazzi) apply false
 }
 
+val verifyHostTests = tasks.register("verifyHostTests") {
+    group = "verification"
+    description = "Runs local JVM/Compose regressions, screenshot verification and lint without devices."
+    dependsOn(
+        "verifyAccessibilityResources", "verifyUiTextResources", "verifyEdgeToEdgeContracts",
+        ":core:core-designsystem:verifyRoborazziDebug",
+    )
+}
+
+subprojects {
+    val modulePath = path
+    listOf("com.android.application", "com.android.library").forEach { pluginId ->
+        pluginManager.withPlugin(pluginId) {
+            verifyHostTests.configure {
+                dependsOn("$modulePath:testDebugUnitTest", "$modulePath:lintDebug")
+            }
+        }
+    }
+}
+
 subprojects {
     plugins.withId("org.jetbrains.kotlin.plugin.compose") {
         extensions.configure<ComposeCompilerGradlePluginExtension> {

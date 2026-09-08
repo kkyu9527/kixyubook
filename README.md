@@ -182,6 +182,14 @@ keyPassword=your-key-password
 
 Profile 任务会在目标设备上安装和卸载测试 APK，建议使用专用设备或 Emulator。
 
+不连接手机或模拟器的本地自动化回归：
+
+```bash
+./gradlew verifyHostTests --continue
+```
+
+覆盖范围、报告位置及已知限制见 [纯本机自动化测试](docs/HOST_TESTS.md)。
+
 ## 参与贡献
 
 欢迎通过 [Issues](https://github.com/kkyu9527/kixyubook/issues) 报告问题或提出建议。提交问题时请尽量附上 Android 版本、设备型号、应用版本、复现步骤和必要的日志或录屏。
