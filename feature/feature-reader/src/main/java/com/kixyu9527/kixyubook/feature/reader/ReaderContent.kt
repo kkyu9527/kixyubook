@@ -2,7 +2,6 @@ package com.kixyu9527.kixyubook.feature.reader
 
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -17,7 +16,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.reader.engine.*
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
@@ -114,10 +113,11 @@ internal fun ReaderContent(
                 val restoredItem = remember(contentParagraphs, state.restorePosition) {
                     ReaderPositionManager().contentItemFor(contentParagraphs, state.restorePosition)
                 }
-                val listState = rememberLazyListState(restoredItem + 1)
+                val listState = rememberReaderListState(state.sessionId, restoredItem + 1)
                 LaunchedEffect(listState, chapter.id) {
                     snapshotFlow {
                         val hasVisibleItems = listState.layoutInfo.visibleItemsInfo.isNotEmpty()
+                        if (!hasVisibleItems) return@snapshotFlow null
                         val chapterComplete = hasVisibleItems && !listState.canScrollForward
                         val visibleItem = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
                         val position = if (chapterComplete) {
@@ -131,7 +131,7 @@ internal fun ReaderContent(
                             ?.minus(1)?.takeIf(contentParagraphs.indices::contains)
                         val visibleEnd = contentParagraphs.getOrNull(lastVisibleItem ?: 0)?.index ?: position
                         Triple(position, visibleEnd, chapterComplete)
-                    }.distinctUntilChanged().debounce(500).collect { (position, visibleEnd, complete) ->
+                    }.filterNotNull().distinctUntilChanged().collect { (position, visibleEnd, complete) ->
                         savePosition(position, 0, complete, visibleEnd)
                     }
                 }

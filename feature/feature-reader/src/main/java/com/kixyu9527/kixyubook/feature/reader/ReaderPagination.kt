@@ -8,7 +8,6 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -92,6 +91,7 @@ internal fun PagedReader(
         measurer = paginationMeasurer,
         paused = resourcePriorityActive,
         minimumVisibleParagraphIndex = state.restorePosition,
+        minimumVisibleCharOffset = state.restoreCharOffset,
         retainedSnapshot = measuredWindow[chapter],
     )
     val pages = pagination.pages
@@ -234,7 +234,8 @@ internal fun PagedReader(
         spread.items.any { it.key == desiredItemKey }
     }.takeIf { it >= 0 } ?: 0
     val desiredSpreadKey = pagerSpreads[desiredSpreadIndex].key
-    val pager = rememberPagerState(
+    val pager = rememberReaderPagerState(
+        sessionId = state.sessionId,
         initialPage = desiredSpreadIndex,
         pageCount = { pagerSpreads.size },
     )
@@ -243,8 +244,9 @@ internal fun PagedReader(
     // replaying an unlimited queue after the finger has taken over makes the page feel sticky.
     val turnRequests = remember { Channel<Int>(Channel.RENDEZVOUS) }
     var lastWheelTurnAt by remember { mutableLongStateOf(0L) }
-    var settledSpreadKey by remember { mutableStateOf(desiredSpreadKey) }
-    var appliedNavigationVersion by remember { mutableIntStateOf(state.navigationVersion) }
+    var settledSpreadKey by remember(pager) { mutableStateOf(desiredSpreadKey) }
+    // Initial measure/restoration must be applied before any leaf can be saved as user progress.
+    var appliedNavigationVersion by remember(pager) { mutableIntStateOf(-1) }
     var pendingDirectChapterTurn by remember { mutableStateOf<Int?>(null) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
     val latestReaderState by rememberUpdatedState(state)

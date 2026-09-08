@@ -101,11 +101,14 @@ private fun LoadedReaderRoute(
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.importFont(it.toString()) }
     }
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> readerResumed = true
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> readerResumed = false
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    readerResumed = false
+                    viewModel.checkpointReadingProgress()
+                }
                 else -> Unit
             }
         }
@@ -120,6 +123,7 @@ private fun LoadedReaderRoute(
     }
     DisposableEffect(viewModel) {
         onDispose {
+            viewModel.checkpointReadingProgress()
             viewModel.setReaderVisible(false)
             viewModel.setReadingActive(false)
             viewModel.finishSession()

@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -30,7 +29,7 @@ class ReaderPagerHandoffTest {
         lateinit var scope: CoroutineScope
         val events = mutableListOf<String>()
         rule.setContent {
-            pager = rememberPagerState(initialPage = 2, pageCount = { keys.size })
+            pager = rememberReaderPagerState("session", initialPage = 2, pageCount = { keys.size })
             scope = rememberCoroutineScope()
             LaunchedEffect(pager) {
                 pager.settledReaderLeaves({ 0 }, { 0 }).collect { it?.let { events += it.first } }
@@ -64,7 +63,7 @@ class ReaderPagerHandoffTest {
         val events = mutableListOf<Pair<String, Int>>()
         val keys = listOf("chapter:0", "chapter:1", "bookmark:0", "search:0")
         rule.setContent {
-            pager = rememberPagerState(pageCount = { keys.size })
+            pager = rememberReaderPagerState("session", initialPage = 0, pageCount = { keys.size })
             scope = rememberCoroutineScope()
             LaunchedEffect(pager) {
                 pager.settledReaderLeaves({ version }, { applied }).collect { it?.let(events::add) }

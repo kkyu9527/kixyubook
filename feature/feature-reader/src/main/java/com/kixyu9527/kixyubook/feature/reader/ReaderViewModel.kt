@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.UUID
 import kotlin.math.abs
 
 @HiltViewModel(assistedFactory = ReaderViewModel.Factory::class)
@@ -52,7 +53,7 @@ class ReaderViewModel @AssistedInject constructor(
         fun create(bookUuid: String): ReaderViewModel
     }
 
-    private val _uiState = MutableStateFlow(ReaderUiState())
+    private val _uiState = MutableStateFlow(ReaderUiState(sessionId = UUID.randomUUID().toString()))
     val uiState = _uiState.asStateFlow()
     private val _positionState = MutableStateFlow(ReaderPositionState())
     val positionState = _positionState.asStateFlow()
@@ -82,7 +83,20 @@ class ReaderViewModel @AssistedInject constructor(
     private var openingCharOffset = 0
     private var userMovedBeforePrioritySync = false
     private var deferredLocalProgress: ReadingProgress? = null
-    @Volatile private var latestProgressCheckpoint: ReadingProgress? = null
+    private val progressWriter = ReaderProgressWriter(
+        save = { progress ->
+            books.saveProgress(progress)
+            // Sync remains best-effort and tied to the visible reader. A late local write must
+            // not reactivate a reader which onCleared has already released.
+            viewModelScope.launch { cloudSync.prioritizeBook(bookUuid) }
+        },
+        onFailure = { error ->
+            DiagnosticLog.record(
+                Category.READER, "progress_checkpoint", outcome = "failed",
+                details = mapOf("bookUuid" to bookUuid, "error" to error.toDiagnosticFailure()),
+            )
+        },
+    )
     private val locationHistory = ReaderLocationHistory()
     private val searchController = ReaderSearchController(
         scope = viewModelScope,
@@ -238,7 +252,7 @@ class ReaderViewModel @AssistedInject constructor(
         require(chapters.isNotEmpty()) { "书籍没有可阅读章节" }
         val progress = initialData.progress
         acceptedProgressUpdatedAt = progress?.updatedTime ?: Long.MIN_VALUE
-        val index = progress?.chapterId?.let { id -> chapters.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
+        val index = progress?.let { readerProgressChapterIndex(chapters, it).takeIf { index -> index >= 0 } } ?: 0
         _uiState.update {
             it.copy(
                 book = book,
@@ -255,7 +269,7 @@ class ReaderViewModel @AssistedInject constructor(
         val content = chapterLoad(index, chapters, ChapterLoadPriority.USER).await() ?: error("章节读取失败")
         lastPosition = progress?.paragraphIndex ?: 0
         lastCharOffset = progress?.charOffset?.coerceAtLeast(0) ?: 0
-        openingChapterId = progress?.chapterId ?: chapters[index].id
+        openingChapterId = chapters[index].id
         openingPosition = lastPosition
         openingCharOffset = lastCharOffset
         _positionState.value = ReaderPositionState(lastPosition, lastCharOffset)
@@ -732,10 +746,7 @@ class ReaderViewModel @AssistedInject constructor(
         ) return
         acceptedProgressUpdatedAt = progress.updatedTime
         val state = _uiState.value
-        val targetIndex = state.chapters.indexOfFirst { chapter ->
-            chapter.id == progress.chapterId ||
-                (progress.chapterKey.isNotBlank() && chapter.chapterKey == progress.chapterKey)
-        }
+        val targetIndex = readerProgressChapterIndex(state.chapters, progress)
         if (targetIndex < 0) return
         val targetPosition = progress.paragraphIndex.coerceAtLeast(0)
         val targetCharOffset = progress.charOffset.coerceAtLeast(0)
@@ -781,7 +792,7 @@ class ReaderViewModel @AssistedInject constructor(
         val pending = deferredLocalProgress
         deferredLocalProgress = null
         if (userMovedBeforePrioritySync && pending != null) {
-            persistProgress(pending.copy(updatedTime = System.currentTimeMillis()))
+            persistProgress(pending.copy(updatedTime = nextProgressUpdatedAt(System.currentTimeMillis(), latestLocalProgressWriteAt)))
         }
     }
 
@@ -1026,8 +1037,8 @@ class ReaderViewModel @AssistedInject constructor(
             fraction = total,
             paragraphIndex = safePosition,
             charOffset = safeCharOffset,
+            chapterKey = state.chapters.getOrNull(state.chapterIndex)?.chapterKey.orEmpty(),
         )
-        latestProgressCheckpoint = progress
         val moved = hasReaderMovedFromOpening(
             openingChapterId = openingChapterId,
             openingPosition = openingPosition,
@@ -1052,30 +1063,27 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     private fun persistProgress(progress: ReadingProgress) {
-        latestProgressCheckpoint = progress
+        // These timestamps suppress stale sync echoes; progressWriter tracks actual completion.
         latestLocalProgressWriteAt = progress.updatedTime
         acceptedProgressUpdatedAt = maxOf(acceptedProgressUpdatedAt, progress.updatedTime)
-        viewModelScope.launch {
-            books.saveProgress(progress)
-            // Reusing prioritizeBook here wakes the already active conflated P1 channel; it does
-            // not restart the reader or enqueue a global Worker.
-            cloudSync.prioritizeBook(bookUuid)
-        }
+        progressWriter.submit(progress)
+    }
+
+    fun checkpointReadingProgress() {
+        progressWriter.checkpoint()
     }
 
     /** HyperOS can ask for a process checkpoint immediately before enforcing its memory budget. */
     override fun onMemoryPressure(level: MemoryPressureLevel) {
         if (level != MemoryPressureLevel.CRITICAL) return
-        val checkpoint = latestProgressCheckpoint ?: return
         // The registry dispatches on the vendor receiver's background HandlerThread. Keep a firm
         // deadline so the complete TRIM/KILL response remains inside HyperOS's three-second limit.
         val saved = runBlocking(Dispatchers.IO) {
             withTimeoutOrNull(PROGRESS_CHECKPOINT_TIMEOUT_MS) {
-                books.saveProgress(checkpoint)
-                true
+                progressWriter.flush()
             }
         }
-        check(saved == true) { "Reading progress checkpoint exceeded its deadline" }
+        check(saved == true) { "Reading progress checkpoint failed or exceeded its deadline" }
     }
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { settingsRepository.update(transform) } }
@@ -1224,6 +1232,7 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     override fun onCleared() {
+        progressWriter.close()
         MemoryPressureRegistry.unregister(this)
         chapterPrefetchJob?.cancel()
         criticalNeighbourJobs.values.forEach(Job::cancel)

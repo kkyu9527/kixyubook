@@ -59,6 +59,8 @@ data class ReaderUiState(
     val loading: Boolean = true,
     val loadStage: ReaderLoadStage? = ReaderLoadStage.OPENING_BOOK,
     val error: String? = null,
+    /** In-memory ViewModel identity; deliberately not restored from saved instance state. */
+    val sessionId: String = "",
 )
 
 @Immutable
@@ -90,6 +92,7 @@ internal data class ReaderContentState(
     val selectedSearchIndex: Int,
     val navigationVersion: Int,
     val settledPageIndex: Int? = null,
+    val sessionId: String = "",
 )
 
 data class ReaderPageDestination(
@@ -130,4 +133,5 @@ internal fun ReaderUiState.toReaderContentState() = ReaderContentState(
     selectedSearchIndex = selectedSearchIndex,
     navigationVersion = navigationVersion,
     settledPageIndex = settledPageIndex,
+    sessionId = sessionId,
 )

@@ -65,6 +65,7 @@ fun rememberMeasuredReaderPages(
     allowPartialResults: Boolean = true,
     minimumVisibleParagraphIndex: Int? = null,
     retainedSnapshot: ReaderPaginationSnapshot? = null,
+    minimumVisibleCharOffset: Int = 0,
 ): ReaderPaginationSnapshot {
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
@@ -125,15 +126,26 @@ fun rememberMeasuredReaderPages(
                     awaitPermit = awaitPermit,
                 )
         }.first { update ->
-            val anchorReady = minimumVisibleParagraphIndex == null || update.pages.any { page ->
-                page.blocks.any { block -> block.paragraphIndex == minimumVisibleParagraphIndex }
-            }
+            val anchorReady = update.readyForReadingAnchor(minimumVisibleParagraphIndex, minimumVisibleCharOffset)
             if (update.isComplete || (allowPartialResults && anchorReady)) snapshot = update
             update.isComplete
         }
     }
-    return snapshot
+    // A cached partial layout needs the same gate as a newly published one. Merely finding the
+    // paragraph's beginning can otherwise display/save an earlier page of a long paragraph.
+    return if (snapshot.readyForReadingAnchor(minimumVisibleParagraphIndex, minimumVisibleCharOffset)) {
+        snapshot
+    } else ReaderPaginationSnapshot()
 }
+
+internal fun ReaderPaginationSnapshot.readyForReadingAnchor(paragraphIndex: Int?, charOffset: Int): Boolean =
+    isComplete || paragraphIndex == null || pages.any { page ->
+        page.blocks.any { block ->
+            block.paragraphIndex == paragraphIndex &&
+                (charOffset <= 0 || (block.kind == ParagraphKind.TEXT &&
+                    block.textStart.toLong() + block.visibleText.length.coerceAtLeast(1) > charOffset))
+        }
+    }
 
 @Composable
 fun rememberReaderPaginationCoordinator(): ReaderPaginationCoordinator {
