@@ -9,10 +9,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
@@ -37,10 +41,22 @@ class KixyuDualThemeScreenshotTest {
 
     @Test fun miuixContextBar() = captureContextBar(AppUiStyle.MIUIX, "miuix")
 
-    private fun captureContextBar(style: AppUiStyle, suffix: String) {
+    @Test fun materialDarkContextBar() = captureContextBar(AppUiStyle.MATERIAL, "material_dark", ReaderTheme.NIGHT)
+
+    @Test fun miuixDarkContextBar() = captureContextBar(AppUiStyle.MIUIX, "miuix_dark", ReaderTheme.NIGHT)
+
+    @Test
+    @Config(qualifiers = "zh-rCN-w1000dp-h700dp")
+    fun materialTabletContextBar() = captureContextBar(AppUiStyle.MATERIAL, "material_tablet")
+
+    @Test
+    @Config(qualifiers = "zh-rCN-w1000dp-h700dp")
+    fun miuixTabletContextBar() = captureContextBar(AppUiStyle.MIUIX, "miuix_tablet")
+
+    private fun captureContextBar(style: AppUiStyle, suffix: String, theme: ReaderTheme = ReaderTheme.DAY) {
         compose.setContent {
             KixyuBookTheme(
-                themeMode = ReaderTheme.DAY,
+                themeMode = theme,
                 uiStyle = style,
                 // Runtime blur is device/GPU dependent. Screenshot contracts validate the shared
                 // geometry, fallback glass tint, typography and semantic colors instead.
@@ -53,8 +69,9 @@ class KixyuDualThemeScreenshotTest {
                         Modifier.fillMaxWidth().padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("已选择 2 本书")
-                        Text("批量操作会替换常规导航")
+                        val textColor = if (theme == ReaderTheme.NIGHT) MaterialTheme.colorScheme.onSurface else Color.Unspecified
+                        Text("已选择 2 本书", color = textColor)
+                        Text("批量操作会替换常规导航", color = textColor)
                     }
                     KixyuContextualActionBar(
                         actions = listOf(
@@ -74,6 +91,10 @@ class KixyuDualThemeScreenshotTest {
             }
         }
 
+        compose.onNodeWithText("分类").assertIsDisplayed()
+        compose.onNodeWithText("删除").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
         compose.onRoot().captureRoboImage("src/test/screenshots/context_bar_$suffix.png")
     }
 }
