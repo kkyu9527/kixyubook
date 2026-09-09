@@ -37,7 +37,7 @@ class ReaderSearchOverlayTest {
                 KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = style, glassEffectEnabled = true) {
                     Box(Modifier.fillMaxSize()) {
                         ReaderSearchOverlay(
-                            visible = visible, progress = 0f, state = state,
+                            visible = visible, progress = { 0f }, state = state,
                             onDismiss = { visible = false }, onSearch = fixture.controller::search,
                             onClearHistory = {}, onMove = fixture.controller::move,
                             onReturn = fixture.controller::returnToReadingPosition,

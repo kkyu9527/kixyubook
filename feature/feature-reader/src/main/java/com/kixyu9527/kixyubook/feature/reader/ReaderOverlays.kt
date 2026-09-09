@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
@@ -59,7 +60,7 @@ import com.kixyu9527.kixyubook.core.reader.engine.*
 @Composable
 internal fun ReaderFloatingSheet(
     show: Boolean,
-    progress: Float,
+    progress: () -> Float,
     onDismissRequest: () -> Unit,
     backdrop: KixyuNavigationBackdrop,
     maxContentWidth: Dp,
@@ -75,7 +76,8 @@ internal fun ReaderFloatingSheet(
             val sheetMaxHeight = maxHeight * .82f
             Box(
                 Modifier.fillMaxSize()
-                    .background(Color.Black.copy(alpha = .28f * (1f - progress)))
+                    .graphicsLayer { alpha = 1f - progress() }
+                    .background(Color.Black.copy(alpha = .28f))
                     .clickable(onClick = onDismissRequest),
             )
             Box(
@@ -122,7 +124,7 @@ internal fun ReaderFloatingSheet(
 @Composable
 internal fun ReaderSearchOverlay(
     visible: Boolean,
-    progress: Float,
+    progress: () -> Float,
     state: ReaderUiState,
     onDismiss: () -> Unit,
     onSearch: (String, ReaderSearchScope) -> Unit,
@@ -503,7 +505,7 @@ private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
 @Composable internal fun BookInfoDialog(
     show: Boolean,
     book: Book?,
-    progress: Float,
+    progress: () -> Float,
     backdrop: KixyuNavigationBackdrop,
     dismiss: () -> Unit,
 ) {
@@ -516,7 +518,8 @@ private fun ReaderSettingsSheetHeader(title: String, onBack: () -> Unit) {
     ) {
         Box(
             Modifier.fillMaxSize()
-                .background(Color.Black.copy(alpha = .28f * (1f - progress)))
+                .graphicsLayer { alpha = 1f - progress() }
+                .background(Color.Black.copy(alpha = .28f))
                 .clickable(onClick = dismiss),
         )
         BoxWithConstraints(

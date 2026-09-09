@@ -3,13 +3,16 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -17,11 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuPredictiveBackEnabled
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -37,48 +36,44 @@ val LocalKixyuNavigationBackTransitionActive = staticCompositionLocalOf { false 
  *
  * Edge-to-edge defines where a surface is drawn; this state defines how that surface gives control
  * back. Both are design-system contracts. A committed gesture keeps its final visual state until
- * the overlay exit has completed, while a cancelled gesture springs back without flashing.
+ * the overlay exit has completed, while a cancelled gesture settles back without flashing.
  */
 @Stable
 class KixyuPredictiveBackState<T> {
-    private val animatedProgress = Animatable(0f)
-    private var pendingReset: Job? = null
+    // One animator per named surface (Unit for standalone overlays; a small enum for reader
+    // chrome), not per gesture. These are released with this remembered controller. A retiring
+    // child and the newly interactive parent may be composed at the same time.
+    private val animations = mutableStateMapOf<T, Animatable<Float, AnimationVector1D>>()
     private var activeTarget by mutableStateOf<T?>(null)
 
     val progress: Float
-        get() = animatedProgress.value
+        get() = activeTarget?.let(::progressFor) ?: 0f
 
-    fun progressFor(target: T): Float = if (activeTarget == target) progress else 0f
+    fun progressFor(target: T): Float = animations[target]?.value ?: 0f
+
+    private fun animationFor(target: T) = animations.getOrPut(target) { Animatable(0f) }
+
+    internal suspend fun prepareTarget(target: T) {
+        activeTarget = target
+        // Reopening this surface starts fresh, but must not reset any still-exiting sibling.
+        animationFor(target).snapTo(0f)
+    }
 
     internal suspend fun update(target: T, value: Float) {
-        pendingReset?.cancel()
         activeTarget = target
-        animatedProgress.snapTo(value.coerceIn(0f, 1f))
+        animationFor(target).snapTo(value.coerceIn(0f, 1f))
     }
 
-    internal suspend fun commit(target: T) {
+    internal suspend fun commit(target: T, animate: Boolean = true) {
         activeTarget = target
-        animatedProgress.snapTo(1f)
+        val animation = animationFor(target)
+        if (animate) animation.animateTo(1f, kixyuBackSettleSpec(1f - animation.value))
+        else animation.snapTo(1f)
     }
 
-    internal suspend fun cancel() {
-        animatedProgress.animateTo(0f, kixyuPopupSpring())
-        activeTarget = null
-    }
-
-    internal suspend fun resetImmediately() {
-        pendingReset?.cancel()
-        animatedProgress.snapTo(0f)
-        activeTarget = null
-    }
-
-    internal fun resetAfterOverlayExit(scope: CoroutineScope) {
-        pendingReset?.cancel()
-        pendingReset = scope.launch {
-            delay(KIXYU_PREDICTIVE_BACK_RESET_MILLIS)
-            animatedProgress.snapTo(0f)
-            activeTarget = null
-        }
+    internal suspend fun cancel(target: T) {
+        val animation = animationFor(target)
+        animation.animateTo(0f, kixyuBackSettleSpec(animation.value))
     }
 }
 
@@ -96,13 +91,16 @@ fun <T> KixyuPredictiveBackHandler(
     target: T?,
     state: KixyuPredictiveBackState<T>,
     onBack: (T) -> Unit,
+    animateOnCommit: Boolean = true,
 ) {
     val predictiveBackEnabled = LocalKixyuPredictiveBackEnabled.current
     val currentTarget = rememberUpdatedState(target)
     val currentOnBack = rememberUpdatedState(onBack)
 
-    LaunchedEffect(predictiveBackEnabled) {
-        if (!predictiveBackEnabled) state.resetImmediately()
+    LaunchedEffect(target, predictiveBackEnabled) {
+        // Only the newly active target resets. Other targets retain their committed frame until
+        // they are reopened or this controller is disposed, independent of exit duration/scale.
+        if (target != null) state.prepareTarget(target)
     }
 
     if (!predictiveBackEnabled) {
@@ -112,30 +110,41 @@ fun <T> KixyuPredictiveBackHandler(
         return
     }
 
-    val resetScope = rememberCoroutineScope()
     PredictiveBackHandler(enabled = target != null) { events ->
         val gestureTarget = currentTarget.value ?: return@PredictiveBackHandler
         var committed = false
+        var receivedProgress = false
         try {
-            events.collect { event -> state.update(gestureTarget, event.progress) }
+            events.collect { event ->
+                receivedProgress = true
+                state.update(gestureTarget, event.progress)
+            }
+            // Hardware/three-button Back completes an empty flow: let the surface run its
+            // ordinary exit instead of flashing through a fabricated 100% gesture frame.
+            if (receivedProgress) state.commit(gestureTarget, animateOnCommit) else state.prepareTarget(gestureTarget)
             committed = true
-            state.commit(gestureTarget)
-            currentOnBack.value(gestureTarget)
+            if (currentTarget.value == gestureTarget) currentOnBack.value(gestureTarget)
         } catch (_: CancellationException) {
-            if (!committed) withContext(NonCancellable) { state.cancel() }
-        } finally {
-            if (committed) state.resetAfterOverlayExit(resetScope)
+            if (!committed) withContext(NonCancellable) { state.cancel(gestureTarget) }
         }
     }
 }
 
 /** Shared visual response used by sheets, dialogs, menus and reader controls. */
-fun Modifier.kixyuPredictivePopupTransform(progress: Float): Modifier = graphicsLayer {
-    val fraction = progress.coerceIn(0f, 1f)
+fun Modifier.kixyuPredictivePopupTransform(progress: Float): Modifier =
+    kixyuPredictivePopupTransform { progress }
+
+/** Read frame-by-frame state in the layer, not in the whole reader/list composition. */
+fun Modifier.kixyuPredictivePopupTransform(progress: () -> Float): Modifier = graphicsLayer {
+    val fraction = progress().coerceIn(0f, 1f)
     alpha = 1f - fraction
-    scaleX = 1f - fraction * .08f
+    scaleX = 1f - fraction * KixyuMotion.BackPopupScaleReduction
     scaleY = scaleX
 }
 
-/** Covers AnimatedVisibility exits and the slower reader side-panel spring. */
-private const val KIXYU_PREDICTIVE_BACK_RESET_MILLIS = 600L
+internal fun kixyuBackSettleSpec(distance: Float) = tween<Float>(
+    durationMillis = if (distance <= 0f) 0 else
+        (KixyuMotion.BackOverlaySettleMillis * distance.coerceIn(0f, 1f)).toInt()
+            .coerceAtLeast(KixyuMotion.BackOverlayMinSettleMillis),
+    easing = FastOutSlowInEasing,
+)

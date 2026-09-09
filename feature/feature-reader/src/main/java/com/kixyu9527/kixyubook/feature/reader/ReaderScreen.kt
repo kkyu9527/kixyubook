@@ -108,11 +108,11 @@ internal fun ReaderScreen(
         toolsMenu = false
     }
     val predictiveBackState = rememberReaderPredictiveBackState()
-    val controlsBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.CONTROLS)
-    val popupBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.POPUP_MENU)
-    val searchBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.SEARCH)
-    val sheetBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET)
-    val bookInfoBackProgress = predictiveBackState.progressFor(ReaderPredictiveBackTarget.BOOK_INFO)
+    val controlsBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.CONTROLS) }
+    val popupBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.POPUP_MENU) }
+    val searchBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SEARCH) }
+    val sheetBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET) }
+    val bookInfoBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.BOOK_INFO) }
     val volumeTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val chapterTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val focusRequester = remember { FocusRequester() }
@@ -680,9 +680,10 @@ internal fun ReaderScreen(
             Box(Modifier.fillMaxSize()) {
                 Box(
                     Modifier.fillMaxSize()
+                        .graphicsLayer { alpha = 1f - sheetBackProgress() }
                         .background(
                             Color.Black.copy(
-                                alpha = .28f * panelProgress * (1f - sheetBackProgress),
+                                alpha = .28f * panelProgress,
                             ),
                         )
                         .clickable(
@@ -709,9 +710,9 @@ internal fun ReaderScreen(
                                 // MIUIX bottom sheets translate by their complete measured height.
                                 // Apply the same progress horizontally and preserve predictive back.
                                 translationX = -size.width * (
-                                    (1f - panelProgress) + sheetBackProgress * panelProgress
+                                    (1f - panelProgress) + sheetBackProgress() * panelProgress
                                 )
-                                alpha = 1f - sheetBackProgress * .35f
+                                alpha = 1f - sheetBackProgress() * .35f
                             },
                         fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {

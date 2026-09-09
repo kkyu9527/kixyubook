@@ -12,6 +12,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.entryProvider
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationBackTransitionActive
@@ -224,7 +225,9 @@ private fun DestinationWithBack(
     content: @Composable ((() -> Unit) -> Unit),
 ) {
     KixyuNavigationBackHandler(onBack)
-    content(onBack)
+    // The toolbar is not a gesture callback. Ignore extra taps on a scene that is already
+    // leaving; do not accidentally pop its parent while both are composed by Navigation 3.
+    content(dropUnlessResumed { onBack() })
 }
 
 @Composable

@@ -61,12 +61,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.designsystem.R
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -97,14 +99,6 @@ import top.yukonga.miuix.kmp.anim.folmeSpring
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-
-object KixyuMotion {
-    const val PageNavigationMillis = 320
-    const val ReaderPopupEnterMillis = 200
-    const val ReaderPopupExitMillis = 150
-    const val ReaderSearchEnterMillis = 280
-    const val ReaderSearchExitMillis = 220
-}
 
 /** Matches the spring used by MIUIX 0.9.2 bottom sheets for edge-attached surfaces. */
 fun kixyuPopupSpring(): AnimationSpec<Float> =
@@ -202,7 +196,7 @@ fun KixyuAdaptiveModal(
             show = show,
             onDismissRequest = onDismissRequest,
             backdrop = backdrop,
-            backProgress = predictiveBackState.progress,
+            backProgress = { predictiveBackState.progress },
             content = content,
         )
         // Compose after the visible surface so this callback outranks the underlying NavDisplay.
@@ -231,7 +225,7 @@ fun KixyuAdaptiveModal(
                 KixyuPopupSurface(
                     modifier = Modifier.width(surfaceWidth)
                         .heightIn(max = surfaceHeight)
-                        .kixyuPredictivePopupTransform(predictiveBackState.progress),
+                        .kixyuPredictivePopupTransform { predictiveBackState.progress },
                     shadowElevation = KixyuSpacing.small,
                     backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
                     content = content,
@@ -256,7 +250,7 @@ private fun KixyuBackdropAdaptiveModal(
     show: Boolean,
     onDismissRequest: () -> Unit,
     backdrop: KixyuNavigationBackdrop,
-    backProgress: Float,
+    backProgress: () -> Float,
     content: @Composable () -> Unit,
 ) {
     val compact = kixyuWindowWidthClass() == KixyuWindowWidthClass.COMPACT
@@ -269,7 +263,8 @@ private fun KixyuBackdropAdaptiveModal(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             Box(
                 Modifier.fillMaxSize()
-                    .background(Color.Black.copy(alpha = .28f * (1f - backProgress)))
+                    .graphicsLayer { alpha = 1f - backProgress() }
+                    .background(Color.Black.copy(alpha = .28f))
                     .clickable(onClick = onDismissRequest),
             )
             val maxSurfaceHeight = if (compact) maxHeight * .82f else {
@@ -978,7 +973,7 @@ fun KixyuActionDialog(
             KixyuPopupSurface(
                 modifier = Modifier.width(surfaceWidth)
                     .heightIn(max = surfaceHeight)
-                    .kixyuPredictivePopupTransform(predictiveBackState.progress),
+                    .kixyuPredictivePopupTransform { predictiveBackState.progress },
                 shadowElevation = KixyuSpacing.small,
                 backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
             ) {
@@ -1204,7 +1199,7 @@ private fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
         (frostLevel.kixyuFrostBlurDp() * (1f - backProgress.coerceIn(0f, 1f)))
             .dp.roundToPx()
     }
-    DisposableEffect(view, glassEnabled, blurRadius) {
+    DisposableEffect(view, glassEnabled) {
         val window = (view.parent as? DialogWindowProvider)?.window
             ?: return@DisposableEffect onDispose {}
         val originalMode = window.attributes.softInputMode
@@ -1232,6 +1227,16 @@ private fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                 }
             }
+        }
+    }
+    // Progress changes must not tear down/reinstall the window effect (including soft-input
+    // flags) every frame. Only send a window update when the rounded pixel radius changes.
+    SideEffect {
+        val window = (view.parent as? DialogWindowProvider)?.window
+        if (window != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && glassEnabled &&
+            window.attributes.blurBehindRadius != blurRadius
+        ) {
+            window.attributes = window.attributes.apply { blurBehindRadius = blurRadius }
         }
     }
 }

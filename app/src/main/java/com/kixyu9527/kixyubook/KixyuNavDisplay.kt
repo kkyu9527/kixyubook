@@ -2,9 +2,6 @@ package com.kixyu9527.kixyubook
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -33,9 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
-import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
-import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
-import androidx.navigation3.ui.NavDisplay
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
@@ -49,8 +43,6 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuContextualBarController
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageEnterTransition
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuDetailPageExitTransition
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
@@ -144,13 +136,14 @@ internal fun KixyuNavDisplay(
     KixyuPredictiveBackHandler(
         target = Unit.takeIf { topLevelActive && contextualBarState == null },
         state = topLevelBackState,
+        animateOnCommit = false, // Android owns the app-to-home surface, not this overlay state.
         onBack = { onExitApp() },
     )
     val prioritizeAnimation: () -> Unit = {
         onAnimationPriorityChanged(true)
         animationPriorityJob?.cancel()
         animationPriorityJob = scope.launch {
-            kotlinx.coroutines.delay(KixyuMotion.PageNavigationMillis.toLong())
+            kotlinx.coroutines.delay(KixyuMotion.BackNavigationMillis.toLong())
             withFrameNanos { }
             withFrameNanos { }
             onAnimationPriorityChanged(false)
@@ -246,7 +239,7 @@ internal fun KixyuNavDisplay(
         if (returned) {
             bookReorderAfterReaderExitJob?.cancel()
             bookReorderAfterReaderExitJob = scope.launch {
-                kotlinx.coroutines.delay(KixyuMotion.PageNavigationMillis.toLong())
+                kotlinx.coroutines.delay(KixyuMotion.BackNavigationMillis.toLong())
                 onBookOpened(bookUuid)
             }
         } else {
@@ -262,12 +255,6 @@ internal fun KixyuNavDisplay(
     }
     val navBackground = kixyuPageBackground()
     val navigationBackdrop = rememberKixyuNavigationBackdrop(navBackground)
-    val predictiveBackSceneDecorator = rememberKixyuPredictiveBackSceneDecorator(
-        currentRoute = route,
-    )
-    val sceneDecoratorStrategies = remember(predictiveBackSceneDecorator) {
-        listOf(predictiveBackSceneDecorator)
-    }
     CompositionLocalProvider(
         LocalKixyuGlassBackdrop provides navigationBackdrop,
         LocalKixyuContextualBarController provides contextualBarController,
@@ -279,7 +266,7 @@ internal fun KixyuNavDisplay(
             Modifier.fillMaxSize()
                 .background(navBackground),
         ) {
-            NavDisplay(
+            KixyuAnimatedNavDisplay(
                 backStack = navigator.backStack,
                 modifier = Modifier
                     .fillMaxSize()
@@ -290,35 +277,7 @@ internal fun KixyuNavDisplay(
                             Modifier
                         },
                     ),
-                entryDecorators = listOf(
-                    rememberSaveableStateHolderNavEntryDecorator(),
-                    rememberViewModelStoreNavEntryDecorator(),
-                ),
-                sceneDecoratorStrategies = sceneDecoratorStrategies,
                 onBack = handleNavigationBack,
-                transitionSpec = {
-                    ContentTransform(
-                        targetContentEnter = kixyuDetailPageEnterTransition(),
-                        initialContentExit = ExitTransition.None,
-                    )
-                },
-                // Secondary destinations are a new surface above the current page. Keeping the
-                // source stationary avoids translating two complete Compose trees at once and
-                // preserves the visual hierarchy of a stacked detail page.
-                popTransitionSpec = {
-                    ContentTransform(
-                        targetContentEnter = EnterTransition.None,
-                        initialContentExit = kixyuDetailPageExitTransition(),
-                    )
-                },
-                // Keep the original horizontal predictive-back motion after the Navigation 3
-                // migration instead of adopting NavDisplay's default scale-out animation.
-                predictivePopTransitionSpec = { _ ->
-                    ContentTransform(
-                        targetContentEnter = EnterTransition.None,
-                        initialContentExit = kixyuDetailPageExitTransition(),
-                    )
-                },
                 entryProvider = kixyuEntryProvider(
                     KixyuNavEntryDependencies(
                         topDestinations = top,
