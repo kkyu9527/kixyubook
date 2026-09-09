@@ -20,6 +20,8 @@ val verifyHostTests = tasks.register("verifyHostTests") {
     )
 }
 
+apply(from = "gradle/i18n.gradle.kts")
+
 subprojects {
     val modulePath = path
     listOf("com.android.application", "com.android.library").forEach { pluginId ->
@@ -165,11 +167,17 @@ tasks.register("verifyUiTextResources") {
         val directUiArgument = Regex(
             """(?:title|subtitle|supportingText|placeholder|message)\s*=\s*"""",
         )
+        // Include nested branches and helpers in Compose files, not just Text("...").
+        // Language autonyms and font samples belong in resources too.
+        val embeddedChinese = Regex(""""[^"\n]*\p{IsHan}[^"\n]*"""")
         val violations = productionSources.files.sorted().flatMap { source ->
             val text = source.readText()
             if (!text.contains("@Composable")) return@flatMap emptyList()
             text.lineSequence().mapIndexedNotNull { index, line ->
-                if (directTextCall.containsMatchIn(line) || directUiArgument.containsMatchIn(line)) {
+                if (!line.trimStart().startsWith("//") && (
+                    directTextCall.containsMatchIn(line) || directUiArgument.containsMatchIn(line) ||
+                        embeddedChinese.containsMatchIn(line)
+                )) {
                     "${source.relativeTo(rootDir)}:${index + 1}: ${line.trim()}"
                 } else {
                     null

@@ -70,6 +70,7 @@ Kixyu Book 是一款 local-first Android 小说阅读器，专注 TXT、EPUB、�
 ### Android 体验
 
 - Material 3 / MIUIX 双界面体系
+- 简体中文、繁体中文、英文、日语；Android 13+ 支持应用内独立选择语言，旧版跟随系统（[翻译维护](docs/LOCALIZATION.md)）
 - Material You 动态取色与自定义强调色
 - Edge-to-Edge、透明手势导航区和 Predictive Back
 - 高刷新率、Baseline Profile 与启动性能优化
