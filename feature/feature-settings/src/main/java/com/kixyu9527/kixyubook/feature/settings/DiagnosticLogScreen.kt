@@ -53,6 +53,10 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun DiagnosticLogRoute(
@@ -89,41 +93,38 @@ private fun DiagnosticLogScreen(
     onOnlyFailuresChanged: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val localeConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
+    val formatter = remember(resources, localeConfiguration) { DiagnosticLogFormatter(resources) }
+    val sharedSession = LocalDiagnosticLogSession.current
+    val session = remember(sharedSession) { sharedSession ?: DiagnosticLogSession() }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
-    var rawLines by remember { mutableStateOf<List<String>?>(null) }
-    val newestEntries = remember(rawLines) {
-        rawLines.orEmpty().asReversed().map(::parseDiagnosticEntry)
+    var page by remember(session, categoryKey) {
+        mutableStateOf(session.peek(localeConfiguration, categoryKey, onlyFailures))
     }
-    val filteredEntries = remember(newestEntries, onlyFailures) {
-        filterDiagnosticEntries(newestEntries, onlyFailures = onlyFailures)
-    }
-    val visibleEntries = remember(filteredEntries, categoryKey) {
-        filterDiagnosticEntries(filteredEntries, categoryKey = categoryKey)
-    }
-    val categorySummaries = remember(filteredEntries) {
-        filteredEntries.groupBy(ReadableDiagnosticEntry::categoryKey).map { (key, entries) ->
-            DiagnosticCategorySummary(
-                key = key,
-                label = entries.first().category,
-                count = entries.size,
-                latestTime = entries.first().time,
-            )
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val revision by session.revision.collectAsStateWithLifecycle()
+    val visibleEntries = page?.entries.orEmpty()
+    val categorySummaries = page?.summaries.orEmpty()
+    LaunchedEffect(session, localeConfiguration, onlyFailures, categoryKey, revision, lifecycle) {
+        // Navigation 3 caps moving scenes at STARTED. Cached previews remain visible, while
+        // uncached parsing and publishing a new list wait for the scene to settle.
+        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+        val loaded = session.load(context, android.content.res.Configuration(localeConfiguration), categoryKey, onlyFailures) {
+            lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
         }
-    }
-
-    LaunchedEffect(Unit) {
-        rawLines = DiagnosticLog.snapshotLines()
+        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+        page = loaded
     }
 
     fun exportLog() {
         menuExpanded = false
         scope.launch {
             val latestLines = DiagnosticLog.snapshotLines()
-            rawLines = latestLines
             if (latestLines.isEmpty()) {
-                snackbar.showSnackbar("暂无可导出的诊断记录")
+                snackbar.showSnackbar(resources.getString(R.string.diag_export_empty))
                 return@launch
             }
             runCatching {
@@ -140,11 +141,11 @@ private fun DiagnosticLogScreen(
                             putExtra(Intent.EXTRA_STREAM, uri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         },
-                        "导出诊断日志",
+                        resources.getString(R.string.diag_export_title),
                     ),
                 )
             }.onFailure {
-                snackbar.showSnackbar("无法导出诊断日志")
+                snackbar.showSnackbar(resources.getString(R.string.diag_export_error))
             }
         }
     }
@@ -153,16 +154,17 @@ private fun DiagnosticLogScreen(
         menuExpanded = false
         scope.launch {
             if (DiagnosticLog.clearAndAwait()) {
-                rawLines = emptyList()
-                snackbar.showSnackbar("诊断日志已清空")
+                session.invalidate()
+                page = DiagnosticLogPage(false, emptyList(), emptyList())
+                snackbar.showSnackbar(resources.getString(R.string.diag_cleared))
             } else {
-                snackbar.showSnackbar("无法清空诊断日志")
+                snackbar.showSnackbar(resources.getString(R.string.diag_clear_error))
             }
         }
     }
 
     KixyuPageScaffold(
-        title = categoryKey?.let(::diagnosticCategoryLabel) ?: "日志详情",
+        title = categoryKey?.let(formatter::diagnosticCategoryLabel) ?: stringResource(R.string.settings_log_details),
         largeTitle = false,
         modifier = Modifier.fillMaxSize(),
         navigationIcon = {
@@ -181,9 +183,9 @@ private fun DiagnosticLogScreen(
                     alignEnd = true,
                     items = listOf(
                         KixyuPopupMenuItem(
-                            label = "仅显示异常",
+                            label = stringResource(R.string.diag_errors_only),
                             icon = KixyuSymbols.ErrorOutline,
-                            enabled = newestEntries.isNotEmpty(),
+                            enabled = page?.hasEntries == true,
                             selected = onlyFailures,
                             onClick = {
                                 onOnlyFailuresChanged(!onlyFailures)
@@ -191,15 +193,15 @@ private fun DiagnosticLogScreen(
                             },
                         ),
                         KixyuPopupMenuItem(
-                            label = "导出",
+                            label = stringResource(R.string.diag_export),
                             icon = KixyuSymbols.Share,
-                            enabled = newestEntries.isNotEmpty(),
+                            enabled = page?.hasEntries == true,
                             onClick = ::exportLog,
                         ),
                         KixyuPopupMenuItem(
-                            label = "清空",
+                            label = stringResource(R.string.diag_clear),
                             icon = KixyuSymbols.DeleteOutline,
-                            enabled = newestEntries.isNotEmpty(),
+                            enabled = page?.hasEntries == true,
                             onClick = ::clearLog,
                         ),
                     ),
@@ -214,7 +216,7 @@ private fun DiagnosticLogScreen(
         },
     ) { innerPadding ->
         when {
-            rawLines == null -> Box(
+            page == null -> Box(
                 modifier = Modifier.fillMaxSize()
                     .padding(innerPadding)
                     .consumeWindowInsets(innerPadding),
@@ -223,7 +225,7 @@ private fun DiagnosticLogScreen(
                 CircularProgressIndicator()
             }
 
-            visibleEntries.isEmpty() -> Column(
+            (if (categoryKey == null) categorySummaries.isEmpty() else visibleEntries.isEmpty()) -> Column(
                 modifier = Modifier.fillMaxSize()
                     .padding(innerPadding)
                     .consumeWindowInsets(innerPadding),
@@ -237,7 +239,7 @@ private fun DiagnosticLogScreen(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    if (onlyFailures) "暂无异常日志" else "暂无诊断日志",
+                    if (onlyFailures) stringResource(R.string.diag_no_errors) else stringResource(R.string.diag_empty),
                     modifier = Modifier.padding(top = KixyuSpacing.medium),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -302,7 +304,7 @@ private fun DiagnosticLogScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
             ) {
-                items(visibleEntries) { entry ->
+                items(visibleEntries, key = { it.id }, contentType = { "diagnostic_entry" }) { entry ->
                     SelectionContainer {
                         DiagnosticEntryCard(entry)
                     }
@@ -311,13 +313,6 @@ private fun DiagnosticLogScreen(
         }
     }
 }
-
-private data class DiagnosticCategorySummary(
-    val key: String,
-    val label: String,
-    val count: Int,
-    val latestTime: String,
-)
 
 @Composable
 private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
@@ -427,7 +422,7 @@ private fun DiagnosticDetailsTable(
                             text = value,
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (isFailure && label == "结果") {
+                            color = if (isFailure && index == 0) {
                                 MaterialTheme.colorScheme.error
                             } else {
                                 MaterialTheme.colorScheme.onSurface

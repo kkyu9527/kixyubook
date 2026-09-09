@@ -7,8 +7,37 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [35], qualifiers = "zh-rCN")
 class DiagnosticLogFormattingTest {
+    private fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry =
+        DiagnosticLogFormatter(
+            androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources,
+        ).parseDiagnosticEntry(rawLine)
     private lateinit var originalTimeZone: TimeZone
+
+    @Test
+    fun diagnosticCodesAndFailureClassificationStayStableAcrossLanguages() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        listOf(
+            "en" to "EPUB chapter parsing failed",
+            "zh-Hans" to "EPUB 章节解析失败",
+            "zh-Hant" to "EPUB 章節解析失敗",
+            "ja" to "EPUB の章の解析失敗",
+        ).forEach { (tag, expected) ->
+            val config = android.content.res.Configuration(context.resources.configuration).apply {
+                setLocales(android.os.LocaleList.forLanguageTags(tag))
+            }
+            val formatter = DiagnosticLogFormatter(context.createConfigurationContext(config).resources)
+            val entry = formatter.parseDiagnosticEntry(
+                "2026-08-08T15:06:04Z | EPUB_PARSE | chapter_parse_finished | outcome=io_error | chapter=42",
+            )
+            assertEquals(expected, entry.title)
+            assertEquals("EPUB_PARSE", entry.categoryKey)
+            assertTrue(entry.isFailure)
+            assertTrue(entry.details.any { it.second == "42" })
+        }
+    }
 
     @Before
     fun setUp() {

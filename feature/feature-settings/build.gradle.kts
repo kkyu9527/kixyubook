@@ -9,6 +9,7 @@ android {
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     buildFeatures { compose = true }
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 
 dependencies {
@@ -30,4 +31,6 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.ext.junit)
 }

@@ -5,7 +5,6 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -17,6 +16,7 @@ internal data class ReadableDiagnosticEntry(
     val description: String,
     val details: List<Pair<String, String>>,
     val isFailure: Boolean,
+    val id: Int = 0,
 )
 
 internal fun filterDiagnosticEntries(
@@ -27,59 +27,364 @@ internal fun filterDiagnosticEntries(
     (!onlyFailures || entry.isFailure) && (categoryKey == null || entry.categoryKey == categoryKey)
 }
 
-internal fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
-    val parts = rawLine.split(" | ")
-    if (parts.size < 3) {
+/** Resolves app-authored log labels at display time; raw event codes and values stay intact. */
+internal class DiagnosticLogFormatter(private val resources: android.content.res.Resources) {
+    private val timeFormatter = DateTimeFormatter.ofPattern(
+        "yyyy-MM-dd HH:mm:ss.SSS", resources.configuration.locales[0],
+    ).withZone(ZoneId.systemDefault())
+    fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry {
+        val parts = rawLine.split(" | ")
+        if (parts.size < 3) {
+            return ReadableDiagnosticEntry(
+                time = resources.getString(R.string.diag_unknown_time),
+                categoryKey = "OTHER",
+                category = resources.getString(R.string.diag_other),
+                title = resources.getString(R.string.diag_unrecognized_log_entry),
+                description = resources.getString(R.string.diag_this_entry_is_incomplete_or_damaged),
+                details = listOf(resources.getString(R.string.diag_raw_content) to rawLine),
+                isFailure = false,
+            )
+        }
+
+        val categoryKey = parts[1]
+        val eventKey = parts[2]
+        val values = parts.drop(3).mapNotNull { field ->
+            val separator = field.indexOf('=')
+            if (separator <= 0) null else field.substring(0, separator) to field.substring(separator + 1)
+        }.toMap(LinkedHashMap())
+        val (title, description) = eventDescription(eventKey, values["outcome"], categoryKey)
+        val details = buildList {
+            values["outcome"]?.let { add(resources.getString(R.string.diag_outcome) to readableOutcome(it)) }
+            values["elapsedMs"]?.let { add(resources.getString(R.string.diag_duration) to readableDuration(it)) }
+            values.forEach { (key, value) ->
+                if (key != "outcome" && key != "elapsedMs") {
+                    add(fieldLabel(key, categoryKey) to readableValue(key, value))
+                }
+            }
+        }
         return ReadableDiagnosticEntry(
-            time = "时间未知",
-            categoryKey = "OTHER",
-            category = "其他",
-            title = "无法识别的日志记录",
-            description = "这条记录内容不完整或已经损坏。",
-            details = listOf("原始内容" to rawLine),
-            isFailure = false,
+            time = deviceTime(parts[0]),
+            categoryKey = categoryKey,
+            category = diagnosticCategoryLabel(categoryKey),
+            title = title,
+            description = description,
+            details = details,
+            isFailure = isFailureOutcome(values["outcome"]),
         )
     }
 
-    val categoryKey = parts[1]
-    val eventKey = parts[2]
-    val values = parts.drop(3).mapNotNull { field ->
-        val separator = field.indexOf('=')
-        if (separator <= 0) null else field.substring(0, separator) to field.substring(separator + 1)
-    }.toMap(LinkedHashMap())
-    val (title, description) = eventDescription(eventKey, values["outcome"], categoryKey)
-    val details = buildList {
-        values["outcome"]?.let { add("结果" to readableOutcome(it)) }
-        values["elapsedMs"]?.let { add("耗时" to readableDuration(it)) }
-        values.forEach { (key, value) ->
-            if (key != "outcome" && key != "elapsedMs") {
-                add(fieldLabel(key, categoryKey) to readableValue(key, value))
+    private fun deviceTime(raw: String): String {
+        val instant = runCatching { Instant.parse(raw) }.getOrNull() ?: return raw
+        return timeFormatter.format(instant)
+    }
+
+    fun diagnosticCategoryLabel(category: String): String = when (category) {
+        "LIBRARY" -> resources.getString(R.string.diag_library)
+        "SYNC" -> resources.getString(R.string.diag_cloud_sync)
+        "IMPORT" -> resources.getString(R.string.diag_book_import)
+        "EPUB_PARSE" -> resources.getString(R.string.diag_epub_parsing)
+        "READER" -> resources.getString(R.string.diag_reading)
+        "PAGINATION" -> resources.getString(R.string.diag_pagination)
+        else -> resources.getString(R.string.diag_other)
+    }
+
+    private fun eventDescription(event: String, outcome: String?, category: String): Pair<String, String> = when (event) {
+        "book_open_activity_failed" ->
+            resources.getString(R.string.diag_could_not_save_last_opened_time) to resources.getString(R.string.diag_the_library_order_was_updated_but_saving_the_last_opened_time_failed)
+        "book_exported" -> resources.getString(R.string.diag_book_exported) to resources.getString(R.string.diag_the_original_book_file_was_copied_to_the_chosen_location)
+        "book_export_failed" -> resources.getString(R.string.diag_book_export_failed) to resources.getString(R.string.diag_copying_the_original_file_failed_check_the_error_and_book_identifier)
+        "books_deleted" -> resources.getString(R.string.diag_books_deleted) to resources.getString(R.string.diag_books_local_progress_bookmarks_and_derived_caches_were_removed_cloud_deletions_w)
+        "full_sync_started" -> resources.getString(R.string.diag_cloud_sync_started) to resources.getString(R.string.diag_checking_local_and_google_drive_data)
+        "full_sync_skipped" -> when (outcome) {
+            "not_ready" -> resources.getString(R.string.diag_sync_not_started) to resources.getString(R.string.diag_sync_is_not_ready_no_data_transfer_started)
+            "conflict_waiting" -> resources.getString(R.string.diag_sync_waiting_for_conflict_resolution) to resources.getString(R.string.diag_sync_paused_because_of_unresolved_conflicts)
+            else -> resources.getString(R.string.diag_sync_skipped) to resources.getString(R.string.diag_conditions_for_cloud_sync_were_not_met)
+        }
+        "authorization_ready" -> resources.getString(R.string.diag_google_authorization_ready) to resources.getString(R.string.diag_authorization_is_valid_app_cloud_data_can_be_accessed)
+        "priority_pull_skipped" -> resources.getString(R.string.diag_stale_cloud_data_ignored) to resources.getString(R.string.diag_the_data_was_deleted_locally_and_will_not_be_restored_by_priority_sync)
+        "remote_snapshot_loaded" -> resources.getString(R.string.diag_cloud_data_checked) to resources.getString(R.string.diag_cloud_objects_and_changes_were_read)
+        "conflicts_waiting" -> resources.getString(R.string.diag_sync_conflicts_found) to resources.getString(R.string.diag_both_local_and_cloud_data_changed_user_input_is_required)
+        "upload_queue_ready" -> resources.getString(R.string.diag_upload_queue_ready) to resources.getString(R.string.diag_changes_to_upload_were_collected)
+        "full_sync_finished" -> when {
+            outcome == "success" -> resources.getString(R.string.diag_cloud_sync_complete) to resources.getString(R.string.diag_local_and_cloud_data_are_synchronized_for_this_run)
+            isInterruptedSyncOutcome(outcome) ->
+                resources.getString(R.string.diag_cloud_sync_interrupted) to resources.getString(R.string.diag_no_data_error_occurred_the_system_will_resume_sync_when_conditions_allow)
+            else -> resources.getString(R.string.diag_cloud_sync_failed) to resources.getString(R.string.diag_sync_did_not_complete_check_the_stage_outcome_and_reason)
+        }
+        "documents_selected" -> resources.getString(R.string.diag_import_files_selected) to resources.getString(R.string.diag_files_were_selected_to_add_to_the_library)
+        "documents_registered" -> if (outcome == "success") {
+            resources.getString(R.string.diag_book_registration_complete) to resources.getString(R.string.diag_files_were_copied_and_registered_parsing_continues_in_the_background)
+        } else {
+            resources.getString(R.string.diag_book_import_partially_complete) to resources.getString(R.string.diag_some_files_could_not_be_imported_check_the_failure_type_and_first_error)
+        }
+        "directory_upgrade_finished" -> if (outcome == "success") {
+            resources.getString(R.string.diag_epub_contents_updated) to resources.getString(R.string.diag_imported_book_contents_were_updated_using_the_new_parsing_rules)
+        } else {
+            resources.getString(R.string.diag_epub_contents_partially_updated) to resources.getString(R.string.diag_some_book_contents_could_not_be_updated_check_the_failure_count)
+        }
+        "background_index_finished" -> if (outcome == "success") {
+            if (category == "IMPORT") {
+                resources.getString(R.string.diag_background_txt_parsing_complete) to resources.getString(R.string.diag_txt_chapters_were_parsed_and_saved_to_the_local_library)
+            } else {
+                resources.getString(R.string.diag_background_indexing_complete) to resources.getString(R.string.diag_chapter_data_for_full_text_search_was_generated_in_the_background)
+            }
+        } else {
+            if (category == "IMPORT") {
+                resources.getString(R.string.diag_background_txt_parsing_failed) to resources.getString(R.string.diag_parsing_txt_chapters_or_saving_them_to_the_library_failed)
+            } else {
+                resources.getString(R.string.diag_background_indexing_failed) to resources.getString(R.string.diag_generating_full_text_search_data_in_the_background_failed)
             }
         }
+        "bulk_parse_finished" -> if (outcome == "success") {
+            resources.getString(R.string.diag_batch_epub_parsing_complete) to resources.getString(R.string.diag_the_requested_epub_chapters_were_parsed)
+        } else {
+            resources.getString(R.string.diag_batch_epub_parsing_failed) to resources.getString(R.string.diag_batch_reading_epub_chapters_failed)
+        }
+        "chapter_parse_finished" -> when (outcome) {
+            "success" -> resources.getString(R.string.diag_epub_chapter_parsed) to resources.getString(R.string.diag_chapter_text_and_image_information_were_read)
+            "missing" -> resources.getString(R.string.diag_epub_chapter_not_found) to resources.getString(R.string.diag_the_requested_chapter_was_not_found_in_the_epub)
+            else -> resources.getString(R.string.diag_epub_chapter_parsing_failed) to resources.getString(R.string.diag_reading_the_chapter_failed)
+        }
+        "chapter_loaded" -> if (outcome == "success") {
+            resources.getString(R.string.diag_chapter_loaded) to resources.getString(R.string.diag_the_reader_received_the_chapter_text)
+        } else {
+            resources.getString(R.string.diag_chapter_load_failed) to resources.getString(R.string.diag_reading_chapter_text_cache_or_the_local_index_failed)
+        }
+        "memory_pressure_handled" -> if (outcome == "success") {
+            resources.getString(R.string.diag_memory_warning_handled) to resources.getString(R.string.diag_reading_state_was_saved_and_rebuildable_caches_released_as_requested_by_the_syst)
+        } else {
+            resources.getString(R.string.diag_memory_warning_handling_failed) to resources.getString(R.string.diag_releasing_caches_saving_reading_state_or_replying_to_the_system_failed)
+        }
+        "priority_sync_failed" ->
+            resources.getString(R.string.diag_priority_book_sync_failed) to resources.getString(R.string.diag_fast_sync_of_progress_bookmarks_or_settings_failed_full_sync_will_retry_later)
+        "chapter_navigation_finished" -> when (outcome) {
+            "success" -> resources.getString(R.string.diag_chapter_navigation_complete) to resources.getString(R.string.diag_the_reader_switched_to_the_target_chapter)
+            "missing" -> resources.getString(R.string.diag_chapter_navigation_failed) to resources.getString(R.string.diag_the_target_chapter_was_not_found)
+            else -> resources.getString(R.string.diag_chapter_navigation_error) to resources.getString(R.string.diag_an_error_occurred_while_switching_chapters)
+        }
+        "restore" -> resources.getString(R.string.diag_pagination_cache_restored) to resources.getString(R.string.diag_previously_saved_pages_were_reused_without_new_layout_work)
+        "measure" -> resources.getString(R.string.diag_chapter_pagination_complete) to resources.getString(R.string.diag_chapter_text_was_laid_out_into_readable_pages)
+        "failed" -> resources.getString(R.string.diag_chapter_pagination_failed) to resources.getString(R.string.diag_laying_out_the_chapter_text_failed)
+        else -> resources.getString(R.string.diag_unknown_event, event) to resources.getString(R.string.diag_no_description_is_available_for_this_diagnostic_event_yet)
     }
-    return ReadableDiagnosticEntry(
-        time = deviceTime(parts[0]),
-        categoryKey = categoryKey,
-        category = diagnosticCategoryLabel(categoryKey),
-        title = title,
-        description = description,
-        details = details,
-        isFailure = isFailureOutcome(values["outcome"]),
-    )
+
+    private fun readableOutcome(outcome: String): String = when (outcome) {
+        "success" -> resources.getString(R.string.diag_success)
+        "partial" -> resources.getString(R.string.diag_partial_success)
+        "missing" -> resources.getString(R.string.diag_content_not_found)
+        "disk_cache" -> resources.getString(R.string.diag_disk_cache_hit)
+        "not_ready" -> resources.getString(R.string.diag_not_ready)
+        "conflict_waiting" -> resources.getString(R.string.diag_waiting_for_conflict_resolution)
+        "user_action" -> resources.getString(R.string.diag_waiting_for_user_action)
+        "local_delete" -> resources.getString(R.string.diag_deleted_locally)
+        "interrupted",
+        "CancellationException",
+        "JobCancellationException",
+        -> resources.getString(R.string.diag_interrupted_by_system)
+        "authorization_required" -> resources.getString(R.string.diag_reauthorization_required)
+        "drive_http_error" -> resources.getString(R.string.diag_google_drive_request_failed)
+        "network_error" -> resources.getString(R.string.diag_network_error)
+        "local_data_error" -> resources.getString(R.string.diag_local_data_error)
+        "cloud_data_error" -> resources.getString(R.string.diag_cloud_data_error)
+        "unexpected_error" -> resources.getString(R.string.diag_unexpected_error)
+        "invalid_archive" -> resources.getString(R.string.diag_damaged_archive)
+        "truncated_input" -> resources.getString(R.string.diag_incomplete_file)
+        "missing_file" -> resources.getString(R.string.diag_file_not_found)
+        "constraint_error" -> resources.getString(R.string.diag_local_data_constraint_conflict)
+        "permission_error" -> resources.getString(R.string.diag_access_denied)
+        "memory_error" -> resources.getString(R.string.diag_insufficient_memory)
+        "memory_release_failed" -> resources.getString(R.string.diag_memory_release_failed)
+        "memory_callback_failed" -> resources.getString(R.string.diag_system_response_failed)
+        "io_error" -> resources.getString(R.string.diag_file_read_or_write_error)
+        "invalid_data" -> resources.getString(R.string.diag_invalid_data_format)
+        "invalid_state" -> resources.getString(R.string.diag_invalid_data_state)
+        "SQLiteConstraintException" -> resources.getString(R.string.diag_local_data_constraint_conflict)
+        "SQLiteException" -> resources.getString(R.string.diag_local_data_error)
+        "ZipException" -> resources.getString(R.string.diag_damaged_archive)
+        "EOFException" -> resources.getString(R.string.diag_incomplete_file)
+        "FileNotFoundException" -> resources.getString(R.string.diag_file_not_found)
+        "IOException" -> resources.getString(R.string.diag_file_read_or_write_error)
+        "SecurityException" -> resources.getString(R.string.diag_access_denied)
+        "OutOfMemoryError" -> resources.getString(R.string.diag_insufficient_memory)
+        "IllegalArgumentException" -> resources.getString(R.string.diag_invalid_data_format)
+        "IllegalStateException" -> resources.getString(R.string.diag_invalid_data_state)
+        "failure" -> resources.getString(R.string.diag_failure)
+        "error" -> resources.getString(R.string.diag_failure)
+        else -> resources.getString(R.string.diag_unknown_failure, outcome)
+    }
+
+    private fun isFailureOutcome(outcome: String?): Boolean = when (outcome) {
+        null,
+        "success",
+        "disk_cache",
+        "not_ready",
+        "conflict_waiting",
+        "user_action",
+        "local_delete",
+        "interrupted",
+        "CancellationException",
+        "JobCancellationException",
+        -> false
+        else -> true
+    }
+
+    private fun readableDuration(raw: String): String {
+        val milliseconds = raw.toLongOrNull() ?: return resources.getString(R.string.diag_duration_ms, raw)
+        return if (milliseconds < 1_000) {
+            resources.getString(R.string.diag_duration_ms, milliseconds.toString())
+        } else {
+            resources.getString(R.string.diag_duration_seconds, milliseconds / 1_000.0)
+        }
+    }
+
+    private fun fieldLabel(key: String, category: String): String = when (key) {
+        "chapter" -> if (category == "PAGINATION") resources.getString(R.string.diag_chapter_id) else resources.getString(R.string.diag_chapter_index)
+        "paragraphs" -> resources.getString(R.string.diag_paragraph_count)
+        "pages" -> resources.getString(R.string.diag_pages_generated)
+        "prefetch" -> resources.getString(R.string.diag_execution_mode)
+        "prefetched" -> resources.getString(R.string.diag_prefetch_state)
+        "format" -> resources.getString(R.string.diag_book_format)
+        "priority" -> resources.getString(R.string.diag_load_type)
+        "source" -> resources.getString(R.string.diag_content_source)
+        "images" -> resources.getString(R.string.diag_image_count)
+        "requested" -> resources.getString(R.string.diag_chapters_requested)
+        "emitted" -> resources.getString(R.string.diag_chapters_completed)
+        "count" -> resources.getString(R.string.diag_count)
+        "imported" -> resources.getString(R.string.diag_imported)
+        "duplicates" -> resources.getString(R.string.diag_duplicate_files)
+        "failures" -> if (category == "IMPORT") resources.getString(R.string.diag_import_failed) else resources.getString(R.string.diag_processing_failed)
+        "inserted" -> resources.getString(R.string.diag_contents_entries_added)
+        "updated" -> resources.getString(R.string.diag_contents_entries_updated)
+        "chapters" -> resources.getString(R.string.diag_chapter_count)
+        "preferredBook" -> resources.getString(R.string.diag_prioritize_current_book)
+        "known" -> resources.getString(R.string.diag_cloud_object_count)
+        "changed" -> resources.getString(R.string.diag_cloud_change_count)
+        "uploaded" -> resources.getString(R.string.diag_items_uploaded)
+        "remoteChanged" -> resources.getString(R.string.diag_cloud_changes_processed)
+        "book" -> resources.getString(R.string.diag_book_identifier)
+        "purpose" -> resources.getString(R.string.diag_parsing_purpose)
+        "progressRecords" -> resources.getString(R.string.diag_progress_entries_deleted)
+        "indexed" -> resources.getString(R.string.diag_chapters_indexed)
+        "preempted" -> resources.getString(R.string.diag_times_yielded_to_foreground)
+        "reason" -> resources.getString(R.string.diag_error_reason)
+        "stage" -> resources.getString(R.string.diag_interrupted_or_failed_stage)
+        "statusCode" -> resources.getString(R.string.diag_http_status_code)
+        "followedByFullSync" -> resources.getString(R.string.diag_full_sync_scheduled)
+        "run" -> when (category) {
+            "SYNC" -> resources.getString(R.string.diag_sync_batch)
+            "IMPORT" -> resources.getString(R.string.diag_import_batch)
+            else -> resources.getString(R.string.diag_task_batch)
+        }
+        "failureTypes" -> resources.getString(R.string.diag_failure_type)
+        "failureType" -> resources.getString(R.string.diag_failure_type)
+        "firstFailureReason" -> resources.getString(R.string.diag_first_failure_reason)
+        "firstFailedBook" -> resources.getString(R.string.diag_first_failed_book)
+        "entity" -> resources.getString(R.string.diag_data_type)
+        "pressure" -> resources.getString(R.string.diag_memory_pressure_level)
+        "action" -> resources.getString(R.string.diag_system_action)
+        "notifyType" -> resources.getString(R.string.diag_notification_type)
+        "notifyId" -> resources.getString(R.string.diag_notification_id)
+        "listeners" -> resources.getString(R.string.diag_components_notified)
+        "listenerFailures" -> resources.getString(R.string.diag_failed_components)
+        "callbackReplied" -> resources.getString(R.string.diag_system_notified)
+        "trimLevel" -> resources.getString(R.string.diag_android_trim_level)
+        "heapAlloc" -> resources.getString(R.string.diag_java_heap_used_kb)
+        "heapCapacity" -> resources.getString(R.string.diag_java_heap_limit_kb)
+        "pss" -> resources.getString(R.string.diag_physical_memory_used_kb)
+        "pssLimit" -> resources.getString(R.string.diag_physical_memory_limit_kb)
+        else -> key
+    }
+
+    private fun readableValue(key: String, value: String): String = when (key) {
+        "prefetch" -> if (value == "true") resources.getString(R.string.diag_background_prefetch) else resources.getString(R.string.diag_current_reading)
+        "prefetched" -> if (value == "true") resources.getString(R.string.diag_prefetched) else resources.getString(R.string.diag_on_demand_load)
+        "preferredBook" -> if (value == "true") resources.getString(R.string.diag_yes) else resources.getString(R.string.diag_no)
+        "followedByFullSync" -> if (value == "true") resources.getString(R.string.diag_yes) else resources.getString(R.string.diag_no)
+        "priority" -> when (value) {
+            "PREFETCH" -> resources.getString(R.string.diag_background_prefetch)
+            "USER" -> resources.getString(R.string.diag_user_request)
+            else -> value
+        }
+        "source" -> when (value) {
+            "database" -> resources.getString(R.string.diag_local_database)
+            "epub_disk_cache" -> resources.getString(R.string.diag_epub_disk_cache)
+            "epub_parse" -> resources.getString(R.string.diag_live_epub_parsing)
+            "unknown" -> resources.getString(R.string.diag_undetermined)
+            "hyperos" -> resources.getString(R.string.diag_xiaomi_hyperos)
+            "android" -> resources.getString(R.string.diag_android_memory_trimming)
+            "android_low_memory" -> resources.getString(R.string.diag_android_low_memory_warning)
+            else -> value
+        }
+        "pressure" -> when (value) {
+            "BACKGROUND" -> resources.getString(R.string.diag_app_backgrounded)
+            "MODERATE" -> resources.getString(R.string.diag_memory_warning)
+            "CRITICAL" -> resources.getString(R.string.diag_process_reclaim_imminent)
+            else -> value
+        }
+        "action" -> when (value.uppercase()) {
+            "TRIM" -> resources.getString(R.string.diag_release_memory)
+            "KILL" -> resources.getString(R.string.diag_save_state_and_end_process)
+            else -> value
+        }
+        "notifyType" -> when (value) {
+            "1000" -> resources.getString(R.string.diag_physical_memory_warning)
+            "2000" -> resources.getString(R.string.diag_java_heap_warning)
+            else -> value
+        }
+        "callbackReplied" -> if (value == "true") resources.getString(R.string.diag_yes) else resources.getString(R.string.diag_no)
+        "purpose" -> when (value) {
+            "index" -> resources.getString(R.string.diag_background_full_text_index)
+            "reader" -> resources.getString(R.string.diag_foreground_reading_request)
+            "interactive" -> resources.getString(R.string.diag_on_demand_parsing)
+            else -> value
+        }
+        "entity" -> when (value) {
+            "progress" -> resources.getString(R.string.diag_reading_progress)
+            "bookmarks" -> resources.getString(R.string.diag_bookmarks)
+            else -> value
+        }
+        "requested" -> if (value == "all") resources.getString(R.string.diag_all) else value
+        "failureType",
+        "failureTypes",
+        -> value.split(',').joinToString(resources.getString(R.string.diag_)) { readableOutcome(it) }
+        "stage" -> when (value) {
+            "preparing" -> resources.getString(R.string.diag_preparing_sync)
+            "authorization" -> resources.getString(R.string.diag_checking_google_authorization)
+            "remote_snapshot" -> resources.getString(R.string.diag_checking_cloud_changes)
+            "applying_remote" -> resources.getString(R.string.diag_applying_cloud_deletions_and_progress)
+            "conflict_check" -> resources.getString(R.string.diag_checking_sync_conflicts)
+            "downloading" -> resources.getString(R.string.diag_applying_cloud_changes)
+            "preparing_uploads" -> resources.getString(R.string.diag_preparing_upload_data)
+            "uploading" -> resources.getString(R.string.diag_uploading_local_changes)
+            "finalizing" -> resources.getString(R.string.diag_saving_sync_results)
+            else -> value
+        }
+        else -> when (value) {
+            "true" -> resources.getString(R.string.diag_yes)
+            "false" -> resources.getString(R.string.diag_no)
+            else -> value
+        }
+    }
+
+    private fun isInterruptedSyncOutcome(outcome: String?): Boolean =
+        outcome == "interrupted" ||
+            outcome == "CancellationException" ||
+            outcome == "JobCancellationException"
 }
 
 internal suspend fun createReadableDiagnosticExport(
     context: Context,
     rawLines: List<String>,
 ): File = withContext(Dispatchers.IO) {
+    val formatter = DiagnosticLogFormatter(context.resources)
     val directory = File(context.cacheDir, "diagnostics").apply { mkdirs() }
     File(directory, "kixyu-diagnostics-readable.log").apply {
         bufferedWriter().use { writer ->
             rawLines.asReversed().forEachIndexed { index, rawLine ->
-                val entry = parseDiagnosticEntry(rawLine)
+                val entry = formatter.parseDiagnosticEntry(rawLine)
                 writer.append(entry.time).append("  [").append(entry.category).appendLine("]")
                 writer.appendLine(entry.title)
-                writer.append("说明：").appendLine(entry.description)
+                writer.append(context.getString(R.string.diag_description)).appendLine(entry.description)
                 entry.details.forEach { (label, value) ->
                     writer.append(label).append("：").appendLine(value)
                 }
@@ -88,303 +393,3 @@ internal suspend fun createReadableDiagnosticExport(
         }
     }
 }
-
-private fun deviceTime(raw: String): String {
-    val instant = runCatching { Instant.parse(raw) }.getOrNull() ?: return raw
-    return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
-        .withZone(ZoneId.systemDefault())
-        .format(instant)
-}
-
-internal fun diagnosticCategoryLabel(category: String): String = when (category) {
-    "LIBRARY" -> "书库"
-    "SYNC" -> "云同步"
-    "IMPORT" -> "书籍导入"
-    "EPUB_PARSE" -> "EPUB 解析"
-    "READER" -> "阅读"
-    "PAGINATION" -> "页面排版"
-    else -> "其他"
-}
-
-private fun eventDescription(event: String, outcome: String?, category: String): Pair<String, String> = when (event) {
-    "book_open_activity_failed" ->
-        "最近打开时间保存失败" to "书架已即时调整顺序，但持久化最近打开时间时发生错误。"
-    "book_exported" -> "书籍导出完成" to "原始书籍文件已经复制到用户选择的位置。"
-    "book_export_failed" -> "书籍导出失败" to "复制原始书籍文件时发生错误，可结合错误原因和书籍标识排查。"
-    "books_deleted" -> "书籍删除完成" to "书籍、本地进度、书签和派生缓存已经清理，并已登记云端删除。"
-    "full_sync_started" -> "开始云同步" to "开始检查本机与 Google Drive 中的数据。"
-    "full_sync_skipped" -> when (outcome) {
-        "not_ready" -> "本次同步未执行" to "同步功能尚未准备完成，未开始传输数据。"
-        "conflict_waiting" -> "同步等待冲突处理" to "存在尚未处理的同步冲突，本次同步已暂停。"
-        else -> "本次同步已跳过" to "当前条件不满足，未执行云同步。"
-    }
-    "authorization_ready" -> "Google 授权可用" to "已取得有效授权，可以访问应用的云端数据。"
-    "priority_pull_skipped" -> "已忽略云端旧数据" to "本机已删除对应数据，优先同步不会将其重新恢复。"
-    "remote_snapshot_loaded" -> "云端数据检查完成" to "已读取云端对象和本次发生变化的数据。"
-    "conflicts_waiting" -> "发现同步冲突" to "本机和云端均有修改，需要等待用户选择。"
-    "upload_queue_ready" -> "待上传数据已整理" to "已统计本次需要上传到云端的更改。"
-    "full_sync_finished" -> when {
-        outcome == "success" -> "云同步完成" to "本机与云端数据已经完成本轮同步。"
-        isInterruptedSyncOutcome(outcome) ->
-            "云同步被系统中断" to "同步任务未发生数据错误，系统会在条件合适时自动继续。"
-        else -> "云同步失败" to "本轮同步未正常完成，可结合阶段、结果和原因继续排查。"
-    }
-    "documents_selected" -> "已选择导入文件" to "用户选择了准备加入书库的文件。"
-    "documents_registered" -> if (outcome == "success") {
-        "书籍导入登记完成" to "文件已复制并登记到书库，后续解析会在后台进行。"
-    } else {
-        "书籍导入部分完成" to "部分文件未能导入，可结合失败类型和首个失败原因排查。"
-    }
-    "directory_upgrade_finished" -> if (outcome == "success") {
-        "EPUB 目录更新完成" to "已根据新版解析规则自动补齐并更新已导入书籍的目录信息。"
-    } else {
-        "EPUB 目录部分更新" to "部分书籍的目录信息未能更新，可结合处理失败数量继续排查。"
-    }
-    "background_index_finished" -> if (outcome == "success") {
-        if (category == "IMPORT") {
-            "TXT 后台解析完成" to "TXT 章节已经解析并写入本地书库。"
-        } else {
-            "书籍后台索引完成" to "全文检索所需的章节数据已经在后台生成。"
-        }
-    } else {
-        if (category == "IMPORT") {
-            "TXT 后台解析失败" to "TXT 章节解析或写入本地书库时发生错误。"
-        } else {
-            "书籍后台索引失败" to "后台生成全文检索数据时发生错误。"
-        }
-    }
-    "bulk_parse_finished" -> if (outcome == "success") {
-        "EPUB 批量解析完成" to "指定范围内的 EPUB 章节已经解析完成。"
-    } else {
-        "EPUB 批量解析失败" to "批量读取 EPUB 章节时发生错误。"
-    }
-    "chapter_parse_finished" -> when (outcome) {
-        "success" -> "EPUB 章节解析完成" to "章节正文和图片信息已经读取完成。"
-        "missing" -> "未找到 EPUB 章节" to "EPUB 中没有找到请求的章节内容。"
-        else -> "EPUB 章节解析失败" to "读取该章节时发生错误。"
-    }
-    "chapter_loaded" -> if (outcome == "success") {
-        "章节内容加载完成" to "阅读器已经取得该章节的正文内容。"
-    } else {
-        "章节内容加载失败" to "阅读器读取章节正文、缓存或本地索引时发生错误。"
-    }
-    "memory_pressure_handled" -> if (outcome == "success") {
-        "系统内存预警已处理" to "已按系统要求保存阅读现场并释放可重建的内存缓存。"
-    } else {
-        "系统内存预警处理异常" to "释放缓存、保存阅读现场或回复系统时发生异常。"
-    }
-    "priority_sync_failed" ->
-        "当前书籍优先同步失败" to "快速同步阅读进度、书签或阅读设置时发生错误，后续完整同步仍会重试。"
-    "chapter_navigation_finished" -> when (outcome) {
-        "success" -> "章节切换完成" to "阅读器已经切换到目标章节。"
-        "missing" -> "章节切换失败" to "没有找到目标章节，无法完成切换。"
-        else -> "章节切换异常" to "切换章节时发生异常。"
-    }
-    "restore" -> "分页缓存读取完成" to "直接使用之前保存的分页结果，无需重新排版。"
-    "measure" -> "章节分页完成" to "章节正文已经排版为可阅读的页面。"
-    "failed" -> "章节分页失败" to "排版章节正文时发生错误。"
-    else -> "诊断事件：$event" to "这是尚未添加中文说明的新诊断事件。"
-}
-
-private fun readableOutcome(outcome: String): String = when (outcome) {
-    "success" -> "成功"
-    "partial" -> "部分成功"
-    "missing" -> "未找到内容"
-    "disk_cache" -> "命中磁盘缓存"
-    "not_ready" -> "尚未准备完成"
-    "conflict_waiting" -> "等待处理冲突"
-    "user_action" -> "等待用户处理"
-    "local_delete" -> "本机已删除"
-    "interrupted",
-    "CancellationException",
-    "JobCancellationException",
-    -> "被系统中断"
-    "authorization_required" -> "需要重新授权"
-    "drive_http_error" -> "Google Drive 请求失败"
-    "network_error" -> "网络连接异常"
-    "local_data_error" -> "本地数据异常"
-    "cloud_data_error" -> "云端数据异常"
-    "unexpected_error" -> "未预期错误"
-    "invalid_archive" -> "压缩文件损坏"
-    "truncated_input" -> "文件内容不完整"
-    "missing_file" -> "文件不存在"
-    "constraint_error" -> "本地数据约束冲突"
-    "permission_error" -> "没有访问权限"
-    "memory_error" -> "可用内存不足"
-    "memory_release_failed" -> "释放内存失败"
-    "memory_callback_failed" -> "回复系统失败"
-    "io_error" -> "文件读写异常"
-    "invalid_data" -> "数据格式异常"
-    "invalid_state" -> "数据状态异常"
-    "SQLiteConstraintException" -> "本地数据约束冲突"
-    "SQLiteException" -> "本地数据异常"
-    "ZipException" -> "压缩文件损坏"
-    "EOFException" -> "文件内容不完整"
-    "FileNotFoundException" -> "文件不存在"
-    "IOException" -> "文件读写异常"
-    "SecurityException" -> "没有访问权限"
-    "OutOfMemoryError" -> "可用内存不足"
-    "IllegalArgumentException" -> "数据格式异常"
-    "IllegalStateException" -> "数据状态异常"
-    "failure" -> "失败"
-    "error" -> "失败"
-    else -> "失败（$outcome）"
-}
-
-private fun isFailureOutcome(outcome: String?): Boolean = when (outcome) {
-    null,
-    "success",
-    "disk_cache",
-    "not_ready",
-    "conflict_waiting",
-    "user_action",
-    "local_delete",
-    "interrupted",
-    "CancellationException",
-    "JobCancellationException",
-    -> false
-    else -> true
-}
-
-private fun readableDuration(raw: String): String {
-    val milliseconds = raw.toLongOrNull() ?: return "$raw 毫秒"
-    return if (milliseconds < 1_000) {
-        "$milliseconds 毫秒"
-    } else {
-        String.format(Locale.getDefault(), "%.2f 秒", milliseconds / 1_000.0)
-    }
-}
-
-private fun fieldLabel(key: String, category: String): String = when (key) {
-    "chapter" -> if (category == "PAGINATION") "章节 ID" else "章节索引"
-    "paragraphs" -> "段落数"
-    "pages" -> "生成页数"
-    "prefetch" -> "执行方式"
-    "prefetched" -> "预加载状态"
-    "format" -> "书籍格式"
-    "priority" -> "加载类型"
-    "source" -> "内容来源"
-    "images" -> "图片数"
-    "requested" -> "请求章节数"
-    "emitted" -> "完成章节数"
-    "count" -> "数量"
-    "imported" -> "导入成功"
-    "duplicates" -> "重复文件"
-    "failures" -> if (category == "IMPORT") "导入失败" else "处理失败"
-    "inserted" -> "新增目录项"
-    "updated" -> "更新目录项"
-    "chapters" -> "章节数"
-    "preferredBook" -> "优先同步当前书籍"
-    "known" -> "云端对象数"
-    "changed" -> "云端变更数"
-    "uploaded" -> "已上传项目数"
-    "remoteChanged" -> "已处理云端变更"
-    "book" -> "书籍标识"
-    "purpose" -> "解析用途"
-    "progressRecords" -> "已删除进度"
-    "indexed" -> "完成索引章节"
-    "preempted" -> "向前台让路次数"
-    "reason" -> "错误原因"
-    "stage" -> "中断或失败阶段"
-    "statusCode" -> "HTTP 状态码"
-    "followedByFullSync" -> "后续安排完整同步"
-    "run" -> when (category) {
-        "SYNC" -> "同步批次"
-        "IMPORT" -> "导入批次"
-        else -> "任务批次"
-    }
-    "failureTypes" -> "失败类型"
-    "failureType" -> "失败类型"
-    "firstFailureReason" -> "首个失败原因"
-    "firstFailedBook" -> "首个失败书籍"
-    "entity" -> "数据类型"
-    "pressure" -> "内存压力级别"
-    "action" -> "系统操作"
-    "notifyType" -> "通知类型"
-    "notifyId" -> "通知编号"
-    "listeners" -> "已通知组件"
-    "listenerFailures" -> "处理失败组件"
-    "callbackReplied" -> "已回复系统"
-    "trimLevel" -> "Android 回收级别"
-    "heapAlloc" -> "Java 堆已用（KB）"
-    "heapCapacity" -> "Java 堆上限（KB）"
-    "pss" -> "物理内存已用（KB）"
-    "pssLimit" -> "物理内存上限（KB）"
-    else -> key
-}
-
-private fun readableValue(key: String, value: String): String = when (key) {
-    "prefetch" -> if (value == "true") "后台预加载" else "当前阅读"
-    "prefetched" -> if (value == "true") "已提前加载" else "现场加载"
-    "preferredBook" -> if (value == "true") "是" else "否"
-    "followedByFullSync" -> if (value == "true") "是" else "否"
-    "priority" -> when (value) {
-        "PREFETCH" -> "后台预加载"
-        "USER" -> "用户请求"
-        else -> value
-    }
-    "source" -> when (value) {
-        "database" -> "本地数据库"
-        "epub_disk_cache" -> "EPUB 磁盘缓存"
-        "epub_parse" -> "实时解析 EPUB"
-        "unknown" -> "尚未确定"
-        "hyperos" -> "小米澎湃 OS"
-        "android" -> "Android 内存回收"
-        "android_low_memory" -> "Android 低内存警告"
-        else -> value
-    }
-    "pressure" -> when (value) {
-        "BACKGROUND" -> "应用进入后台"
-        "MODERATE" -> "内存预警"
-        "CRITICAL" -> "即将回收进程"
-        else -> value
-    }
-    "action" -> when (value.uppercase()) {
-        "TRIM" -> "释放内存"
-        "KILL" -> "保存现场并结束进程"
-        else -> value
-    }
-    "notifyType" -> when (value) {
-        "1000" -> "物理内存预警"
-        "2000" -> "Java 堆内存预警"
-        else -> value
-    }
-    "callbackReplied" -> if (value == "true") "是" else "否"
-    "purpose" -> when (value) {
-        "index" -> "后台全文索引"
-        "reader" -> "前台阅读请求"
-        "interactive" -> "即时解析"
-        else -> value
-    }
-    "entity" -> when (value) {
-        "progress" -> "阅读进度"
-        "bookmarks" -> "书签"
-        else -> value
-    }
-    "requested" -> if (value == "all") "全部" else value
-    "failureType",
-    "failureTypes",
-    -> value.split(',').joinToString("、") { readableOutcome(it) }
-    "stage" -> when (value) {
-        "preparing" -> "准备同步"
-        "authorization" -> "检查 Google 授权"
-        "remote_snapshot" -> "检查云端变更"
-        "applying_remote" -> "处理云端删除和进度"
-        "conflict_check" -> "检查同步冲突"
-        "downloading" -> "应用云端更改"
-        "preparing_uploads" -> "整理待上传数据"
-        "uploading" -> "上传本机更改"
-        "finalizing" -> "保存同步结果"
-        else -> value
-    }
-    else -> when (value) {
-        "true" -> "是"
-        "false" -> "否"
-        else -> value
-    }
-}
-
-private fun isInterruptedSyncOutcome(outcome: String?): Boolean =
-    outcome == "interrupted" ||
-        outcome == "CancellationException" ||
-        outcome == "JobCancellationException"
