@@ -4,7 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,16 +53,15 @@ internal fun ReleaseNotesMarkdown(
 ) {
     val blocks = remember(markdown) { parseReleaseNotes(markdown) }
     val colors = MaterialTheme.colorScheme
-    Column(
+    LazyColumn(
         modifier = modifier.fillMaxWidth()
-            .heightIn(max = KixyuSize.updateNotesMaxHeight)
-            .verticalScroll(rememberScrollState()),
+            .heightIn(max = KixyuSize.updateNotesMaxHeight),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
     ) {
-        blocks.forEach { block ->
+        itemsIndexed(blocks, key = { index, _ -> index }, contentType = { _, block -> block::class }) { _, block ->
             when (block) {
                 is ReleaseNoteBlock.Heading -> Text(
-                    text = renderInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
+                    text = rememberInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
                     style = when (block.level) {
                         1 -> MaterialTheme.typography.titleLarge
                         2 -> MaterialTheme.typography.titleMedium
@@ -81,7 +80,7 @@ internal fun ReleaseNotesMarkdown(
                         color = colors.primary,
                     )
                     Text(
-                        text = renderInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
+                        text = rememberInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurface,
@@ -96,7 +95,7 @@ internal fun ReleaseNotesMarkdown(
                             .background(colors.primary, RoundedCornerShape(2.dp)),
                     )
                     Text(
-                        text = renderInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
+                        text = rememberInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
                         color = colors.onSurfaceVariant,
@@ -117,7 +116,7 @@ internal fun ReleaseNotesMarkdown(
                     )
                 }
                 is ReleaseNoteBlock.Paragraph -> Text(
-                    text = renderInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
+                    text = rememberInlineMarkdown(block.text, colors.primary, colors.surfaceVariant),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurface,
                 )
@@ -221,6 +220,10 @@ private fun taskMarker(text: String): Pair<String, String> = when {
     text.startsWith("[ ] ") -> "○" to text.drop(4)
     else -> "•" to text
 }
+
+@Composable
+private fun rememberInlineMarkdown(source: String, linkColor: Color, codeBackground: Color): AnnotatedString =
+    remember(source, linkColor, codeBackground) { renderInlineMarkdown(source, linkColor, codeBackground) }
 
 private fun renderInlineMarkdown(source: String, linkColor: Color, codeBackground: Color): AnnotatedString {
     val normalized = source
