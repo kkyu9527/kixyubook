@@ -43,7 +43,7 @@ private fun rememberReaderFoldingFeature(): FoldingFeature? {
     return foldingFeature
 }
 
-@OptIn(kotlinx.coroutines.FlowPreview::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ReaderContent(
     state: ReaderContentState,
@@ -118,7 +118,7 @@ internal fun ReaderContent(
                     snapshotFlow {
                         val hasVisibleItems = listState.layoutInfo.visibleItemsInfo.isNotEmpty()
                         if (!hasVisibleItems) return@snapshotFlow null
-                        val chapterComplete = hasVisibleItems && !listState.canScrollForward
+                        val chapterComplete = !listState.canScrollForward
                         val visibleItem = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
                         val position = if (chapterComplete) {
                             contentParagraphs.lastOrNull()?.index ?: 0
