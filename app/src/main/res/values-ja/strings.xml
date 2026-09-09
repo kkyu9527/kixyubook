@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_logo_description">Kixyu Book のロゴ</string>
+    <string name="app_syncing_cloud_data">クラウドデータを同期中</string>
+    <string name="update_download_start_failed">ダウンロードを開始できませんでした。後でもう一度お試しください</string>
+    <string name="update_downloading">アプリの更新をダウンロード中</string>
+    <string name="update_download_started">バックグラウンドでダウンロード中です。検証後にインストール画面が開きます</string>
+    <string name="update_apk_unreadable">更新パッケージを読み込めません。再度ダウンロードしてください</string>
+    <string name="update_apk_wrong_package">別のアプリのパッケージのため、インストールを中止しました</string>
+    <string name="update_apk_not_newer">ダウンロードしたバージョンは現在のバージョンより新しくありません</string>
+    <string name="update_apk_wrong_signature">更新の署名が一致しないため、インストールを中止しました</string>
+    <string name="release_notes_title">更新履歴 · v%1$s</string>
+    <string name="release_notes_empty">このバージョンの更新履歴はありません。</string>
+    <string name="retry">再試行</string>
+    <string name="open_github">GitHub を開く</string>
+    <string name="view_release_on_github">GitHub でこのリリースを見る</string>
+    <string name="close">閉じる</string>
+    <string name="update_available_title">新しいバージョン %1$s があります</string>
+    <string name="current_version">現在のバージョン: %1$s</string>
+    <string name="update_notes_fallback">新しいバージョンがあります。ダウンロードと検証の完了後、インストール画面が開きます。</string>
+    <string name="open_github_release">GitHub のリリースページを開く</string>
+    <string name="cancel">キャンセル</string>
+    <string name="download">ダウンロード</string>
+</resources>

@@ -1,0 +1,12 @@
+<resources>
+    <string name="notification_sync_conflict_title">同期の競合を確認してください</string>
+    <string name="notification_sync_conflict_text">%1$d 件について端末版かクラウド版を選択してください</string>
+    <string name="notification_backup_export_title">完全バックアップをエクスポート中</string>
+    <string name="notification_backup_restore_title">完全バックアップを復元中</string>
+    <string name="notification_background_task">この画面を離れても処理はバックグラウンドで続行されます</string>
+    <string name="notification_cancel">キャンセル</string>
+    <string name="notification_reading_remaining">今日の目標まであと %1$d 分</string>
+    <string name="notification_reading_goal">読書を続けて、1 日 %1$d 分の目標を達成しましょう</string>
+    <string name="sync_uploading_changes">変更をアップロード中</string>
+    <string name="sync_processed_items">%1$d/%2$d 件を処理済み</string>
+</resources>

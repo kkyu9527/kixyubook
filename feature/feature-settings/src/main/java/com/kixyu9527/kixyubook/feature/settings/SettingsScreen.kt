@@ -150,10 +150,10 @@ fun SettingsRoute(
             KixyuSettingsRow(
                 title = stringResource(R.string.settings_google_sync),
                 supportingText = when {
-                    syncAccount == null -> "登录后在设备间增量同步"
-                    state.cloudSync.initialSyncDecision != null -> "需要处理同步冲突 · ${syncAccount.email}"
-                    state.cloudSync.phase == CloudSyncPhase.SYNCING -> "正在同步 · ${syncAccount.email}"
-                    state.cloudSync.pendingCount > 0 -> "${state.cloudSync.pendingCount} 项等待同步 · ${syncAccount.email}"
+                    syncAccount == null -> stringResource(R.string.settings_sync_login_hint)
+                    state.cloudSync.initialSyncDecision != null -> stringResource(R.string.settings_sync_conflict_account, syncAccount.email)
+                    state.cloudSync.phase == CloudSyncPhase.SYNCING -> stringResource(R.string.settings_syncing_account, syncAccount.email)
+                    state.cloudSync.pendingCount > 0 -> stringResource(R.string.settings_sync_pending_account, state.cloudSync.pendingCount, syncAccount.email)
                     else -> syncAccount.email
                 },
                 icon = when {
@@ -173,7 +173,7 @@ fun SettingsRoute(
                 supportingText = buildString {
                     append(state.settings.pageMode.displayName())
                     append(" · ")
-                    append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: "系统字体")
+                    append(state.fonts.firstOrNull { it.uuid == state.settings.fontUuid }?.name ?: stringResource(R.string.settings_system_font))
                 },
                 icon = KixyuSymbols.Tune,
                 selected = if (twoPane) selectedPane == SettingsPane.READING else null,
@@ -385,7 +385,7 @@ fun CloudSyncRoute(
                 selected = state.cloudSync.wifiOnlyForLargeFiles,
                 options = listOf(true, false),
                 optionLabel = { wifiOnly ->
-                    if (wifiOnly) "仅 Wi-Fi" else "Wi-Fi 和移动数据"
+                    if (wifiOnly) stringResource(R.string.settings_wifi_only) else stringResource(R.string.settings_any_network)
                 },
                 onSelected = viewModel::setWifiOnlyForLargeFiles,
                 icon = KixyuSymbols.Wifi,
@@ -438,7 +438,7 @@ fun CloudSyncRoute(
                 }
             }
             Text(
-                "书库、进度、书签、统计和阅读设置始终同步",
+                stringResource(R.string.settings_always_synced),
                 modifier = Modifier.padding(horizontal = KixyuSpacing.extraSmall),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -495,22 +495,22 @@ fun CloudSyncRoute(
         show = syncConflict != null && !conflictDeferred,
         title = stringResource(R.string.settings_sync_conflict_title),
         onDismissRequest = { conflictDeferred = true },
-        confirmLabel = "使用本机更改",
+        confirmLabel = stringResource(R.string.settings_use_local),
         onConfirm = {
             viewModel.resolveInitialSync(InitialSyncChoice.KEEP_LOCAL_CHANGES)
         },
         confirmEnabled = !state.cloudSync.inspectingInitialSync,
-        alternativeLabel = "使用云端更改",
+        alternativeLabel = stringResource(R.string.settings_use_cloud),
         onAlternative = {
             viewModel.resolveInitialSync(InitialSyncChoice.USE_CLOUD_CHANGES)
         },
         alternativeEnabled = !state.cloudSync.inspectingInitialSync,
-        dismissLabel = "稍后处理",
+        dismissLabel = stringResource(R.string.settings_resolve_later),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
             Text(stringResource(R.string.settings_sync_conflict_count, syncConflict?.conflicts?.size ?: 0))
             Text(
-                "阅读进度、阅读记录和删除操作会自动合并；这里只列出无法安全判断的书籍信息、书签或阅读设置。",
+                stringResource(R.string.settings_conflict_explanation),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -563,10 +563,10 @@ private fun GoogleStorageSection(
                 ) {
                     Text(
                         text = when {
-                            quota == null && state.refreshing -> "正在获取 Google 云空间"
-                            quota == null -> state.errorMessage ?: "Google 云空间"
-                            limitText == null -> "已使用 $usedText"
-                            else -> "已使用 $usedText，共 $limitText"
+                            quota == null && state.refreshing -> stringResource(R.string.settings_storage_loading)
+                            quota == null -> state.errorMessage ?: stringResource(R.string.settings_storage_google)
+                            limitText == null -> stringResource(R.string.settings_storage_used, usedText.orEmpty())
+                            else -> stringResource(R.string.settings_storage_used_limit, usedText.orEmpty(), limitText)
                         },
                         style = MaterialTheme.typography.bodyLarge,
                         color = if (quota == null && state.errorMessage != null) {
@@ -577,11 +577,11 @@ private fun GoogleStorageSection(
                     )
                     Text(
                         text = when {
-                            warning -> "仅剩 $remainingText，空间不足可能导致同步失败"
-                            remainingText != null -> "剩余 $remainingText · Drive、Gmail 和 Google Photos 共用"
-                            quota != null -> "账号未提供空间上限 · Drive、Gmail 和 Google Photos 共用"
-                            state.errorMessage != null -> "点击右侧按钮重试"
-                            else -> "Drive、Gmail 和 Google Photos 共用此空间"
+                            warning -> stringResource(R.string.settings_storage_low, remainingText.orEmpty())
+                            remainingText != null -> stringResource(R.string.settings_storage_remaining, remainingText)
+                            quota != null -> stringResource(R.string.settings_storage_unlimited)
+                            state.errorMessage != null -> stringResource(R.string.settings_storage_retry)
+                            else -> stringResource(R.string.settings_storage_shared)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = if (warning) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -615,7 +615,7 @@ private fun GoogleStorageSection(
                 val driveUsage = Formatter.formatShortFileSize(context, it.usageInDriveBytes)
                 val trashUsage = Formatter.formatShortFileSize(context, it.usageInDriveTrashBytes)
                 Text(
-                    text = "其中 Google Drive 占用 $driveUsage，回收站占用 $trashUsage",
+                    text = stringResource(R.string.settings_storage_drive, driveUsage, trashUsage),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -663,14 +663,14 @@ private fun CloudSyncOverviewCard(
                     ) {
                         Text(stringResource(R.string.settings_sync_continue_title), style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "同步书库、进度、书签和个性化设置",
+                            stringResource(R.string.settings_connect_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
                 KixyuButton(
-                    text = "连接 Google Drive",
+                    text = stringResource(R.string.settings_connect_drive),
                     onClick = onConnect,
                     enabled = connectEnabled,
                     modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(),
@@ -706,7 +706,7 @@ private fun CloudSyncOverviewCard(
                 onClick = onAccountClick,
             ) {
                 Text(
-                    "已连接",
+                    stringResource(R.string.settings_connected),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -741,7 +741,7 @@ private fun CloudSyncOverviewCard(
                     KixyuIconButton(onClick = onSyncAction) {
                         Icon(
                             KixyuSymbols.Refresh,
-                            "立即同步",
+                            stringResource(R.string.settings_sync_now),
                         )
                     }
                 }
@@ -781,6 +781,7 @@ fun GoogleAccountRoute(
     val context = LocalContext.current
     val activity = context as? Activity
     val account = state.cloudSync.account
+    val openAccountError = stringResource(R.string.settings_open_account_error)
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val navigationContentPadding = LocalKixyuNavigationContentPadding.current
@@ -834,7 +835,7 @@ fun GoogleAccountRoute(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "Google 账号未连接",
+                    stringResource(R.string.settings_not_connected),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -863,7 +864,7 @@ fun GoogleAccountRoute(
                 }.recoverCatching {
                     context.startActivity(Intent(Intent.ACTION_VIEW, uri))
                 }.onFailure {
-                    scope.launch { snackbar.showSnackbar("无法打开 Google 账号页面") }
+                    scope.launch { snackbar.showSnackbar(openAccountError) }
                 }
             },
             onSwitchAccount = { activity?.let(viewModel::switchGoogleAccount) },
@@ -880,7 +881,7 @@ fun GoogleAccountRoute(
         show = confirmDelete,
         title = stringResource(R.string.settings_delete_cloud_data_question),
         onDismissRequest = { confirmDelete = false },
-        confirmLabel = "永久删除",
+        confirmLabel = stringResource(R.string.settings_delete_permanently),
         onConfirm = {
             confirmDelete = false
             activity?.let(viewModel::deleteCloudData)
@@ -937,7 +938,7 @@ private fun GoogleAccountPage(
                         leading = { GoogleAccountAvatar(account) },
                     ) {
                         Text(
-                            "已连接",
+                            stringResource(R.string.settings_connected),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -1004,15 +1005,16 @@ private fun GoogleAccountPage(
     }
 }
 
+@Composable
 private fun cloudSyncActionLabel(state: CloudSyncState): String = when {
-    state.initialSyncDecision != null -> "处理同步冲突"
-    state.inspectingInitialSync -> "正在检查云端…"
-    state.phase == CloudSyncPhase.AUTHORIZING -> "正在授权…"
-    state.phase == CloudSyncPhase.AUTH_REQUIRED -> "重新授权"
-    state.phase == CloudSyncPhase.SYNCING -> "正在同步…"
-    !state.enabled -> "同步已暂停"
-    state.phase == CloudSyncPhase.ERROR -> "重试同步"
-    else -> "立即同步"
+    state.initialSyncDecision != null -> stringResource(R.string.settings_resolve_conflicts)
+    state.inspectingInitialSync -> stringResource(R.string.settings_checking_cloud)
+    state.phase == CloudSyncPhase.AUTHORIZING -> stringResource(R.string.settings_authorizing)
+    state.phase == CloudSyncPhase.AUTH_REQUIRED -> stringResource(R.string.settings_reauthorize)
+    state.phase == CloudSyncPhase.SYNCING -> stringResource(R.string.settings_syncing)
+    !state.enabled -> stringResource(R.string.settings_sync_status_paused)
+    state.phase == CloudSyncPhase.ERROR -> stringResource(R.string.settings_retry_sync)
+    else -> stringResource(R.string.settings_sync_now)
 }
 
 private fun cloudSyncActionEnabled(state: CloudSyncState): Boolean =
@@ -1102,69 +1104,71 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
     val locale = LocalLocale.current.platformLocale
     val conflict = state.initialSyncDecision
     val lastSync = state.lastSyncTime.takeIf { it > 0 }?.let {
-        SimpleDateFormat("MM-dd HH:mm", locale).format(Date(it))
+        java.text.DateFormat.getDateTimeInstance(
+            java.text.DateFormat.SHORT, java.text.DateFormat.SHORT, locale,
+        ).format(Date(it))
     }
     return when {
         conflict != null -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_waiting_conflict),
-            detail = "${conflict.conflicts.size} 项内容在本机和云端都已修改",
+            detail = stringResource(R.string.settings_sync_conflict_count, conflict.conflicts.size),
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         state.inspectingInitialSync -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_checking_library),
-            detail = "正在识别本机与云端数据",
+            detail = stringResource(R.string.settings_identifying_data),
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         !state.enabled -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_paused),
-            detail = lastSync?.let { "上次同步于 $it" } ?: "开启自动同步后开始上传数据",
+            detail = lastSync?.let { stringResource(R.string.settings_last_sync, it) } ?: stringResource(R.string.settings_enable_sync_hint),
             icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.MUTED,
         )
         state.phase == CloudSyncPhase.AUTHORIZING -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_connecting),
-            detail = "正在确认账号与访问权限",
+            detail = stringResource(R.string.settings_confirming_access),
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         state.phase == CloudSyncPhase.AUTH_REQUIRED -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_reauthorize),
-            detail = "进入应用后会自动恢复 Google Drive 连接",
+            detail = stringResource(R.string.settings_reconnect_hint),
             icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         state.phase == CloudSyncPhase.SYNCING -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_syncing),
-            detail = if (state.pendingCount > 0) "${state.pendingCount} 项本地变更等待完成" else "正在检查云端变更",
+            detail = if (state.pendingCount > 0) stringResource(R.string.settings_pending_changes, state.pendingCount) else stringResource(R.string.settings_checking_changes),
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
         )
         state.phase == CloudSyncPhase.ERROR -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_error),
-            detail = state.errorMessage ?: "请检查网络后重试",
+            detail = state.errorMessage ?: stringResource(R.string.settings_check_network),
             icon = KixyuSymbols.Cloud,
             tone = CloudSyncStatusTone.ERROR,
         )
         state.pendingCount > 0 -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_waiting),
-            detail = "${state.pendingCount} 项本地变更等待上传",
+            detail = stringResource(R.string.settings_pending_upload, state.pendingCount),
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ATTENTION,
         )
         lastSync != null -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_complete),
-            detail = "上次同步于 $lastSync",
+            detail = stringResource(R.string.settings_last_sync, lastSync),
             icon = KixyuSymbols.CloudDone,
             tone = CloudSyncStatusTone.SUCCESS,
         )
         else -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_initial),
-            detail = "连接网络后将自动开始",
+            detail = stringResource(R.string.settings_wait_network),
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
         )

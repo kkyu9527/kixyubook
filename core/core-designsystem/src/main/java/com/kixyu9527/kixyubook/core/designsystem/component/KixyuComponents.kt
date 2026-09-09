@@ -698,7 +698,7 @@ fun <T> KixyuDropdownRow(
     title: String,
     selected: T,
     options: List<T>,
-    optionLabel: (T) -> String,
+    optionLabel: @Composable (T) -> String,
     onSelected: (T) -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
@@ -706,7 +706,7 @@ fun <T> KixyuDropdownRow(
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val glassEnabled = LocalKixyuGlassEffectEnabled.current
     if (isMiuix && !glassEnabled) {
-        val labels = options.map(optionLabel)
+        val labels = options.map { optionLabel(it) }
         val selectedIndex = options.indexOf(selected).coerceAtLeast(0)
         WindowDropdownPreference(
             items = labels,

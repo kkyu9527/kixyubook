@@ -31,12 +31,12 @@ internal fun CorrectionEditDialog(
     var replacement by remember(original, initialReplacement) { mutableStateOf(initialReplacement) }
     KixyuActionDialog(
         show = true,
-        title = if (existing == null) "纠正段落" else "编辑纠错",
+        title = if (existing == null) stringResource(R.string.reader_correct_paragraph) else stringResource(R.string.reader_edit_correction),
         onDismissRequest = onDismiss,
-        confirmLabel = "保存",
+        confirmLabel = stringResource(R.string.reader_annotation_save),
         confirmEnabled = replacement.isNotBlank() && replacement != original,
         onConfirm = { onSave(replacement) },
-        alternativeLabel = onDelete?.let { "撤销纠错" },
+        alternativeLabel = onDelete?.let { stringResource(R.string.reader_undo_correction) },
         onAlternative = onDelete,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium)) {
@@ -52,7 +52,7 @@ internal fun CorrectionEditDialog(
             )
             onManageAll?.let {
                 KixyuTextButton(
-                    text = "管理全书纠错",
+                    text = stringResource(R.string.reader_manage_corrections),
                     onClick = it,
                     modifier = Modifier.fillMaxWidth(),
                 )

@@ -1,0 +1,18 @@
+<resources>
+    <string name="notification_sync_title">正在同步書籍</string>
+    <string name="notification_sync_data">正在傳輸 Google Drive 資料</string>
+    <string name="notification_export_failed">完整備份匯出失敗</string>
+    <string name="notification_restore_failed">完整備份還原失敗</string>
+    <string name="notification_export_complete">完整備份已匯出</string>
+    <string name="notification_restore_complete">完整備份已還原</string>
+    <string name="notification_books_saved">已儲存 %1$d 本書</string>
+    <string name="notification_books_restored">已還原 %1$d 本書，重新開啟應用程式後生效</string>
+    <string name="notification_channel_tasks">背景工作</string>
+    <string name="notification_channel_tasks_hint">書籍、字型、雲端同步與完整備份的背景進度</string>
+    <string name="notification_channel_attention">需要處理</string>
+    <string name="notification_channel_attention_hint">同步衝突等需要操作的提醒</string>
+    <string name="notification_channel_results">工作結果</string>
+    <string name="notification_channel_results_hint">完整備份等背景工作完成或失敗的結果</string>
+    <string name="notification_channel_reading">閱讀提醒</string>
+    <string name="notification_channel_reading_hint">由你主動開啟的每日閱讀目標提醒</string>
+</resources>

@@ -1,0 +1,7 @@
+<resources>
+    <string name="update_notes_unpublished">v%1$s の更新履歴は GitHub にまだ公開されていません</string>
+    <string name="update_published_hint">新しいバージョンがあります。GitHub で更新履歴の確認とダウンロードができます。</string>
+    <string name="update_network_timeout">GitHub への接続がタイムアウトしました。後で再試行してください</string>
+    <string name="update_no_network">接続できません。ネットワーク設定を確認してください</string>
+    <string name="update_check_failed">更新を確認できませんでした</string>
+</resources>

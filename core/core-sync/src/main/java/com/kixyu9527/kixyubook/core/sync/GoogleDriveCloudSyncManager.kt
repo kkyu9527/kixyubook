@@ -30,6 +30,7 @@ import javax.inject.Singleton
 
 @Singleton
 class GoogleDriveCloudSyncManager @Inject constructor(
+    @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val preferences: SyncPreferencesStore,
     private val syncDao: SyncDao,
     private val accounts: GoogleAccountClient,
@@ -202,7 +203,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 scheduler.requestImmediate()
             }.onFailure { error ->
                 if (error is CancellationException) throw error
-                preferences.markError(error.message ?: "同步冲突处理失败")
+                preferences.markError(error.message ?: context.getString(R.string.sync_conflict_failed))
             }
         } finally {
             // StateFlow assignment is non-suspending, so cancellation cannot strand the sheet in
@@ -236,7 +237,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             )
             try {
                 val token = accounts.accessToken()
-                    ?: error("需要重新授权 Google Drive")
+                    ?: error(context.getString(R.string.sync_reauthorize))
                 val quota = drive.storageQuota(token)
                 if (preferences.current().account?.subject == accountSubject) {
                     storageQuota.value = AccountStorageQuota(
@@ -253,7 +254,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                         accountSubject = accountSubject,
                         state = DriveStorageQuotaState(
                             quota = previous?.state?.quota,
-                            errorMessage = "暂时无法获取云空间",
+                            errorMessage = context.getString(R.string.sync_storage_unavailable),
                         ),
                         refreshedAt = previous?.refreshedAt ?: 0L,
                     )
@@ -339,7 +340,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                             _priorityBookSync.value = PriorityBookSyncState(
                                 bookUuid,
                                 PriorityBookSyncPhase.ERROR,
-                                error.message ?: "当前书籍同步失败",
+                                error.message ?: context.getString(R.string.sync_book_failed),
                             )
                         }
                     },
@@ -385,8 +386,8 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override suspend fun deleteCloudData(activity: Activity): Result<Unit> = runCatching {
         val authorization = accounts.authorize(activity)
-        require(authorization is GoogleConnectResult.Connected) { "需要先完成 Google Drive 授权" }
-        val token = accounts.accessToken() ?: error("需要重新授权 Google Drive")
+        require(authorization is GoogleConnectResult.Connected) { context.getString(R.string.sync_authorize_first) }
+        val token = accounts.accessToken() ?: error(context.getString(R.string.sync_reauthorize))
         engine.deleteAllCloudData(token)
         preferences.setEnabled(false)
         scheduler.cancel()
@@ -464,7 +465,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
                 ) {
                     preferences.markAuthRequired()
                 } else {
-                    preferences.markError(error.message ?: "无法检查云端书库")
+                    preferences.markError(error.message ?: context.getString(R.string.sync_library_check_failed))
                 }
             }
         } finally {

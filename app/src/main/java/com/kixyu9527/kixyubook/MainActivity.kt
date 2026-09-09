@@ -14,6 +14,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -63,6 +65,10 @@ class MainActivity : ComponentActivity() {
         // relayout and a visible 60 -> 120 Hz hitch during cold start.
         requestHighestRefreshRate(window.decorView)
         setContent {
+            val languageTags = LocalConfiguration.current.locales.toLanguageTags()
+            LaunchedEffect(languageTags) {
+                localNotifications.refreshLocalizedChannels()
+            }
             val settings by appViewModel.settings.collectAsStateWithLifecycle()
             val updateState by appViewModel.updateState.collectAsStateWithLifecycle()
             val releaseNotesState by appViewModel.releaseNotesState.collectAsStateWithLifecycle()

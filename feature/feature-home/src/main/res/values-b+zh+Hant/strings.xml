@@ -1,0 +1,23 @@
+<resources>
+    <string name="home_open_recent_book">開啟最近閱讀：%1$s</string>
+    <string name="home_open_book">開啟書籍：%1$s</string>
+    <string name="home_title">閱讀</string>
+    <string name="home_recent_reading">最近閱讀</string>
+    <string name="home_read_progress">已讀 %1$d%%</string>
+    <string name="home_continue_reading">繼續閱讀</string>
+    <string name="home_choose_book">從書架選一本書開始</string>
+    <string name="home_choose_book_hint">開始閱讀後，這裡會直接帶你回到上次的位置。</string>
+    <string name="home_today_goal">今日目標</string>
+    <string name="home_minutes_unit">\u0020分鐘</string>
+    <string name="home_goal_minutes">目標 %1$d 分鐘</string>
+    <string name="home_days_value">%1$d 天</string>
+    <string name="home_hours_value">%1$d 小時</string>
+    <string name="home_minutes_value">%1$d 分鐘</string>
+    <string name="home_reading_streak">連續閱讀</string>
+    <string name="home_total_duration">累計時長</string>
+    <string name="home_last_seven_days">近 7 天</string>
+    <string name="home_weekly_total">7 天共閱讀 %1$d 分鐘</string>
+    <string name="home_days_read">有閱讀</string>
+    <string name="home_days_goal_met">完成目標</string>
+    <string name="home_daily_average">日均</string>
+</resources>

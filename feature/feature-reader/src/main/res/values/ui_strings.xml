@@ -1,0 +1,6 @@
+<resources>
+    <string name="reader_correct_paragraph">Correct paragraph</string>
+    <string name="reader_edit_correction">Edit correction</string>
+    <string name="reader_undo_correction">Remove correction</string>
+    <string name="reader_manage_corrections">Manage book corrections</string>
+</resources>

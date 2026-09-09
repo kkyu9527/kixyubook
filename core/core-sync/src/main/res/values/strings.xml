@@ -1,12 +1,12 @@
 <resources>
-    <string name="notification_sync_conflict_title">同步冲突等待处理</string>
-    <string name="notification_sync_conflict_text">%1$d 项内容需要选择本机或云端版本</string>
-    <string name="notification_backup_export_title">正在导出完整备份</string>
-    <string name="notification_backup_restore_title">正在恢复完整备份</string>
-    <string name="notification_background_task">可离开此页面，任务会在后台继续</string>
-    <string name="notification_cancel">取消</string>
-    <string name="notification_reading_remaining">今天还差 %1$d 分钟</string>
-    <string name="notification_reading_goal">继续阅读，完成每日 %1$d 分钟目标</string>
-    <string name="sync_uploading_changes">正在上传云端更改</string>
-    <string name="sync_processed_items">已处理 %1$d/%2$d 项</string>
+    <string name="notification_sync_conflict_title">Sync conflicts need attention</string>
+    <string name="notification_sync_conflict_text">Choose local or cloud versions for %1$d items</string>
+    <string name="notification_backup_export_title">Exporting full backup</string>
+    <string name="notification_backup_restore_title">Restoring full backup</string>
+    <string name="notification_background_task">You can leave this page. The task will continue in the background.</string>
+    <string name="notification_cancel">Cancel</string>
+    <string name="notification_reading_remaining">%1$d min left for today</string>
+    <string name="notification_reading_goal">Keep reading to reach your daily goal of %1$d min</string>
+    <string name="sync_uploading_changes">Uploading changes</string>
+    <string name="sync_processed_items">Processed %1$d/%2$d items</string>
 </resources>

@@ -26,11 +26,14 @@ import java.text.Collator
 import java.util.Locale
 import javax.inject.Inject
 
+// Internal filter token, never translated or used as a localized category name.
+internal const val ALL_LIBRARY_CATEGORIES = "全部"
+
 data class LibraryUiState(
     val books: List<LibraryBook> = emptyList(),
     val query: String = "",
-    val category: String = "全部",
-    val categories: List<String> = listOf("全部"),
+    val category: String = ALL_LIBRARY_CATEGORIES,
+    val categories: List<String> = listOf(ALL_LIBRARY_CATEGORIES),
     val allCategories: List<String> = emptyList(),
     val hiddenCategories: Set<String> = emptySet(),
     val sortMode: LibrarySortMode = LibrarySortMode.RECENT,
@@ -49,9 +52,10 @@ class LibraryViewModel @Inject constructor(
     private val repository: BookRepository,
     catalogRepository: LibraryCatalogRepository,
     private val preferencesRepository: LibraryPreferencesRepository,
+    @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
     private val query = MutableStateFlow("")
-    private val category = MutableStateFlow("全部")
+    private val category = MutableStateFlow(ALL_LIBRARY_CATEGORIES)
     private val catalog = catalogRepository.catalog
         .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryCatalog())
     private val preferences = preferencesRepository.preferences
@@ -109,17 +113,17 @@ class LibraryViewModel @Inject constructor(
     ): LibraryUiState {
         val visibleCategories = books.map { it.book.category }.distinct().sorted()
         val effectiveCategory = selectedCategory.takeUnless {
-            it != "全部" && it !in visibleCategories
-        } ?: "全部"
+            it != ALL_LIBRARY_CATEGORIES && it !in visibleCategories
+        } ?: ALL_LIBRARY_CATEGORIES
         val sortedBooks = sortLibraryBooks(books, libraryPreferences)
         return LibraryUiState(
             books = sortedBooks.filter {
-                (effectiveCategory == "全部" || it.book.category == effectiveCategory) &&
+                (effectiveCategory == ALL_LIBRARY_CATEGORIES || it.book.category == effectiveCategory) &&
                     (search.isBlank() || it.book.title.contains(search, true) || it.book.author.contains(search, true))
             },
             query = search,
             category = effectiveCategory,
-            categories = listOf("全部") + visibleCategories,
+            categories = listOf(ALL_LIBRARY_CATEGORIES) + visibleCategories,
             allCategories = catalog.allCategories,
             hiddenCategories = catalog.hiddenCategories,
             sortMode = libraryPreferences.sortMode,
@@ -174,7 +178,7 @@ class LibraryViewModel @Inject constructor(
 
     fun setCategoryHidden(value: String, hidden: Boolean) = viewModelScope.launch {
         preferencesRepository.setCategoryHidden(value, hidden)
-        if (category.value == value) category.value = "全部"
+        if (category.value == value) category.value = ALL_LIBRARY_CATEGORIES
     }
 
     fun import(uriStrings: List<String>, onComplete: () -> Unit = {}) = viewModelScope.launch {
@@ -185,15 +189,15 @@ class LibraryViewModel @Inject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                messages.send(error.message ?: "导入失败，请重新选择文件")
+                messages.send(error.message ?: context.getString(R.string.library_import_error))
                 null
             }
             if (result == null) return@launch
             val success = buildString {
-                if (result.importedCount > 0) append("已导入 ${result.importedCount} 本书")
+                if (result.importedCount > 0) append(context.getString(R.string.library_imported_count, result.importedCount))
                 if (result.duplicateCount > 0) {
-                    append(if (isNotEmpty()) "，" else "")
-                    append("已跳过 ${result.duplicateCount} 本重复书籍")
+                    append(if (isNotEmpty()) "\n" else "")
+                    append(context.getString(R.string.library_duplicate_count, result.duplicateCount))
                 }
             }
             val failure = result.failures.joinToString("\n")
@@ -207,25 +211,25 @@ class LibraryViewModel @Inject constructor(
 
     fun cancelImport(runId: String) = viewModelScope.launch {
         repository.cancelImport(runId)
-        messages.send("已取消未完成的导入")
+        messages.send(context.getString(R.string.library_import_stopped))
     }
 
     fun retryImport(runId: String) = viewModelScope.launch {
         val result = repository.retryImport(runId)
         if (result.importedCount == 0 && result.failures.isEmpty()) {
-            messages.send("没有可重试的文件")
+            messages.send(context.getString(R.string.library_no_retry_files))
         }
     }
 
     fun clearImportHistory() = viewModelScope.launch {
         runCatching { repository.clearImportHistory() }
-            .onFailure { messages.send(it.message ?: "无法清空导入记录") }
+            .onFailure { messages.send(it.message ?: context.getString(R.string.library_clear_history_failed)) }
     }
 
     fun export(bookUuid: String, uriString: String) = viewModelScope.launch {
         repository.exportBook(bookUuid, uriString)
             .onSuccess { exports.send(BookExportEvent(uriString)) }
-            .onFailure { messages.send(it.message ?: "书籍导出失败") }
+            .onFailure { messages.send(it.message ?: context.getString(R.string.library_export_failed)) }
     }
 
     fun exportBooks(bookUuids: Set<String>, directoryUriString: String) = viewModelScope.launch {
@@ -239,7 +243,7 @@ class LibraryViewModel @Inject constructor(
                     ),
                 )
             }
-            .onFailure { messages.send(it.message ?: "批量导出失败") }
+            .onFailure { messages.send(it.message ?: context.getString(R.string.library_batch_export_failed)) }
     }
 
     fun delete(bookUuid: String) = viewModelScope.launch { repository.deleteBook(bookUuid) }
@@ -248,7 +252,7 @@ class LibraryViewModel @Inject constructor(
     }
     fun updateMetadata(bookUuid: String, title: String, author: String, description: String) = viewModelScope.launch {
         runCatching { repository.updateBookMetadata(bookUuid, title, author, description) }
-            .onFailure { messages.send(it.message ?: "修改失败") }
+            .onFailure { messages.send(it.message ?: context.getString(R.string.library_edit_failed)) }
     }
     fun setCategory(bookUuid: String, value: String) = viewModelScope.launch { repository.setCategory(bookUuid, value) }
     fun setCategories(bookUuids: Set<String>, value: String) = viewModelScope.launch {

@@ -1,0 +1,7 @@
+<resources>
+    <string name="update_notes_unpublished">GitHub 尚未发布 v%1$s 的 Release Note</string>
+    <string name="update_published_hint">新版本已经发布，可前往 GitHub 查看完整发版说明并下载。</string>
+    <string name="update_network_timeout">连接 GitHub 超时，请稍后重试</string>
+    <string name="update_no_network">无法连接网络，请检查网络设置</string>
+    <string name="update_check_failed">检查更新失败</string>
+</resources>

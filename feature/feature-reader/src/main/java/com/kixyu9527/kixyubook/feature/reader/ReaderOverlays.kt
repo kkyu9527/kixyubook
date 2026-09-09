@@ -335,7 +335,7 @@ internal fun ReaderSearchOverlay(
                     }
                 } else {
                 Text(
-                    stringResource(R.string.reader_search_result_count, state.searchResults.size),
+                    androidx.compose.ui.res.pluralStringResource(R.plurals.reader_search_result_count, state.searchResults.size, state.searchResults.size),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -1,7 +1,7 @@
 <resources>
-    <string name="reader_chapter_end">· 本章完 ·</string>
-    <string name="reader_previous_chapter">上一章</string>
-    <string name="reader_next_chapter">下一章</string>
-    <string name="reader_book_illustration">书内插图</string>
-    <string name="reader_illustration">插图</string>
+    <string name="reader_chapter_end">· End of chapter ·</string>
+    <string name="reader_previous_chapter">Previous chapter</string>
+    <string name="reader_next_chapter">Next chapter</string>
+    <string name="reader_book_illustration">Book illustration</string>
+    <string name="reader_illustration">Illustration</string>
 </resources>

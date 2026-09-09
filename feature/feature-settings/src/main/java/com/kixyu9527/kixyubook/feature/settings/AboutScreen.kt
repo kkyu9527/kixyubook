@@ -56,6 +56,7 @@ fun AboutRoute(
     appLogo: @Composable () -> Unit,
     embedded: Boolean = false,
 ) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val openExternal: ((() -> Boolean), String) -> Unit = { open, errorMessage ->
@@ -64,7 +65,7 @@ fun AboutRoute(
     LaunchedEffect(updateState) {
         when (val result = updateState) {
             is AppUpdateState.UpToDate -> {
-                snackbar.showSnackbar("当前已是最新版本 ${result.currentVersion}")
+                snackbar.showSnackbar(resources.getString(R.string.settings_latest_version, result.currentVersion))
                 onUpdateResultConsumed()
             }
             is AppUpdateState.Failed -> {
@@ -118,13 +119,13 @@ fun AboutRoute(
                         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                     ) {
                         KixyuButton(
-                            text = if (updateState == AppUpdateState.Checking) "正在检查…" else "检查更新",
+                            text = if (updateState == AppUpdateState.Checking) stringResource(R.string.settings_checking_update) else stringResource(R.string.settings_check_update),
                             onClick = onCheckForUpdates,
                             modifier = Modifier.weight(1f),
                             enabled = updateState != AppUpdateState.Checking,
                         )
                         KixyuSecondaryButton(
-                            text = "更新日志",
+                            text = stringResource(R.string.settings_release_notes),
                             onClick = onShowReleaseNotes,
                             modifier = Modifier.weight(1f),
                         )
@@ -149,7 +150,7 @@ fun AboutRoute(
                         title = stringResource(R.string.settings_project_source),
                         supportingText = stringResource(R.string.settings_project_url),
                         onClick = {
-                            openExternal(onOpenProjectSource, "无法打开 GitHub，请检查可用的浏览器")
+                            openExternal(onOpenProjectSource, resources.getString(R.string.settings_open_github_error))
                         },
                         leading = {
                             Icon(
@@ -167,7 +168,7 @@ fun AboutRoute(
                         title = stringResource(R.string.settings_telegram_contact),
                         supportingText = stringResource(R.string.settings_telegram_handle),
                         onClick = {
-                            openExternal(onContactTelegram, "无法打开 Telegram 联系链接")
+                            openExternal(onContactTelegram, resources.getString(R.string.settings_open_telegram_error))
                         },
                         leading = {
                             Icon(

@@ -1,0 +1,11 @@
+<resources>
+    <string name="library_import_error">导入失败，请重新选择文件</string>
+    <string name="library_imported_count">已导入 %1$d 本书</string>
+    <string name="library_duplicate_count">已跳过 %1$d 本重复书籍</string>
+    <string name="library_import_stopped">已取消未完成的导入</string>
+    <string name="library_no_retry_files">没有可重试的文件</string>
+    <string name="library_clear_history_failed">无法清空导入记录</string>
+    <string name="library_export_failed">书籍导出失败</string>
+    <string name="library_batch_export_failed">批量导出失败</string>
+    <string name="library_edit_failed">修改失败</string>
+</resources>

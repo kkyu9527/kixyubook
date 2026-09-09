@@ -411,12 +411,12 @@ private fun DayBar(day: DailyReading, maxDuration: Long, modifier: Modifier = Mo
             ) { }
         }
         Text(
-            dayLabel(day.epochDay),
+            dayLabel(day.epochDay, androidx.compose.ui.platform.LocalConfiguration.current.locales[0]),
             style = MaterialTheme.typography.labelSmall,
             color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
-private fun dayLabel(epochDay: Long): String = LocalDate.ofEpochDay(epochDay)
-    .format(DateTimeFormatter.ofPattern("EEEEE", Locale.getDefault()))
+private fun dayLabel(epochDay: Long, locale: Locale): String = LocalDate.ofEpochDay(epochDay)
+    .format(DateTimeFormatter.ofPattern("EEEEE", locale))

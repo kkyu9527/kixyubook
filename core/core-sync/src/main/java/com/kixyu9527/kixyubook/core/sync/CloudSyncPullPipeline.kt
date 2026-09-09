@@ -111,8 +111,8 @@ internal class CloudSyncPullPipeline(
         if (changedBookUuids.isNotEmpty()) {
             onProgress(
                 CloudSyncProgress(
-                    title = if (initialMergeComplete) "正在下载书籍" else "正在恢复云端书库",
-                    text = "已恢复 0/${changedBookUuids.size} 本",
+                    title = if (initialMergeComplete) context.getString(R.string.sync_downloading_books) else context.getString(R.string.sync_restoring_library),
+                    text = context.getString(R.string.sync_restored_count, 0, changedBookUuids.size),
                     completed = 0,
                     total = changedBookUuids.size,
                 ),
@@ -125,8 +125,8 @@ internal class CloudSyncPullPipeline(
             restoredBooks++
             onProgress(
                 CloudSyncProgress(
-                    title = if (initialMergeComplete) "正在下载书籍" else "正在恢复云端书库",
-                    text = "已恢复 $restoredBooks/${changedBookUuids.size} 本",
+                    title = if (initialMergeComplete) context.getString(R.string.sync_downloading_books) else context.getString(R.string.sync_restoring_library),
+                    text = context.getString(R.string.sync_restored_count, restoredBooks, changedBookUuids.size),
                     completed = restoredBooks,
                     total = changedBookUuids.size,
                 ),

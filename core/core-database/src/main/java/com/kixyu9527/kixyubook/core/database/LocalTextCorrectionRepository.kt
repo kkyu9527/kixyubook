@@ -49,9 +49,9 @@ class LocalTextCorrectionRepository @Inject constructor(
         originalText: String,
         replacementText: String,
     ): TextCorrection = withContext(Dispatchers.IO) {
-        require(originalText.isNotEmpty()) { "空段落不能纠错" }
-        require(replacementText != originalText) { "纠正后的内容没有变化" }
-        val book = books.getBook(bookUuid) ?: error("书籍不存在或已被删除")
+        require(originalText.isNotEmpty()) { context.getString(R.string.db_empty_correction) }
+        require(replacementText != originalText) { context.getString(R.string.db_unchanged_correction) }
+        val book = books.getBook(bookUuid) ?: error(context.getString(R.string.db_book_removed))
         val now = System.currentTimeMillis()
         var value = TextCorrection(
             uuid = UUID.randomUUID().toString(),

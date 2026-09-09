@@ -128,7 +128,7 @@ fun KixyuThemeModeControl(
         title = title ?: stringResource(R.string.kixyu_display_mode),
         selected = settings.theme,
         options = listOf(ReaderTheme.SYSTEM, ReaderTheme.DAY, ReaderTheme.NIGHT),
-        optionLabel = ReaderTheme::displayName,
+        optionLabel = { it.displayName() },
         onSelected = { onSettingsChange(settings.copy(theme = it)) },
     )
 }
@@ -144,7 +144,7 @@ fun KixyuAppColorControl(
         options = AppColorTheme.entries.filter {
             settings.appUiStyle == AppUiStyle.MATERIAL || it != AppColorTheme.WHITE
         },
-        optionLabel = AppColorTheme::displayName,
+        optionLabel = { it.displayName() },
         onSelected = { onSettingsChange(settings.copy(appColorTheme = it)) },
     )
 }
@@ -158,7 +158,7 @@ fun KixyuAppUiStyleControl(
         title = stringResource(R.string.kixyu_ui_style),
         selected = settings.appUiStyle,
         options = AppUiStyle.entries,
-        optionLabel = AppUiStyle::displayName,
+        optionLabel = { it.displayName() },
         onSelected = { style ->
             onSettingsChange(
                 settings.copy(
@@ -260,7 +260,7 @@ fun KixyuFontControls(
         title = stringResource(R.string.kixyu_reading_font),
         selected = selected,
         options = options,
-        optionLabel = KixyuFontOption::label,
+        optionLabel = { it.label },
         icon = KixyuSymbols.FontDownload,
         onSelected = { option ->
             if (option.addFont) onAddFont() else onSelectFont(option.uuid)
@@ -293,7 +293,7 @@ fun KixyuPageModeControl(
         title = stringResource(R.string.kixyu_reading_mode),
         selected = selected,
         options = ReaderReadingMode.entries,
-        optionLabel = ReaderReadingMode::displayName,
+        optionLabel = { it.displayName() },
         onSelected = { mode ->
             onSettingsChange(
                 when (mode) {
@@ -418,13 +418,13 @@ fun KixyuReaderBrightnessControls(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "阅读亮度",
+                text = stringResource(R.string.kixyu_reading_brightness),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = if (automatic) "跟随系统" else "${(previewBrightness * 100).roundToInt()}%",
+                text = if (automatic) stringResource(R.string.kixyu_follow_system) else "${(previewBrightness * 100).roundToInt()}%",
                 style = MaterialTheme.typography.labelLarge,
                 color = if (automatic) {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -561,10 +561,10 @@ private fun CustomThemeEditor(
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
     ) {
-        KixyuColorEditorRow("背景", theme.backgroundHex) { onChanged(theme.copy(backgroundHex = it)) }
-        KixyuColorEditorRow("正文", theme.bodyHex) { onChanged(theme.copy(bodyHex = it)) }
-        KixyuColorEditorRow("标题", theme.titleHex) { onChanged(theme.copy(titleHex = it)) }
-        KixyuColorEditorRow("强调色", theme.accentHex) { onChanged(theme.copy(accentHex = it)) }
+        KixyuColorEditorRow(stringResource(R.string.kixyu_color_background), theme.backgroundHex) { onChanged(theme.copy(backgroundHex = it)) }
+        KixyuColorEditorRow(stringResource(R.string.kixyu_color_body), theme.bodyHex) { onChanged(theme.copy(bodyHex = it)) }
+        KixyuColorEditorRow(stringResource(R.string.kixyu_color_title), theme.titleHex) { onChanged(theme.copy(titleHex = it)) }
+        KixyuColorEditorRow(stringResource(R.string.kixyu_color_accent), theme.accentHex) { onChanged(theme.copy(accentHex = it)) }
     }
 }
 
@@ -595,39 +595,38 @@ private fun KixyuColorEditorRow(label: String, value: String, onValidValue: (Str
     }
 }
 
-fun ReaderTheme.displayName(): String = when (this) {
-    ReaderTheme.SYSTEM -> "跟随系统"
-    ReaderTheme.DAY -> "日间"
-    ReaderTheme.NIGHT -> "夜间"
-}
+@Composable
+fun ReaderTheme.displayName(): String = stringResource(when (this) {
+    ReaderTheme.SYSTEM -> R.string.kixyu_follow_system
+    ReaderTheme.DAY -> R.string.kixyu_theme_day
+    ReaderTheme.NIGHT -> R.string.kixyu_theme_night
+})
 
-fun PageMode.displayName(): String = when (this) {
-    PageMode.SCROLL -> "上下滑动"
-    PageMode.PAGED -> "左右翻页"
-}
+@Composable
+fun PageMode.displayName(): String = stringResource(when (this) {
+    PageMode.SCROLL -> R.string.kixyu_mode_scroll
+    PageMode.PAGED -> R.string.kixyu_mode_paged
+})
 
 private enum class ReaderReadingMode { VERTICAL_SCROLL, HORIZONTAL_SLIDE, COVER }
 
-private fun ReaderReadingMode.displayName(): String = when (this) {
-    ReaderReadingMode.VERTICAL_SCROLL -> "上下滑动"
-    ReaderReadingMode.HORIZONTAL_SLIDE -> "左右滑动"
-    ReaderReadingMode.COVER -> "覆盖翻页"
-}
+@Composable
+private fun ReaderReadingMode.displayName(): String = stringResource(when (this) {
+    ReaderReadingMode.VERTICAL_SCROLL -> R.string.kixyu_mode_scroll
+    ReaderReadingMode.HORIZONTAL_SLIDE -> R.string.kixyu_mode_slide
+    ReaderReadingMode.COVER -> R.string.kixyu_mode_cover
+})
 
-fun ReaderBrightnessMode.displayName(): String = when (this) {
-    ReaderBrightnessMode.SYSTEM -> "跟随系统"
-    ReaderBrightnessMode.MANUAL -> "自定义"
-}
-
-fun AppColorTheme.displayName(): String = when (this) {
-    AppColorTheme.DEFAULT -> "默认"
-    AppColorTheme.WHITE -> "纯净白"
-    AppColorTheme.DYNAMIC -> "莫奈动态取色"
-    AppColorTheme.SAGE -> "静谧青"
-    AppColorTheme.OCEAN -> "雾海蓝"
-    AppColorTheme.VIOLET -> "暮光紫"
-    AppColorTheme.AMBER -> "暖琥珀"
-}
+@Composable
+fun AppColorTheme.displayName(): String = stringResource(when (this) {
+    AppColorTheme.DEFAULT -> R.string.kixyu_palette_default
+    AppColorTheme.WHITE -> R.string.kixyu_palette_white
+    AppColorTheme.DYNAMIC -> R.string.kixyu_palette_dynamic
+    AppColorTheme.SAGE -> R.string.kixyu_palette_sage
+    AppColorTheme.OCEAN -> R.string.kixyu_palette_ocean
+    AppColorTheme.VIOLET -> R.string.kixyu_palette_violet
+    AppColorTheme.AMBER -> R.string.kixyu_palette_amber
+})
 
 fun AppUiStyle.displayName(): String = when (this) {
     AppUiStyle.MATERIAL -> "Material"

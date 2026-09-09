@@ -113,7 +113,7 @@ class CloudSyncEngine @Inject constructor(
 
     suspend fun inspectInitialSync(): InitialSyncDecision = withContext(Dispatchers.IO) {
         val token = accountClient.accessToken()
-            ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+            ?: throw AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
         val (objects, pageToken) = coroutineScope {
             val objects = async { drive.listAll(token) }
             val pageToken = async { drive.startPageToken(token) }
@@ -154,7 +154,7 @@ class CloudSyncEngine @Inject constructor(
 
     suspend fun acceptLocalChanges(conflicts: List<InitialSyncConflict>) = withContext(Dispatchers.IO) {
         val token = accountClient.accessToken()
-            ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+            ?: throw AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
         val remote = drive.listAll(token).associateBy(DriveObject::objectKey)
         acceptLocalChanges(conflicts, remote)
     }
@@ -222,7 +222,7 @@ class CloudSyncEngine @Inject constructor(
             preferences.markRunning()
             syncStage = FullSyncStage.AUTHORIZATION
             val token = accountClient.accessToken()
-                ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+                ?: throw AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
             DiagnosticLog.record(Category.SYNC, "authorization_ready", details = mapOf("run" to syncRun))
             syncStage = FullSyncStage.REMOTE_SNAPSHOT
             val snapshot = loadRemoteSnapshot(token, persisted)
@@ -393,7 +393,7 @@ class CloudSyncEngine @Inject constructor(
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired()
             } else {
-                preferences.markError(error.message ?: "同步失败")
+                preferences.markError(error.message ?: context.getString(R.string.sync_failed))
             }
         } }
     }
@@ -419,35 +419,35 @@ class CloudSyncEngine @Inject constructor(
     private fun Throwable.toSyncFailureDiagnostic(): SyncFailureDiagnostic = when (this) {
         is AuthorizationRequiredException -> SyncFailureDiagnostic(
             outcome = "authorization_required",
-            reason = "Google Drive 授权已失效",
+            reason = context.getString(R.string.sync_auth_expired),
         )
         is DriveHttpException -> SyncFailureDiagnostic(
             outcome = "drive_http_error",
             reason = when (statusCode) {
-                401 -> "Google Drive 授权已失效"
-                403 -> "Google Drive 拒绝了本次访问"
-                404 -> "Google Drive 中的同步对象不存在"
-                429 -> "Google Drive 请求过于频繁"
-                in 500..599 -> "Google Drive 服务暂时不可用"
-                else -> "Google Drive 请求失败"
+                401 -> context.getString(R.string.sync_auth_expired)
+                403 -> context.getString(R.string.sync_access_denied)
+                404 -> context.getString(R.string.sync_object_missing)
+                429 -> context.getString(R.string.sync_too_many_requests)
+                in 500..599 -> context.getString(R.string.sync_service_unavailable)
+                else -> context.getString(R.string.sync_request_failed)
             },
             statusCode = statusCode,
         )
         is java.io.IOException -> SyncFailureDiagnostic(
             outcome = "network_error",
-            reason = "网络连接在同步过程中不可用",
+            reason = context.getString(R.string.sync_network_lost),
         )
         is android.database.sqlite.SQLiteException -> SyncFailureDiagnostic(
             outcome = "local_data_error",
-            reason = "读取或保存本地同步数据失败",
+            reason = context.getString(R.string.sync_local_data_failed),
         )
         is org.json.JSONException -> SyncFailureDiagnostic(
             outcome = "cloud_data_error",
-            reason = "云端同步数据格式无法识别",
+            reason = context.getString(R.string.sync_cloud_format_unknown),
         )
         else -> SyncFailureDiagnostic(
             outcome = "unexpected_error",
-            reason = "同步过程中发生未预期错误",
+            reason = context.getString(R.string.sync_unexpected_error),
         )
     }
 
@@ -480,7 +480,7 @@ class CloudSyncEngine @Inject constructor(
             // app displaying SYNCING after this quick stage has already finished.
             priorityStage = "authorization"
             val token = accountClient.accessToken()
-                ?: throw AuthorizationRequiredException("需要重新授权 Google Drive")
+                ?: throw AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
             val key = "progress/$bookUuid"
             priorityStage = "remote_snapshot"
             var remote = findRemoteObject(token, key, "progress-$bookUuid.json")
@@ -605,7 +605,7 @@ class CloudSyncEngine @Inject constructor(
                 if (error is DriveHttpException) accountClient.invalidateAccessToken()
                 preferences.markAuthRequired()
             } else if (followedByFullSync) {
-                preferences.markError(error.message ?: "同步失败")
+                preferences.markError(error.message ?: context.getString(R.string.sync_failed))
             }
         } }
     }

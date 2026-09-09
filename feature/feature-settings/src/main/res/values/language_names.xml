@@ -1,0 +1,7 @@
+<resources>
+    <!-- Autonyms stay recognizable even when the current UI language is unfamiliar. -->
+    <string name="language_simplified_chinese" translatable="false">简体中文</string>
+    <string name="language_traditional_chinese" translatable="false">繁體中文</string>
+    <string name="language_english" translatable="false">English</string>
+    <string name="language_japanese" translatable="false">日本語</string>
+</resources>

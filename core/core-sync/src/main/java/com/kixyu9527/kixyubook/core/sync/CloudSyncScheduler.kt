@@ -172,7 +172,7 @@ class CloudSyncWorker(
             ?: SyncWorkerMode.FULL
         val preferredBookUuid = inputData.getString(KEY_BOOK_UUID)
         val latestProgress = AtomicReference(
-            CloudSyncProgress("正在同步书籍", "正在检查本地与云端数据"),
+            CloudSyncProgress(applicationContext.getString(R.string.notification_sync_title), applicationContext.getString(R.string.sync_checking_local_cloud)),
         )
         val foregroundStarted = AtomicBoolean(false)
         var foregroundJob: Job? = null

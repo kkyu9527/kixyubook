@@ -1,0 +1,7 @@
+<resources>
+    <string name="update_notes_unpublished">GitHub 尚未發布 v%1$s 的更新說明</string>
+    <string name="update_published_hint">新版本已發布，可前往 GitHub 查看完整說明並下載。</string>
+    <string name="update_network_timeout">連線至 GitHub 逾時，請稍後重試</string>
+    <string name="update_no_network">無法連線至網路，請檢查網路設定</string>
+    <string name="update_check_failed">檢查更新失敗</string>
+</resources>

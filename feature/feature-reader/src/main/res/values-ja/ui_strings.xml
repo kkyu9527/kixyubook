@@ -1,0 +1,6 @@
+<resources>
+    <string name="reader_correct_paragraph">段落を修正</string>
+    <string name="reader_edit_correction">修正を編集</string>
+    <string name="reader_undo_correction">修正を取り消す</string>
+    <string name="reader_manage_corrections">本全体の修正を管理</string>
+</resources>

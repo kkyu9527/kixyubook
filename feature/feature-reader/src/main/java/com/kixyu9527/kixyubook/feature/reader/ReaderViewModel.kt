@@ -47,6 +47,7 @@ class ReaderViewModel @AssistedInject constructor(
     private val cloudSync: CloudSyncCoordinator,
     private val textCorrections: TextCorrectionRepository,
     private val annotations: ReaderAnnotationRepository,
+    @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel(), MemoryPressureListener {
     @AssistedFactory
     interface Factory {
@@ -107,6 +108,7 @@ class ReaderViewModel @AssistedInject constructor(
         recordOrigin = ::recordNavigationOrigin,
         jumpToPosition = ::jumpToPositionRaw,
         returnToOrigin = ::navigateHistoryBack,
+        failureMessage = { context.getString(R.string.reader_error_search) },
     )
 
     init {
@@ -247,9 +249,9 @@ class ReaderViewModel @AssistedInject constructor(
             }
             InitialReaderData(book.await(), chapters.await(), progress.await(), presentation.await())
         }
-        val book = initialData.book ?: error("书籍不存在")
+        val book = initialData.book ?: error(context.getString(R.string.reader_error_missing_book))
         val chapters = initialData.chapters
-        require(chapters.isNotEmpty()) { "书籍没有可阅读章节" }
+        require(chapters.isNotEmpty()) { context.getString(R.string.reader_error_no_chapters) }
         val progress = initialData.progress
         acceptedProgressUpdatedAt = progress?.updatedTime ?: Long.MIN_VALUE
         val index = progress?.let { readerProgressChapterIndex(chapters, it).takeIf { index -> index >= 0 } } ?: 0
@@ -266,7 +268,7 @@ class ReaderViewModel @AssistedInject constructor(
                 error = null,
             )
         }
-        val content = chapterLoad(index, chapters, ChapterLoadPriority.USER).await() ?: error("章节读取失败")
+        val content = chapterLoad(index, chapters, ChapterLoadPriority.USER).await() ?: error(context.getString(R.string.reader_error_chapter))
         lastPosition = progress?.paragraphIndex ?: 0
         lastCharOffset = progress?.charOffset?.coerceAtLeast(0) ?: 0
         openingChapterId = chapters[index].id
@@ -626,7 +628,7 @@ class ReaderViewModel @AssistedInject constructor(
                 throw error
             } catch (error: Exception) {
                 if (pendingChapterIndex == index) {
-                    _uiState.update { it.copy(error = error.message ?: "章节读取失败") }
+                    _uiState.update { it.copy(error = error.message ?: context.getString(R.string.reader_error_chapter)) }
                 }
             } finally {
                 if (pendingChapterIndex == index) {

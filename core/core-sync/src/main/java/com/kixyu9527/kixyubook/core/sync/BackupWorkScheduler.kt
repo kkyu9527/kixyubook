@@ -127,7 +127,7 @@ class BackupWorker(
                     Result.success()
                 },
                 onFailure = { error ->
-                    val message = error.message ?: "完整备份任务失败"
+                    val message = error.message ?: applicationContext.getString(R.string.sync_backup_failed)
                     scheduler.markFailed(id, operation, message)
                     notifications.showBackupResult(operation, null, message)
                     Result.failure()

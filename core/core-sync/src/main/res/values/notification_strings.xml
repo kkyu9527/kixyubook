@@ -1,0 +1,18 @@
+<resources>
+    <string name="notification_sync_title">Syncing books</string>
+    <string name="notification_sync_data">Transferring Google Drive data</string>
+    <string name="notification_export_failed">Backup export failed</string>
+    <string name="notification_restore_failed">Backup restore failed</string>
+    <string name="notification_export_complete">Backup exported</string>
+    <string name="notification_restore_complete">Backup restored</string>
+    <string name="notification_books_saved">Books saved: %1$d</string>
+    <string name="notification_books_restored">Books restored: %1$d. Reopen the app to apply.</string>
+    <string name="notification_channel_tasks">Background tasks</string>
+    <string name="notification_channel_tasks_hint">Progress for books, fonts, cloud sync, and full backups</string>
+    <string name="notification_channel_attention">Needs attention</string>
+    <string name="notification_channel_attention_hint">Actions needed, such as sync conflict resolution</string>
+    <string name="notification_channel_results">Task results</string>
+    <string name="notification_channel_results_hint">Completion or failure of backups and other background tasks</string>
+    <string name="notification_channel_reading">Reading reminders</string>
+    <string name="notification_channel_reading_hint">Daily reading goal reminders that you enable</string>
+</resources>

@@ -43,6 +43,7 @@ class SettingsViewModel @Inject constructor(
     private val backupRepository: BackupRepository,
     private val cloudSync: CloudSyncManager,
     private val readingReminders: ReadingReminderScheduler,
+    @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
     private data class BasicSettings(
         val settings: ReaderSettings,
@@ -93,11 +94,11 @@ class SettingsViewModel @Inject constructor(
                     BackupTaskPhase.SUCCEEDED -> {
                         lastReportedWorkId = workId
                         if (task.requiresRestart) _restoreCompleted.emit(Unit)
-                        else _messages.emit("完整备份已保存：${task.bookCount ?: 0} 本书")
+                        else _messages.emit(context.getString(R.string.settings_backup_saved, task.bookCount ?: 0))
                     }
                     BackupTaskPhase.FAILED -> {
                         lastReportedWorkId = workId
-                        _messages.emit(task.error ?: "完整备份任务失败")
+                        _messages.emit(task.error ?: context.getString(R.string.settings_backup_failed))
                     }
                     else -> Unit
                 }
@@ -106,7 +107,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun update(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { repository.update(transform) } }
-    fun resetReaderTheme() = resetSettingsGroup("阅读外观已恢复默认") { current ->
+    fun resetReaderTheme() = resetSettingsGroup(context.getString(R.string.settings_theme_reset)) { current ->
         val defaults = ReaderSettings()
         current.copy(
             theme = defaults.theme,
@@ -118,7 +119,7 @@ class SettingsViewModel @Inject constructor(
             keepScreenOn = defaults.keepScreenOn,
         )
     }
-    fun resetReaderLayout() = resetSettingsGroup("排版与翻页已恢复默认") { current ->
+    fun resetReaderLayout() = resetSettingsGroup(context.getString(R.string.settings_layout_reset)) { current ->
         val defaults = ReaderSettings()
         current.copy(
             fontSize = defaults.fontSize,
@@ -130,13 +131,13 @@ class SettingsViewModel @Inject constructor(
             fontUuid = defaults.fontUuid,
         )
     }
-    fun resetReaderBehavior() = resetSettingsGroup("阅读控制已恢复默认") { current ->
+    fun resetReaderBehavior() = resetSettingsGroup(context.getString(R.string.settings_controls_reset)) { current ->
         val defaults = ReaderSettings()
         current.copy(
             volumeKeyPageTurn = defaults.volumeKeyPageTurn,
         )
     }
-    fun resetReaderInformation() = resetSettingsGroup("阅读信息已恢复默认") { current ->
+    fun resetReaderInformation() = resetSettingsGroup(context.getString(R.string.settings_information_reset)) { current ->
         val defaults = ReaderSettings()
         current.copy(
             showStatusBar = defaults.showStatusBar,
@@ -160,7 +161,7 @@ class SettingsViewModel @Inject constructor(
         }
         repository.setReadingGoalMinutes(30)
         readingReminders.setEnabled(false)
-        _messages.emit("阅读设置已全部恢复默认")
+        _messages.emit(context.getString(R.string.settings_reading_reset))
     }
     fun setGoal(minutes: Int) { viewModelScope.launch { repository.setReadingGoalMinutes(minutes) } }
     fun importFont(uri: String) {
@@ -168,9 +169,9 @@ class SettingsViewModel @Inject constructor(
             fonts.importFont(uri)
                 .onSuccess { font ->
                     repository.update { it.copy(fontUuid = font.uuid) }
-                    _messages.emit("已导入并使用 ${font.name}")
+                    _messages.emit(context.getString(R.string.settings_font_applied, font.name))
                 }
-                .onFailure { _messages.emit(it.message ?: "字体导入失败") }
+                .onFailure { _messages.emit(it.message ?: context.getString(R.string.settings_font_import_failed)) }
         }
     }
     fun deleteFont(font: UserFont) { viewModelScope.launch {
@@ -186,7 +187,7 @@ class SettingsViewModel @Inject constructor(
         _backupInspectionActive.value = true
         backupRepository.inspect(uri)
             .onSuccess { _backupPreview.value = it }
-            .onFailure { _messages.emit(it.message ?: "无法读取备份信息") }
+            .onFailure { _messages.emit(it.message ?: context.getString(R.string.settings_backup_read_failed)) }
         _backupInspectionActive.value = false
     }
 
@@ -215,20 +216,20 @@ class SettingsViewModel @Inject constructor(
     fun setWifiOnlyForLargeFiles(enabled: Boolean) = viewModelScope.launch { cloudSync.setWifiOnlyForLargeFiles(enabled) }
     fun resolveInitialSync(choice: InitialSyncChoice) = viewModelScope.launch {
         cloudSync.resolveInitialSync(choice)
-            .onFailure { _messages.emit(it.message ?: "同步冲突处理失败") }
+            .onFailure { _messages.emit(it.message ?: context.getString(R.string.settings_conflict_failed)) }
     }
     fun syncNow() = cloudSync.syncNow()
     fun refreshGoogleDriveStorage(force: Boolean = false) = cloudSync.refreshStorageQuota(force)
     fun disconnectGoogle() = viewModelScope.launch { cloudSync.disconnect() }
     fun deleteCloudData(activity: Activity) = viewModelScope.launch {
         cloudSync.deleteCloudData(activity)
-            .onSuccess { _messages.emit("Google Drive 同步数据已删除") }
-            .onFailure { _messages.emit(it.message ?: "删除云端数据失败") }
+            .onSuccess { _messages.emit(context.getString(R.string.settings_cloud_deleted)) }
+            .onFailure { _messages.emit(it.message ?: context.getString(R.string.settings_cloud_delete_failed)) }
     }
 
     private suspend fun handleConnectResult(result: GoogleConnectResult) {
         when (result) {
-            GoogleConnectResult.Connected -> _messages.emit("Google 账号已连接，正在自动同步")
+            GoogleConnectResult.Connected -> _messages.emit(context.getString(R.string.settings_account_connected))
             is GoogleConnectResult.NeedsAuthorization -> _authorizationRequests.send(result.pendingIntent)
             is GoogleConnectResult.Failed -> _messages.emit(result.message)
         }

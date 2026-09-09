@@ -98,8 +98,8 @@ fun FontManagementRoute(
             item {
                 KixyuSection(title = stringResource(R.string.settings_fonts_section)) {
                     FontChoiceRow(
-                        name = "系统默认",
-                        description = "跟随设备字体，体积最小",
+                        name = stringResource(com.kixyu9527.kixyubook.core.designsystem.R.string.kixyu_system_default),
+                        description = stringResource(R.string.settings_default_font_hint),
                         font = null,
                         selected = state.settings.fontUuid == null,
                         onSelect = { viewModel.update { it.copy(fontUuid = null) } },
@@ -120,7 +120,7 @@ fun FontManagementRoute(
                         KixyuDivider()
                         FontChoiceRow(
                             name = font.name,
-                            description = "用户导入 · TTF / OTF",
+                            description = stringResource(R.string.settings_imported_font_hint),
                             font = font,
                             selected = state.settings.fontUuid == font.uuid,
                             onSelect = { viewModel.update { it.copy(fontUuid = font.uuid) } },
@@ -138,7 +138,7 @@ fun FontManagementRoute(
         show = fontToDelete != null,
         title = stringResource(R.string.settings_delete_font),
         onDismissRequest = { pendingDeletion = null },
-        confirmLabel = "删除",
+        confirmLabel = stringResource(R.string.settings_delete),
         onConfirm = {
             fontToDelete?.let(viewModel::deleteFont)
             pendingDeletion = null
@@ -178,7 +178,7 @@ private fun FontChoiceRow(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "阅",
+                    text = stringResource(R.string.settings_font_sample),
                     style = MaterialTheme.typography.titleLarge,
                     fontFamily = previewFamily,
                     color = foreground,
@@ -193,7 +193,7 @@ private fun FontChoiceRow(
             KixyuIconButton(onClick = onDelete) {
                 Icon(
                     KixyuSymbols.DeleteOutline,
-                    "删除 $name",
+                    stringResource(R.string.settings_remove_named_font, name),
                     tint = if (selected) foreground else MaterialTheme.colorScheme.error,
                 )
             }

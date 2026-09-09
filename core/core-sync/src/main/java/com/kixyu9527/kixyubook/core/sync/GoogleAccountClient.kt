@@ -52,7 +52,7 @@ class GoogleAccountClient @Inject constructor(
     }.getOrElse { GoogleConnectResult.Failed(it.authorizationMessage()) }
 
     suspend fun finishAuthorization(activity: Activity, resultData: Intent?): GoogleConnectResult = runCatching {
-        requireNotNull(resultData) { "已取消 Google 账号授权" }
+        requireNotNull(resultData) { context.getString(R.string.sync_account_canceled) }
         val result = Identity.getAuthorizationClient(activity)
             .getAuthorizationResultFromIntent(resultData)
         consumeAuthorizationResult(result)
@@ -124,16 +124,16 @@ class GoogleAccountClient @Inject constructor(
 
     private fun AuthorizationResult.toConnectResult(): GoogleConnectResult? = if (hasResolution()) {
         pendingIntent?.let(GoogleConnectResult::NeedsAuthorization)
-            ?: GoogleConnectResult.Failed("Google 账号选择界面不可用")
+            ?: GoogleConnectResult.Failed(context.getString(R.string.sync_account_picker_unavailable))
     } else if (accessToken.isNullOrBlank()) {
-        GoogleConnectResult.Failed("Google Drive 未返回访问令牌")
+        GoogleConnectResult.Failed(context.getString(R.string.sync_token_missing))
     } else {
         GoogleConnectResult.Connected
     }
 
     private suspend fun consumeAuthorizationResult(result: AuthorizationResult): GoogleConnectResult {
         val connectResult = result.toConnectResult()
-            ?: return GoogleConnectResult.Failed("Google Drive 授权流程不可用")
+            ?: return GoogleConnectResult.Failed(context.getString(R.string.sync_authorization_unavailable))
         if (connectResult is GoogleConnectResult.Connected) {
             result.accessToken?.takeIf(String::isNotBlank)?.let { token ->
                 cachedToken = CachedAccessToken(token, System.currentTimeMillis() + TOKEN_CACHE_MILLIS)
@@ -144,12 +144,12 @@ class GoogleAccountClient @Inject constructor(
     }
 
     private fun Throwable.authorizationMessage(): String = when {
-        this is ApiException && statusCode == 16 -> "已取消 Google 账号授权"
+        this is ApiException && statusCode == 16 -> context.getString(R.string.sync_account_canceled)
         this is ApiException && statusCode in setOf(8, 10) ->
-            "应用尚未在 Google Cloud 注册：请为正式版包名和签名 SHA-1 创建 Android OAuth Client"
+            context.getString(R.string.sync_oauth_unregistered)
         message?.contains("UNREGISTERED_ON_API_CONSOLE", ignoreCase = true) == true ->
-            "应用尚未在 Google Cloud 注册：请为正式版包名和签名 SHA-1 创建 Android OAuth Client"
-        else -> message ?: "Google Drive 授权失败"
+            context.getString(R.string.sync_oauth_unregistered)
+        else -> message ?: context.getString(R.string.sync_authorization_failed)
     }
 
     private suspend fun saveAuthorizedAccount(accessToken: String) = withContext(Dispatchers.IO) {
@@ -161,11 +161,11 @@ class GoogleAccountClient @Inject constructor(
             setRequestProperty("Accept", "application/json")
         }
         try {
-            check(connection.responseCode in 200..299) { "无法读取 Google 账号信息" }
+            check(connection.responseCode in 200..299) { context.getString(R.string.sync_account_read_failed) }
             val json = connection.inputStream.bufferedReader().use { JSONObject(it.readText()) }
             val subject = json.optString("sub").ifBlank { json.optString("email") }
             val email = json.optString("email")
-            check(subject.isNotBlank()) { "Google 账号信息不完整" }
+            check(subject.isNotBlank()) { context.getString(R.string.sync_account_incomplete) }
             preferences.saveAccount(
                 SyncAccount(
                     subject = subject,

@@ -94,7 +94,8 @@ class ReaderViewModelRecoveryTest {
         val annotations = fake<ReaderAnnotationRepository> { method, _ ->
             check(method == "observeBookAnnotations"); flowOf(emptyList<ReaderAnnotation>())
         }
-        fun newReader() = ReaderViewModel("book", repository, settings, fonts, stats, sync, corrections, annotations)
+        fun newReader() = ReaderViewModel("book", repository, settings, fonts, stats, sync, corrections, annotations,
+            androidx.test.core.app.ApplicationProvider.getApplicationContext())
         val firstStore = ViewModelStore()
         val secondStore = ViewModelStore()
         lateinit var first: ReaderViewModel

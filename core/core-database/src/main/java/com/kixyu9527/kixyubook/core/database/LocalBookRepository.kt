@@ -169,7 +169,7 @@ class LocalBookRepository @Inject constructor(
     }
 
     override suspend fun clearImportHistory() = withContext(Dispatchers.IO) {
-        require(importProgress.value?.finished != false) { "导入进行中，不能清空记录" }
+        require(importProgress.value?.finished != false) { context.getString(R.string.db_import_running) }
         importDao.deleteAll()
     }
 
@@ -290,7 +290,7 @@ class LocalBookRepository @Inject constructor(
     override suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit> = withContext(Dispatchers.IO) {
         val startedAt = SystemClock.elapsedRealtime()
         runCatching {
-            val book = dao.getBook(bookUuid) ?: error("书籍不存在或已被删除")
+            val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_removed))
             val destination = uriString.toUri()
             context.contentResolver.openOutputStream(destination, "w")?.use { output ->
                 output.bufferedWriter(Charsets.UTF_8).use { writer ->
@@ -307,7 +307,7 @@ class LocalBookRepository @Inject constructor(
                         }
                     }
                 }
-            } ?: error("无法写入所选位置")
+            } ?: error(context.getString(R.string.db_write_location_failed))
             Unit
         }.onSuccess {
             DiagnosticLog.record(
@@ -355,7 +355,7 @@ class LocalBookRepository @Inject constructor(
                     parent,
                     "text/plain",
                     correctedExportFileName(book.title, book.format),
-                ) ?: error("无法创建导出文件")
+                ) ?: error(context.getString(R.string.db_create_export_failed))
             }.getOrElse {
                 failedTitles += book.title
                 return@forEach
@@ -462,7 +462,7 @@ class LocalBookRepository @Inject constructor(
                 )
                 val outlines = if (format == BookFormat.EPUB) {
                     epubIndex.registerDirectory(bookUuid, stored, parser as EpubBookParser)
-                        .also { if (it.isEmpty()) error("未找到可阅读章节") }
+                        .also { if (it.isEmpty()) error(context.getString(R.string.db_no_chapters)) }
                 } else {
                     emptyList()
                 }
@@ -474,7 +474,7 @@ class LocalBookRepository @Inject constructor(
                     if (format == BookFormat.EPUB) 1f else .78f,
                     if (format == BookFormat.EPUB) ImportItemStatus.SUCCEEDED else ImportItemStatus.RUNNING,
                     bookUuid = bookUuid,
-                    message = if (format == BookFormat.EPUB) "已加入书架，全文索引将在后台继续" else "正在建立正文索引",
+                    message = if (format == BookFormat.EPUB) context.getString(R.string.db_import_background) else context.getString(R.string.db_indexing),
                 )
             } catch (error: ImportCanceledException) {
                 insertedUuid?.let { removeIncompleteImport(it) }
@@ -497,14 +497,14 @@ class LocalBookRepository @Inject constructor(
                 insertedUuid?.let { removeIncompleteImport(it) }
                 storedFile?.delete()
                 coverFile?.delete()
-                failures += "$displayName：${error.message ?: "导入失败"}"
+                failures += "$displayName：${error.message ?: context.getString(R.string.db_import_failed)}"
                 failureDiagnostics += error.toDiagnosticFailure()
                 updateImportProgress(
                     importRun, rawUri,
                     ImportStage.FINISHED,
                     1f,
                     ImportItemStatus.FAILED,
-                    message = error.message ?: "导入失败",
+                    message = error.message ?: context.getString(R.string.db_import_failed),
                 )
             } finally {
                 temp.delete()
@@ -553,7 +553,7 @@ class LocalBookRepository @Inject constructor(
                 dao.deleteChapters(bookUuid)
             }
             val chapterCount = importStreamingChapters(bookUuid, source, parsers.parserFor(BookFormat.TXT))
-            if (chapterCount == 0) error("未找到可阅读章节")
+            if (chapterCount == 0) error(context.getString(R.string.db_no_chapters))
             DiagnosticLog.record(
                 Category.IMPORT,
                 "background_index_finished",
@@ -587,7 +587,7 @@ class LocalBookRepository @Inject constructor(
                 ),
             )
             removeIncompleteImport(bookUuid)
-            importEvents.emit("$displayName：${error.message ?: "导入失败"}")
+            importEvents.emit("$displayName：${error.message ?: context.getString(R.string.db_import_failed)}")
             if (runId != null && sourceId != null) {
                 updateImportProgress(
                     runId,
@@ -596,7 +596,7 @@ class LocalBookRepository @Inject constructor(
                     1f,
                     ImportItemStatus.FAILED,
                     bookUuid = bookUuid,
-                    message = error.message ?: "导入失败",
+                    message = error.message ?: context.getString(R.string.db_import_failed),
                 )
             }
         }
@@ -656,7 +656,7 @@ class LocalBookRepository @Inject constructor(
             context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
         }.getOrNull()?.takeIf { it > 0L }
         val digest = MessageDigest.getInstance("SHA-256")
-        val input = context.contentResolver.openInputStream(uri) ?: error("无法读取文件")
+        val input = context.contentResolver.openInputStream(uri) ?: error(context.getString(R.string.db_read_failed))
         input.use { source ->
             DigestInputStream(source, digest).use { hashingInput ->
                 destination.outputStream().buffered().use { output ->
@@ -695,7 +695,7 @@ class LocalBookRepository @Inject constructor(
         if (name.endsWith(".txt", true)) return BookFormat.TXT
         val sample = FileInputStream(file).use { input -> ByteArray(1024).let { it.copyOf(input.read(it).coerceAtLeast(0)) } }
         if (sample.any { it == '\n'.code.toByte() } || sample.isNotEmpty()) return BookFormat.TXT
-        error("仅支持 TXT 与 EPUB")
+        error(context.getString(R.string.db_supported_formats))
     }
 
     private fun File.isEpub(): Boolean = runCatching {
@@ -708,7 +708,7 @@ class LocalBookRepository @Inject constructor(
                 if (dao.bookExists(book.uuid)) return@withLock true
                 if (dao.findUuidByHash(book.contentHash) != null) return@withLock false
                 val source = File(sourceFilePath)
-                require(source.isFile) { "云端书籍文件不存在" }
+                require(source.isFile) { context.getString(R.string.db_cloud_file_missing) }
                 val actualHash = source.inputStream().use { input ->
                     val digest = MessageDigest.getInstance("SHA-256")
                     DigestInputStream(input, digest).use { stream ->
@@ -719,7 +719,7 @@ class LocalBookRepository @Inject constructor(
                     }
                     digest.digest().joinToString("") { "%02x".format(it) }
                 }
-                require(actualHash == book.contentHash) { "云端书籍校验失败" }
+                require(actualHash == book.contentHash) { context.getString(R.string.db_cloud_hash_failed) }
                 val extension = if (book.format == BookFormat.EPUB) "epub" else "txt"
                 val stored = File(context.filesDir, "books/${book.uuid}.$extension").also { it.parentFile?.mkdirs() }
                 source.copyTo(stored, overwrite = true)
@@ -1031,7 +1031,7 @@ class LocalBookRepository @Inject constructor(
     }
 
     override suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = withContext(Dispatchers.IO) {
-        val book = dao.getBook(bookUuid) ?: error("书籍不存在")
+        val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_missing))
         dao.insertMetadataEdit(MetadataEditEntity(UUID.randomUUID().toString(), bookUuid, book.title, book.author, book.description, title.trim(), author.trim(), description.trim(), System.currentTimeMillis()))
         dao.updateBookMetadata(bookUuid, title.trim().ifBlank { "未命名书籍" }, author.trim().ifBlank { "未知作者" }, description.trim())
         syncMutations.record(SyncEntityType.BOOK, bookUuid)
@@ -1039,10 +1039,10 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun reparseTxt(bookUuid: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val book = dao.getBook(bookUuid) ?: error("书籍不存在")
-            require(book.format == BookFormat.TXT.name) { "只有 TXT 可以重新解析" }
+            val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_missing))
+            require(book.format == BookFormat.TXT.name) { context.getString(R.string.db_txt_only) }
             val source = File(book.storagePath)
-            require(source.isFile) { "找不到原始 TXT 文件" }
+            require(source.isFile) { context.getString(R.string.db_txt_missing) }
             val parser = parsers.parserFor(BookFormat.TXT)
             val metadata = parser.readMetadata(source, book.title)
             val previousChapters = dao.getChapters(bookUuid)
@@ -1072,7 +1072,7 @@ class LocalBookRepository @Inject constructor(
                     chapterIds += chapterId
                     dao.insertParagraphsChunked(chapterId, chapter.paragraphs)
                 }
-                require(chapterIndex > 0) { "未找到可阅读章节" }
+                require(chapterIndex > 0) { context.getString(R.string.db_no_chapters) }
                 val paragraphsByChapter = chapterIds.associateWith { chapterId ->
                     dao.getParagraphs(chapterId)
                 }

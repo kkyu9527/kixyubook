@@ -92,11 +92,14 @@ internal fun KixyuNavDisplay(
     val homeIcon = KixyuSymbols.AutoStories
     val libraryIcon = KixyuSymbols.LibraryBooks
     val settingsIcon = KixyuSymbols.Settings
-    val top = remember(homeIcon, libraryIcon, settingsIcon) {
+    val homeLabel = androidx.compose.ui.res.stringResource(com.kixyu9527.kixyubook.feature.home.R.string.home_title)
+    val libraryLabel = androidx.compose.ui.res.stringResource(com.kixyu9527.kixyubook.feature.library.R.string.library_title)
+    val settingsLabel = androidx.compose.ui.res.stringResource(com.kixyu9527.kixyubook.feature.settings.R.string.settings_title)
+    val top = remember(homeIcon, libraryIcon, settingsIcon, homeLabel, libraryLabel, settingsLabel) {
         listOf(
-            TopDestination(Routes.HOME, "阅读", homeIcon),
-            TopDestination(Routes.LIBRARY, "书库", libraryIcon),
-            TopDestination(Routes.SETTINGS, "设置", settingsIcon),
+            TopDestination(Routes.HOME, homeLabel, homeIcon),
+            TopDestination(Routes.LIBRARY, libraryLabel, libraryIcon),
+            TopDestination(Routes.SETTINGS, settingsLabel, settingsIcon),
         )
     }
     val useNavigationRail = kixyuUsesNavigationRail()

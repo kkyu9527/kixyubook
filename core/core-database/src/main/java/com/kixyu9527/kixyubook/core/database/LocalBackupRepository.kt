@@ -49,7 +49,7 @@ class LocalBackupRepository @Inject constructor(
                 val properties = loadManifest(extracted)
                 val formatVersion = requireSupportedFormat(properties)
                 val snapshot = File(extracted, DATABASE_ENTRY).also {
-                    require(it.isFile) { "备份缺少数据库" }
+                    require(it.isFile) { context.getString(R.string.backup_no_database) }
                 }
                 val integrityProtected = verifyIntegrity(properties, extracted)
                 validateAndRebase(snapshot, File(extracted, "files"))
@@ -126,7 +126,7 @@ class LocalBackupRepository @Inject constructor(
                     settings.fontUuid?.let { setProperty("fontUuid", it) }
                     setProperty("readingGoalMinutes", goal.toString())
                 }
-                val output = context.contentResolver.openOutputStream(uriString.toUri(), "w") ?: error("无法创建备份文件")
+                val output = context.contentResolver.openOutputStream(uriString.toUri(), "w") ?: error(context.getString(R.string.backup_create_failed))
                 output.use { raw -> ZipOutputStream(BufferedOutputStream(raw)).use { zip ->
                     zip.putNextEntry(ZipEntry(MANIFEST_ENTRY)); properties.store(zip, "KixyuBook full backup") ; zip.closeEntry()
                     zip.putFile(snapshot, DATABASE_ENTRY)
@@ -149,7 +149,7 @@ class LocalBackupRepository @Inject constructor(
                 val properties = loadManifest(extracted)
                 requireSupportedFormat(properties)
                 val snapshot = File(extracted, DATABASE_ENTRY)
-                require(snapshot.isFile) { "备份缺少数据库" }
+                require(snapshot.isFile) { context.getString(R.string.backup_no_database) }
                 verifyIntegrity(properties, extracted)
                 validateAndRebase(snapshot, File(extracted, "files"))
                 ensureRestoreInstallSpace(snapshot, File(extracted, "files"))
@@ -167,14 +167,14 @@ class LocalBackupRepository @Inject constructor(
         var totalBytes = 0L
         var entries = 0
         val names = hashSetOf<String>()
-        val input = context.contentResolver.openInputStream(uriString.toUri()) ?: error("无法读取备份文件")
+        val input = context.contentResolver.openInputStream(uriString.toUri()) ?: error(context.getString(R.string.backup_read_failed))
         input.use { raw -> ZipInputStream(BufferedInputStream(raw)).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
-                require(++entries <= MAX_ENTRIES) { "备份条目过多" }
-                require(names.add(entry.name)) { "备份包含重复条目：${entry.name}" }
+                require(++entries <= MAX_ENTRIES) { context.getString(R.string.backup_too_many_entries) }
+                require(names.add(entry.name)) { context.getString(R.string.backup_duplicate_entry, entry.name) }
                 val target = File(extracted, entry.name).canonicalFile
-                require(target.path.startsWith(extracted.canonicalPath + File.separator)) { "备份包含非法路径" }
+                require(target.path.startsWith(extracted.canonicalPath + File.separator)) { context.getString(R.string.backup_invalid_path) }
                 if (entry.isDirectory) target.mkdirs() else {
                     target.parentFile?.mkdirs()
                     target.outputStream().buffered().use { output ->
@@ -183,10 +183,10 @@ class LocalBackupRepository @Inject constructor(
                             val read = zip.read(buffer)
                             if (read <= 0) break
                             totalBytes += read
-                            require(totalBytes <= MAX_UNCOMPRESSED_BYTES) { "备份解压后体积异常" }
+                            require(totalBytes <= MAX_UNCOMPRESSED_BYTES) { context.getString(R.string.backup_abnormal_size) }
                             if (totalBytes % RESTORE_SPACE_CHECK_INTERVAL_BYTES < read) {
                                 require(allocatableBytes(work) >= RESTORE_WORKING_SPACE_RESERVE_BYTES) {
-                                    "设备存储空间不足，无法继续解压备份"
+                                    context.getString(R.string.backup_extract_no_space)
                                 }
                             }
                             output.write(buffer, 0, read)
@@ -201,31 +201,31 @@ class LocalBackupRepository @Inject constructor(
 
     private fun loadManifest(extracted: File): Properties = Properties().apply {
         File(extracted, MANIFEST_ENTRY).takeIf(File::isFile)?.inputStream()?.use(::load)
-            ?: error("不是有效的 KixyuBook 备份")
+            ?: error(context.getString(R.string.backup_invalid))
     }
 
     private fun requireSupportedFormat(properties: Properties): Int =
         properties.getProperty("formatVersion")?.toIntOrNull()?.also { version ->
-            require(version == BACKUP_VERSION) { "不支持此备份版本" }
-        } ?: error("备份缺少格式版本")
+            require(version == BACKUP_VERSION) { context.getString(R.string.backup_version_unsupported) }
+        } ?: error(context.getString(R.string.backup_version_missing))
 
     /** Legacy v5 backups remain restorable; newly exported v5 backups carry a complete hash list. */
     private fun verifyIntegrity(properties: Properties, extracted: File): Boolean {
         val integrityVersion = properties.getProperty("integrityVersion")?.toIntOrNull() ?: return false
-        require(integrityVersion == INTEGRITY_VERSION) { "不支持此备份校验格式" }
+        require(integrityVersion == INTEGRITY_VERSION) { context.getString(R.string.backup_integrity_unsupported) }
         val snapshot = File(extracted, DATABASE_ENTRY)
-        require(snapshot.sha256() == properties.getProperty("databaseSha256")) { "备份数据库校验失败" }
+        require(snapshot.sha256() == properties.getProperty("databaseSha256")) { context.getString(R.string.backup_database_invalid) }
         val assetCount = properties.getProperty("assetCount")?.toIntOrNull()
-            ?: error("备份缺少资源校验清单")
-        require(assetCount in 0..MAX_ENTRIES) { "备份资源校验清单异常" }
+            ?: error(context.getString(R.string.backup_manifest_missing))
+        require(assetCount in 0..MAX_ENTRIES) { context.getString(R.string.backup_manifest_invalid) }
         repeat(assetCount) { index ->
-            val path = properties.getProperty("asset.$index.path") ?: error("备份资源清单不完整")
-            val expected = properties.getProperty("asset.$index.sha256") ?: error("备份资源清单不完整")
+            val path = properties.getProperty("asset.$index.path") ?: error(context.getString(R.string.backup_manifest_incomplete))
+            val expected = properties.getProperty("asset.$index.sha256") ?: error(context.getString(R.string.backup_manifest_incomplete))
             val file = File(extracted, path).canonicalFile
             require(file.path.startsWith(extracted.canonicalPath + File.separator) && file.isFile) {
-                "备份缺少资源：$path"
+                context.getString(R.string.backup_asset_missing, path)
             }
-            require(file.sha256() == expected) { "备份资源校验失败：$path" }
+            require(file.sha256() == expected) { context.getString(R.string.backup_asset_invalid, path) }
         }
         return true
     }
@@ -235,14 +235,14 @@ class LocalBackupRepository @Inject constructor(
             db.rawQuery("PRAGMA user_version", null).use { cursor ->
                 require(
                     cursor.moveToFirst() && cursor.getInt(0) in SUPPORTED_BACKUP_DATABASE_VERSIONS,
-                ) { "备份数据库版本不兼容" }
+                ) { context.getString(R.string.backup_database_version) }
             }
             db.rawQuery("SELECT uuid, format, coverPath FROM books", null).use { cursor ->
                 while (cursor.moveToNext()) {
                     val uuid = cursor.getString(0)
                     val format = cursor.getString(1).lowercase()
                     val storedBook = File(assets, "books/$uuid.$format")
-                    require(storedBook.isFile) { "备份缺少书籍原文件：$uuid" }
+                    require(storedBook.isFile) { context.getString(R.string.backup_book_missing, uuid) }
                     val coverName = cursor.getString(2)?.let { File(it).name }
                     val cover = coverName?.let { File(context.filesDir, "covers/$it").absolutePath }
                     db.execSQL("UPDATE books SET storagePath = ?, coverPath = ? WHERE uuid = ?", arrayOf(storedBook.livePath("books"), cover, uuid))
@@ -252,7 +252,7 @@ class LocalBackupRepository @Inject constructor(
                 while (cursor.moveToNext()) {
                     val uuid = cursor.getString(0)
                     val archived = File(assets, "fonts/${File(cursor.getString(1)).name}")
-                    require(archived.isFile && archived.nameWithoutExtension == uuid) { "备份缺少用户字体：$uuid" }
+                    require(archived.isFile && archived.nameWithoutExtension == uuid) { context.getString(R.string.backup_font_missing, uuid) }
                     db.execSQL("UPDATE user_fonts SET filePath = ? WHERE uuid = ?", arrayOf(archived.livePath("fonts"), uuid))
                 }
             }
@@ -266,7 +266,7 @@ class LocalBackupRepository @Inject constructor(
         val requiredBytes = installBytes + RESTORE_WORKING_SPACE_RESERVE_BYTES
         require(allocatableBytes(context.filesDir) >= requiredBytes) {
             val requiredMegabytes = (requiredBytes + BYTES_PER_MEBIBYTE - 1) / BYTES_PER_MEBIBYTE
-            "设备存储空间不足，恢复需要至少约 ${requiredMegabytes} MiB 可用空间"
+            context.getString(R.string.backup_space_required, requiredMegabytes)
         }
     }
 
@@ -282,7 +282,7 @@ class LocalBackupRepository @Inject constructor(
         try {
             snapshot.copyTo(replacing, overwrite = true)
             listOf(dbFile, File("${dbFile.path}-wal"), File("${dbFile.path}-shm")).forEach { it.delete() }
-            check(replacing.renameTo(dbFile)) { "无法安装恢复数据库" }
+            check(replacing.renameTo(dbFile)) { context.getString(R.string.backup_install_database_failed) }
             ASSET_DIRECTORIES.forEach { name ->
                 val live = File(context.filesDir, name)
                 live.deleteRecursively()
@@ -391,7 +391,7 @@ class LocalBackupRepository @Inject constructor(
                     val uuid = cursor.getString(0)
                     val format = cursor.getString(1).lowercase()
                     val book = File(context.filesDir, "books/$uuid.$format")
-                    require(book.isFile) { "书籍原文件不存在：$uuid" }
+                    require(book.isFile) { context.getString(R.string.backup_original_book_missing, uuid) }
                     assets["files/books/$uuid.$format"] = BackupAsset(book, "files/books/$uuid.$format")
 
                     cursor.getString(2)?.let { coverPath ->
@@ -407,7 +407,7 @@ class LocalBackupRepository @Inject constructor(
                 while (cursor.moveToNext()) {
                     val uuid = cursor.getString(0)
                     val font = File(context.filesDir, "fonts/${File(cursor.getString(1)).name}")
-                    require(font.isFile && font.nameWithoutExtension == uuid) { "用户字体不存在：$uuid" }
+                    require(font.isFile && font.nameWithoutExtension == uuid) { context.getString(R.string.backup_original_font_missing, uuid) }
                     val entryName = "files/fonts/${font.name}"
                     assets[entryName] = BackupAsset(font, entryName)
                 }

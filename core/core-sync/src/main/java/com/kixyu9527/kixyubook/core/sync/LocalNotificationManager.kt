@@ -40,10 +40,12 @@ class LocalNotificationManager @Inject constructor(
     private val appForegroundState = MutableStateFlow(false)
 
     init {
-        createChannels()
+        refreshLocalizedChannels()
     }
 
     fun onAppForeground() {
+        // Refresh localized names after a system app-language change; IDs stay unchanged.
+        refreshLocalizedChannels()
         appInForeground = true
         appForegroundState.value = true
         manager.cancel(NOTIFICATION_AUTH_REQUIRED)
@@ -99,8 +101,8 @@ class LocalNotificationManager @Inject constructor(
     }
 
     fun syncProgressNotification(
-        title: String = "正在同步书籍",
-        text: String = "正在传输 Google Drive 数据",
+        title: String = context.getString(R.string.notification_sync_title),
+        text: String = context.getString(R.string.notification_sync_data),
         completed: Int? = null,
         total: Int? = null,
         workerId: java.util.UUID? = null,
@@ -123,7 +125,7 @@ class LocalNotificationManager @Inject constructor(
         workerId?.let { id ->
             builder.addAction(
                 0,
-                "取消",
+                context.getString(R.string.notification_cancel),
                 WorkManager.getInstance(context).createCancelPendingIntent(id),
             )
         }
@@ -149,13 +151,13 @@ class LocalNotificationManager @Inject constructor(
         if (appInForeground || !canPostNotifications()) return
         val succeeded = error == null
         val title = when {
-            !succeeded -> if (operation == BackupOperationType.EXPORT) "完整备份导出失败" else "完整备份恢复失败"
-            operation == BackupOperationType.EXPORT -> "完整备份已导出"
-            else -> "完整备份已恢复"
+            !succeeded -> if (operation == BackupOperationType.EXPORT) context.getString(R.string.notification_export_failed) else context.getString(R.string.notification_restore_failed)
+            operation == BackupOperationType.EXPORT -> context.getString(R.string.notification_export_complete)
+            else -> context.getString(R.string.notification_restore_complete)
         }
         val text = error ?: when (operation) {
-            BackupOperationType.EXPORT -> "已保存 ${bookCount ?: 0} 本书"
-            BackupOperationType.RESTORE -> "已恢复 ${bookCount ?: 0} 本书，重新打开应用后生效"
+            BackupOperationType.EXPORT -> context.getString(R.string.notification_books_saved, bookCount ?: 0)
+            BackupOperationType.RESTORE -> context.getString(R.string.notification_books_restored, bookCount ?: 0)
         }
         post(
             NOTIFICATION_BACKUP_RESULT,
@@ -222,45 +224,45 @@ class LocalNotificationManager @Inject constructor(
         )
     }
 
-    private fun createChannels() {
+    fun refreshLocalizedChannels() {
         val systemManager = context.getSystemService(NotificationManager::class.java)
         systemManager.createNotificationChannels(
             listOf(
                 NotificationChannel(
                     CHANNEL_TRANSFERS,
-                    "后台任务",
+                    context.getString(R.string.notification_channel_tasks),
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "书籍、字体、云同步与完整备份的后台进度"
+                    description = context.getString(R.string.notification_channel_tasks_hint)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     setShowBadge(false)
                 },
                 NotificationChannel(
                     CHANNEL_ACTION_REQUIRED,
-                    "需要处理",
+                    context.getString(R.string.notification_channel_attention),
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "同步冲突等需要操作的提醒"
+                    description = context.getString(R.string.notification_channel_attention_hint)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
                     enableLights(true)
                 },
                 NotificationChannel(
                     CHANNEL_TASK_RESULTS,
-                    "任务结果",
+                    context.getString(R.string.notification_channel_results),
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "完整备份等后台任务完成或失败的结果"
+                    description = context.getString(R.string.notification_channel_results_hint)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
                     enableLights(true)
                 },
                 NotificationChannel(
                     CHANNEL_REMINDERS,
-                    "阅读提醒",
+                    context.getString(R.string.notification_channel_reading),
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "由你主动开启的每日阅读目标提醒"
+                    description = context.getString(R.string.notification_channel_reading_hint)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
                     enableLights(true)

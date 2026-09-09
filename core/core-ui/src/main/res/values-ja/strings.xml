@@ -1,0 +1,5 @@
+<resources>
+    <string name="library_empty_title">あなただけの静かな本棚</string>
+    <string name="library_empty_description">TXT や EPUB をインポートして、読書に集中しましょう。</string>
+    <string name="book_cover_untitled">無題の本</string>
+</resources>

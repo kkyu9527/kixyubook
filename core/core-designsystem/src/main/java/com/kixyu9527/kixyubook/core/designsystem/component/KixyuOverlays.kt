@@ -61,6 +61,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.kixyu9527.kixyubook.core.designsystem.R
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
@@ -895,7 +897,7 @@ fun KixyuSnackbarHost(
                     KixyuMiuixWideActionButtons(
                         primaryLabel = data.visuals.actionLabel,
                         onPrimary = data::performAction,
-                        secondaryLabel = "关闭".takeIf { data.visuals.withDismissAction },
+                        secondaryLabel = stringResource(R.string.kixyu_close).takeIf { data.visuals.withDismissAction },
                         onSecondary = data::dismiss,
                         modifier = Modifier.align(Alignment.CenterHorizontally),
                     )
@@ -916,7 +918,7 @@ fun KixyuSnackbarHost(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     if (data.visuals.withDismissAction) {
-                        KixyuTextButton(text = "关闭", onClick = data::dismiss)
+                        KixyuTextButton(text = stringResource(R.string.kixyu_close), onClick = data::dismiss)
                     }
                     data.visuals.actionLabel?.let { actionLabel ->
                         KixyuTextButton(text = actionLabel, onClick = data::performAction)
@@ -952,7 +954,7 @@ fun KixyuActionDialog(
     alternativeLabel: String? = null,
     onAlternative: (() -> Unit)? = null,
     alternativeEnabled: Boolean = true,
-    dismissLabel: String? = "取消",
+    dismissLabel: String? = stringResource(R.string.kixyu_cancel),
     content: @Composable () -> Unit,
 ) {
     if (!show) return

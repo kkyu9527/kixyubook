@@ -1,0 +1,7 @@
+<resources>
+    <string name="update_notes_unpublished">Release notes for v%1$s have not been published on GitHub</string>
+    <string name="update_published_hint">A new version is available. View the full release notes and download it on GitHub.</string>
+    <string name="update_network_timeout">Connection to GitHub timed out. Try again later.</string>
+    <string name="update_no_network">Cannot connect. Check your network settings.</string>
+    <string name="update_check_failed">Could not check for updates</string>
+</resources>

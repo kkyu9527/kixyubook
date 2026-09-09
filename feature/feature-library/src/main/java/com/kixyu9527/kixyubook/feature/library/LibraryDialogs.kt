@@ -169,7 +169,10 @@ internal fun ImportHistoryDialog(
             history.forEach { run ->
                 Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
                     Text(
-                        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                        DateFormat.getDateTimeInstance(
+                            DateFormat.MEDIUM, DateFormat.SHORT,
+                            androidx.compose.ui.platform.LocalConfiguration.current.locales[0],
+                        )
                             .format(Date(run.startedTime)),
                         style = MaterialTheme.typography.titleSmall,
                     )
@@ -360,7 +363,7 @@ internal fun CategoryVisibilityDialog(
                         Column(Modifier.weight(1f)) {
                             Text(stringResource(R.string.library_hidden_title), style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                stringResource(R.string.library_hidden_category_count, hiddenCategories.size),
+                                androidx.compose.ui.res.pluralStringResource(R.plurals.library_hidden_category_count, hiddenCategories.size, hiddenCategories.size),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -513,7 +516,7 @@ internal fun BatchCategoryDialog(
     var category by rememberSaveable { mutableStateOf("") }
     KixyuActionDialog(
         show = true,
-        title = stringResource(R.string.library_batch_category_title, selectedCount),
+        title = androidx.compose.ui.res.pluralStringResource(R.plurals.library_batch_category_title, selectedCount, selectedCount),
         onDismissRequest = onDismiss,
         confirmLabel = stringResource(R.string.library_action_done),
         onConfirm = { onConfirm(category) },

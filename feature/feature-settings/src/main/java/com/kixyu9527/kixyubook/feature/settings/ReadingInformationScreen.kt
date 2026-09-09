@@ -68,7 +68,7 @@ fun ReadingInformationRoute(
                 KixyuSection(
                     title = stringResource(R.string.settings_display_content_section),
                     action = {
-                        KixyuTextButton(text = "重置", onClick = viewModel::resetReaderInformation)
+                        KixyuTextButton(text = stringResource(R.string.settings_reset), onClick = viewModel::resetReaderInformation)
                     },
                 ) {
                     KixyuReaderInformationControls(state.settings) { updated ->

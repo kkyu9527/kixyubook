@@ -125,7 +125,9 @@ fun BookCover(
         if (currentBitmap != null) {
             Image(currentBitmap, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
-            val displayTitle = title.trim().ifBlank { "未命名书籍" }
+            val displayTitle = title.trim().ifBlank {
+                androidx.compose.ui.res.stringResource(R.string.book_cover_untitled)
+            }
             val visualLength = displayTitle.sumOf { character ->
                 when {
                     character.isWhitespace() -> 0.35

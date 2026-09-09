@@ -40,12 +40,12 @@ class LocalFontRepository @Inject constructor(
                 val uri = uriString.toUri()
                 val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                     ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "自定义字体"
-                require(name.endsWith(".ttf", true) || name.endsWith(".otf", true)) { "仅支持 TTF / OTF" }
+                require(name.endsWith(".ttf", true) || name.endsWith(".otf", true)) { context.getString(R.string.db_font_format) }
                 val uuid = UUID.randomUUID().toString()
                 val fontFile = File(context.filesDir, "fonts/$uuid.${name.substringAfterLast('.').lowercase()}")
                     .also { it.parentFile?.mkdirs() }
                 target = fontFile
-                context.contentResolver.openInputStream(uri)?.use { input -> fontFile.outputStream().use(input::copyTo) } ?: error("无法读取字体")
+                context.contentResolver.openInputStream(uri)?.use { input -> fontFile.outputStream().use(input::copyTo) } ?: error(context.getString(R.string.db_font_read_failed))
                 Typeface.createFromFile(fontFile)
                 val model = UserFont(uuid, name.substringBeforeLast('.'), fontFile.absolutePath, System.currentTimeMillis())
                 dao.insert(UserFontEntity(model.uuid, model.name, model.filePath, model.createdTime))

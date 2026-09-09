@@ -121,7 +121,7 @@ internal fun DirectorySheet(
         ) {
             Text(
                 when (directoryView) {
-                    DirectoryView.CHAPTERS -> stringResource(R.string.reader_directory_title, state.chapters.size)
+                    DirectoryView.CHAPTERS -> androidx.compose.ui.res.pluralStringResource(R.plurals.reader_directory_title, state.chapters.size, state.chapters.size)
                     DirectoryView.BOOKMARKS -> stringResource(R.string.reader_bookmarks_title, state.bookmarks.size)
                     DirectoryView.ANNOTATIONS -> stringResource(R.string.reader_annotations_title, state.annotations.size)
                 },
@@ -215,7 +215,7 @@ internal fun DirectorySheet(
                                     KixyuListRow(
                                         title = row.title,
                                         supportingText = if (row.chapterCount > 0) {
-                                            stringResource(R.string.reader_chapter_count, row.chapterCount)
+                                            androidx.compose.ui.res.pluralStringResource(R.plurals.reader_chapter_count, row.chapterCount, row.chapterCount)
                                         } else {
                                             stringResource(R.string.reader_volume_content)
                                         },
@@ -343,10 +343,7 @@ internal fun DirectorySheet(
                             ) {
                                 KixyuListRow(
                                     title = volume.title,
-                                    supportingText = stringResource(
-                                        R.string.reader_current_volume_chapters,
-                                        volume.chapterCount,
-                                    ),
+                                    supportingText = androidx.compose.ui.res.pluralStringResource(R.plurals.reader_current_volume_chapters, volume.chapterCount, volume.chapterCount),
                                     titleStyle = MaterialTheme.typography.bodyMedium,
                                     titleMaxLines = 2,
                                     supportingTextStyle = MaterialTheme.typography.bodySmall,

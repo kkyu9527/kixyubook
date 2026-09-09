@@ -49,6 +49,7 @@ internal class ReaderSearchFixture : AutoCloseable {
         scope, "book", repository, state, { history += it },
         { chapter, paragraph -> origins += chapter to paragraph },
         { chapter, paragraph -> jumps += chapter to paragraph }, { returns++ },
+        { "Search failed" },
     )
     override fun close() { scope.cancel() }
 }

@@ -27,6 +27,7 @@ internal class ReaderSearchController(
     private val recordOrigin: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
     private val jumpToPosition: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
     private val returnToOrigin: () -> Unit,
+    private val failureMessage: () -> String,
 ) {
     private var originRecorded = false
     private var searchJob: Job? = null
@@ -95,7 +96,7 @@ internal class ReaderSearchController(
                     if (current.searchQuery != normalized || current.searchScope != searchScope) current
                     else current.copy(
                         searchInProgress = false,
-                        searchError = error.message ?: "全文搜索失败",
+                        searchError = error.message ?: failureMessage(),
                     )
                 }
             }

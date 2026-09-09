@@ -1,0 +1,11 @@
+<resources>
+    <string name="library_import_error">Import failed. Select the file again.</string>
+    <string name="library_imported_count">Books imported: %1$d</string>
+    <string name="library_duplicate_count">Duplicates skipped: %1$d</string>
+    <string name="library_import_stopped">Unfinished imports canceled</string>
+    <string name="library_no_retry_files">No files to retry</string>
+    <string name="library_clear_history_failed">Cannot clear import history</string>
+    <string name="library_export_failed">Book export failed</string>
+    <string name="library_batch_export_failed">Batch export failed</string>
+    <string name="library_edit_failed">Update failed</string>
+</resources>

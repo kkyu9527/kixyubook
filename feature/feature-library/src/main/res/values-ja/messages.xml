@@ -1,0 +1,11 @@
+<resources>
+    <string name="library_import_error">インポートに失敗しました。ファイルを選び直してください</string>
+    <string name="library_imported_count">インポートした本: %1$d 冊</string>
+    <string name="library_duplicate_count">重複スキップ: %1$d 冊</string>
+    <string name="library_import_stopped">未完了のインポートをキャンセルしました</string>
+    <string name="library_no_retry_files">再試行できるファイルがありません</string>
+    <string name="library_clear_history_failed">インポート履歴を消去できません</string>
+    <string name="library_export_failed">本のエクスポートに失敗しました</string>
+    <string name="library_batch_export_failed">一括エクスポートに失敗しました</string>
+    <string name="library_edit_failed">変更に失敗しました</string>
+</resources>

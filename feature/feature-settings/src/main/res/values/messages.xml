@@ -1,0 +1,16 @@
+<resources>
+    <string name="settings_backup_saved">Backup saved · Books: %1$d</string>
+    <string name="settings_backup_failed">Backup task failed</string>
+    <string name="settings_theme_reset">Reader appearance reset</string>
+    <string name="settings_layout_reset">Layout and page turns reset</string>
+    <string name="settings_controls_reset">Reading controls reset</string>
+    <string name="settings_information_reset">Reading information reset</string>
+    <string name="settings_reading_reset">All reading settings reset</string>
+    <string name="settings_font_applied">Imported and applied %1$s</string>
+    <string name="settings_font_import_failed">Font import failed</string>
+    <string name="settings_backup_read_failed">Cannot read backup information</string>
+    <string name="settings_conflict_failed">Could not resolve sync conflicts</string>
+    <string name="settings_cloud_deleted">Google Drive sync data deleted</string>
+    <string name="settings_cloud_delete_failed">Could not delete cloud data</string>
+    <string name="settings_account_connected">Google account connected. Syncing automatically.</string>
+</resources>

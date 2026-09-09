@@ -160,7 +160,7 @@ internal fun LibraryFilters(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    stringResource(R.string.library_book_count, state.books.size),
+                    androidx.compose.ui.res.pluralStringResource(R.plurals.library_book_count, state.books.size, state.books.size),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -175,7 +175,7 @@ internal fun LibraryFilters(
                     ) {
                         Icon(KixyuSymbols.Category, null, Modifier.size(KixyuSize.iconSmall))
                         Spacer(Modifier.size(KixyuSpacing.small))
-                        Text(state.category, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(categoryFilterLabel(state.category), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Icon(KixyuSymbols.ExpandMore, stringResource(R.string.library_choose_category), Modifier.size(KixyuSize.iconSmall))
                     }
                     KixyuPopupMenu(
@@ -183,7 +183,7 @@ internal fun LibraryFilters(
                         onDismissRequest = { categoriesExpanded = false },
                         items = state.categories.map { category ->
                             KixyuPopupMenuItem(
-                                label = category,
+                                label = categoryFilterLabel(category),
                                 icon = KixyuSymbols.Category,
                                 selected = state.category == category,
                             ) {

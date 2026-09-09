@@ -19,6 +19,7 @@
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:resizeableActivity="true"
         android:supportsRtl="true"
@@ -51,7 +52,7 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.Kixyubook.Starting"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|uiMode"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|uiMode|locale|layoutDirection"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

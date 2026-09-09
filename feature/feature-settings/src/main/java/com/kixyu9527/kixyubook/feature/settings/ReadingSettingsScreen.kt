@@ -148,11 +148,11 @@ fun ReadingSettingsRoute(
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_reading_information_bar),
                         supportingText = listOfNotNull(
-                            "章节名".takeIf { state.settings.showChapterTitle },
-                            "页码".takeIf { state.settings.showPageNumber },
-                            "时间".takeIf { state.settings.showReadingTime },
-                            "电量".takeIf { state.settings.showBatteryLevel },
-                        ).joinToString("、").ifBlank { "均不显示" },
+                            stringResource(R.string.settings_info_chapter).takeIf { state.settings.showChapterTitle },
+                            stringResource(R.string.settings_info_page).takeIf { state.settings.showPageNumber },
+                            stringResource(R.string.settings_info_time).takeIf { state.settings.showReadingTime },
+                            stringResource(R.string.settings_info_battery).takeIf { state.settings.showBatteryLevel },
+                        ).joinToString(stringResource(R.string.settings_info_separator)).ifBlank { stringResource(R.string.settings_info_hidden) },
                         onClick = onReadingInformation,
                     ) {
                         Icon(KixyuSymbols.KeyboardArrowRight, null)
@@ -163,7 +163,7 @@ fun ReadingSettingsRoute(
                 KixyuSection(title = stringResource(R.string.settings_reading_habits_section)) {
                     KixyuStepperRow(
                         title = stringResource(R.string.settings_daily_goal),
-                        valueLabel = "${state.goalMinutes} 分钟",
+                        valueLabel = stringResource(R.string.settings_goal_minutes, state.goalMinutes),
                         onDecrease = { viewModel.setGoal((state.goalMinutes - 5).coerceAtLeast(5)) },
                         onIncrease = { viewModel.setGoal((state.goalMinutes + 5).coerceAtMost(120)) },
                         decreaseEnabled = state.goalMinutes > 5,
@@ -173,10 +173,15 @@ fun ReadingSettingsRoute(
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_daily_goal_reminder),
                         supportingText = if (state.readingReminder.enabled) {
-                            "目标未完成时，在 ${state.readingReminder.hour.toString().padStart(2, '0')}:" +
-                                state.readingReminder.minute.toString().padStart(2, '0') + " 提醒"
+                            stringResource(
+                                R.string.settings_reminder_enabled,
+                                "%02d:%02d".format(
+                                    androidx.compose.ui.platform.LocalConfiguration.current.locales[0],
+                                    state.readingReminder.hour, state.readingReminder.minute,
+                                ),
+                            )
                         } else {
-                            "关闭 · 仅在主动开启后发送"
+                            stringResource(R.string.settings_reminder_disabled)
                         },
                         onClick = { updateReminderEnabled(!state.readingReminder.enabled) },
                     ) {
@@ -223,12 +228,12 @@ fun ReadingSettingsRoute(
         show = resetAllVisible,
         onDismissRequest = { resetAllVisible = false },
         title = stringResource(R.string.settings_reset_all_reader_settings),
-        confirmLabel = "恢复默认",
+        confirmLabel = stringResource(R.string.settings_reset_defaults),
         onConfirm = {
             resetAllVisible = false
             viewModel.resetAllReaderSettings()
         },
-        dismissLabel = "取消",
+        dismissLabel = stringResource(R.string.settings_cancel),
     ) {
         Text(stringResource(R.string.settings_reset_reader_warning))
     }
@@ -259,9 +264,9 @@ private fun ReadingReminderTimeDialog(
         show = true,
         title = stringResource(R.string.settings_reminder_time),
         onDismissRequest = onDismissRequest,
-        confirmLabel = "确定",
+        confirmLabel = stringResource(R.string.settings_ok),
         onConfirm = { onConfirm(hour, minute) },
-        dismissLabel = "取消",
+        dismissLabel = stringResource(R.string.settings_cancel),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium)) {
             Text(
@@ -288,5 +293,5 @@ private fun ReadingReminderTimeDialog(
 
 @Composable
 private fun ReadingSectionResetAction(onClick: () -> Unit) {
-    KixyuTextButton(text = "重置", onClick = onClick)
+    KixyuTextButton(text = stringResource(R.string.settings_reset), onClick = onClick)
 }

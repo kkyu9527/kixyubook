@@ -84,7 +84,7 @@ internal fun ReaderAnnotationDirectory(
             title = stringResource(R.string.reader_annotation_filter),
             selected = filter,
             options = AnnotationFilter.entries,
-            optionLabel = filterLabels::getValue,
+            optionLabel = { filterLabels.getValue(it) },
             onSelected = { filterName = it.name },
         )
         if (visible.isEmpty()) {

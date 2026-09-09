@@ -1,4 +1,5 @@
 <resources>
-    <string name="library_empty_title">你的静谧书架</string>
-    <string name="library_empty_description">导入 TXT 或 EPUB，开始一段不被打扰的阅读。</string>
+    <string name="library_empty_title">Your quiet bookshelf</string>
+    <string name="library_empty_description">Import a TXT or EPUB and enjoy distraction-free reading.</string>
+    <string name="book_cover_untitled">Untitled book</string>
 </resources>

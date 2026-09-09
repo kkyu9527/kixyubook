@@ -51,7 +51,7 @@ private data class ChunkUploadResult(
 
 @Singleton
 class DriveAppDataClient @Inject constructor(
-    @ApplicationContext context: Context,
+    @param:ApplicationContext private val context: Context,
 ) {
     private val uploadSessions = context.getSharedPreferences("drive_resumable_uploads", Context.MODE_PRIVATE)
 
@@ -155,7 +155,7 @@ class DriveAppDataClient @Inject constructor(
                     // not turn an invalid range response into unbounded recursion.
                     throw DriveHttpException(
                         statusCode = HttpURLConnection.HTTP_INTERNAL_ERROR,
-                        message = "Google Drive 下载断点已失效，正在重试",
+                        message = context.getString(R.string.sync_download_range_expired),
                     )
                 }
                 ensureSuccess(connection)
@@ -301,7 +301,7 @@ class DriveAppDataClient @Inject constructor(
         try {
             session.outputStream.use { it.write(metadata.toString().toByteArray()) }
             ensureSuccess(session)
-            session.getHeaderField("Location") ?: error("Google Drive 未返回上传地址")
+            session.getHeaderField("Location") ?: error(context.getString(R.string.sync_upload_location_missing))
         } finally {
             session.disconnect()
         }
@@ -339,7 +339,7 @@ class DriveAppDataClient @Inject constructor(
                             while (remaining > 0) {
                                 currentCoroutineContext().ensureActive()
                                 val read = input.read(buffer, 0, minOf(buffer.size, remaining))
-                                if (read < 0) error("上传源文件提前结束")
+                                if (read < 0) error(context.getString(R.string.sync_upload_source_ended))
                                 output.write(buffer, 0, read)
                                 remaining -= read
                             }
@@ -362,11 +362,11 @@ class DriveAppDataClient @Inject constructor(
                 offset = result.nextOffset
             }
         }
-        error("Google Drive 上传未返回文件信息")
+        error(context.getString(R.string.sync_upload_metadata_missing))
     }
 
     private suspend fun driveObjectAfterCompletedUpload(token: String, objectKey: String): DriveObject =
-        findByObjectKey(token, objectKey) ?: error("Google Drive 已完成上传，但未返回文件信息")
+        findByObjectKey(token, objectKey) ?: error(context.getString(R.string.sync_upload_complete_metadata_missing))
 
     private suspend fun queryUploadOffset(location: String, token: String, total: Long): Long = withBackoff {
         val query = open(location, "PUT", token).apply {
@@ -379,7 +379,7 @@ class DriveAppDataClient @Inject constructor(
             when (val code = query.responseCode) {
                 308 -> uploadedOffset(query) ?: 0L
                 in 200..299 -> total
-                404, 410 -> throw DriveHttpException(code, "Google Drive 上传会话已过期")
+                404, 410 -> throw DriveHttpException(code, context.getString(R.string.sync_upload_expired))
                 else -> throw driveError(query, code)
             }
         } finally {
@@ -397,7 +397,7 @@ class DriveAppDataClient @Inject constructor(
         val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
         return DriveHttpException(
             statusCode = code,
-            message = body.ifBlank { "Google Drive 请求失败 ($code)" },
+            message = body.ifBlank { context.getString(R.string.sync_http_error, code) },
             retryAfterMillis = parseRetryAfterMillis(connection.getHeaderField("Retry-After")),
         )
     }
@@ -437,7 +437,7 @@ class DriveAppDataClient @Inject constructor(
         val body = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
         throw DriveHttpException(
             statusCode = connection.responseCode,
-            message = body.ifBlank { "Google Drive 请求失败 (${connection.responseCode})" },
+            message = body.ifBlank { context.getString(R.string.sync_http_error, connection.responseCode) },
             retryAfterMillis = parseRetryAfterMillis(connection.getHeaderField("Retry-After")),
         )
     }

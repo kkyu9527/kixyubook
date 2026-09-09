@@ -1,0 +1,12 @@
+<resources>
+    <string name="notification_sync_conflict_title">同步衝突等待處理</string>
+    <string name="notification_sync_conflict_text">%1$d 項內容需要選擇本機或雲端版本</string>
+    <string name="notification_backup_export_title">正在匯出完整備份</string>
+    <string name="notification_backup_restore_title">正在還原完整備份</string>
+    <string name="notification_background_task">可離開此頁面，工作會在背景繼續</string>
+    <string name="notification_cancel">取消</string>
+    <string name="notification_reading_remaining">今天還差 %1$d 分鐘</string>
+    <string name="notification_reading_goal">繼續閱讀，完成每日 %1$d 分鐘目標</string>
+    <string name="sync_uploading_changes">正在上傳雲端變更</string>
+    <string name="sync_processed_items">已處理 %1$d/%2$d 項</string>
+</resources>

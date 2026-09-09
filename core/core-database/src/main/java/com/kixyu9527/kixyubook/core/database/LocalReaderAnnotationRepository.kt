@@ -45,11 +45,11 @@ class LocalReaderAnnotationRepository @Inject constructor(
         style: ReaderAnnotationStyle,
         note: String,
     ): ReaderAnnotation = withContext(Dispatchers.IO) {
-        require(originalText.isNotBlank()) { "空段落不能添加批注" }
+        require(originalText.isNotBlank()) { context.getString(R.string.db_empty_annotation) }
         val safeStart = startOffset.coerceIn(0, originalText.length)
         val safeEnd = endOffset.coerceIn(safeStart, originalText.length)
-        require(safeStart < safeEnd) { "未选择可批注的文本" }
-        val book = books.getBook(bookUuid) ?: error("书籍不存在或已被删除")
+        require(safeStart < safeEnd) { context.getString(R.string.db_no_annotation_selection) }
+        val book = books.getBook(bookUuid) ?: error(context.getString(R.string.db_book_removed))
         val now = System.currentTimeMillis()
         val existing = annotations.getForBook(bookUuid).firstOrNull {
             it.chapterKey == chapterKey && it.paragraphIndex == paragraphIndex &&

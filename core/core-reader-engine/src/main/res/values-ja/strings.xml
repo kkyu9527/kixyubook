@@ -1,0 +1,7 @@
+<resources>
+    <string name="reader_chapter_end">· 章の終わり ·</string>
+    <string name="reader_previous_chapter">前の章</string>
+    <string name="reader_next_chapter">次の章</string>
+    <string name="reader_book_illustration">本の挿絵</string>
+    <string name="reader_illustration">挿絵</string>
+</resources>

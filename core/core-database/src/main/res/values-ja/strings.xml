@@ -1,0 +1,5 @@
+<resources>
+    <string name="import_status_canceled">キャンセル済み</string>
+    <string name="import_status_duplicate_content">同じ内容が既にあります</string>
+    <string name="import_status_duplicate_epub">この EPUB は既にあります</string>
+</resources>

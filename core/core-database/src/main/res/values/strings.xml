@@ -1,5 +1,5 @@
 <resources>
-    <string name="import_status_canceled">已取消</string>
-    <string name="import_status_duplicate_content">已存在相同内容</string>
-    <string name="import_status_duplicate_epub">已存在同一本 EPUB</string>
+    <string name="import_status_canceled">Canceled</string>
+    <string name="import_status_duplicate_content">Identical content already exists</string>
+    <string name="import_status_duplicate_epub">This EPUB already exists</string>
 </resources>

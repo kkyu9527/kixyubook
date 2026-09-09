@@ -64,6 +64,8 @@ fun AppearanceRoute(
         ) {
             item {
                 KixyuSection(title = stringResource(R.string.settings_app_interface_section)) {
+                    AppLanguageControl()
+                    KixyuDivider()
                     KixyuThemeModeControl(
                         settings = state.settings,
                         onSettingsChange = { updated -> viewModel.update { updated } },
@@ -77,9 +79,9 @@ fun AppearanceRoute(
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_predictive_back),
                         supportingText = if (state.settings.predictiveBackEnabled) {
-                            "返回手势会跟随手指显示关闭过程"
+                            stringResource(R.string.settings_predictive_enabled)
                         } else {
-                            "关闭 · 返回时直接执行当前操作"
+                            stringResource(R.string.settings_predictive_disabled)
                         },
                         onClick = {
                             viewModel.update {

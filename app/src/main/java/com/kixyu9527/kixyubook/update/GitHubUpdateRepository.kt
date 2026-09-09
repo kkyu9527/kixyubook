@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.update
 
 import android.content.Context
 import androidx.core.content.edit
+import com.kixyu9527.kixyubook.R
 import com.kixyu9527.kixyubook.BuildConfig
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
@@ -27,7 +28,7 @@ import javax.inject.Singleton
 
 @Singleton
 class GitHubUpdateRepository @Inject constructor(
-    @ApplicationContext context: Context,
+    @param:ApplicationContext private val context: Context,
 ) : AppUpdateRepository {
     private val mutableState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     override val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
@@ -77,7 +78,7 @@ class GitHubUpdateRepository @Inject constructor(
             mutableReleaseNotesState.value = runCatching { fetchRelease(versionName) }.fold(
                 onSuccess = { release ->
                     if (release == null) {
-                        ReleaseNotesState.Unavailable("GitHub 尚未发布 v$versionName 的 Release Note")
+                        ReleaseNotesState.Unavailable(context.getString(R.string.update_notes_unpublished, versionName))
                     } else {
                         ReleaseNotesState.Available(release)
                     }
@@ -182,7 +183,7 @@ class GitHubUpdateRepository @Inject constructor(
                     AppUpdateInfo(
                         versionName = version,
                         releaseName = "Kixyu Book $version",
-                        releaseNotes = "新版本已经发布，可前往 GitHub 查看完整发版说明并下载。",
+                        releaseNotes = context.getString(R.string.update_published_hint),
                         releaseUrl = releaseUrl,
                         downloadUrl = fetchApkDownloadUrl(encodedTag),
                     )
@@ -279,9 +280,9 @@ class GitHubUpdateRepository @Inject constructor(
         url.startsWith(APK_DOWNLOAD_URL_PREFIX) && url.substringBefore('?').endsWith(".apk", ignoreCase = true)
 
     private fun Throwable.toUserMessage(): String = when (this) {
-        is java.net.SocketTimeoutException -> "连接 GitHub 超时，请稍后重试"
-        is java.net.UnknownHostException -> "无法连接网络，请检查网络设置"
-        else -> message?.takeIf { it.isNotBlank() } ?: "检查更新失败"
+        is java.net.SocketTimeoutException -> context.getString(R.string.update_network_timeout)
+        is java.net.UnknownHostException -> context.getString(R.string.update_no_network)
+        else -> message?.takeIf { it.isNotBlank() } ?: context.getString(R.string.update_check_failed)
     }
 
     private companion object {

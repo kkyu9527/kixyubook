@@ -612,7 +612,7 @@ private fun LibraryScreen(
     if (confirmingBatchDelete) {
         KixyuActionDialog(
             show = true,
-            title = stringResource(R.string.library_delete_selected_title, selectedBookUuids.size),
+            title = androidx.compose.ui.res.pluralStringResource(R.plurals.library_delete_selected_title, selectedBookUuids.size, selectedBookUuids.size),
             onDismissRequest = { confirmingBatchDelete = false },
             confirmLabel = stringResource(R.string.library_action_delete),
             onConfirm = {

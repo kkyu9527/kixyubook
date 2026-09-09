@@ -1,0 +1,18 @@
+<resources>
+    <string name="notification_sync_title">本を同期中</string>
+    <string name="notification_sync_data">Google Drive のデータを転送中</string>
+    <string name="notification_export_failed">バックアップのエクスポートに失敗</string>
+    <string name="notification_restore_failed">バックアップの復元に失敗</string>
+    <string name="notification_export_complete">バックアップをエクスポートしました</string>
+    <string name="notification_restore_complete">バックアップを復元しました</string>
+    <string name="notification_books_saved">保存した本: %1$d 冊</string>
+    <string name="notification_books_restored">%1$d 冊を復元しました。アプリを開き直してください</string>
+    <string name="notification_channel_tasks">バックグラウンド処理</string>
+    <string name="notification_channel_tasks_hint">書籍、フォント、クラウド同期、完全バックアップの進捗</string>
+    <string name="notification_channel_attention">確認が必要</string>
+    <string name="notification_channel_attention_hint">同期の競合など、操作が必要な通知</string>
+    <string name="notification_channel_results">処理結果</string>
+    <string name="notification_channel_results_hint">バックアップなどのバックグラウンド処理の完了・失敗</string>
+    <string name="notification_channel_reading">読書のリマインダー</string>
+    <string name="notification_channel_reading_hint">自分で有効にした毎日の読書目標の通知</string>
+</resources>

@@ -1,0 +1,5 @@
+<resources>
+    <string name="import_status_canceled">已取消</string>
+    <string name="import_status_duplicate_content">已存在相同內容</string>
+    <string name="import_status_duplicate_epub">已存在同一本 EPUB</string>
+</resources>
