@@ -1,4 +1,6 @@
 package com.kixyu9527.kixyubook.core.reader.engine
+import com.kixyu9527.kixyubook.core.common.cache.ReaderCacheBudget
+import com.kixyu9527.kixyubook.core.common.cache.WeightedLruCache
 
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
@@ -20,21 +22,22 @@ import kotlinx.coroutines.ensureActive
 
 class EpubBookParser : BookParser, MemoryPressureListener {
     override val format = BookFormat.EPUB
-    private val packageIndexCache = object : LinkedHashMap<PackageCacheKey, PackageDocument>(
-        PACKAGE_INDEX_CACHE_SIZE,
-        0.75f,
-        true,
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PackageCacheKey, PackageDocument>): Boolean =
-            size > PACKAGE_INDEX_CACHE_SIZE
+    private val packageIndexCache = WeightedLruCache<PackageCacheKey, PackageDocument>(
+        ReaderCacheBudget.EPUB_PACKAGE_MEMORY_BYTES, PACKAGE_INDEX_CACHE_SIZE,
+    ) { document ->
+        256L + (document.identifier.length + document.title.length + document.author.length + document.description.length) * 2L +
+            document.spine.sumOf { 40L + it.length * 2L } + document.manifest.entries.sumOf { (key, item) ->
+                128L + (key.length + item.path.length + item.mediaType.length) * 2L + item.properties.sumOf { 40L + it.length * 2L }
+            }
     }
-    private val cssSourceCache = object : LinkedHashMap<CssSourceCacheKey, ParsedCssSource>(
-        CSS_SOURCE_CACHE_SIZE,
-        0.75f,
-        true,
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CssSourceCacheKey, ParsedCssSource>): Boolean =
-            size > CSS_SOURCE_CACHE_SIZE
+    private val cssSourceCache = WeightedLruCache<CssSourceCacheKey, ParsedCssSource>(
+        ReaderCacheBudget.EPUB_CSS_MEMORY_BYTES, CSS_SOURCE_CACHE_SIZE,
+    ) { source ->
+        128L + source.imports.sumOf { 40L + it.length * 2L } + source.rules.sumOf { rule ->
+            128L + (rule.selector.length + rule.sourcePath.length) * 2L + rule.declarations.entries.sumOf { (key, value) ->
+                80L + (key.length + value.length) * 2L
+            }
+        }
     }
 
     init {

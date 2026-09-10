@@ -1,4 +1,6 @@
 package com.kixyu9527.kixyubook.core.database
+import com.kixyu9527.kixyubook.core.common.cache.ReaderCacheBudget
+import com.kixyu9527.kixyubook.core.common.cache.DiskCacheBudget
 
 import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
@@ -11,6 +13,9 @@ import java.io.File
 
 /** Regenerable binary cache for the EPUB data that Room's searchable text rows intentionally omit. */
 internal class EpubChapterCache(private val root: File) {
+    private val budget by lazy { DiskCacheBudget(
+        root, "bin", ReaderCacheBudget.EPUB_DISK_BYTES,
+    ) }
     init {
         // A process death can interrupt the atomic replacement below. Temporary files are never
         // readable cache entries, so they are safe to remove when the cache is opened again.
@@ -19,7 +24,7 @@ internal class EpubChapterCache(private val root: File) {
             .forEach(File::delete)
     }
 
-    fun read(bookUuid: String, contentHash: String, chapterIndex: Int): DocumentChapter? {
+    @Synchronized fun read(bookUuid: String, contentHash: String, chapterIndex: Int): DocumentChapter? {
         val file = cacheFile(bookUuid, contentHash, chapterIndex)
         if (!file.isFile) return null
         return runCatching {
@@ -59,7 +64,7 @@ internal class EpubChapterCache(private val root: File) {
                 }
                 DocumentChapter(title, paragraphs, images, paragraphSpans)
             }
-        }.getOrElse {
+        }.onSuccess { runCatching { budget.touch(file) } }.getOrElse {
             file.delete()
             null
         }
@@ -68,7 +73,7 @@ internal class EpubChapterCache(private val root: File) {
     fun contains(bookUuid: String, contentHash: String, chapterIndex: Int): Boolean =
         cacheFile(bookUuid, contentHash, chapterIndex).isFile
 
-    fun write(bookUuid: String, contentHash: String, chapterIndex: Int, chapter: DocumentChapter) {
+    @Synchronized fun write(bookUuid: String, contentHash: String, chapterIndex: Int, chapter: DocumentChapter) {
         val target = cacheFile(bookUuid, contentHash, chapterIndex)
         val temporary = File(target.parentFile, "${target.name}$TEMPORARY_SUFFIX")
         runCatching {
@@ -108,6 +113,7 @@ internal class EpubChapterCache(private val root: File) {
                 temporary.copyTo(target, overwrite = true)
                 temporary.delete()
             }
+            budget.written(target)
         }.onFailure { temporary.delete() }
     }
 

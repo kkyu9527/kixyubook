@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.core.reader.engine
+import com.kixyu9527.kixyubook.core.common.cache.ReaderCacheBudget
 
 import android.app.ActivityManager
 import android.content.Context
@@ -42,8 +43,8 @@ import java.util.zip.ZipFile
 import kotlin.math.max
 
 private object EpubImageCache : MemoryPressureListener {
-    private var maxBytes = DEFAULT_MAX_BYTES
-    private val images = object : LruCache<String, ImageBitmap>(DEFAULT_MAX_BYTES) {
+    private var maxBytes = ReaderCacheBudget.DEFAULT_IMAGE_MEMORY_BYTES
+    private val images = object : LruCache<String, ImageBitmap>(maxBytes) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
     }
 
@@ -57,13 +58,7 @@ private object EpubImageCache : MemoryPressureListener {
     @Synchronized
     fun configure(context: Context) {
         val memory = context.getSystemService(ActivityManager::class.java)
-        val target = if (memory.isLowRamDevice) {
-            LOW_RAM_MAX_BYTES
-        } else {
-            (memory.memoryClass.toLong() * 1024L * 1024L / CACHE_HEAP_DIVISOR)
-                .coerceIn(MIN_MAX_BYTES.toLong(), MAX_MAX_BYTES.toLong())
-                .toInt()
-        }
+        val target = ReaderCacheBudget.imageMemoryBytes(memory.memoryClass, memory.isLowRamDevice)
         if (target != maxBytes) {
             maxBytes = target
             images.resize(target)
@@ -79,11 +74,6 @@ private object EpubImageCache : MemoryPressureListener {
         }
     }
 
-    private const val CACHE_HEAP_DIVISOR = 16L
-    private const val LOW_RAM_MAX_BYTES = 8 * 1024 * 1024
-    private const val MIN_MAX_BYTES = 12 * 1024 * 1024
-    private const val DEFAULT_MAX_BYTES = 32 * 1024 * 1024
-    private const val MAX_MAX_BYTES = 48 * 1024 * 1024
 }
 
 /** Reuses the EPUB central directory and serializes bitmap decode to avoid parallel memory spikes. */

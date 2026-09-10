@@ -72,7 +72,6 @@ internal fun ImportItemProgress.toEntity(
     updatedTime = startedTime,
 )
 
-internal const val CHAPTER_CACHE_SIZE = 6
 internal const val SLOW_CHAPTER_LOAD_MS = 250L
 internal const val IMPORT_CHAPTER_BATCH_SIZE = 32
 internal const val IMPORT_PROGRESS_PUBLISH_BYTES = 512L * 1024L

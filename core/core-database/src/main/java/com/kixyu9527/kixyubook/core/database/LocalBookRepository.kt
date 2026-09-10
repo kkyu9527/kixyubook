@@ -1,4 +1,6 @@
 package com.kixyu9527.kixyubook.core.database
+import com.kixyu9527.kixyubook.core.common.cache.ReaderCacheBudget
+import com.kixyu9527.kixyubook.core.common.cache.WeightedLruCache
 
 import android.content.Context
 import android.os.SystemClock
@@ -114,13 +116,13 @@ class LocalBookRepository @Inject constructor(
     // Keep only the decoded chapters needed by the active pager. EPUB chapters outside this
     // window remain in the binary disk cache and are cheap to hydrate without retaining a whole
     // reading session in the process heap.
-    private val chapterCache = object : LinkedHashMap<ChapterCacheKey, ChapterContent>(
-        CHAPTER_CACHE_SIZE,
-        0.75f,
-        true,
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ChapterCacheKey, ChapterContent>) =
-            size > CHAPTER_CACHE_SIZE
+    private val chapterCache = WeightedLruCache<ChapterCacheKey, ChapterContent>(
+        ReaderCacheBudget.CHAPTER_MEMORY_BYTES,
+        ReaderCacheBudget.MAX_MEMORY_CHAPTERS,
+    ) { content ->
+        256L + content.paragraphs.sumOf { paragraph ->
+            128L + paragraph.text.length * 2L + paragraph.spans.size * 96L
+        }
     }
 
     init {
@@ -804,7 +806,7 @@ class LocalBookRepository @Inject constructor(
                 }
             }
             synchronized(chapterCacheLock) {
-                chapterCache.keys.removeAll { it.bookUuid in bookUuids }
+                chapterCache.removeMatching { it.bookUuid in bookUuids }
             }
             books.forEach { book ->
                 epubChapterCache.clearBook(book.uuid)
@@ -1005,7 +1007,7 @@ class LocalBookRepository @Inject constructor(
 
     override fun releaseReaderMemory(bookUuid: String) {
         synchronized(chapterCacheLock) {
-            chapterCache.keys.removeAll { it.bookUuid == bookUuid }
+            chapterCache.removeMatching { it.bookUuid == bookUuid }
         }
         (parsers.parserFor(BookFormat.EPUB) as EpubBookParser).clearMemoryCaches()
     }
@@ -1108,7 +1110,7 @@ class LocalBookRepository @Inject constructor(
                 }
             }
             synchronized(chapterCacheLock) {
-                chapterCache.keys.removeAll { it.bookUuid == bookUuid }
+                chapterCache.removeMatching { it.bookUuid == bookUuid }
             }
             Result.success(Unit)
         } catch (error: CancellationException) {

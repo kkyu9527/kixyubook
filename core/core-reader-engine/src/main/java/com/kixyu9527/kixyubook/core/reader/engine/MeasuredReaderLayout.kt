@@ -1,4 +1,6 @@
 package com.kixyu9527.kixyubook.core.reader.engine
+import com.kixyu9527.kixyubook.core.common.cache.ReaderCacheBudget
+import com.kixyu9527.kixyubook.core.common.cache.WeightedLruCache
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -200,13 +202,18 @@ class ReaderPaginationCoordinator internal constructor(
     private val cacheScope = CoroutineScope(sessionJob + Dispatchers.IO.limitedParallelism(1))
     private val paused = MutableStateFlow(false)
     private val inFlight = mutableMapOf<PaginationCacheKey, PaginationLoad>()
-    private val pages = object : LinkedHashMap<PaginationCacheKey, List<ReaderPage>>(
-        PAGINATION_CACHE_SIZE,
-        0.75f,
-        true,
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PaginationCacheKey, List<ReaderPage>>) =
-            size > PAGINATION_CACHE_SIZE
+    private val pages = WeightedLruCache<PaginationCacheKey, List<ReaderPage>>(
+        ReaderCacheBudget.PAGINATION_MEMORY_BYTES,
+        ReaderCacheBudget.MAX_MEMORY_CHAPTERS,
+    ) { chapterPages ->
+        // fullText is shared between page fragments; count each paragraph once.
+        val seen = hashSetOf<Int>()
+        chapterPages.sumOf { page ->
+            128L + page.blocks.sumOf { block ->
+                160L + block.visibleText.length * 2L + block.spans.size * 96L +
+                    if (seen.add(block.paragraphIndex)) block.fullText.length * 2L else 0L
+            }
+        }
     }
 
     init {
@@ -251,11 +258,7 @@ class ReaderPaginationCoordinator internal constructor(
             inFlight.values.forEach { it.deferred.cancel() }
             inFlight.clear()
             val retainedPages = if (level == MemoryPressureLevel.MODERATE) 1 else 0
-            val iterator = pages.entries.iterator()
-            while (pages.size > retainedPages && iterator.hasNext()) {
-                iterator.next()
-                iterator.remove()
-            }
+            pages.trimToSize(retainedPages)
         }
     }
 
@@ -657,7 +660,6 @@ private class MeasuredReaderPaginator(
     }
 }
 
-private const val PAGINATION_CACHE_SIZE = 6
 private const val FIRST_READABLE_PAGE_BATCH_SIZE = 4
 private const val SUBSEQUENT_READABLE_PAGE_BATCH_SIZE = 8
 private const val MEASUREMENT_WINDOW_CHARS = 512

@@ -1,4 +1,6 @@
 package com.kixyu9527.kixyubook.core.reader.engine
+import com.kixyu9527.kixyubook.core.common.cache.ReaderCacheBudget
+import com.kixyu9527.kixyubook.core.common.cache.DiskCacheBudget
 
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import java.io.DataInputStream
@@ -11,6 +13,12 @@ import java.security.MessageDigest
  * remain owned by the first-level Document cache and are reconstructed when a page is restored.
  */
 internal class ReaderPaginationDiskCache(private val root: File) {
+    private val budget by lazy {
+        DiskCacheBudget(
+            root, "pbin", ReaderCacheBudget.PAGINATION_DISK_BYTES,
+            MAX_CACHE_FILES,
+        )
+    }
     fun read(key: PaginationCacheKey, chapter: ReaderChapter): List<ReaderPage>? {
         val file = cacheFile(key)
         if (!file.isFile || file.length() !in 1..MAX_CACHE_FILE_BYTES) return null
@@ -61,7 +69,7 @@ internal class ReaderPaginationDiskCache(private val root: File) {
                 }.also { require(it.isNotEmpty()) }
             }
         }.onSuccess {
-            file.setLastModified(System.currentTimeMillis())
+            runCatching { budget.touch(file) }
         }.getOrElse {
             file.delete()
             null
@@ -103,11 +111,7 @@ internal class ReaderPaginationDiskCache(private val root: File) {
                 temporary.copyTo(target, overwrite = true)
                 temporary.delete()
             }
-            writesSincePrune++
-            if (writesSincePrune >= PRUNE_EVERY_WRITES) {
-                writesSincePrune = 0
-                pruneLocked()
-            }
+            budget.written(target)
         }.onFailure { temporary.delete() }
     }
 
@@ -115,18 +119,6 @@ internal class ReaderPaginationDiskCache(private val root: File) {
         val bookDirectory = File(root, key.bookUuid.safePathSegment())
         val contentPrefix = key.contentHash.safePathSegment().take(20).ifBlank { "content" }
         return File(bookDirectory, "$contentPrefix-${key.chapterId}-${key.fingerprint()}.pbin")
-    }
-
-    private fun pruneLocked() {
-        val files = root.walkTopDown().filter { it.isFile && it.extension == "pbin" }
-            .sortedByDescending(File::lastModified).toList()
-        var retainedBytes = 0L
-        files.forEachIndexed { index, file ->
-            retainedBytes += file.length()
-            if (index >= MAX_CACHE_FILES || retainedBytes > MAX_TOTAL_CACHE_BYTES) file.delete()
-        }
-        root.walkBottomUp().filter { it != root && it.isDirectory && it.list().isNullOrEmpty() }
-            .forEach(File::delete)
     }
 
     private fun PaginationCacheKey.fingerprint(): String {
@@ -144,7 +136,6 @@ internal class ReaderPaginationDiskCache(private val root: File) {
 
     internal companion object {
         val IO_LOCK = Any()
-        var writesSincePrune = 0
     }
 }
 
@@ -172,6 +163,4 @@ private const val MAX_PAGES = 100_000
 private const val MAX_BLOCKS_PER_PAGE = 10_000
 private const val MAX_CACHE_FILES = 1_500
 private const val MAX_CACHE_FILE_BYTES = 8L * 1024L * 1024L
-private const val MAX_TOTAL_CACHE_BYTES = 96L * 1024L * 1024L
 private const val TEMPORARY_SUFFIX = ".tmp"
-private const val PRUNE_EVERY_WRITES = 32
