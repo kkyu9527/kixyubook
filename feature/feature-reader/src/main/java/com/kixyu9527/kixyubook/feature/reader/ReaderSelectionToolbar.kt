@@ -12,10 +12,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.text.contextmenu.builder.item
 import androidx.compose.foundation.text.contextmenu.data.TextContextMenuData
 import androidx.compose.foundation.text.contextmenu.data.TextContextMenuItem
@@ -267,6 +273,7 @@ private class MenuRequest(
     suspend fun awaitClose() { closed.await() }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderTextSelectionMenu(
     data: TextContextMenuData,
@@ -299,7 +306,7 @@ private fun ReaderTextSelectionMenu(
             },
             label = "readerTextActions",
         ) { activePanel ->
-            Row(Modifier.padding(KixyuSpacing.extraSmall)) {
+            FlowRow(Modifier.padding(KixyuSpacing.extraSmall)) {
                 when (activePanel) {
                     ReaderTextActionPanel.PRIMARY -> {
                         if (sourceActionsEnabled) ReaderTextActionButton(
@@ -389,7 +396,7 @@ private fun ReaderTextSelectionSurface(
 }
 
 @Composable
-private fun ReaderTextActionButton(
+internal fun ReaderTextActionButton(
     label: String,
     icon: ImageVector,
     emphasized: Boolean = false,
@@ -398,9 +405,17 @@ private fun ReaderTextActionButton(
     val color = if (emphasized) MaterialTheme.colorScheme.primary else {
         MaterialTheme.colorScheme.onSurface
     }
+    val density = LocalDensity.current
+    val labelLayout = rememberTextMeasurer().measure(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        constraints = Constraints(maxWidth = with(density) { 64.dp.roundToPx() }),
+    )
+    // IconButton has a fixed default size; merely removing maxLines would still clip large text.
+    val buttonHeight = maxOf(56.dp, with(density) { labelLayout.size.height.toDp() } + 28.dp)
     KixyuIconButton(
         onClick = onClick,
-        modifier = Modifier.width(64.dp).height(56.dp),
+        modifier = Modifier.width(64.dp).height(buttonHeight),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
@@ -409,7 +424,7 @@ private fun ReaderTextActionButton(
                 modifier = Modifier.size(20.dp),
                 tint = color,
             )
-            Text(text = label, color = color, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            Text(text = label, color = color, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
         }
     }
 }
