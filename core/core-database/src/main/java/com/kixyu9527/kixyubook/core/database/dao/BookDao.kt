@@ -6,6 +6,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BookDao {
+    /** Keyset paging bounds decoded text during full-book search, including giant chapters. */
+    @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId AND paragraphIndex > :afterIndex ORDER BY paragraphIndex LIMIT :limit")
+    suspend fun getParagraphBatch(chapterId: Long, afterIndex: Int, limit: Int): List<ParagraphEntity>
+
     @Query("SELECT * FROM books ORDER BY createdTime DESC") fun observeBooks(): Flow<List<BookEntity>>
     @Query("SELECT * FROM reading_progress") fun observeAllProgress(): Flow<List<ReadingProgressEntity>>
     @Query("SELECT * FROM reading_progress") suspend fun getAllProgress(): List<ReadingProgressEntity>

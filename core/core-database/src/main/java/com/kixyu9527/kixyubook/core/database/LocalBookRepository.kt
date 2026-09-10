@@ -1152,53 +1152,17 @@ class LocalBookRepository @Inject constructor(
         if (normalizedQuery.isBlank()) return@withContext emptyList()
         val chapters = dao.getChapters(bookUuid)
         onProgress(BookSearchProgress(BookSearchStage.SEARCHING, 0, chapters.size))
-        val corrections = textCorrections.getBookCorrections(bookUuid)
-            .filter { it.status == TextCorrectionStatus.ACTIVE }
-        val correctionsByParagraph = corrections.groupBy { it.chapterIndex to it.paragraphIndex }
-        val resultsByLocation = linkedMapOf<Pair<Long, Int>, BookSearchResult>()
-
-        // Readium and Foliate search one reading-order resource at a time. Our paragraphs are
-        // already normalized in Room, so a chapter is the equivalent resource: load it through
-        // the chapterId index, match in memory, then publish that chapter's results immediately.
-        chapters.forEachIndexed { chapterOffset, storedChapter ->
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            val chapter = if (storedChapter.indexed) {
-                storedChapter
-            } else {
-                onProgress(BookSearchProgress(BookSearchStage.INDEXING, chapterOffset, chapters.size))
-                epubIndex.ensureChapterIndexedForSearch(bookUuid, storedChapter.chapterIndex)
-                    ?: storedChapter
-            }
-            var chapterAddedResults = false
-            if (resultsByLocation.size < MAX_BOOK_SEARCH_RESULTS) {
-                dao.getParagraphs(chapter.id).forEach { paragraph ->
-                    val displayedText = applyCorrections(
-                        paragraph.text,
-                        correctionsByParagraph[chapter.chapterIndex to paragraph.paragraphIndex].orEmpty(),
-                    )
-                    if (displayedText.contains(normalizedQuery, ignoreCase = true)) {
-                        resultsByLocation[chapter.id to paragraph.paragraphIndex] = BookSearchResult(
-                            chapterId = chapter.id,
-                            chapterTitle = chapter.title,
-                            chapterIndex = chapter.chapterIndex,
-                            paragraphIndex = paragraph.paragraphIndex,
-                            text = displayedText,
-                        )
-                        chapterAddedResults = true
-                    }
-                }
-            }
-            if (chapterAddedResults) onResults(resultsByLocation.values.toList())
-            onProgress(
-                BookSearchProgress(
-                    BookSearchStage.SEARCHING,
-                    completed = chapterOffset + 1,
-                    total = chapters.size,
-                ),
-            )
-            kotlinx.coroutines.yield()
-        }
-        resultsByLocation.values.toList()
+        BookSearchScanner(dao).search(
+            chapters = chapters,
+            query = normalizedQuery,
+            corrections = textCorrections.getBookCorrections(bookUuid),
+            ensureIndexed = { stored ->
+                epubIndex.ensureChapterIndexedForSearch(bookUuid, stored.chapterIndex)
+                    ?: error(context.getString(R.string.db_read_failed))
+            },
+            onProgress = onProgress,
+            onResults = onResults,
+        )
     }
 
     override suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult? =
@@ -1283,5 +1247,3 @@ class LocalBookRepository @Inject constructor(
 }
 
 private class ImportCanceledException : Exception()
-
-private const val MAX_BOOK_SEARCH_RESULTS = 1_000

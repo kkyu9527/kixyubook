@@ -125,7 +125,6 @@ internal class ReaderSearchController(
                     text = paragraph.text,
                 )
             }
-            .take(MAX_SEARCH_RESULTS)
             .toList()
     }
 
@@ -187,17 +186,15 @@ internal class ReaderSearchController(
         searchScope: ReaderSearchScope,
         candidates: List<BookSearchResult>,
     ) {
-        val merged = mergeResults(candidates)
         state.update { current ->
             if (current.searchQuery != query || current.searchScope != searchScope) current
-            else current.withSearchResults(merged)
+            else current.withSearchResults(mergeResults(current.searchResults + candidates))
         }
     }
 
     private fun mergeResults(candidates: List<BookSearchResult>): List<BookSearchResult> = candidates
         .distinctBy { it.chapterId to it.paragraphIndex }
         .sortedWith(compareBy(BookSearchResult::chapterIndex, BookSearchResult::paragraphIndex))
-        .take(MAX_SEARCH_RESULTS)
 
     private fun ReaderUiState.withSearchResults(results: List<BookSearchResult>): ReaderUiState {
         val selected = searchResults.getOrNull(selectedSearchIndex)
@@ -211,6 +208,5 @@ internal class ReaderSearchController(
 
     private companion object {
         const val MAX_SEARCH_HISTORY = 10
-        const val MAX_SEARCH_RESULTS = 1000
     }
 }

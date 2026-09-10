@@ -51,6 +51,7 @@ interface BookRepository {
     fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>>
     suspend fun addBookmark(bookmark: Bookmark)
     suspend fun deleteBookmark(bookmarkUuid: String)
+    /** onResults publishes incremental batches; the return value contains all matching paragraphs. */
     suspend fun searchBook(
         bookUuid: String,
         query: String,

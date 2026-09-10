@@ -6,6 +6,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ReaderSearchControllerTest {
+    @Test fun incrementalBatchesKeepMoreThanOneThousandResultsAndLastChapterSelectable() = kotlinx.coroutines.runBlocking {
+        ReaderSearchFixture().use { fixture ->
+            fixture.controller.search("needle", ReaderSearchScope.BOOK)
+            val request = fixture.repository.requests.single()
+            val all = List(1_205) { index ->
+                com.kixyu9527.kixyubook.core.common.model.BookSearchResult(100L + index, "chapter", index, 0, "needle")
+            }
+            all.chunked(128).forEach { request.partial(it) }
+            org.junit.Assert.assertEquals(1_205, fixture.state.value.searchResults.size)
+            request.result.complete(all)
+            fixture.controller.select(1_204)
+            org.junit.Assert.assertEquals(1_204 to 0, fixture.jumps.last())
+        }
+    }
+
     private val earlier = BookSearchResult(10, "序章", 2, 7, "黄金序章")
 
     @Test fun chapterOnlySearchUsesSourceIndexWithoutStartingFullBookWork() {
