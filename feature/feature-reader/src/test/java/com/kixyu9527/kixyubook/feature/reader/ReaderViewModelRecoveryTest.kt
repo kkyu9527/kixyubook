@@ -35,7 +35,10 @@ class ReaderViewModelRecoveryTest {
 
     @Test fun epubReopensAtLastCheckpointAfterReaderIsCleared() = recreateReader(BookFormat.EPUB)
 
-    private fun recreateReader(format: BookFormat) = runBlocking { withTimeout(5_000) {
+    @Test fun txtLocationChainKeepsAnchorsAndCanStillRestore() = recreateReader(BookFormat.TXT, exerciseJumps = true)
+    @Test fun epubLocationChainKeepsAnchorsAndCanStillRestore() = recreateReader(BookFormat.EPUB, exerciseJumps = true)
+
+    private fun recreateReader(format: BookFormat, exerciseJumps: Boolean = false) = runBlocking { withTimeout(5_000) {
         val chapters = MutableStateFlow(listOf(
             Chapter(12, "book", "第一章", 0, chapterKey = "first"),
             Chapter(33, "book", "第二章", 1, chapterKey = "second"),
@@ -104,6 +107,20 @@ class ReaderViewModelRecoveryTest {
             first = newReader()
             firstStore.put("reader", first)
             first.uiState.first { !it.loading }
+            if (exerciseJumps) {
+                first.requestLocation(ReaderLocationRequest(0, 4, 6, ReaderLocationSource.ANNOTATION))
+                first.uiState.first { it.chapterIndex == 0 && it.restorePosition == 4 }
+                assertEquals(6, first.uiState.value.restoreCharOffset)
+                first.jumpToChapter(1)
+                first.uiState.first { it.chapterIndex == 1 && it.restorePosition == 0 }
+                first.navigateHistoryBack()
+                first.uiState.first { it.chapterIndex == 0 && it.restorePosition == 4 }
+                assertEquals(6, first.uiState.value.restoreCharOffset)
+                first.requestLocation(ReaderLocationRequest(1, 3, source = ReaderLocationSource.BOOKMARK))
+                first.uiState.first { it.chapterIndex == 1 && it.restorePosition == 3 }
+                first.requestLocation(ReaderLocationRequest(1, 2, 4, ReaderLocationSource.SEARCH))
+                assertEquals(4, first.uiState.value.restoreCharOffset)
+            }
             run {
                 assertEquals(2, first.uiState.value.restorePosition)
                 first.savePosition(7, 5)

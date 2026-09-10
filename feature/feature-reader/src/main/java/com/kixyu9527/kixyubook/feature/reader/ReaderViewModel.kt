@@ -100,6 +100,10 @@ class ReaderViewModel @AssistedInject constructor(
         },
     )
     private val locationHistory = ReaderLocationHistory()
+    private val locationJourney = ReaderJourneyTracker(SystemClock::elapsedRealtime) { source, elapsed, outcome ->
+        DiagnosticLog.record(Category.READER, "location_ready", elapsedMs = elapsed, outcome = outcome,
+            details = mapOf("source" to source.name))
+    }
     val operations = UserOperationController(viewModelScope) { error ->
         val failure = error.toDiagnosticFailure()
         DiagnosticLog.record(Category.READER, "reader_operation_failed", outcome = failure.outcome, details = mapOf("reason" to failure.reason))
@@ -276,8 +280,12 @@ class ReaderViewModel @AssistedInject constructor(
             )
         }
         val content = chapterLoad(index, chapters, ChapterLoadPriority.USER).await() ?: error(context.getString(R.string.reader_error_chapter))
-        lastPosition = progress?.paragraphIndex ?: 0
-        lastCharOffset = progress?.charOffset?.coerceAtLeast(0) ?: 0
+        val restoredLocation = requireNotNull(ReaderLocationRequest(
+            index, progress?.paragraphIndex ?: 0, progress?.charOffset ?: 0,
+            ReaderLocationSource.RESTORE, isChapterPosition = true, rememberOrigin = false,
+        ).resolve(chapters))
+        lastPosition = restoredLocation.paragraphIndex
+        lastCharOffset = restoredLocation.charOffset
         openingChapterId = chapters[index].id
         openingPosition = lastPosition
         openingCharOffset = lastCharOffset
@@ -336,6 +344,7 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     fun moveChapter(delta: Int, openAtEnd: Boolean = false) {
+        locationJourney.finish("superseded")
         val state = _uiState.value
         val baseIndex = pendingChapterIndex ?: state.chapterIndex
         navigateToChapter(
@@ -352,6 +361,7 @@ class ReaderViewModel @AssistedInject constructor(
     fun moveChapterFromPage(sourceChapterIndex: Int, delta: Int, openAtEnd: Boolean = false) {
         val state = _uiState.value
         if (state.chapterIndex != sourceChapterIndex) return
+        locationJourney.finish("superseded")
         navigateToChapter(
             index = (sourceChapterIndex + delta).coerceIn(0, state.chapters.lastIndex),
             position = if (openAtEnd) Int.MAX_VALUE else 0,
@@ -359,9 +369,7 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     fun jumpToChapter(index: Int) {
-        val target = index.coerceIn(0, _uiState.value.chapters.lastIndex)
-        recordNavigationOrigin(target, 0)
-        navigateToChapter(index = target, position = 0)
+        requestLocation(ReaderLocationRequest(index, source = ReaderLocationSource.DIRECTORY, isChapterPosition = true))
     }
 
     /** Commit the leaf already shown by Pager without issuing another text-position jump. */
@@ -371,6 +379,7 @@ class ReaderViewModel @AssistedInject constructor(
             destination.chapterIndex == state.chapterIndex ||
             destination.chapterIndex !in state.chapters.indices
         ) return
+        locationJourney.finish("superseded")
         navigateToChapter(
             index = destination.chapterIndex,
             position = destination.paragraphIndex,
@@ -540,6 +549,7 @@ class ReaderViewModel @AssistedInject constructor(
                 throw error
             } catch (error: Exception) {
                 if (pendingChapterIndex == index) {
+                    locationJourney.failed(index)
                     _uiState.update { it.copy(error = error.message ?: context.getString(R.string.reader_error_chapter)) }
                 }
             } finally {
@@ -686,12 +696,8 @@ class ReaderViewModel @AssistedInject constructor(
                 )
             }
         } else {
-            navigateToChapter(
-                targetIndex,
-                targetPosition,
-                targetCharOffset,
-                persistProgress = false,
-            )
+            requestLocation(ReaderLocationRequest(targetIndex, targetPosition, targetCharOffset,
+                ReaderLocationSource.RESTORE, isChapterPosition = true, rememberOrigin = false))
         }
     }
 
@@ -844,28 +850,38 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     fun jumpToPosition(chapterIndex: Int, position: Int) {
-        recordNavigationOrigin(chapterIndex, position)
-        jumpToPositionRaw(chapterIndex, position)
+        requestLocation(ReaderLocationRequest(chapterIndex, position, source = ReaderLocationSource.BOOKMARK))
     }
 
     private fun jumpToPositionRaw(chapterIndex: Int, position: Int) {
-        val state = _uiState.value
-        val safeChapter = state.chapters.indexOfFirst { it.index == chapterIndex }
-            .takeIf { it >= 0 }
-            ?: chapterIndex.coerceIn(0, state.chapters.lastIndex)
-        navigateToChapter(safeChapter, position.coerceAtLeast(0))
+        requestLocation(ReaderLocationRequest(chapterIndex, position, source = ReaderLocationSource.SEARCH, rememberOrigin = false))
+    }
+
+    internal fun requestLocation(request: ReaderLocationRequest) {
+        val target = request.resolve(_uiState.value.chapters) ?: return
+        if (target != currentLocation()) {
+            locationJourney.begin(request.source, target.chapterPosition, _uiState.value.navigationVersion)
+        }
+        if (request.rememberOrigin) {
+            locationHistory.record(currentLocation(), target)
+            publishLocationHistoryState()
+        }
+        navigateToChapter(target.chapterPosition, target.paragraphIndex, target.charOffset,
+            persistProgress = request.source != ReaderLocationSource.RESTORE)
     }
 
     fun navigateHistoryBack() {
         val target = locationHistory.goBack(currentLocation()) ?: return
         publishLocationHistoryState()
-        navigateToChapter(target.chapterPosition, target.paragraphIndex, target.charOffset)
+        requestLocation(ReaderLocationRequest(target.chapterPosition, target.paragraphIndex, target.charOffset,
+            ReaderLocationSource.HISTORY, isChapterPosition = true, rememberOrigin = false))
     }
 
     fun navigateHistoryForward() {
         val target = locationHistory.goForward(currentLocation()) ?: return
         publishLocationHistoryState()
-        navigateToChapter(target.chapterPosition, target.paragraphIndex, target.charOffset)
+        requestLocation(ReaderLocationRequest(target.chapterPosition, target.paragraphIndex, target.charOffset,
+            ReaderLocationSource.HISTORY, isChapterPosition = true, rememberOrigin = false))
     }
 
     fun openEpubLink(target: String) {
@@ -873,8 +889,7 @@ class ReaderViewModel @AssistedInject constructor(
             when (val result = books.resolveEpubLink(bookUuid, target)) {
                 is EpubLinkResult.Footnote -> _uiState.update { it.copy(epubFootnote = result) }
                 is EpubLinkResult.Location -> {
-                    recordNavigationOrigin(result.chapterIndex, result.paragraphIndex)
-                    jumpToPositionRaw(result.chapterIndex, result.paragraphIndex)
+                    requestLocation(ReaderLocationRequest(result.chapterIndex, result.paragraphIndex, source = ReaderLocationSource.DOCUMENT_LINK))
                 }
                 null -> Unit
             }
@@ -886,14 +901,11 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     private fun recordNavigationOrigin(chapterIndex: Int, paragraphIndex: Int) {
-        val state = _uiState.value
-        if (state.chapters.isEmpty()) return
-        val targetChapter = state.chapters.indexOfFirst { it.index == chapterIndex }
-            .takeIf { it >= 0 }
-            ?: chapterIndex.coerceIn(0, state.chapters.lastIndex)
+        val target = ReaderLocationRequest(chapterIndex, paragraphIndex, source = ReaderLocationSource.SEARCH)
+            .resolve(_uiState.value.chapters) ?: return
         locationHistory.record(
             origin = currentLocation(),
-            destination = ReaderLocation(targetChapter, paragraphIndex.coerceAtLeast(0), 0),
+            destination = target,
         )
         publishLocationHistoryState()
     }
@@ -1126,6 +1138,7 @@ class ReaderViewModel @AssistedInject constructor(
     fun chapterRendered(navigationVersion: Int) {
         val rendered = _uiState.value
         if (rendered.navigationVersion != navigationVersion || rendered.chapter == null) return
+        locationJourney.rendered(rendered.chapterIndex, navigationVersion)
         if (rendered.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE) {
             _uiState.update { current ->
                 if (current.navigationVersion != navigationVersion) current else {
@@ -1146,6 +1159,7 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     override fun onCleared() {
+        locationJourney.finish()
         progressWriter.close()
         MemoryPressureRegistry.unregister(this)
         chapterPrefetchJob?.cancel()
