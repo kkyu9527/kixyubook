@@ -1,0 +1,3 @@
+<resources>
+    <string name="backup_restart_recovery">還原過程中斷。請關閉並重新開啟應用程式，完成資料復原後再繼續使用。</string>
+</resources>

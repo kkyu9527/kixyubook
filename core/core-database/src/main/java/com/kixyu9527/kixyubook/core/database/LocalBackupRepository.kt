@@ -15,6 +15,12 @@ import com.kixyu9527.kixyubook.core.common.repository.BackupResult
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import com.kixyu9527.kixyubook.core.common.repository.BackupRecoveryException
+import com.kixyu9527.kixyubook.core.common.repository.withoutRecordingSyncMutations
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -154,8 +160,7 @@ class LocalBackupRepository @Inject constructor(
                 validateAndRebase(snapshot, File(extracted, "files"))
                 ensureRestoreInstallSpace(snapshot, File(extracted, "files"))
                 val bookCount = countBooks(snapshot)
-                installRestore(snapshot, File(extracted, "files"))
-                restoreSettings(properties)
+                installRestore(snapshot, File(extracted, "files"), properties)
                 BackupResult(bookCount, totalBytes, requiresRestart = true)
             } finally {
                 work.deleteRecursively()
@@ -275,25 +280,62 @@ class LocalBackupRepository @Inject constructor(
         return storageManager.getAllocatableBytes(storageManager.getUuidForPath(path))
     }
 
-    private fun installRestore(snapshot: File, assets: File) {
-        database.close()
-        val dbFile = context.getDatabasePath(DATABASE_NAME)
-        val replacing = File(dbFile.parentFile, "$DATABASE_NAME.restoring")
+    private suspend fun installRestore(snapshot: File, assets: File, properties: Properties): Unit = LibraryStorageGate.mutex.withLock {
+        val oldSettings = settingsRepository.settings.first()
+        val oldGoal = settingsRepository.readingGoalMinutes.first()
+        val journal = backupRestoreJournal(context)
         try {
-            snapshot.copyTo(replacing, overwrite = true)
-            listOf(dbFile, File("${dbFile.path}-wal"), File("${dbFile.path}-shm")).forEach { it.delete() }
-            check(replacing.renameTo(dbFile)) { context.getString(R.string.backup_install_database_failed) }
-            ASSET_DIRECTORIES.forEach { name ->
-                val live = File(context.filesDir, name)
-                live.deleteRecursively()
-                File(assets, name).takeIf(File::exists)?.copyRecursively(live, overwrite = true)
-            }
-            // Rich EPUB chapters are derived from the immutable source. Keeping cache entries from
-            // the replaced library wastes space and can retain obsolete books indefinitely.
-            File(context.noBackupFilesDir, EPUB_CACHE_DIRECTORY).deleteRecursively()
-        } finally {
-            replacing.delete()
+            journal.requireRecovered()
+        } catch (failure: Exception) {
+            throw BackupRecoveryException(context.getString(R.string.backup_restart_recovery), failure)
         }
+        var databaseClosed = false
+        var settingsTouched = false
+        var committed = false
+        try {
+            journal.prepare(buildMap {
+                put("database", snapshot)
+                ASSET_DIRECTORIES.forEach { name -> File(assets, name).takeIf(File::exists)?.let { put(name, it) } }
+            })
+            currentCoroutineContext().ensureActive()
+            // Once switching starts, coroutine cancellation must not strand an open process in
+            // the middle. Actual process death is handled by the on-disk journal at startup.
+            withContext(NonCancellable) {
+                withoutRecordingSyncMutations {
+                    settingsTouched = true
+                    restoreSettings(properties)
+                }
+                databaseClosed = true
+                database.close()
+                journal.install()
+                journal.commit()
+                committed = true
+            }
+            runCatching { File(context.noBackupFilesDir, EPUB_CACHE_DIRECTORY).deleteRecursively() }
+        } catch (failure: Exception) {
+            // Returning from NonCancellable can deliver a pending cancellation after commit.
+            // The restored database and settings must remain a pair in that case.
+            if (committed) throw BackupRecoveryException(context.getString(R.string.backup_restart_recovery), failure)
+            // Keep the journal if either rollback fails. Never discard the only remaining copy
+            // of the old library; startup retries rollback before opening Room or DataStore.
+            withContext(NonCancellable) {
+                try {
+                    journal.rollback(includePreferences = false)
+                    if (settingsTouched) withoutRecordingSyncMutations {
+                        settingsRepository.update { oldSettings }
+                        settingsRepository.setReadingGoalMinutes(oldGoal)
+                    }
+                    journal.cleanup()
+                } catch (rollbackFailure: Exception) {
+                    failure.addSuppressed(rollbackFailure)
+                    throw BackupRecoveryException(context.getString(R.string.backup_restart_recovery), failure)
+                }
+            }
+            if (databaseClosed) throw BackupRecoveryException(context.getString(R.string.backup_restart_recovery), failure)
+            if (failure is CancellationException) throw failure
+            throw failure
+        }
+        Unit
     }
 
     private fun cleanupBackupWorkDirectories() {
@@ -418,7 +460,7 @@ class LocalBackupRepository @Inject constructor(
 
     private fun File.livePath(directory: String) = File(context.filesDir, "$directory/$name").absolutePath
 
-    private companion object {
+    internal companion object {
         const val DATABASE_NAME = "kixyu-books.db"
         const val BACKUP_VERSION = 5
         const val MANIFEST_ENTRY = "manifest.properties"

@@ -124,6 +124,7 @@ internal fun SettingsBackupSection(
 internal fun SettingsBackupDialogs(
     preview: BackupPreview?,
     restored: Boolean,
+    restoreFailure: String?,
     onDismissPreview: () -> Unit,
     onRestore: (BackupPreview) -> Unit,
     onCloseApp: () -> Unit,
@@ -172,12 +173,12 @@ internal fun SettingsBackupDialogs(
     }
     KixyuActionDialog(
         show = restored,
-        title = stringResource(R.string.settings_restore_complete),
+        title = stringResource(if (restoreFailure == null) R.string.settings_restore_complete else R.string.settings_restore_recovery_title),
         onDismissRequest = {},
         confirmLabel = stringResource(R.string.settings_close_app),
         dismissLabel = null,
         onConfirm = onCloseApp,
     ) {
-        Text(stringResource(R.string.settings_restore_restart_hint))
+        Text(restoreFailure ?: stringResource(R.string.settings_restore_restart_hint))
     }
 }

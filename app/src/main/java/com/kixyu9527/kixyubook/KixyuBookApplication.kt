@@ -1,6 +1,8 @@
 package com.kixyu9527.kixyubook
 
 import android.app.Application
+import android.content.Context
+import com.kixyu9527.kixyubook.core.database.recoverInterruptedBackupRestore
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -13,6 +15,11 @@ import javax.inject.Inject
 class KixyuBookApplication : Application(), DefaultLifecycleObserver {
     @Inject lateinit var cloudSync: CloudSyncCoordinator
     private lateinit var fairMemoryManager: HyperOsFairMemoryManager
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        recoverInterruptedBackupRestore(base)
+    }
 
     override fun onCreate() {
         super<Application>.onCreate()

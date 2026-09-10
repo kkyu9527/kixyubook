@@ -1,0 +1,3 @@
+<resources>
+    <string name="backup_restart_recovery">Restore was interrupted. Close and reopen the app to finish recovery before continuing.</string>
+</resources>

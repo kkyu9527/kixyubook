@@ -1,0 +1,3 @@
+<resources>
+    <string name="backup_restart_recovery">復元処理が中断されました。アプリを閉じて開き直し、データの復旧が完了してから続行してください。</string>
+</resources>

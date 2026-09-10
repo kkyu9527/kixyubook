@@ -1,0 +1,3 @@
+<resources>
+    <string name="backup_restart_recovery">恢复过程被中断。请关闭并重新打开应用，完成数据恢复后再继续使用。</string>
+</resources>

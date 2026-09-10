@@ -77,8 +77,8 @@ class BackupWorkScheduler @Inject constructor(
         )
     }
 
-    internal fun markFailed(id: UUID, operation: BackupOperationType, error: String) {
-        _state.value = BackupTaskState(id, operation, BackupTaskPhase.FAILED, error = error)
+    internal fun markFailed(id: UUID, operation: BackupOperationType, error: String, requiresRestart: Boolean = false) {
+        _state.value = BackupTaskState(id, operation, BackupTaskPhase.FAILED, error = error, requiresRestart = requiresRestart)
     }
 
     internal fun markCancelled(id: UUID) {
@@ -128,7 +128,7 @@ class BackupWorker(
                 },
                 onFailure = { error ->
                     val message = error.message ?: applicationContext.getString(R.string.sync_backup_failed)
-                    scheduler.markFailed(id, operation, message)
+                    scheduler.markFailed(id, operation, message, error is com.kixyu9527.kixyubook.core.common.repository.BackupRecoveryException)
                     notifications.showBackupResult(operation, null, message)
                     Result.failure()
                 },

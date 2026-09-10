@@ -70,6 +70,7 @@ fun SettingsRoute(
     val snackbar = remember { SnackbarHostState() }
     val requestNotificationPermission = rememberNotificationPermissionAction()
     var restored by rememberSaveable { mutableStateOf(false) }
+    var restoreFailure by rememberSaveable { mutableStateOf<String?>(null) }
     val backupCreator = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
@@ -95,7 +96,7 @@ fun SettingsRoute(
         }
     }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
-    LaunchedEffect(Unit) { viewModel.restoreCompleted.collect { restored = true } }
+    LaunchedEffect(Unit) { viewModel.restoreCompleted.collect { restoreFailure = it; restored = true } }
     val syncAccount = state.cloudSync.account
     val windowSizeClass = kixyuWindowSizeClass()
     val twoPane = windowSizeClass.supportsTwoPane && detailContent != null
@@ -245,6 +246,7 @@ fun SettingsRoute(
     SettingsBackupDialogs(
         preview = backupPreview,
         restored = restored,
+        restoreFailure = restoreFailure,
         onDismissPreview = viewModel::clearBackupPreview,
         onRestore = { preview ->
             viewModel.clearBackupPreview()

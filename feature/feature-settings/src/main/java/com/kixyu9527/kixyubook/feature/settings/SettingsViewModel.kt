@@ -75,7 +75,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
     private val _messages = MutableSharedFlow<String>()
     val messages = _messages.asSharedFlow()
-    private val _restoreCompleted = MutableSharedFlow<Unit>()
+    // null means success; a message means recovery requires a restart, not a completed restore.
+    private val _restoreCompleted = MutableSharedFlow<String?>(replay = 1)
     val restoreCompleted = _restoreCompleted.asSharedFlow()
     private val _backupPreview = MutableStateFlow<BackupPreview?>(null)
     val backupPreview = _backupPreview.asStateFlow()
@@ -93,12 +94,13 @@ class SettingsViewModel @Inject constructor(
                 when (task.phase) {
                     BackupTaskPhase.SUCCEEDED -> {
                         lastReportedWorkId = workId
-                        if (task.requiresRestart) _restoreCompleted.emit(Unit)
+                        if (task.requiresRestart) _restoreCompleted.emit(null)
                         else _messages.emit(context.getString(R.string.settings_backup_saved, task.bookCount ?: 0))
                     }
                     BackupTaskPhase.FAILED -> {
                         lastReportedWorkId = workId
-                        _messages.emit(task.error ?: context.getString(R.string.settings_backup_failed))
+                        val message = task.error ?: context.getString(R.string.settings_backup_failed)
+                        if (task.requiresRestart) _restoreCompleted.emit(message) else _messages.emit(message)
                     }
                     else -> Unit
                 }
