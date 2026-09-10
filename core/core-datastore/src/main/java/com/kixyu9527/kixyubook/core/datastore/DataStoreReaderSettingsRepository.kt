@@ -5,7 +5,6 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
-import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -24,9 +23,12 @@ class DataStoreReaderSettingsRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val syncMutations: SyncMutationRecorder,
 ) : ReaderSettingsRepository {
-    override val settings: Flow<ReaderSettings> = context.readerSettingsDataStore.data.map { values ->
+    private val mutations = SettingsMutationJournal(context.readerSettingsDataStore, syncMutations)
+    override val settings: Flow<ReaderSettings> = context.readerSettingsDataStore.data.map(::readSettings)
+
+    private fun readSettings(values: Preferences): ReaderSettings {
         val storedTheme = values[THEME]
-        ReaderSettings(
+        return ReaderSettings(
             fontSize = values[FONT_SIZE] ?: 19f,
             lineHeight = values[LINE_HEIGHT] ?: 1.72f,
             letterSpacing = values[LETTER_SPACING] ?: 0.01f,
@@ -81,8 +83,8 @@ class DataStoreReaderSettingsRepository @Inject constructor(
     }
 
     override suspend fun update(transform: (ReaderSettings) -> ReaderSettings) {
-        val updated = transform(settings.first())
-        context.readerSettingsDataStore.edit { values ->
+        mutations.edit { values ->
+            val updated = transform(readSettings(values))
             values[FONT_SIZE] = updated.fontSize; values[LINE_HEIGHT] = updated.lineHeight
             values[LETTER_SPACING] = updated.letterSpacing; values[MARGIN] = updated.margin
             values[THEME] = updated.theme.name; values[PAGE_MODE] = updated.pageMode.name
@@ -115,12 +117,10 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[BRIGHTNESS_MODE] = updated.brightnessMode.name
             values[BRIGHTNESS] = updated.brightness.coerceIn(.05f, 1f)
         }
-        syncMutations.record(SyncEntityType.SETTINGS, "global")
     }
 
     override suspend fun setReadingGoalMinutes(minutes: Int) {
-        context.readerSettingsDataStore.edit { it[READING_GOAL] = minutes.coerceIn(5, 240) }
-        syncMutations.record(SyncEntityType.SETTINGS, "global")
+        mutations.edit { it[READING_GOAL] = minutes.coerceIn(5, 240) }
     }
 
     override suspend fun addSearchHistory(query: String) {

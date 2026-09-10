@@ -5,14 +5,19 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.collect
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.AbstractCoroutineContextElement
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.coroutineContext
 
 @Singleton
 class RoomSyncMutationRecorder @Inject constructor(
@@ -21,6 +26,26 @@ class RoomSyncMutationRecorder @Inject constructor(
     private val scheduler: CloudSyncScheduler,
 ) : SyncMutationRecorder {
     private val logicalClock = AtomicLong()
+
+    init {
+        // Scheduling is a consequence of committed data, never part of a caller's transaction.
+        // A scheduler failure retries from durable Room state and cannot undo a saved note.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            var seen = emptySet<String>()
+            dao.observePendingMutations().onEach { pending ->
+                if (preferences.current().enabled) {
+                    val fresh = pending.filter { it.uuid !in seen }
+                    scheduler.requestDebouncedForMutations(fresh.map { it.entityType to it.entityId })
+                }
+                seen = pending.mapTo(hashSetOf()) { it.uuid }
+            }.retryWhen { cause, _ ->
+                if (cause is CancellationException) false else {
+                    delay(1_000)
+                    true
+                }
+            }.collect()
+        }
+    }
 
     override suspend fun record(type: SyncEntityType, entityId: String, operation: SyncMutationOperation) {
         if (isSyncMutationRecordingSuppressed()) return
@@ -36,7 +61,6 @@ class RoomSyncMutationRecorder @Inject constructor(
                 deviceId = preferences.deviceId(),
             ),
         )
-        if (preferences.current().enabled) scheduler.requestDebounced(type, entityId)
     }
 
     suspend fun <T> withoutRecording(block: suspend () -> T): T =
@@ -44,12 +68,7 @@ class RoomSyncMutationRecorder @Inject constructor(
 }
 
 internal suspend fun isSyncMutationRecordingSuppressed(): Boolean =
-    coroutineContext[MutationRecordingSuppressedKey] != null
+    com.kixyu9527.kixyubook.core.common.repository.syncMutationRecordingSuppressed()
 
 internal suspend fun <T> withoutSyncMutationRecording(block: suspend () -> T): T =
-    withContext(MutationRecordingSuppressed) { block() }
-
-private object MutationRecordingSuppressedKey : CoroutineContext.Key<MutationRecordingSuppressed>
-
-private object MutationRecordingSuppressed :
-    AbstractCoroutineContextElement(MutationRecordingSuppressedKey)
+    com.kixyu9527.kixyubook.core.common.repository.withoutRecordingSyncMutations(block)

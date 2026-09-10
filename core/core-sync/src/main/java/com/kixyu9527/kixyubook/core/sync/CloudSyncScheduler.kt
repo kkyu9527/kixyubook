@@ -16,6 +16,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.Operation
+import androidx.work.await
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -78,19 +80,21 @@ class CloudSyncScheduler @Inject constructor(
             .enqueue()
     }
 
-    fun requestDebounced() {
+    fun requestDebounced(): Operation {
         val request = OneTimeWorkRequestBuilder<CloudSyncTriggerWorker>()
             .setInitialDelay(5, TimeUnit.SECONDS)
             .setConstraints(connected)
             .build()
-        workManager.enqueueUniqueWork(DEBOUNCE_TRIGGER_WORK, ExistingWorkPolicy.REPLACE, request)
+        return workManager.enqueueUniqueWork(DEBOUNCE_TRIGGER_WORK, ExistingWorkPolicy.REPLACE, request)
     }
 
-    fun requestDebounced(type: SyncEntityType, entityId: String) {
-        // Reader progress already has a low-latency in-process lane. Starting the full Drive chain
-        // for every page would make that upload wait behind metadata and large-file reconciliation.
-        if (type == SyncEntityType.PROGRESS && entityId == activePriorityBookUuid) return
-        requestDebounced()
+    /** Coalesce a committed transaction into one trigger; preserve the reader progress lane. */
+    suspend fun requestDebouncedForMutations(mutations: List<Pair<String, String>>) {
+        if (mutations.any { (type, id) -> type != SyncEntityType.PROGRESS.name || id != activePriorityBookUuid }) {
+            // Enqueue is asynchronous. A failed WorkManager database write must be observed
+            // before the outbox observer acknowledges this batch in its in-memory seen set.
+            requestDebounced().await()
+        }
     }
 
     fun setActivePriorityBook(bookUuid: String?) {

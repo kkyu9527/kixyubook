@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SyncDao {
+    /** Room emits only committed outbox snapshots, never intermediate transaction writes. */
+    @Query("SELECT * FROM sync_outbox ORDER BY changedAt, logicalCounter")
+    fun observePendingMutations(): Flow<List<SyncOutboxEntity>>
+
     @Query("SELECT COUNT(*) FROM sync_outbox")
     fun observePendingCount(): Flow<Int>
 

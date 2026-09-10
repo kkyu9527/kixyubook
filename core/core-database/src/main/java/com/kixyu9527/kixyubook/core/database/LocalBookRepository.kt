@@ -75,6 +75,7 @@ class LocalBookRepository @Inject constructor(
     private val importDao: ImportDao,
 ) : BookRepository, CompleteLibraryRepository, MemoryPressureListener {
     private val parsers = BookParserRegistry()
+    private val bookMutations = BookMutationStore(context, database, dao, syncMutations)
     // Parsed XHTML is derived data, but it must not disappear during ordinary Android cache
     // reclamation. A partially evicted cache made otherwise identical directory jumps vary from
     // instant to a full ZIP/XHTML parse. noBackupFilesDir persists it without bloating backups.
@@ -83,7 +84,7 @@ class LocalBookRepository @Inject constructor(
     )
     private val chapterCacheLock = Any()
     private val chapterLoadMutex = Mutex()
-    private val storageMutationMutex = Mutex()
+    private val storageMutationMutex = LibraryStorageGate.mutex
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
     private val canceledImportRuns = ConcurrentHashMap.newKeySet<String>()
@@ -449,10 +450,20 @@ class LocalBookRepository @Inject constructor(
                         it.writeBytes(bytes)
                     }.absolutePath
                 }
-                dao.insertBook(
-                    BookEntity(bookUuid, metadata.title, metadata.author, metadata.description, coverPath, format.name, rawUri, stored.absolutePath, System.currentTimeMillis(), hash, "未分类"),
-                )
-                insertedUuid = bookUuid
+                // Parse outside Room's write transaction, then publish metadata, directory and
+                // the sync mutation together. Other readers never see half a registered book.
+                val outlines = if (format == BookFormat.EPUB) {
+                    (parser as EpubBookParser).readChapterOutlines(stored)
+                        .also { if (it.isEmpty()) error(context.getString(R.string.db_no_chapters)) }
+                } else emptyList()
+                database.withTransaction {
+                    dao.insertBook(
+                        BookEntity(bookUuid, metadata.title, metadata.author, metadata.description, coverPath, format.name, rawUri, stored.absolutePath, System.currentTimeMillis(), hash, "未分类"),
+                    )
+                    epubIndex.registerDirectory(bookUuid, outlines)
+                    syncMutations.record(SyncEntityType.BOOK, bookUuid)
+                    insertedUuid = bookUuid
+                }
                 updateImportProgress(
                     importRun, rawUri,
                     ImportStage.BUILDING_DIRECTORY,
@@ -460,14 +471,7 @@ class LocalBookRepository @Inject constructor(
                     ImportItemStatus.RUNNING,
                     bookUuid = bookUuid,
                 )
-                val outlines = if (format == BookFormat.EPUB) {
-                    epubIndex.registerDirectory(bookUuid, stored, parser as EpubBookParser)
-                        .also { if (it.isEmpty()) error(context.getString(R.string.db_no_chapters)) }
-                } else {
-                    emptyList()
-                }
                 imports += RegisteredImport(importRun, rawUri, bookUuid, displayName, format, stored, parser)
-                syncMutations.record(SyncEntityType.BOOK, bookUuid)
                 updateImportProgress(
                     importRun, rawUri,
                     if (format == BookFormat.EPUB) ImportStage.FINISHED else ImportStage.INDEXING,
@@ -1011,31 +1015,12 @@ class LocalBookRepository @Inject constructor(
     }
 
     override fun observeProgress(bookUuid: String) = dao.observeProgress(bookUuid).map { it?.toModel() }
-    override suspend fun saveProgress(progress: ReadingProgress) = withContext(Dispatchers.IO) {
-        val chapter = dao.getChapters(progress.bookUuid).firstOrNull { it.id == progress.chapterId }
-        val saved = dao.saveProgressIfNewer(
-            ReadingProgressEntity(
-                bookUuid = progress.bookUuid,
-                chapterId = progress.chapterId,
-                position = progress.position,
-                offset = progress.offset,
-                updatedTime = progress.updatedTime,
-                fraction = progress.fraction,
-                chapterKey = progress.chapterKey.ifBlank { chapter?.chapterKey.orEmpty() },
-                paragraphIndex = progress.paragraphIndex,
-                charOffset = progress.charOffset,
-                quoteAnchor = progress.quoteAnchor,
-            ),
-        )
-        if (saved) syncMutations.record(SyncEntityType.PROGRESS, progress.bookUuid)
-    }
+    override suspend fun saveProgress(progress: ReadingProgress) = bookMutations.saveProgress(progress)
 
-    override suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = withContext(Dispatchers.IO) {
-        val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_missing))
-        dao.insertMetadataEdit(MetadataEditEntity(UUID.randomUUID().toString(), bookUuid, book.title, book.author, book.description, title.trim(), author.trim(), description.trim(), System.currentTimeMillis()))
-        dao.updateBookMetadata(bookUuid, title.trim().ifBlank { "未命名书籍" }, author.trim().ifBlank { "未知作者" }, description.trim())
-        syncMutations.record(SyncEntityType.BOOK, bookUuid)
-    }
+    override suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = bookMutations.updateBookMetadata(bookUuid, title, author, description)
+
+    override suspend fun updateBookDetails(bookUuid: String, title: String, author: String, description: String, category: String): Unit =
+        bookMutations.updateBookDetails(bookUuid, title, author, description, category)
 
     override suspend fun reparseTxt(bookUuid: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -1146,43 +1131,16 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
-    override suspend fun setCategory(bookUuid: String, category: String) = withContext(Dispatchers.IO) {
-        dao.setCategory(bookUuid, category.trim().ifBlank { "未分类" })
-        syncMutations.record(SyncEntityType.BOOK, bookUuid)
-    }
+    override suspend fun setCategory(bookUuid: String, category: String) = bookMutations.setCategory(bookUuid, category)
 
-    override suspend fun setCategories(bookUuids: Set<String>, category: String) = withContext(Dispatchers.IO) {
-        if (bookUuids.isEmpty()) return@withContext
-        val normalized = category.trim().ifBlank { "未分类" }
-        database.withTransaction {
-            dao.setCategories(bookUuids, normalized)
-            bookUuids.forEach { uuid -> syncMutations.record(SyncEntityType.BOOK, uuid) }
-        }
-    }
+    override suspend fun setCategories(bookUuids: Set<String>, category: String) = bookMutations.setCategories(bookUuids, category)
 
     override fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>> =
         dao.observeBookmarks(bookUuid).map { rows -> rows.map { it.toModel() } }
 
-    override suspend fun addBookmark(bookmark: Bookmark): Unit = withContext(Dispatchers.IO) {
-        dao.insertBookmark(
-            BookmarkEntity(
-                uuid = bookmark.uuid,
-                bookUuid = bookmark.bookUuid,
-                chapterId = bookmark.chapterId,
-                position = bookmark.position,
-                preview = bookmark.preview,
-                createdTime = bookmark.createdTime,
-            ),
-        )
-        syncMutations.record(SyncEntityType.BOOKMARKS, bookmark.bookUuid)
-    }
+    override suspend fun addBookmark(bookmark: Bookmark): Unit = bookMutations.addBookmark(bookmark)
 
-    override suspend fun deleteBookmark(bookmarkUuid: String) = withContext(Dispatchers.IO) {
-        val owner = dao.getAllBookmarkEntities().firstOrNull { it.uuid == bookmarkUuid }?.bookUuid
-        dao.deleteBookmark(bookmarkUuid)
-        owner?.let { syncMutations.record(SyncEntityType.BOOKMARKS, it) }
-        Unit
-    }
+    override suspend fun deleteBookmark(bookmarkUuid: String) = bookMutations.deleteBookmark(bookmarkUuid)
 
     override suspend fun searchBook(
         bookUuid: String,
@@ -1297,17 +1255,17 @@ class LocalBookRepository @Inject constructor(
     }
 
     private suspend fun removeIncompleteImport(bookUuid: String) {
-        dao.getBook(bookUuid)?.let { book ->
-            File(book.storagePath).delete()
-            book.coverPath?.let(::File)?.delete()
-        }
-        epubChapterCache.clearBook(bookUuid)
-        ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, bookUuid)
+        val book = dao.getBook(bookUuid) ?: return
         database.withTransaction {
             dao.deleteMetadataEdits(setOf(bookUuid))
             dao.deleteBookParagraphFts(setOf(bookUuid))
             dao.deleteBook(bookUuid)
+            syncMutations.record(SyncEntityType.BOOK, bookUuid, SyncMutationOperation.DELETE)
         }
+        File(book.storagePath).delete()
+        book.coverPath?.let(::File)?.delete()
+        epubChapterCache.clearBook(bookUuid)
+        ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, bookUuid)
     }
 
     private fun cleanupImportArtifacts() {

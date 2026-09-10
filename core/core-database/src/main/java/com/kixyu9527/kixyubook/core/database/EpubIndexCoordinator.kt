@@ -124,7 +124,12 @@ internal class EpubIndexCoordinator(
         parser: EpubBookParser,
     ): List<DocumentChapterOutline> {
         val outlines = parser.readChapterOutlines(source)
-        if (outlines.isEmpty()) return emptyList()
+        registerDirectory(bookUuid, outlines)
+        return outlines
+    }
+
+    suspend fun registerDirectory(bookUuid: String, outlines: List<DocumentChapterOutline>) {
+        if (outlines.isEmpty()) return
         database.withTransaction {
             dao.insertChapters(
                 outlines.map { outline ->
@@ -140,7 +145,6 @@ internal class EpubIndexCoordinator(
                 },
             )
         }
-        return outlines
     }
 
     /** Durable WorkManager entry point. Every completed chapter is an independent checkpoint. */

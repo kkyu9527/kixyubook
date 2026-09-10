@@ -43,6 +43,8 @@ interface BookRepository {
     fun observeProgress(bookUuid: String): Flow<ReadingProgress?>
     suspend fun saveProgress(progress: ReadingProgress)
     suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String)
+    /** A single editor submission: metadata, category and outbound sync must commit together. */
+    suspend fun updateBookDetails(bookUuid: String, title: String, author: String, description: String, category: String)
     suspend fun reparseTxt(bookUuid: String): Result<Unit>
     suspend fun setCategory(bookUuid: String, category: String)
     suspend fun setCategories(bookUuids: Set<String>, category: String)

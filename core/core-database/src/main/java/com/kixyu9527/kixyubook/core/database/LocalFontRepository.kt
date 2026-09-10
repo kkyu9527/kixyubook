@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
+import androidx.room.withTransaction
 import javax.inject.Singleton
 
 @Singleton
@@ -27,8 +28,9 @@ class LocalFontRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val dao: FontDao,
     private val syncMutations: SyncMutationRecorder,
+    private val database: KixyuDatabase,
 ) : FontRepository {
-    private val mutationMutex = Mutex()
+    private val mutationMutex = LibraryStorageGate.mutex
 
     override fun observeFonts() = dao.observeFonts().map { list -> list.map { UserFont(it.uuid, it.name, it.filePath, it.createdTime) } }
 
@@ -48,12 +50,20 @@ class LocalFontRepository @Inject constructor(
                 context.contentResolver.openInputStream(uri)?.use { input -> fontFile.outputStream().use(input::copyTo) } ?: error(context.getString(R.string.db_font_read_failed))
                 Typeface.createFromFile(fontFile)
                 val model = UserFont(uuid, name.substringBeforeLast('.'), fontFile.absolutePath, System.currentTimeMillis())
-                dao.insert(UserFontEntity(model.uuid, model.name, model.filePath, model.createdTime))
-                syncMutations.record(SyncEntityType.FONT, model.uuid)
+                database.withTransaction {
+                    dao.insert(UserFontEntity(model.uuid, model.name, model.filePath, model.createdTime))
+                    syncMutations.record(SyncEntityType.FONT, model.uuid)
+                }
                 model
-            }.onFailure {
-                target?.delete()
-                File(context.filesDir, "fonts").delete()
+            }.onFailure { failure ->
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    target?.let { file ->
+                        // A cancellation can arrive just after Room commits. Never remove a
+                        // font still referenced by that committed row.
+                        if (runCatching { dao.getFont(file.nameWithoutExtension) == null }.getOrDefault(false)) file.delete()
+                    }
+                }
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
             }
         }
     }
@@ -61,8 +71,10 @@ class LocalFontRepository @Inject constructor(
     override suspend fun deleteFont(fontUuid: String) = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
             val file = dao.getFont(fontUuid)?.filePath?.let(::File)
-            dao.delete(fontUuid)
-            syncMutations.record(SyncEntityType.FONT, fontUuid, SyncMutationOperation.DELETE)
+            database.withTransaction {
+                dao.delete(fontUuid)
+                syncMutations.record(SyncEntityType.FONT, fontUuid, SyncMutationOperation.DELETE)
+            }
             file?.delete()
             pruneUnreferencedFonts()
         }

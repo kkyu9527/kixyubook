@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import androidx.room.withTransaction
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,6 +30,7 @@ class LocalTextCorrectionRepository @Inject constructor(
     private val corrections: TextCorrectionDao,
     private val books: BookDao,
     private val syncMutations: SyncMutationRecorder,
+    private val database: KixyuDatabase,
 ) : TextCorrectionRepository {
     override fun observeBookCorrections(bookUuid: String): Flow<List<TextCorrection>> =
         corrections.observeForBook(bookUuid).map { values -> values.map(TextCorrectionEntity::toModel) }
@@ -48,7 +50,7 @@ class LocalTextCorrectionRepository @Inject constructor(
         paragraphIndex: Int,
         originalText: String,
         replacementText: String,
-    ): TextCorrection = withContext(Dispatchers.IO) {
+    ): TextCorrection = database.withTransaction {
         require(originalText.isNotEmpty()) { context.getString(R.string.db_empty_correction) }
         require(replacementText != originalText) { context.getString(R.string.db_unchanged_correction) }
         val book = books.getBook(bookUuid) ?: error(context.getString(R.string.db_book_removed))
@@ -77,11 +79,11 @@ class LocalTextCorrectionRepository @Inject constructor(
     }
 
     override suspend fun updateCorrection(uuid: String, replacementText: String): TextCorrection? =
-        withContext(Dispatchers.IO) {
-            val current = corrections.get(uuid)?.toModel() ?: return@withContext null
+        database.withTransaction {
+            val current = corrections.get(uuid)?.toModel() ?: return@withTransaction null
             if (replacementText == current.exactText) {
                 deleteCorrection(uuid)
-                return@withContext null
+                return@withTransaction null
             }
             var updated = current.copy(
                 replacementText = replacementText,
@@ -95,13 +97,13 @@ class LocalTextCorrectionRepository @Inject constructor(
             updated
         }
 
-    override suspend fun deleteCorrection(uuid: String) = withContext(Dispatchers.IO) {
+    override suspend fun deleteCorrection(uuid: String) = database.withTransaction {
         corrections.delete(uuid)
         syncMutations.record(SyncEntityType.CORRECTION, uuid, SyncMutationOperation.DELETE)
     }
 
-    override suspend fun resolveConflict(uuid: String) = withContext(Dispatchers.IO) {
-        val selected = corrections.get(uuid)?.toModel() ?: return@withContext
+    override suspend fun resolveConflict(uuid: String) = database.withTransaction {
+        val selected = corrections.get(uuid)?.toModel() ?: return@withTransaction
         val overlapping = corrections.getForBook(selected.bookUuid).map(TextCorrectionEntity::toModel)
             .filter { it.uuid != uuid && it.overlaps(selected) }
         overlapping.forEach { deleteCorrection(it.uuid) }
@@ -141,17 +143,17 @@ class LocalTextCorrectionRepository @Inject constructor(
         )
     }
 
-    override suspend fun applyRemote(correction: TextCorrection) = withContext(Dispatchers.IO) {
-        if (books.getBook(correction.bookUuid) == null) return@withContext
+    override suspend fun applyRemote(correction: TextCorrection) = database.withTransaction {
+        if (books.getBook(correction.bookUuid) == null) return@withTransaction
         val local = corrections.get(correction.uuid)?.toModel()
-        if (local != null && local.updatedTime > correction.updatedTime) return@withContext
+        if (local != null && local.updatedTime > correction.updatedTime) return@withTransaction
         val incoming = if (markOverlappingConflicts(correction)) {
             correction.copy(status = TextCorrectionStatus.CONFLICT)
         } else correction
         corrections.upsert(incoming.toEntity())
     }
 
-    override suspend fun deleteRemote(uuid: String) = withContext(Dispatchers.IO) {
+    override suspend fun deleteRemote(uuid: String) = database.withTransaction {
         corrections.delete(uuid)
     }
 

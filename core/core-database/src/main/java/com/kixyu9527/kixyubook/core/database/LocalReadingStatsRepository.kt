@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.util.UUID
+import androidx.room.withTransaction
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,6 +20,7 @@ import javax.inject.Singleton
 class LocalReadingStatsRepository @Inject constructor(
     private val dao: BookDao,
     private val syncMutations: SyncMutationRecorder,
+    private val database: KixyuDatabase,
 ) : ReadingStatsRepository {
     override fun observeStats() = dao.observeSessions().map { sessions ->
         val today = LocalDate.now().toEpochDay()
@@ -43,7 +45,7 @@ class LocalReadingStatsRepository @Inject constructor(
         )
     }
 
-    override suspend fun recordSession(bookUuid: String, durationMillis: Long) = withContext(Dispatchers.IO) {
+    override suspend fun recordSession(bookUuid: String, durationMillis: Long) = database.withTransaction {
         if (durationMillis >= 1_000) {
             val syncUuid = UUID.randomUUID().toString()
             dao.insertSession(ReadingSessionEntity(

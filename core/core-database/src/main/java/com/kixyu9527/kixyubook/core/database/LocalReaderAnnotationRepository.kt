@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import androidx.room.withTransaction
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,6 +27,7 @@ class LocalReaderAnnotationRepository @Inject constructor(
     private val annotations: ReaderAnnotationDao,
     private val books: BookDao,
     private val syncMutations: SyncMutationRecorder,
+    private val database: KixyuDatabase,
 ) : ReaderAnnotationRepository {
     override fun observeBookAnnotations(bookUuid: String): Flow<List<ReaderAnnotation>> =
         annotations.observeForBook(bookUuid).map { values -> values.map(ReaderAnnotationEntity::toModel) }
@@ -44,7 +46,7 @@ class LocalReaderAnnotationRepository @Inject constructor(
         endOffset: Int,
         style: ReaderAnnotationStyle,
         note: String,
-    ): ReaderAnnotation = withContext(Dispatchers.IO) {
+    ): ReaderAnnotation = database.withTransaction {
         require(originalText.isNotBlank()) { context.getString(R.string.db_empty_annotation) }
         val safeStart = startOffset.coerceIn(0, originalText.length)
         val safeEnd = endOffset.coerceIn(safeStart, originalText.length)
@@ -76,27 +78,27 @@ class LocalReaderAnnotationRepository @Inject constructor(
         value
     }
 
-    override suspend fun updateNote(uuid: String, note: String): ReaderAnnotation? = withContext(Dispatchers.IO) {
-        val current = annotations.get(uuid)?.toModel() ?: return@withContext null
+    override suspend fun updateNote(uuid: String, note: String): ReaderAnnotation? = database.withTransaction {
+        val current = annotations.get(uuid)?.toModel() ?: return@withTransaction null
         val updated = current.copy(note = note.trim(), updatedTime = System.currentTimeMillis(), deviceId = deviceId())
         annotations.upsert(updated.toEntity())
         syncMutations.record(SyncEntityType.ANNOTATION, uuid)
         updated
     }
 
-    override suspend fun deleteAnnotation(uuid: String) = withContext(Dispatchers.IO) {
+    override suspend fun deleteAnnotation(uuid: String) = database.withTransaction {
         annotations.delete(uuid)
         syncMutations.record(SyncEntityType.ANNOTATION, uuid, SyncMutationOperation.DELETE)
     }
 
-    override suspend fun applyRemote(annotation: ReaderAnnotation) = withContext(Dispatchers.IO) {
-        if (books.getBook(annotation.bookUuid) == null) return@withContext
+    override suspend fun applyRemote(annotation: ReaderAnnotation) = database.withTransaction {
+        if (books.getBook(annotation.bookUuid) == null) return@withTransaction
         val local = annotations.get(annotation.uuid)?.toModel()
-        if (local != null && local.updatedTime > annotation.updatedTime) return@withContext
+        if (local != null && local.updatedTime > annotation.updatedTime) return@withTransaction
         annotations.upsert(annotation.toEntity())
     }
 
-    override suspend fun deleteRemote(uuid: String) = withContext(Dispatchers.IO) {
+    override suspend fun deleteRemote(uuid: String) = database.withTransaction {
         annotations.delete(uuid)
     }
 

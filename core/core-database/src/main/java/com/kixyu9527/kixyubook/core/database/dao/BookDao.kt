@@ -40,6 +40,8 @@ interface BookDao {
         WHERE b.bookUuid = :uuid ORDER BY c.chapterIndex, b.position""")
     suspend fun getBookmarks(uuid: String): List<BookmarkRow>
     @Query("SELECT * FROM bookmarks") suspend fun getAllBookmarkEntities(): List<BookmarkEntity>
+    @Query("SELECT * FROM bookmarks WHERE uuid = :uuid LIMIT 1")
+    suspend fun getBookmarkEntity(uuid: String): BookmarkEntity?
     @Query("""SELECT c.id AS chapterId, c.title AS chapterTitle, c.chapterIndex,
         p.paragraphIndex, p.text
         FROM paragraphs_fts f
