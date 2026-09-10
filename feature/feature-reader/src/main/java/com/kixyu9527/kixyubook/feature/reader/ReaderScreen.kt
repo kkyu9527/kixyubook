@@ -537,12 +537,10 @@ internal fun ReaderScreen(
                 onDismiss = { correctionEditorTarget = null },
                 onSave = { replacement ->
                     saveCorrection(target.chapterIndex, target.paragraphIndex, target.text, replacement)
-                    correctionEditorTarget = null
                 },
                 onDelete = existing?.let { correction ->
                     {
                         deleteCorrection(correction.uuid)
-                        correctionEditorTarget = null
                     }
                 },
                 onManageAll = {
@@ -566,12 +564,10 @@ internal fun ReaderScreen(
                         target.chapterIndex, target.paragraphIndex, target.text,
                         target.selectedStart, target.selectedEnd, note,
                     )
-                    noteEditorTarget = null
                 },
                 onDelete = existing?.let { annotation ->
                     {
                         deleteAnnotation(annotation.uuid)
-                        noteEditorTarget = null
                     }
                 },
             )

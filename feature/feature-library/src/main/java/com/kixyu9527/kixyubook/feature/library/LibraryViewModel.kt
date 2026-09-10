@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.feature.library
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -66,6 +67,7 @@ class LibraryViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryPreferences())
     private var customOrderPersistence: Job? = null
     private val messages = Channel<String>(Channel.BUFFERED)
+    val operations = UserOperationController(viewModelScope)
     val messageEvents = messages.receiveAsFlow()
     private val exports = Channel<BookExportEvent>(Channel.BUFFERED)
     val exportEvents = exports.receiveAsFlow()
@@ -246,16 +248,14 @@ class LibraryViewModel @Inject constructor(
             .onFailure { messages.send(it.message ?: context.getString(R.string.library_batch_export_failed)) }
     }
 
-    fun delete(bookUuid: String) = viewModelScope.launch { repository.deleteBook(bookUuid) }
-    fun deleteBooks(bookUuids: Set<String>) = viewModelScope.launch {
+    fun delete(bookUuid: String) = operations.submit { repository.deleteBook(bookUuid) }
+    fun deleteBooks(bookUuids: Set<String>) = operations.submit {
         if (bookUuids.isNotEmpty()) repository.deleteBooks(bookUuids)
     }
-    fun updateMetadata(bookUuid: String, title: String, author: String, description: String) = viewModelScope.launch {
-        runCatching { repository.updateBookMetadata(bookUuid, title, author, description) }
-            .onFailure { messages.send(it.message ?: context.getString(R.string.library_edit_failed)) }
+    fun updateMetadata(bookUuid: String, title: String, author: String, description: String, category: String) = operations.submit {
+        repository.updateBookDetails(bookUuid, title, author, description, category)
     }
-    fun setCategory(bookUuid: String, value: String) = viewModelScope.launch { repository.setCategory(bookUuid, value) }
-    fun setCategories(bookUuids: Set<String>, value: String) = viewModelScope.launch {
+    fun setCategories(bookUuids: Set<String>, value: String) = operations.submit {
         repository.setCategories(bookUuids, value)
     }
 }

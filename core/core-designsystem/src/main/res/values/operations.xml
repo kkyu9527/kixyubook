@@ -1,0 +1,7 @@
+<resources>
+    <string name="kixyu_operation_failed">The operation could not be completed. Please retry.</string>
+    <string name="kixyu_operation_retry">Retry</string>
+    <string name="kixyu_operation_delete_title">Delete this item?</string>
+    <string name="kixyu_operation_delete">Delete</string>
+    <string name="kixyu_operation_delete_warning">This also removes its saved content. This action cannot be undone.</string>
+</resources>

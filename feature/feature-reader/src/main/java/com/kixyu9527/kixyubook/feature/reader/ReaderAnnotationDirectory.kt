@@ -146,11 +146,9 @@ internal fun ReaderAnnotationDirectory(
             onDismiss = { editor = null },
             onSave = { note ->
                 updateAnnotationNote(annotation.uuid, note)
-                editor = null
             },
             onDelete = {
                 deleteAnnotation(annotation.uuid)
-                editor = null
             },
         )
     }

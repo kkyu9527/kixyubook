@@ -1,0 +1,7 @@
+<resources>
+    <string name="kixyu_operation_failed">操作未完成，请重试。</string>
+    <string name="kixyu_operation_retry">重试</string>
+    <string name="kixyu_operation_delete_title">删除此项目？</string>
+    <string name="kixyu_operation_delete">删除</string>
+    <string name="kixyu_operation_delete_warning">同时移除已保存的内容，此操作无法撤销。</string>
+</resources>

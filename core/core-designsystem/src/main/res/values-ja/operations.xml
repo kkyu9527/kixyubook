@@ -1,0 +1,7 @@
+<resources>
+    <string name="kixyu_operation_failed">操作を完了できませんでした。再試行してください。</string>
+    <string name="kixyu_operation_retry">再試行</string>
+    <string name="kixyu_operation_delete_title">この項目を削除しますか？</string>
+    <string name="kixyu_operation_delete">削除</string>
+    <string name="kixyu_operation_delete_warning">保存済みの内容も削除されます。この操作は取り消せません。</string>
+</resources>

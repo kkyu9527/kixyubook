@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.feature.library
+import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuEditorOperation
 
 import android.content.Context
 import android.content.Intent
@@ -579,28 +580,32 @@ internal fun BookManagementDialog(
     var author by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.author) }
     var description by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.description) }
     var category by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.category) }
+    val operation = rememberKixyuEditorOperation(dismiss)
     KixyuActionDialog(
         show = true,
         title = stringResource(R.string.library_edit_book),
-        onDismissRequest = dismiss,
+        onDismissRequest = { operation.edited(); dismiss() },
         confirmLabel = stringResource(R.string.library_action_save),
-        onConfirm = { save(title, author, description, category) },
+        confirmEnabled = !operation.running,
+        onConfirm = { operation.submit { save(title, author, description, category) } },
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
         ) {
-            OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.library_book_title)) }, singleLine = true)
-            OutlinedTextField(author, { author = it }, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.library_book_author)) }, singleLine = true)
+            if (operation.failed) Text(stringResource(com.kixyu9527.kixyubook.core.designsystem.R.string.kixyu_operation_failed), color = MaterialTheme.colorScheme.error)
+            OutlinedTextField(title, { operation.edited(); title = it }, enabled = !operation.running, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.library_book_title)) }, singleLine = true)
+            OutlinedTextField(author, { operation.edited(); author = it }, enabled = !operation.running, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.library_book_author)) }, singleLine = true)
             OutlinedTextField(
                 description,
-                { description = it },
+                { operation.edited(); description = it },
+                enabled = !operation.running,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.library_book_description)) },
                 minLines = 3,
                 maxLines = 6,
             )
-            OutlinedTextField(category, { category = it }, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.library_book_category)) }, singleLine = true)
+            OutlinedTextField(category, { operation.edited(); category = it }, enabled = !operation.running, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.library_book_category)) }, singleLine = true)
         }
     }
 }

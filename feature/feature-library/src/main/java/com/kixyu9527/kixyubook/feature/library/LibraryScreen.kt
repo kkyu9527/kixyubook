@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.feature.library
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
@@ -220,6 +221,7 @@ fun LibraryRoute(
             }
         }
     }
+    KixyuOperationHost(viewModel.operations) {
     LibraryScreen(
         state = state,
         importProgress = importProgress,
@@ -241,7 +243,6 @@ fun LibraryRoute(
         onExport = beginExport,
         onExportMany = beginBatchExport,
         onUpdateMetadata = viewModel::updateMetadata,
-        onSetCategory = viewModel::setCategory,
         onSetCategories = viewModel::setCategories,
         onDropDocuments = { uris, releasePermission ->
             viewModel.import(uris) { releasePermission?.invoke() }
@@ -251,6 +252,7 @@ fun LibraryRoute(
         onRetryImport = viewModel::retryImport,
         onClearImportHistory = viewModel::clearImportHistory,
     )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -275,8 +277,7 @@ private fun LibraryScreen(
     onDeleteMany: (Set<String>) -> Unit,
     onExport: (LibraryBook) -> Unit,
     onExportMany: (Set<String>) -> Unit,
-    onUpdateMetadata: (String, String, String, String) -> Unit,
-    onSetCategory: (String, String) -> Unit,
+    onUpdateMetadata: (String, String, String, String, String) -> Unit,
     onSetCategories: (Set<String>, String) -> Unit,
     onDropDocuments: (List<String>, (() -> Unit)?) -> Unit,
     onClearImportProgress: () -> Unit,
@@ -594,9 +595,7 @@ private fun LibraryScreen(
             item = item,
             dismiss = { managingUuid = null },
             save = { title, author, description, category ->
-                onUpdateMetadata(item.book.uuid, title, author, description)
-                onSetCategory(item.book.uuid, category)
-                managingUuid = null
+                onUpdateMetadata(item.book.uuid, title, author, description, category)
             },
         )
     }

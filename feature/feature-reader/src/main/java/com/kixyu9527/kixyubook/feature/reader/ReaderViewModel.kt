@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.feature.reader
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
@@ -99,6 +100,12 @@ class ReaderViewModel @AssistedInject constructor(
         },
     )
     private val locationHistory = ReaderLocationHistory()
+    val operations = UserOperationController(viewModelScope) { error ->
+        val failure = error.toDiagnosticFailure()
+        DiagnosticLog.record(Category.READER, "reader_operation_failed", outcome = failure.outcome, details = mapOf("reason" to failure.reason))
+    }
+
+    private val annotationActions = ReaderAnnotationActions(bookUuid, _uiState, annotations, textCorrections, operations)
     private val searchController = ReaderSearchController(
         scope = viewModelScope,
         bookUuid = bookUuid,
@@ -377,35 +384,9 @@ class ReaderViewModel @AssistedInject constructor(
         paragraphIndex: Int,
         displayedText: String,
         replacementText: String,
-    ) {
-        val state = _uiState.value
-        val chapterPosition = state.chapters.indexOfFirst { it.index == chapterIndex }
-        val chapter = state.chapters.getOrNull(chapterPosition) ?: return
-        val existing = state.corrections.firstOrNull {
-            it.chapterKey == chapter.chapterKey &&
-                it.paragraphIndex == paragraphIndex && it.status != TextCorrectionStatus.UNRESOLVED
-        }
-        viewModelScope.launch {
-            if (existing != null) {
-                textCorrections.updateCorrection(existing.uuid, replacementText)
-            } else {
-                textCorrections.createParagraphCorrection(
-                    bookUuid = bookUuid,
-                    chapterKey = chapter.chapterKey,
-                    chapterIndex = chapter.index,
-                    paragraphIndex = paragraphIndex,
-                    originalText = displayedText,
-                    replacementText = replacementText,
-                )
-            }
-        }
-    }
+    ) = annotationActions.saveParagraphCorrection(chapterIndex, paragraphIndex, displayedText, replacementText)
 
-    fun deleteCorrection(uuid: String) {
-        viewModelScope.launch {
-            textCorrections.deleteCorrection(uuid)
-        }
-    }
+    fun deleteCorrection(uuid: String) = annotationActions.deleteCorrection(uuid)
 
     fun saveParagraphHighlight(
         chapterIndex: Int,
@@ -413,9 +394,7 @@ class ReaderViewModel @AssistedInject constructor(
         displayedText: String,
         startOffset: Int,
         endOffset: Int,
-    ) {
-        saveAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.HIGHLIGHT)
-    }
+    ) = annotationActions.saveParagraphHighlight(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset)
 
     fun saveParagraphUnderline(
         chapterIndex: Int,
@@ -423,9 +402,7 @@ class ReaderViewModel @AssistedInject constructor(
         displayedText: String,
         startOffset: Int,
         endOffset: Int,
-    ) {
-        saveAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.UNDERLINE)
-    }
+    ) = annotationActions.saveParagraphUnderline(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset)
 
     fun saveParagraphNote(
         chapterIndex: Int,
@@ -434,76 +411,11 @@ class ReaderViewModel @AssistedInject constructor(
         startOffset: Int,
         endOffset: Int,
         note: String,
-    ) {
-        viewModelScope.launch {
-            val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
-            if (existing != null) {
-                annotations.updateNote(existing.uuid, note)
-            } else {
-                createAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.HIGHLIGHT, note)
-            }
-        }
-    }
+    ) = annotationActions.saveParagraphNote(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, note)
 
-    fun deleteAnnotation(uuid: String) {
-        viewModelScope.launch { annotations.deleteAnnotation(uuid) }
-    }
+    fun deleteAnnotation(uuid: String) = annotationActions.deleteAnnotation(uuid)
 
-    fun updateAnnotationNote(uuid: String, note: String) {
-        viewModelScope.launch { annotations.updateNote(uuid, note.trim()) }
-    }
-
-    private fun saveAnnotation(
-        chapterIndex: Int,
-        paragraphIndex: Int,
-        displayedText: String,
-        startOffset: Int,
-        endOffset: Int,
-        style: ReaderAnnotationStyle,
-    ) {
-        viewModelScope.launch {
-            val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
-            if (existing?.style == style && existing.note.isBlank()) {
-                annotations.deleteAnnotation(existing.uuid)
-            } else {
-                createAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, style, existing?.note.orEmpty())
-            }
-        }
-    }
-
-    private suspend fun createAnnotation(
-        chapterIndex: Int,
-        paragraphIndex: Int,
-        displayedText: String,
-        startOffset: Int,
-        endOffset: Int,
-        style: ReaderAnnotationStyle,
-        note: String,
-    ) {
-        val chapter = _uiState.value.chapters.firstOrNull { it.index == chapterIndex } ?: return
-        annotations.createAnnotation(
-            bookUuid = bookUuid,
-            chapterKey = chapter.chapterKey,
-            chapterIndex = chapter.index,
-            paragraphIndex = paragraphIndex,
-            originalText = displayedText,
-            startOffset = startOffset,
-            endOffset = endOffset,
-            style = style,
-            note = note,
-        )
-    }
-
-    private fun findAnnotation(
-        chapterIndex: Int,
-        paragraphIndex: Int,
-        startOffset: Int,
-        endOffset: Int,
-    ): ReaderAnnotation? =
-        _uiState.value.annotations.firstOrNull {
-            it.chapterIndex == chapterIndex && it.paragraphIndex == paragraphIndex &&
-                it.startOffset == startOffset && it.endOffset == endOffset
-        }
+    fun updateAnnotationNote(uuid: String, note: String) = annotationActions.updateAnnotationNote(uuid, note)
 
     /**
      * Corrections can change from the editor, the management destination, or cloud sync. Keep
@@ -1099,9 +1011,9 @@ class ReaderViewModel @AssistedInject constructor(
         fonts.deleteFont(font.uuid)
     }
 
-    fun addBookmark() = viewModelScope.launch {
+    fun addBookmark() = operations.submit {
         val state = _uiState.value
-        val chapter = state.chapter ?: return@launch
+        val chapter = state.chapter ?: return@submit
         val position = lastPosition
         val preview = chapter.contentParagraphs()
             .firstOrNull { it.index >= position && it.kind == ParagraphKind.TEXT }
@@ -1123,7 +1035,7 @@ class ReaderViewModel @AssistedInject constructor(
         )
     }
 
-    fun deleteBookmark(uuid: String) = viewModelScope.launch { books.deleteBookmark(uuid) }
+    fun deleteBookmark(uuid: String) = operations.confirmDelete { books.deleteBookmark(uuid) }
 
     fun search(query: String, scope: ReaderSearchScope) = searchController.search(query, scope)
 

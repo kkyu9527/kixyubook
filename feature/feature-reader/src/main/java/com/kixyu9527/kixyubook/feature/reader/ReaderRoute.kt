@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.feature.reader
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -147,49 +148,51 @@ private fun LoadedReaderRoute(
         )
         return
     }
-    ReaderScreen(
-        state = renderedState,
-        position = position,
-        contentState = if (state.settingsLoaded) contentState else {
-            contentState.copy(settings = initialSettings)
-        },
-        readerContentReady = state.settingsLoaded,
-        onExit = onExit,
-        moveChapter = viewModel::moveChapter,
-        moveChapterFromPage = viewModel::moveChapterFromPage,
-        settlePage = viewModel::settlePage,
-        jumpChapter = viewModel::jumpToChapter,
-        jumpPosition = viewModel::jumpToPosition,
-        savePosition = viewModel::savePosition,
-        updateSettings = viewModel::updateSettings,
-        addBookmark = viewModel::addBookmark,
-        deleteBookmark = viewModel::deleteBookmark,
-        search = viewModel::search,
-        selectSearchResult = viewModel::selectSearchResult,
-        moveSearchResult = viewModel::moveSearchResult,
-        returnFromSearchResult = viewModel::returnFromSearchResult,
-        navigateHistoryBack = viewModel::navigateHistoryBack,
-        navigateHistoryForward = viewModel::navigateHistoryForward,
-        clearSearch = viewModel::clearSearch,
-        clearSearchHistory = viewModel::clearSearchHistory,
-        chapterRendered = viewModel::chapterRendered,
-        setPageInteractionActive = viewModel::setPageInteractionActive,
-        prioritizeAdjacentChapter = viewModel::prioritizeAdjacentChapter,
-        addFont = {
-            fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
-        },
-        deleteFont = viewModel::deleteFont,
-        saveCorrection = viewModel::saveParagraphCorrection,
-        deleteCorrection = viewModel::deleteCorrection,
-        saveHighlight = viewModel::saveParagraphHighlight,
-        saveUnderline = viewModel::saveParagraphUnderline,
-        saveNote = viewModel::saveParagraphNote,
-        updateAnnotationNote = viewModel::updateAnnotationNote,
-        deleteAnnotation = viewModel::deleteAnnotation,
-        openDocumentLink = viewModel::openEpubLink,
-        closeFootnote = viewModel::closeEpubFootnote,
-        onManageCorrections = onManageCorrections,
-    )
+    KixyuOperationHost(viewModel.operations) {
+        ReaderScreen(
+            state = renderedState,
+            position = position,
+            contentState = if (state.settingsLoaded) contentState else {
+                contentState.copy(settings = initialSettings)
+            },
+            readerContentReady = state.settingsLoaded,
+            onExit = onExit,
+            moveChapter = viewModel::moveChapter,
+            moveChapterFromPage = viewModel::moveChapterFromPage,
+            settlePage = viewModel::settlePage,
+            jumpChapter = viewModel::jumpToChapter,
+            jumpPosition = viewModel::jumpToPosition,
+            savePosition = viewModel::savePosition,
+            updateSettings = viewModel::updateSettings,
+            addBookmark = viewModel::addBookmark,
+            deleteBookmark = viewModel::deleteBookmark,
+            search = viewModel::search,
+            selectSearchResult = viewModel::selectSearchResult,
+            moveSearchResult = viewModel::moveSearchResult,
+            returnFromSearchResult = viewModel::returnFromSearchResult,
+            navigateHistoryBack = viewModel::navigateHistoryBack,
+            navigateHistoryForward = viewModel::navigateHistoryForward,
+            clearSearch = viewModel::clearSearch,
+            clearSearchHistory = viewModel::clearSearchHistory,
+            chapterRendered = viewModel::chapterRendered,
+            setPageInteractionActive = viewModel::setPageInteractionActive,
+            prioritizeAdjacentChapter = viewModel::prioritizeAdjacentChapter,
+            addFont = {
+                fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
+            },
+            deleteFont = viewModel::deleteFont,
+            saveCorrection = viewModel::saveParagraphCorrection,
+            deleteCorrection = viewModel::deleteCorrection,
+            saveHighlight = viewModel::saveParagraphHighlight,
+            saveUnderline = viewModel::saveParagraphUnderline,
+            saveNote = viewModel::saveParagraphNote,
+            updateAnnotationNote = viewModel::updateAnnotationNote,
+            deleteAnnotation = viewModel::deleteAnnotation,
+            openDocumentLink = viewModel::openEpubLink,
+            closeFootnote = viewModel::closeEpubFootnote,
+            onManageCorrections = onManageCorrections,
+        )
+    }
 }
 
 /**
