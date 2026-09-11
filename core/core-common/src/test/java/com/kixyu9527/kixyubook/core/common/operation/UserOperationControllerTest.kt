@@ -56,6 +56,32 @@ class UserOperationControllerTest {
         } finally { scope.cancel() }
     }
 
+    @Test fun deleteKindIsExposedThroughFailureRetryAndSuccess() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val controller = UserOperationController(scope)
+            var calls = 0
+            controller.submit(kind = UserOperationKind.DELETE) {
+                calls++
+                if (calls == 1) throw IOException()
+            }
+            assertEquals(UserOperationKind.DELETE, controller.state.value.kind)
+            assertTrue(controller.state.value.failed)
+            controller.retry(controller.state.value.attempt)
+            assertTrue(controller.state.value.succeeded)
+            assertEquals(UserOperationKind.DELETE, controller.state.value.kind)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun submitDefaultsToGenericKind() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val controller = UserOperationController(scope)
+            controller.submit { }
+            assertEquals(UserOperationKind.GENERIC, controller.state.value.kind)
+        } finally { scope.cancel() }
+    }
+
     @Test fun repeatedTapsAreRejectedAndCancellationIsNotReportedAsFailure() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         var errors = 0
