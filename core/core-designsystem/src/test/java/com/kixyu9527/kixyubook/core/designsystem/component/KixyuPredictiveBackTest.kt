@@ -31,6 +31,28 @@ class KixyuPredictiveBackTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     private enum class Surface { SETTINGS, MENU }
+    @Test fun dirtyEditorReturnsToVisibleStateBeforeDiscardConfirmation() {
+        lateinit var state: KixyuPredictiveBackState<Unit>
+        var requested = false
+        compose.setContent {
+            CompositionLocalProvider(LocalKixyuPredictiveBackEnabled provides true) {
+                state = rememberKixyuPredictiveBackState()
+                KixyuPredictiveBackHandler(Unit, state, onBack = { requested = true }, commitAllowed = { false })
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        val dispatcher = compose.activity.onBackPressedDispatcher
+        compose.runOnIdle { dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 300f, 0f, BackEventCompat.EDGE_LEFT)) }
+        compose.mainClock.advanceTimeBy(32)
+        compose.runOnIdle { dispatcher.dispatchOnBackProgressed(BackEventCompat(100f, 300f, .7f, BackEventCompat.EDGE_LEFT)) }
+        compose.mainClock.advanceTimeBy(32)
+        compose.runOnIdle { dispatcher.onBackPressed() }
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        compose.runOnIdle { assertTrue(requested); assertEquals(0f, state.progress, .001f) }
+        compose.mainClock.autoAdvance = true
+    }
 
     @Test fun materialNestedReturnKeepsOutgoingSettingsHidden() = nestedReturn(AppUiStyle.MATERIAL)
 

@@ -92,10 +92,12 @@ fun <T> KixyuPredictiveBackHandler(
     state: KixyuPredictiveBackState<T>,
     onBack: (T) -> Unit,
     animateOnCommit: Boolean = true,
+    commitAllowed: () -> Boolean = { true },
 ) {
     val predictiveBackEnabled = LocalKixyuPredictiveBackEnabled.current
     val currentTarget = rememberUpdatedState(target)
     val currentOnBack = rememberUpdatedState(onBack)
+    val currentCommitAllowed = rememberUpdatedState(commitAllowed)
 
     LaunchedEffect(target, predictiveBackEnabled) {
         // Only the newly active target resets. Other targets retain their committed frame until
@@ -121,7 +123,10 @@ fun <T> KixyuPredictiveBackHandler(
             }
             // Hardware/three-button Back completes an empty flow: let the surface run its
             // ordinary exit instead of flashing through a fabricated 100% gesture frame.
-            if (receivedProgress) state.commit(gestureTarget, animateOnCommit) else state.prepareTarget(gestureTarget)
+            if (receivedProgress) {
+                if (currentCommitAllowed.value()) state.commit(gestureTarget, animateOnCommit)
+                else state.cancel(gestureTarget)
+            } else state.prepareTarget(gestureTarget)
             committed = true
             if (currentTarget.value == gestureTarget) currentOnBack.value(gestureTarget)
         } catch (_: CancellationException) {

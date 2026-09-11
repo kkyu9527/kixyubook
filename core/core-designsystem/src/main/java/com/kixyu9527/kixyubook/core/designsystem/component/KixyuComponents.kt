@@ -362,6 +362,7 @@ fun KixyuListRow(
     leading: (@Composable () -> Unit)? = null,
     trailing: @Composable () -> Unit = {},
 ) {
+    val rowModifier = modifier.semantics(mergeDescendants = true) { this.selected = selected }
     val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
     val containerColor = when {
         selected && isMiuix -> MaterialTheme.colorScheme.primary
@@ -374,7 +375,7 @@ fun KixyuListRow(
         val selectedSupportingColor = selectedContentColor.copy(alpha = .78f)
         if (titleStyle != null || supportingTextStyle != null || titleMaxLines != 1) {
             MiuixBasicComponent(
-                modifier = modifier.fillMaxWidth()
+                modifier = rowModifier.fillMaxWidth()
                     .clip(MaterialTheme.shapes.large)
                     .background(containerColor, MaterialTheme.shapes.large)
                     .heightIn(min = KixyuSize.rowMinHeight),
@@ -428,7 +429,7 @@ fun KixyuListRow(
             return
         }
         MiuixBasicComponent(
-            modifier = modifier.fillMaxWidth()
+            modifier = rowModifier.fillMaxWidth()
                 .clip(MaterialTheme.shapes.large)
                 .background(containerColor, MaterialTheme.shapes.large)
                 .heightIn(min = KixyuSize.rowMinHeight),
@@ -493,7 +494,7 @@ fun KixyuListRow(
             leadingContent = leading,
             trailingContent = { trailing() },
             colors = ListItemDefaults.colors(containerColor = containerColor),
-            modifier = modifier.fillMaxWidth()
+            modifier = rowModifier.fillMaxWidth()
                 .clip(MaterialTheme.shapes.large)
                 .clickable(onClick = onClick),
         )

@@ -950,6 +950,7 @@ fun KixyuActionDialog(
     onAlternative: (() -> Unit)? = null,
     alternativeEnabled: Boolean = true,
     dismissLabel: String? = stringResource(R.string.kixyu_cancel),
+    dismissRequiresConfirmation: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     if (!show) return
@@ -1087,6 +1088,7 @@ fun KixyuActionDialog(
             target = Unit,
             state = predictiveBackState,
             onBack = { onDismissRequest() },
+            commitAllowed = { !dismissRequiresConfirmation },
         )
     }
 }
