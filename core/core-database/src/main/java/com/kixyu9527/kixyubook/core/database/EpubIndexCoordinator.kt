@@ -299,7 +299,7 @@ internal class EpubIndexCoordinator(
 }
 
 private const val KEY_EPUB_DIRECTORY_VERSION = "epub_directory_version"
-private const val EPUB_DIRECTORY_VERSION = 3
+private const val EPUB_DIRECTORY_VERSION = 4
 private fun String.shortIndexDiagnosticId(): String = take(8)
 
 private fun stableIndexChapterKey(bookUuid: String, index: Int, title: String): String {

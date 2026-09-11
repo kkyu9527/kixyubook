@@ -207,10 +207,17 @@ internal fun String.semanticEpubSectionTitle(): String? {
         normalized in setOf("cover", "coverpage", "bookcover", "titlepage", "封面") -> "封面"
         normalized in setOf("preface", "foreword", "prologue", "introduction", "xu", "序", "序章") ->
             if (normalized == "prologue" || normalized == "序章") "序章" else "序"
+        normalized.isVolumeOpeningPageName() -> "序"
         normalized in setOf("toc", "contents", "tableofcontents", "目录") -> "目录"
         else -> null
     }
 }
+
+/** Publisher front-matter file names such as `foreword.xhtml` or `foreword2.xhtml`. */
+internal fun String.isVolumeOpeningPageName(): Boolean =
+    VOLUME_OPENING_PAGE_NAME.matches(trim().lowercase().replace(Regex("[\\s_.-]+"), ""))
+
+private val VOLUME_OPENING_PAGE_NAME = Regex("^(?:foreword|preface)\\d*$")
 
 internal fun String.isGenericEpubChapterTitle(): Boolean {
     val value = singleLineBookHeading()

@@ -55,6 +55,24 @@ class ReaderDirectoryTest {
     }
 
     @Test
+    fun consecutiveVolumeOpeningPagesCollapseUnderOneVolumeRow() {
+        val chapters = listOf(
+            chapter(90, "小丑", 0),
+            chapter(91, "小丑", 1),
+            chapter(92, "第一章 绯红", 2, "小丑", 0),
+            chapter(93, "第二章 情况", 3, "小丑", 0),
+        )
+
+        val rows = buildDirectoryRows(chapters, mapOf(0 to true))
+        val volume = rows.first() as DirectoryRow.Volume
+
+        assertEquals(0, volume.targetChapterIndex)
+        assertEquals(true, volume.hasOwnContent)
+        assertEquals(2, volume.chapterCount)
+        assertEquals(listOf(2, 3), rows.filterIsInstance<DirectoryRow.ChapterRow>().map { it.index })
+    }
+
+    @Test
     fun stickyVolumeFollowsDirectoryViewportInsteadOfReadingChapter() {
         val chapters = listOf(
             chapter(40, "第一章", 0, "第一卷", 0),

@@ -522,9 +522,7 @@ private fun buildSpineDirectoryRows(
         return chapters.mapIndexed { index, chapter -> DirectoryRow.ChapterRow(index, chapter.id) }
     }
     val sectionsByStart = sections.associateBy(VolumeSection::startIndex)
-    val hiddenStandaloneTargets = sections.mapNotNullTo(hashSetOf()) { section ->
-        section.targetChapterIndex.takeIf { it !in section.startIndex until section.endIndexExclusive }
-    }
+    val hiddenStandaloneTargets = sections.flatMapTo(hashSetOf(), VolumeSection::openingChapterIndices)
     return buildList {
         var position = 0
         while (position < chapters.size) {
@@ -543,10 +541,10 @@ private fun buildSpineDirectoryRows(
                     chapterCount = section.childChapterIndices.size,
                     chapterIds = buildSet {
                         section.chapterIndices.mapTo(this) { chapters[it].id }
-                        add(chapters[section.targetChapterIndex].id)
+                        section.openingChapterIndices.mapTo(this) { chapters[it].id }
                     },
                     targetChapterIndex = section.targetChapterIndex,
-                    hasOwnContent = section.targetChapterIndex !in section.childChapterIndices,
+                    hasOwnContent = section.openingChapterIndices.isNotEmpty(),
                 ),
             )
             if (expandedVolumes[section.volumeIndex] == true) {
@@ -573,11 +571,13 @@ private data class VolumeSection(
     val chapterIndices: List<Int>,
     val childChapterIndices: List<Int>,
     val targetChapterIndex: Int,
+    /** Front-matter pages (plate, foreword) claimed by this volume and hidden from the list. */
+    val openingChapterIndices: Set<Int>,
 )
 
 /**
  * Builds display-only volume sections without changing the underlying reading order. A publisher
- * supplied EPUB volume page, or TXT prose between a volume heading and its first chapter, becomes
+ * supplied EPUB volume opening, or TXT prose between a volume heading and its first chapter, becomes
  * the row target. When no such page exists, the volume starts at its first child chapter.
  */
 private fun buildVolumeSections(chapters: List<Chapter>): List<VolumeSection> = buildList {
@@ -602,20 +602,20 @@ private fun buildVolumeSections(chapters: List<Chapter>): List<VolumeSection> = 
         }
         val end = position
         val normalizedTitle = volumeTitle.normalizedDirectoryTitle()
+        // A publisher's volume opening is often two consecutive pages (a plate and a foreword).
+        // Claim the whole contiguous front-matter run so the directory shows one volume row whose
+        // target is the earliest page and the rest are read in order without extra rows.
+        val precedingRun = (start - 1 downTo previousSectionEnd).takeWhile { candidate ->
+            candidate !in claimedStandaloneTargets &&
+                chapters[candidate].volumeIndex == null &&
+                chapters[candidate].title.normalizedDirectoryTitle() == normalizedTitle
+        }.toList()
+        precedingRun.forEach(claimedStandaloneTargets::add)
         val inlineOpening = start.takeIf {
             chapters[it].title.normalizedDirectoryTitle() == normalizedTitle
         }
-        val standaloneOpening = if (inlineOpening == null) {
-            (start - 1 downTo previousSectionEnd).firstOrNull { candidate ->
-                candidate !in claimedStandaloneTargets &&
-                    chapters[candidate].volumeIndex == null &&
-                    chapters[candidate].title.normalizedDirectoryTitle() == normalizedTitle
-            }
-        } else {
-            null
-        }
-        standaloneOpening?.let(claimedStandaloneTargets::add)
-        val target = inlineOpening ?: standaloneOpening ?: start
+        val opening = (precedingRun + listOfNotNull(inlineOpening)).toSortedSet()
+        val target = opening.firstOrNull() ?: start
         val chapterIndices = (start until end).toList()
         add(
             VolumeSection(
@@ -624,8 +624,9 @@ private fun buildVolumeSections(chapters: List<Chapter>): List<VolumeSection> = 
                 startIndex = start,
                 endIndexExclusive = end,
                 chapterIndices = chapterIndices,
-                childChapterIndices = chapterIndices.filterNot { it == inlineOpening },
+                childChapterIndices = chapterIndices.filterNot { it in opening },
                 targetChapterIndex = target,
+                openingChapterIndices = opening,
             ),
         )
         previousSectionEnd = end

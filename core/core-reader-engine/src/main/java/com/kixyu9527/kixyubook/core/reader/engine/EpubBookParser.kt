@@ -188,7 +188,32 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         }
         // The publisher's TOC is navigation, not a whitelist of readable spine resources.
         // Keep every source index so unlisted prologues/interludes remain readable and searchable.
-        candidates
+        adoptVolumeOpeningPages(candidates, pkg)
+    }
+
+    /**
+     * Some publishers leave a volume's foreword/opening page out of the navigation document. With
+     * no volume of its own it surfaced as an extra top-level row right before that volume. Adopt
+     * the following volume's title so the directory claims the page as the volume's own opening
+     * content instead of rendering "foreword2" as a sibling chapter.
+     */
+    private fun adoptVolumeOpeningPages(
+        outlines: List<DocumentChapterOutline>,
+        pkg: PackageDocument,
+    ): List<DocumentChapterOutline> {
+        if (outlines.none { it.volumeTitle == null }) return outlines
+        return outlines.mapIndexed { index, outline ->
+            if (outline.volumeTitle != null) return@mapIndexed outline
+            val nextVolume = outlines.getOrNull(index + 1)?.volumeTitle?.takeIf(String::isNotBlank)
+                ?: return@mapIndexed outline
+            val item = pkg.manifest[pkg.spine.getOrNull(outline.sourceIndex).orEmpty()]
+                ?: return@mapIndexed outline
+            val fileName = item.path.substringAfterLast('/').substringBeforeLast('.')
+            if (!fileName.isVolumeOpeningPageName() && !outline.title.isVolumeOpeningPageName()) {
+                return@mapIndexed outline
+            }
+            outline.copy(title = nextVolume)
+        }
     }
 
     fun readNavigation(file: File): List<com.kixyu9527.kixyubook.core.common.model.EpubNavigationEntry> = ZipFile(file).use { zip ->
