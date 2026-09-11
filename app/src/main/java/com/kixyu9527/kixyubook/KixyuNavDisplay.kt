@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -257,6 +258,14 @@ internal fun KixyuNavDisplay(
     }
     val navBackground = kixyuPageBackground()
     val navigationBackdrop = rememberKixyuNavigationBackdrop(navBackground)
+    // Navigation 3 keeps a remembered entry per back-stack key, so entry content cannot read these
+    // values from a captured snapshot; it reads the latest through a stable State instead.
+    val latestTopDestinations = rememberUpdatedState(top)
+    val latestInitialReaderSettings = rememberUpdatedState(initialReaderSettings)
+    val latestUpdateState = rememberUpdatedState(updateState)
+    val latestDiagnosticOnlyFailures = rememberUpdatedState(diagnosticOnlyFailures)
+    val latestExternalImportRequestId = rememberUpdatedState(externalImportRequestId)
+    val latestExternalImportUris = rememberUpdatedState(externalImportUris)
     CompositionLocalProvider(
         LocalKixyuGlassBackdrop provides navigationBackdrop,
         LocalKixyuContextualBarController provides contextualBarController,
@@ -282,14 +291,14 @@ internal fun KixyuNavDisplay(
                 onBack = handleNavigationBack,
                 entryProvider = kixyuEntryProvider(
                     KixyuNavEntryDependencies(
-                        topDestinations = top,
+                        topDestinations = latestTopDestinations,
                         pagerState = pagerState,
                         navigator = navigator,
-                        initialReaderSettings = initialReaderSettings,
-                        updateState = updateState,
-                        diagnosticOnlyFailures = diagnosticOnlyFailures,
-                        externalImportRequestId = externalImportRequestId,
-                        externalImportUris = externalImportUris,
+                        initialReaderSettings = latestInitialReaderSettings,
+                        updateState = latestUpdateState,
+                        diagnosticOnlyFailures = latestDiagnosticOnlyFailures,
+                        externalImportRequestId = latestExternalImportRequestId,
+                        externalImportUris = latestExternalImportUris,
                         uriHandler = uriHandler,
                         openBook = openBook,
                         prioritizeAnimation = prioritizeAnimation,

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.painterResource
@@ -39,14 +40,16 @@ internal const val PROJECT_SOURCE_URL = "https://github.com/kkyu9527/kixyubook"
 private const val TELEGRAM_CONTACT_URL = "https://t.me/kkyu9527s_bot"
 
 internal class KixyuNavEntryDependencies(
-    val topDestinations: List<TopDestination>,
+    // Mutable values are exposed as State because Navigation 3 memoizes entries on the back stack
+    // alone; entry content must read the latest value, not the one captured when the entry was built.
+    val topDestinations: State<List<TopDestination>>,
     val pagerState: PagerState,
     val navigator: KixyuNavigator,
-    val initialReaderSettings: ReaderSettings,
-    val updateState: AppUpdateState,
-    val diagnosticOnlyFailures: Boolean,
-    val externalImportRequestId: Long?,
-    val externalImportUris: List<String>,
+    val initialReaderSettings: State<ReaderSettings>,
+    val updateState: State<AppUpdateState>,
+    val diagnosticOnlyFailures: State<Boolean>,
+    val externalImportRequestId: State<Long?>,
+    val externalImportUris: State<List<String>>,
     val uriHandler: UriHandler,
     val openBook: (String) -> Unit,
     val prioritizeAnimation: () -> Unit,
@@ -73,9 +76,9 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
                     // The previous top-level page is built on the first predictive-back frame.
                     // Do not also build its adjacent sibling until the gesture has settled.
                     beyondViewportPageCount = if (navigationBackTransitionActive) 0 else 1,
-                    key = { page -> topDestinations[page].route },
+                    key = { page -> topDestinations.value[page].route },
                 ) { page ->
-                    when (topDestinations[page].route) {
+                    when (topDestinations.value[page].route) {
                         Routes.HOME -> HomeRoute(onOpenBook = openBook)
                         Routes.LIBRARY -> LibraryRoute(
                             onOpenBook = openBook,
@@ -83,8 +86,8 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
                                 prioritizeAnimation()
                                 navigator.push(AppRoute.HiddenLibrary)
                             },
-                            externalImportRequestId = externalImportRequestId,
-                            externalImportUris = externalImportUris,
+                            externalImportRequestId = externalImportRequestId.value,
+                            externalImportUris = externalImportUris.value,
                             onExternalImportConsumed = onExternalImportConsumed,
                         )
                         Routes.SETTINGS -> SettingsRoute(
@@ -178,7 +181,7 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
             entry<AppRoute.DiagnosticLog> {
                 DestinationWithBack(popDestination) { onBack ->
                     DiagnosticLogRoute(
-                        onlyFailures = diagnosticOnlyFailures,
+                        onlyFailures = diagnosticOnlyFailures.value,
                         onOnlyFailuresChanged = onDiagnosticOnlyFailuresChanged,
                         onBack = onBack,
                         onOpenCategory = { category ->
@@ -192,7 +195,7 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
                 DestinationWithBack(popDestination) { onBack ->
                     DiagnosticLogCategoryRoute(
                         categoryKey = route.category,
-                        onlyFailures = diagnosticOnlyFailures,
+                        onlyFailures = diagnosticOnlyFailures.value,
                         onOnlyFailuresChanged = onDiagnosticOnlyFailuresChanged,
                         onBack = onBack,
                     )
@@ -203,7 +206,7 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
                 KixyuNavigationBackHandler(onExitReader)
                 ReaderRoute(
                     bookUuid = route.bookUuid,
-                    initialSettings = initialReaderSettings,
+                    initialSettings = initialReaderSettings.value,
                     onManageCorrections = {
                         prioritizeAnimation()
                         navigator.push(AppRoute.TextCorrections(route.bookUuid))
@@ -272,7 +275,7 @@ private fun AboutDestination(
     embedded: Boolean = false,
 ) = with(dependencies) {
     AboutRoute(
-        updateState = updateState,
+        updateState = updateState.value,
         currentVersion = BuildConfig.VERSION_NAME,
         onCheckForUpdates = onCheckForUpdates,
         onUpdateResultConsumed = onUpdateResultConsumed,
