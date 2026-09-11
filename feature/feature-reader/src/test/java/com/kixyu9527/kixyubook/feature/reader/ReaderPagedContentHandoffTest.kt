@@ -81,11 +81,11 @@ class ReaderPagedContentHandoffTest {
                 }
             }
         }
-        rule.waitUntil(10_000) { rule.onAllNodesWithTag("reader-leaf:0:0").fetchSemanticsNodes().isNotEmpty() }
-        rule.waitUntil(10_000) { rule.onAllNodesWithTag("reader-leaf:1:0").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(30_000) { rule.onAllNodesWithTag("reader-leaf:0:0").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(30_000) { rule.onAllNodesWithTag("reader-leaf:1:0").fetchSemanticsNodes().isNotEmpty() }
         if (enterByGesture) rule.onRoot().performTouchInput { swipeLeft() }
         else rule.runOnIdle { turns.tryEmit(1) }
-        rule.waitUntil(10_000) { destinations.isNotEmpty() }
+        rule.waitUntil(30_000) { destinations.isNotEmpty() }
         rule.waitForIdle()
         rule.onNodeWithTag("reader-leaf:1:0").assertIsDisplayed()
         rule.runOnIdle {

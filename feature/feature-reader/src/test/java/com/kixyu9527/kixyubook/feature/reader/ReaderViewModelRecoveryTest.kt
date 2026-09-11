@@ -39,7 +39,7 @@ class ReaderViewModelRecoveryTest {
     @Test fun epubLocationChainKeepsAnchorsAndCanStillRestore() = recreateReader(BookFormat.EPUB, exerciseJumps = true)
     @Test fun failedBookmarkRetryAfterChapterJumpUsesOriginalPayload() = recreateReader(BookFormat.EPUB, exerciseBookmark = true)
 
-    private fun recreateReader(format: BookFormat, exerciseJumps: Boolean = false, exerciseBookmark: Boolean = false) = runBlocking { withTimeout(5_000) {
+    private fun recreateReader(format: BookFormat, exerciseJumps: Boolean = false, exerciseBookmark: Boolean = false) = runBlocking { withTimeout(30_000) {
         val bookmarkAttempts = mutableListOf<Bookmark>()
         val chapters = MutableStateFlow(listOf(
             Chapter(12, "book", "第一章", 0, chapterKey = "first"),

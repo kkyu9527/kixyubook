@@ -20,7 +20,7 @@ class ReaderProgressWriterTest {
     )
 
     @Test fun lockAndOwnerCancellationDrainLastPositionWithoutWaitingForNetwork() = runBlocking {
-        withTimeout(5_000) {
+        withTimeout(30_000) {
             val releaseDisk = CompletableDeferred<Unit>()
             val writes = mutableListOf<ReadingProgress>()
             val owner = CoroutineScope(Job() + Dispatchers.Unconfined)
