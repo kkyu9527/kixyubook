@@ -1,0 +1,7 @@
+<resources>
+    <string name="recovery_title">书库需要恢复</string>
+    <string name="recovery_message">上次恢复未能安全回滚，原始文件仍保留。请检查剩余空间后重试；恢复成功前不会打开书库。</string>
+    <string name="recovery_retry_failed">恢复仍未完成，原始文件已保留。请检查剩余空间后再试，请勿清除应用数据。</string>
+    <string name="recovery_retry">重试恢复</string>
+    <string name="recovery_close">关闭</string>
+</resources>

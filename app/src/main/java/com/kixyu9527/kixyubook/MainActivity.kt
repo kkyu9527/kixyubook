@@ -26,21 +26,38 @@ import com.kixyu9527.kixyubook.core.sync.LocalNotificationManager
 import com.kixyu9527.kixyubook.update.AppUpdateDownloader
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import javax.inject.Provider
+import com.kixyu9527.kixyubook.core.common.repository.StartupRecoveryState
 import kotlinx.coroutines.flow.MutableStateFlow
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    private suspend fun retryStartupRecovery() {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            StartupRecoveryState.recover {
+                com.kixyu9527.kixyubook.core.database.recoverInterruptedBackupRestore(applicationContext)
+            }
+        }
+        if (StartupRecoveryState.failure == null) {
+            androidx.work.WorkManager.initialize(applicationContext, androidx.work.Configuration.Builder().build())
+            (application as KixyuBookApplication).cloudSync.get().onAppForeground()
+            recreate()
+        }
+    }
     private val appViewModel: AppViewModel by viewModels()
-    @Inject lateinit var updateDownloader: AppUpdateDownloader
-    @Inject lateinit var localNotifications: LocalNotificationManager
-    @Inject lateinit var bookRepository: BookRepository
+    @Inject lateinit var updateDownloaderProvider: Provider<AppUpdateDownloader>
+    @Inject lateinit var localNotificationsProvider: Provider<LocalNotificationManager>
+    @Inject lateinit var bookRepositoryProvider: Provider<BookRepository>
+    private val updateDownloader get() = updateDownloaderProvider.get()
+    private val localNotifications get() = localNotificationsProvider.get()
+    private val bookRepository get() = bookRepositoryProvider.get()
     private val notificationDestination = MutableStateFlow<String?>(null)
     private val externalBookImport = MutableStateFlow<ExternalBookImportRequest?>(null)
     private var externalImportSequence = 0L
 
     override fun onResume() {
         super.onResume()
-        updateDownloader.resumePendingInstallIfPermitted()
+        if (StartupRecoveryState.failure == null) updateDownloader.resumePendingInstallIfPermitted()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +68,10 @@ class MainActivity : ComponentActivity() {
         )
         window.disableSystemBarContrastProtection()
         super.onCreate(savedInstanceState)
+        if (StartupRecoveryState.failure != null) {
+            setContent { RecoveryRequiredScreen(onClose = ::finish, onRetry = ::retryStartupRecovery) }
+            return
+        }
         splashScreen.setKeepOnScreenCondition { appViewModel.settings.value == null }
         // Suppress action-needed notifications while this new window is becoming visible. The
         // process lifecycle owns the matching background transition so another visible window

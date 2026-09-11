@@ -7,6 +7,39 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class RestoreJournalTest {
+    @Test fun committedCleanupFailureNeverBlocksHealthyDatabaseOrRollsItBack() {
+        val root = folder.newFolder()
+        val targets = fixture(root)
+        val journalRoot = File(root, "journal")
+        val replacement = File(root, "replacement").apply { writeText("committed database") }
+        val journal = RestoreJournal(journalRoot, targets, checkpoint = {
+            if (it == "cleanup") throw java.io.IOException("cleanup failed")
+        })
+        journal.prepare(mapOf("database" to replacement)); journal.install(); journal.commit()
+        journal.recoverBeforeOpen()
+        assertEquals("committed database", targets.getValue("database").readText())
+        assertTrue(File(journalRoot, "committed").exists())
+        RestoreJournal(journalRoot, targets).recoverBeforeOpen()
+        assertFalse(journalRoot.exists())
+    }
+    @Test fun allPreferenceStoresRollbackTogether() {
+        val root = folder.newFolder()
+        val targets = fixture(root) + mapOf(
+            "library" to File(root, "library").apply { writeText("old library") },
+            "reminder" to File(root, "reminder").apply { writeText("old reminder") },
+        )
+        val keys = setOf("preferences", "library", "reminder")
+        val journalRoot = File(root, "journal")
+        RestoreJournal(journalRoot, targets, keys).apply {
+            prepare(emptyMap())
+            keys.forEach { targets.getValue(it).writeText("new") }
+            install()
+        }
+        RestoreJournal(journalRoot, targets, keys).recoverBeforeOpen()
+        assertEquals("old settings", targets.getValue("preferences").readText())
+        assertEquals("old library", targets.getValue("library").readText())
+        assertEquals("old reminder", targets.getValue("reminder").readText())
+    }
     @get:Rule val folder = TemporaryFolder()
     private class ProcessDeath : Error()
 

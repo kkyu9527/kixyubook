@@ -52,8 +52,9 @@ import javax.inject.Singleton
 object DatabaseModule {
     @Provides
     @Singleton
-    fun provideDatabase(@ApplicationContext context: Context): KixyuDatabase =
-        Room.databaseBuilder(context, KixyuDatabase::class.java, "kixyu-books.db")
+    fun provideDatabase(@ApplicationContext context: Context): KixyuDatabase {
+        com.kixyu9527.kixyubook.core.common.repository.StartupRecoveryState.requireReady()
+        return Room.databaseBuilder(context, KixyuDatabase::class.java, "kixyu-books.db")
             .addMigrations(
                 MIGRATION_6_7,
                 MIGRATION_7_8,
@@ -66,6 +67,7 @@ object DatabaseModule {
                 MIGRATION_13_14,
             )
             .build()
+    }
 
     @Provides
     fun provideBookDao(database: KixyuDatabase): BookDao = database.bookDao()
@@ -85,6 +87,8 @@ object DatabaseModule {
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
+    @Binds abstract fun bindBookSettings(implementation: DataStoreReaderSettingsRepository): com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository
+    @Binds abstract fun bindReadingReminders(implementation: com.kixyu9527.kixyubook.core.sync.NotificationPreferencesStore): com.kixyu9527.kixyubook.core.common.repository.ReadingReminderRepository
     @Binds abstract fun bindBookRepository(implementation: LocalBookRepository): BookRepository
     @Binds abstract fun bindCompleteLibraryRepository(implementation: LocalBookRepository): CompleteLibraryRepository
     @Binds abstract fun bindBackupRepository(implementation: LocalBackupRepository): BackupRepository

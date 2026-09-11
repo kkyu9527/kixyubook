@@ -10,20 +10,25 @@ import com.kixyu9527.kixyubook.core.common.repository.CloudSyncCoordinator
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
+import javax.inject.Provider
+import com.kixyu9527.kixyubook.core.common.repository.StartupRecoveryState
+import androidx.work.WorkManager
+import androidx.work.Configuration
 
 @HiltAndroidApp
 class KixyuBookApplication : Application(), DefaultLifecycleObserver {
-    @Inject lateinit var cloudSync: CloudSyncCoordinator
+    @Inject lateinit var cloudSync: Provider<CloudSyncCoordinator>
     private lateinit var fairMemoryManager: HyperOsFairMemoryManager
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
-        recoverInterruptedBackupRestore(base)
+        StartupRecoveryState.recover { recoverInterruptedBackupRestore(base) }
     }
 
     override fun onCreate() {
         super<Application>.onCreate()
         DiagnosticLog.initialize(this)
+        if (StartupRecoveryState.failure == null) WorkManager.initialize(this, Configuration.Builder().build())
         fairMemoryManager = HyperOsFairMemoryManager(this).also(HyperOsFairMemoryManager::start)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
     }
@@ -47,10 +52,10 @@ class KixyuBookApplication : Application(), DefaultLifecycleObserver {
     }
 
     override fun onStart(owner: LifecycleOwner) {
-        cloudSync.onAppForeground()
+        if (StartupRecoveryState.failure == null) cloudSync.get().onAppForeground()
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        cloudSync.onAppBackground()
+        if (StartupRecoveryState.failure == null) cloudSync.get().onAppBackground()
     }
 }

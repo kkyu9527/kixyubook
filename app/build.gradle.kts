@@ -61,6 +61,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.androidx.work.runtime)
     implementation(project(":core:core-common"))
     implementation(project(":core:core-designsystem"))
     implementation(project(":core:core-navigation"))

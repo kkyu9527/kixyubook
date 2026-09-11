@@ -97,6 +97,11 @@
                 <data android:mimeType="application/epub+zip" />
             </intent-filter>
         </activity>
+        <!-- Do not schedule database work until interrupted restore has been resolved. -->
+        <provider android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup" tools:node="merge">
+            <meta-data android:name="androidx.work.WorkManagerInitializer" tools:node="remove" />
+        </provider>
         <receiver
             android:name=".update.AppUpdateDownloadReceiver"
             android:exported="true"

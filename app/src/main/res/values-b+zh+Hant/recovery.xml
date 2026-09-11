@@ -1,0 +1,7 @@
+<resources>
+    <string name="recovery_title">書庫需要復原</string>
+    <string name="recovery_message">上次還原未能安全回復，原始檔案仍保留。請檢查剩餘空間後重試；復原成功前不會開啟書庫。</string>
+    <string name="recovery_retry_failed">復原仍未完成，原始檔案已保留。請檢查剩餘空間後再試，請勿清除應用程式資料。</string>
+    <string name="recovery_retry">重試復原</string>
+    <string name="recovery_close">關閉</string>
+</resources>

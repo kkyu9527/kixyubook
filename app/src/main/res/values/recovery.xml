@@ -1,0 +1,7 @@
+<resources>
+    <string name="recovery_title">Library recovery required</string>
+    <string name="recovery_message">A previous restore could not be rolled back safely. Your original files are retained. Free storage if needed, then retry. The library will remain closed until recovery succeeds.</string>
+    <string name="recovery_retry_failed">Recovery is still blocked. The original files have been retained. Check available storage and try again; do not clear app data.</string>
+    <string name="recovery_retry">Retry recovery</string>
+    <string name="recovery_close">Close</string>
+</resources>

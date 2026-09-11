@@ -10,7 +10,7 @@ import java.util.Properties
 internal class RestoreJournal(
     private val root: File,
     private val targets: Map<String, File>,
-    private val preferencesKey: String = "preferences",
+    private val preferencesKeys: Set<String> = setOf("preferences"),
     private val checkpoint: (String) -> Unit = {},
 ) {
     private val manifest get() = File(root, "active.properties")
@@ -28,11 +28,11 @@ internal class RestoreJournal(
         check(root.deleteRecursively() || !root.exists())
         check(root.mkdirs())
         replacements.forEach { (key, source) ->
-            require(key in targets && key != preferencesKey)
+            require(key in targets && key !in preferencesKeys)
             copyDurably(source, staged(key))
         }
         // DataStore remains live until restart, so capture (do not rename) its old atomic file.
-        targets[preferencesKey]?.takeIf(File::exists)?.let { copyDurably(it, old(preferencesKey)) }
+        preferencesKeys.forEach { key -> targets[key]?.takeIf(File::exists)?.let { copyDurably(it, old(key)) } }
         val values = Properties().apply {
             targets.forEach { (key, target) -> setProperty(key, target.exists().toString()) }
         }
@@ -45,7 +45,7 @@ internal class RestoreJournal(
     /** Call only after all database users have released the live SQLite handle. */
     fun install() {
         check(manifest.isFile)
-        targets.filterKeys { it != preferencesKey }.forEach { (key, target) ->
+        targets.filterKeys { it !in preferencesKeys }.forEach { (key, target) ->
             // Absence at prepare time does not mean any later file belongs to the restore:
             // SQLite may create a WAL while the archive is staging. Mark only targets whose
             // installation has actually begun, after the live database has been closed.
@@ -69,12 +69,12 @@ internal class RestoreJournal(
         if (!manifest.isFile) return
         val values = Properties().apply { manifest.inputStream().use(::load) }
         targets.forEach { (key, target) ->
-            if (key == preferencesKey && !includePreferences) return@forEach
+            if (key in preferencesKeys && !includePreferences) return@forEach
             val previous = old(key)
             if (previous.exists()) {
                 check(target.deleteRecursively() || !target.exists()) { "Cannot remove incomplete restore: $key" }
                 move(previous, target)
-            } else if (values.getProperty(key) == "false" && (key == preferencesKey || installing(key).exists())) {
+            } else if (values.getProperty(key) == "false" && (key in preferencesKeys || installing(key).exists())) {
                 check(target.deleteRecursively() || !target.exists()) { "Cannot remove new restore file: $key" }
             }
             checkpoint("rollback:$key")
@@ -82,6 +82,7 @@ internal class RestoreJournal(
     }
 
     fun cleanup() {
+        checkpoint("cleanup")
         // Keep the commit decision until every rollback artifact is gone. Deleting the marker
         // first would let a cleanup failure turn a successful installation into a later rollback.
         root.listFiles().orEmpty().filter { it != committed }.forEach {
@@ -92,7 +93,9 @@ internal class RestoreJournal(
     }
 
     fun recoverBeforeOpen() {
-        if (committed.exists()) { cleanup(); return }
+        // A committed file set is already safe to open. Garbage collection is best effort;
+        // an undeletable old asset must not turn a successful restore into a boot loop.
+        if (committed.exists()) { runCatching { cleanup() }; return }
         if (manifest.exists()) rollback(includePreferences = true)
         cleanup()
     }
@@ -129,5 +132,7 @@ internal fun backupRestoreJournal(context: Context): RestoreJournal {
         "covers" to File(context.filesDir, "covers"),
         "fonts" to File(context.filesDir, "fonts"),
         "preferences" to File(context.filesDir, "datastore/reader_settings.preferences_pb"),
-    ))
+        "libraryPreferences" to File(context.filesDir, "datastore/library_preferences.preferences_pb"),
+        "notificationPreferences" to File(context.filesDir, "datastore/notification_settings.preferences_pb"),
+    ), preferencesKeys = setOf("preferences", "libraryPreferences", "notificationPreferences"))
 }

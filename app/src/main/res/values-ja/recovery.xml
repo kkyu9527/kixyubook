@@ -1,0 +1,7 @@
+<resources>
+    <string name="recovery_title">書庫の復旧が必要です</string>
+    <string name="recovery_message">前回の復元を安全に元に戻せませんでした。元のファイルは保持されています。空き容量を確認して再試行してください。復旧するまで書庫は開きません。</string>
+    <string name="recovery_retry_failed">復旧できませんでした。元のファイルは保持されています。空き容量を確認して再試行してください。アプリのデータを消去しないでください。</string>
+    <string name="recovery_retry">復旧を再試行</string>
+    <string name="recovery_close">閉じる</string>
+</resources>
