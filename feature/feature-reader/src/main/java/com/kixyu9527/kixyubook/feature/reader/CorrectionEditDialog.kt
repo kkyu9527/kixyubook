@@ -31,10 +31,14 @@ internal fun CorrectionEditDialog(
 ) {
     var replacement by rememberSaveable(original, initialReplacement) { mutableStateOf(initialReplacement) }
     val operation = rememberKixyuEditorOperation(onDismiss)
+    val dismissDraft = com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuDraftDismiss(replacement != initialReplacement) {
+        operation.edited(); onDismiss()
+    }
     KixyuActionDialog(
         show = true,
         title = if (existing == null) stringResource(R.string.reader_correct_paragraph) else stringResource(R.string.reader_edit_correction),
-        onDismissRequest = { operation.edited(); onDismiss() },
+        onDismissRequest = dismissDraft,
+        dismissRequiresConfirmation = replacement != initialReplacement,
         confirmLabel = stringResource(R.string.reader_annotation_save),
         confirmEnabled = !operation.running && replacement.isNotBlank() && replacement != original,
         onConfirm = { operation.submit { onSave(replacement) } },

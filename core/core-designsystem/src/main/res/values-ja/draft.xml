@@ -1,0 +1,5 @@
+<resources>
+    <string name="kixyu_draft_discard_title">変更を破棄しますか？</string>
+    <string name="kixyu_draft_discard">破棄</string>
+    <string name="kixyu_draft_discard_message">未保存の変更は失われます。この確認を閉じると編集を続けられます。</string>
+</resources>

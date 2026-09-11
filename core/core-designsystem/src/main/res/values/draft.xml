@@ -1,0 +1,5 @@
+<resources>
+    <string name="kixyu_draft_discard_title">Discard changes?</string>
+    <string name="kixyu_draft_discard">Discard</string>
+    <string name="kixyu_draft_discard_message">Your unsaved changes will be lost. Close this confirmation to keep editing.</string>
+</resources>

@@ -26,10 +26,14 @@ internal fun AnnotationNoteDialog(
 ) {
     var note by rememberSaveable(excerpt, initialNote) { mutableStateOf(initialNote) }
     val operation = rememberKixyuEditorOperation(onDismiss)
+    val dismissDraft = com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuDraftDismiss(note != initialNote) {
+        operation.edited(); onDismiss()
+    }
     KixyuActionDialog(
         show = true,
         title = stringResource(R.string.reader_annotation_note_title),
-        onDismissRequest = { operation.edited(); onDismiss() },
+        onDismissRequest = dismissDraft,
+        dismissRequiresConfirmation = note != initialNote,
         confirmLabel = stringResource(R.string.reader_annotation_save),
         confirmEnabled = !operation.running,
         onConfirm = { operation.submit { onSave(note) } },

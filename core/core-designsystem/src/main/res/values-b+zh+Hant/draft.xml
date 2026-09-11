@@ -1,0 +1,5 @@
+<resources>
+    <string name="kixyu_draft_discard_title">放棄未儲存的修改？</string>
+    <string name="kixyu_draft_discard">放棄修改</string>
+    <string name="kixyu_draft_discard_message">未儲存的內容將遺失。關閉此確認視窗可繼續編輯。</string>
+</resources>
