@@ -5,4 +5,6 @@
     <string name="kixyu_operation_restart">アプリを再起動してからやり直してください。下書きは現在の画面に残っています。</string>
     <string name="kixyu_operation_invalid">入力内容を確認してから保存してください。</string>
     <string name="kixyu_operation_delete_target">「%1$s」を削除しますか？この操作は取り消せません。</string>
+    <string name="kixyu_operation_deleting">削除中…</string>
+    <string name="kixyu_operation_deleted">削除しました</string>
 </resources>

@@ -817,6 +817,8 @@ fun KixyuTransientStatusPopup(
     visible: Boolean,
     message: String,
     modifier: Modifier = Modifier,
+    // Completion notices reuse the same popup without a spinner so both states look unified.
+    progress: Boolean = true,
 ) {
     KixyuSafeTopPopup(visible = visible, modifier = modifier) {
         Row(
@@ -827,11 +829,13 @@ fun KixyuTransientStatusPopup(
             horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            if (progress) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Text(
                 text = message,
                 style = MaterialTheme.typography.labelLarge,

@@ -5,4 +5,6 @@
     <string name="kixyu_operation_restart">Restart the app before trying again. Your draft is still visible.</string>
     <string name="kixyu_operation_invalid">Check the input before saving again.</string>
     <string name="kixyu_operation_delete_target">Delete %1$s? This action cannot be undone.</string>
+    <string name="kixyu_operation_deleting">Deleting…</string>
+    <string name="kixyu_operation_deleted">Deleted</string>
 </resources>

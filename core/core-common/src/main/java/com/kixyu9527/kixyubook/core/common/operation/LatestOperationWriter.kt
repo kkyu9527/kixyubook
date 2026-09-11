@@ -32,7 +32,7 @@ class LatestOperationWriter(private val scope: CoroutineScope, private val contr
                     val write = entry.value
                     pending.remove(keyToWrite)
                     active = keyToWrite to write
-                    controller.submit(write)
+                    controller.submit(action = write)
                     val result = controller.state.first { !it.running }
                     if (result.succeeded || result.failed) active = null
                     failedKey = keyToWrite.takeIf { result.failed }

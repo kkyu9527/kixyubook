@@ -10,8 +10,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationKind
 import com.kixyu9527.kixyubook.core.common.operation.OperationFailure
 import com.kixyu9527.kixyubook.core.designsystem.R
+import kotlinx.coroutines.delay
 
 val LocalKixyuOperationController = compositionLocalOf<UserOperationController?> { null }
 
@@ -46,7 +48,26 @@ private fun OperationFeedback(controller: UserOperationController, modifier: Mod
             } else controller.dismissFailure(state.attempt)
         }
     }
+    val deleting = state.running && state.kind == UserOperationKind.DELETE
+    var showDeleted by remember { mutableStateOf(false) }
+    LaunchedEffect(state.attempt, state.succeeded, state.kind) {
+        if (state.succeeded && state.kind == UserOperationKind.DELETE) {
+            showDeleted = true
+            delay(1_800)
+            showDeleted = false
+        }
+    }
     KixyuSnackbarHost(snackbar, modifier)
+    // Unified transient popup for both deletion states; only the delete kind opts in.
+    KixyuTransientStatusPopup(
+        visible = deleting,
+        message = stringResource(R.string.kixyu_operation_deleting),
+    )
+    KixyuTransientStatusPopup(
+        visible = showDeleted,
+        message = stringResource(R.string.kixyu_operation_deleted),
+        progress = false,
+    )
     KixyuActionDialog(
         show = state.awaitingConfirmation,
         title = stringResource(R.string.kixyu_operation_delete_title),

@@ -5,4 +5,6 @@
     <string name="kixyu_operation_restart">请重启应用后再试，当前草稿仍保留在页面中。</string>
     <string name="kixyu_operation_invalid">请检查输入内容后重新保存。</string>
     <string name="kixyu_operation_delete_target">确定删除“%1$s”？此操作无法撤销。</string>
+    <string name="kixyu_operation_deleting">正在删除…</string>
+    <string name="kixyu_operation_deleted">删除完成</string>
 </resources>

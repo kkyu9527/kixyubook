@@ -6,6 +6,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/** Lets the feedback host label long operations without coupling it to a feature module. */
+enum class UserOperationKind { GENERIC, DELETE }
+
 data class UserOperationState(
     val attempt: Long = 0,
     val running: Boolean = false,
@@ -14,6 +17,7 @@ data class UserOperationState(
     val awaitingConfirmation: Boolean = false,
     val failure: OperationFailure? = null,
     val targetLabel: String? = null,
+    val kind: UserOperationKind = UserOperationKind.GENERIC,
 )
 
 /** UI-thread owned write coordinator. Failed requests retain their payload until retry/dismiss. */
@@ -21,20 +25,23 @@ class UserOperationController(private val scope: CoroutineScope, private val rep
     private val mutableState = MutableStateFlow(UserOperationState())
     val state = mutableState.asStateFlow()
     private var retryAction: (suspend () -> Unit)? = null
+    private var retryKind = UserOperationKind.GENERIC
 
-    fun submit(action: suspend () -> Unit) {
+    // `kind` precedes `action` so existing trailing-lambda calls keep binding to the action.
+    fun submit(kind: UserOperationKind = UserOperationKind.GENERIC, action: suspend () -> Unit) {
         if (state.value.awaitingConfirmation) return
-        start(state.value.attempt + 1, action)
+        start(state.value.attempt + 1, action, kind)
     }
 
     fun confirmDelete(targetLabel: String? = null, action: suspend () -> Unit) {
         if (state.value.running || state.value.awaitingConfirmation) return
         retryAction = action
+        retryKind = UserOperationKind.GENERIC
         mutableState.value = UserOperationState(state.value.attempt + 1, awaitingConfirmation = true, targetLabel = targetLabel)
     }
 
     fun acceptConfirmation() {
-        if (state.value.awaitingConfirmation) retryAction?.let { start(state.value.attempt, it) }
+        if (state.value.awaitingConfirmation) retryAction?.let { start(state.value.attempt, it, retryKind) }
     }
 
     fun cancelConfirmation() {
@@ -43,28 +50,29 @@ class UserOperationController(private val scope: CoroutineScope, private val rep
         mutableState.value = UserOperationState(state.value.attempt)
     }
 
-    private fun start(attempt: Long, action: suspend () -> Unit) {
+    private fun start(attempt: Long, action: suspend () -> Unit, kind: UserOperationKind) {
         if (state.value.running) return
         retryAction = action
-        mutableState.value = UserOperationState(attempt, running = true)
+        retryKind = kind
+        mutableState.value = UserOperationState(attempt, running = true, kind = kind)
         scope.launch {
             try {
                 action()
                 retryAction = null
-                mutableState.value = UserOperationState(attempt, succeeded = true)
+                mutableState.value = UserOperationState(attempt, succeeded = true, kind = kind)
             } catch (cancelled: CancellationException) {
                 retryAction = null
-                mutableState.value = UserOperationState(attempt)
+                mutableState.value = UserOperationState(attempt, kind = kind)
                 throw cancelled
             } catch (error: Exception) {
-                mutableState.value = UserOperationState(attempt, failed = true, failure = OperationFailure.from(error))
+                mutableState.value = UserOperationState(attempt, failed = true, failure = OperationFailure.from(error), kind = kind)
                 runCatching { reportFailure(error) }
             }
         }
     }
 
     fun retry(attempt: Long) {
-        if (state.value.attempt == attempt && state.value.failed && state.value.failure?.retryable != false) retryAction?.let { start(attempt, it) }
+        if (state.value.attempt == attempt && state.value.failed && state.value.failure?.retryable != false) retryAction?.let { start(attempt, it, retryKind) }
     }
 
     fun dismissFailure(attempt: Long) {

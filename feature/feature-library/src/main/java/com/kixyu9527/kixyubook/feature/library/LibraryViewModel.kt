@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook.feature.library
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationKind
 import com.kixyu9527.kixyubook.core.common.operation.LatestOperationWriter
 
 import androidx.lifecycle.ViewModel
@@ -268,8 +269,11 @@ class LibraryViewModel @Inject constructor(
             .onFailure { messages.send(it.message ?: context.getString(R.string.library_batch_export_failed)) }
     }
 
-    fun delete(bookUuid: String) = operations.submit { repository.deleteBook(bookUuid) }
-    fun deleteBooks(bookUuids: Set<String>) = operations.submit {
+    fun delete(bookUuid: String) = operations.submit(kind = UserOperationKind.DELETE) {
+        repository.deleteBook(bookUuid)
+    }
+
+    fun deleteBooks(bookUuids: Set<String>) = operations.submit(kind = UserOperationKind.DELETE) {
         if (bookUuids.isNotEmpty()) repository.deleteBooks(bookUuids)
     }
     fun updateMetadata(bookUuid: String, title: String, author: String, description: String, category: String) = operations.submit {
