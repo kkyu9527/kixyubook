@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
@@ -70,6 +71,7 @@ internal fun KixyuNavDisplay(
     releaseNotesState: ReleaseNotesState,
     onCheckForUpdates: () -> Unit,
     onUpdateResultConsumed: () -> Unit,
+    onDownloadUpdate: (AppUpdateInfo) -> Boolean,
     onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
     onPrepareReader: (String) -> Unit,
@@ -356,6 +358,13 @@ internal fun KixyuNavDisplay(
                         )
                     }.isSuccess
                 },
+            )
+            // Kept inside the backdrop provider so the update prompt uses the exact same frosted
+            // glass recipe as every other modal instead of falling back to a separate window.
+            AvailableUpdateModal(
+                update = (updateState as? AppUpdateState.Available)?.update,
+                onDismiss = onUpdateResultConsumed,
+                onDownload = onDownloadUpdate,
             )
         }
     }

@@ -123,6 +123,7 @@ internal fun KixyuBookApp(
                 releaseNotesState = latestReleaseNotesState.value,
                 onCheckForUpdates = onCheckForUpdates,
                 onUpdateResultConsumed = onUpdateResultConsumed,
+                onDownloadUpdate = onDownloadUpdate,
                 onLoadReleaseNotes = onLoadReleaseNotes,
                 onAnimationPriorityChanged = onAnimationPriorityChanged,
                 onPrepareReader = onPrepareReader,
@@ -229,11 +230,6 @@ internal fun KixyuBookApp(
                         message = stringResource(R.string.app_syncing_cloud_data),
                     )
                 }
-                AvailableUpdateModal(
-                    update = (updateState as? AppUpdateState.Available)?.update,
-                    onDismiss = onUpdateResultConsumed,
-                    onDownload = onDownloadUpdate,
-                )
             }
         }
     }
