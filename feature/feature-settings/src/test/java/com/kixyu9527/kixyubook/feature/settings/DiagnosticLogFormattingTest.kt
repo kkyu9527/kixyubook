@@ -194,6 +194,35 @@ class DiagnosticLogFormattingTest {
     }
 
     @Test
+    fun locationReadyEntryIsNotAFailureAndExplainsItsSource() {
+        val entry = parseDiagnosticEntry(
+            "2026-09-11T08:38:11.194Z | READER | location_ready | elapsedMs=374 | " +
+                "outcome=ready | source=DOCUMENT_LINK",
+        )
+
+        assertEquals("阅读定位完成", entry.title)
+        assertEquals(false, entry.isFailure)
+        assertTrue(entry.details.contains("结果" to "已就绪"))
+        assertTrue(entry.details.contains("内容来源" to "文内链接"))
+    }
+
+    @Test
+    fun backwardPageTurnKeepsDirectionAndSource() {
+        val entry = parseDiagnosticEntry(
+            "2026-09-11T08:38:11.194Z | READER | page_turn | elapsedMs=12 | outcome=success | " +
+                "direction=backward | source=pager | fromChapter=240 | chapter=239",
+        )
+
+        assertEquals("跨章翻页完成", entry.title)
+        assertEquals(false, entry.isFailure)
+        assertTrue(entry.details.contains("结果" to "成功"))
+        assertTrue(entry.details.contains("翻页方向" to "向前回退（上一页）"))
+        assertTrue(entry.details.contains("内容来源" to "滑动翻页"))
+        assertTrue(entry.details.contains("起始章节" to "240"))
+        assertTrue(entry.details.contains("章节索引" to "239"))
+    }
+
+    @Test
     fun chapterLoadFailureShowsSourceAndReason() {
         val entry = parseDiagnosticEntry(
             "2026-08-09T12:44:43.586Z | READER | chapter_loaded | elapsedMs=845 | " +

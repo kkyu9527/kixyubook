@@ -104,13 +104,29 @@ class ReaderViewModel @AssistedInject constructor(
         DiagnosticLog.record(Category.READER, "location_ready", elapsedMs = elapsed, outcome = outcome,
             details = mapOf("source" to source.name))
     }
+    // Natural page turns never went through a location request, so a chapter-boundary rollback left
+    // no trace in the journal. Track the accepted turn through the target's render callback.
+    private data class PendingPageTurn(
+        val direction: Int,
+        val source: String,
+        val fromChapter: Int,
+        val toChapter: Int,
+        val startedAt: Long,
+    )
+    private var pendingPageTurn: PendingPageTurn? = null
     val operations = UserOperationController(viewModelScope) { error ->
         val failure = error.toDiagnosticFailure()
         DiagnosticLog.record(Category.READER, "reader_operation_failed", outcome = failure.outcome, details = mapOf("reason" to failure.reason))
     }
 
     private val annotationActions = ReaderAnnotationActions(bookUuid, _uiState, annotations, textCorrections, operations)
+    private val settingWrites = LatestOperationWriter(viewModelScope, operations)
+    private val settingRequests = com.kixyu9527.kixyubook.core.common.configuration.ReaderSettingsRequests()
+    private val effectiveSettings = combine(settingsRepository.settings, bookSettings.overrides) { global, overrides ->
+        applySettingsPatch(global, overrides[bookUuid])
+    }.distinctUntilChanged()
     private val searchController = ReaderSearchController(
+        resultDirectory = java.io.File(context.cacheDir, "reader-search-results"),
         scope = viewModelScope,
         bookUuid = bookUuid,
         books = books,
@@ -347,8 +363,10 @@ class ReaderViewModel @AssistedInject constructor(
         locationJourney.finish("superseded")
         val state = _uiState.value
         val baseIndex = pendingChapterIndex ?: state.chapterIndex
+        val target = (baseIndex + delta).coerceIn(0, state.chapters.lastIndex)
+        beginPageTurn(delta, "chapter_button", state.chapterIndex, target)
         navigateToChapter(
-            index = (baseIndex + delta).coerceIn(0, state.chapters.lastIndex),
+            index = target,
             position = if (openAtEnd) Int.MAX_VALUE else 0,
         )
     }
@@ -362,8 +380,10 @@ class ReaderViewModel @AssistedInject constructor(
         val state = _uiState.value
         if (state.chapterIndex != sourceChapterIndex) return
         locationJourney.finish("superseded")
+        val target = (sourceChapterIndex + delta).coerceIn(0, state.chapters.lastIndex)
+        beginPageTurn(delta, "page_boundary", sourceChapterIndex, target)
         navigateToChapter(
-            index = (sourceChapterIndex + delta).coerceIn(0, state.chapters.lastIndex),
+            index = target,
             position = if (openAtEnd) Int.MAX_VALUE else 0,
         )
     }
@@ -380,6 +400,12 @@ class ReaderViewModel @AssistedInject constructor(
             destination.chapterIndex !in state.chapters.indices
         ) return
         locationJourney.finish("superseded")
+        beginPageTurn(
+            direction = destination.chapterIndex - destination.sourceChapterIndex,
+            source = "pager",
+            fromChapter = destination.sourceChapterIndex,
+            toChapter = destination.chapterIndex,
+        )
         navigateToChapter(
             index = destination.chapterIndex,
             position = destination.paragraphIndex,
@@ -550,6 +576,7 @@ class ReaderViewModel @AssistedInject constructor(
             } catch (error: Exception) {
                 if (pendingChapterIndex == index) {
                     locationJourney.failed(index)
+                    completePageTurn(index, "failed")
                     _uiState.update { it.copy(error = error.message ?: context.getString(R.string.reader_error_chapter)) }
                 }
             } finally {
@@ -578,6 +605,7 @@ class ReaderViewModel @AssistedInject constructor(
         val readerChapter = prefetched
             ?: chapterLoad(index, currentState.chapters, ChapterLoadPriority.USER).await()
         if (readerChapter == null) {
+            completePageTurn(index, "missing")
             DiagnosticLog.record(
                 Category.READER,
                 "chapter_navigation_finished",
@@ -859,6 +887,8 @@ class ReaderViewModel @AssistedInject constructor(
 
     internal fun requestLocation(request: ReaderLocationRequest) {
         val target = request.resolve(_uiState.value.chapters) ?: return
+        // An explicit destination supersedes any natural page turn still waiting to render.
+        pendingPageTurn = null
         if (target != currentLocation()) {
             locationJourney.begin(request.source, target.chapterPosition, _uiState.value.navigationVersion)
         }
@@ -916,6 +946,39 @@ class ReaderViewModel @AssistedInject constructor(
             chapterPosition = _uiState.value.chapterIndex,
             paragraphIndex = position.paragraphIndex,
             charOffset = position.charOffset,
+        )
+    }
+
+    /**
+     * Records a natural page turn once the target chapter is actually on screen. Backward turns are
+     * the ones that used to spring back, so direction and source make a rollback visible in order.
+     */
+    private fun beginPageTurn(direction: Int, source: String, fromChapter: Int, toChapter: Int) {
+        if (direction == 0 || fromChapter == toChapter) return
+        pendingPageTurn = PendingPageTurn(
+            direction = if (direction < 0) -1 else 1,
+            source = source,
+            fromChapter = fromChapter,
+            toChapter = toChapter,
+            startedAt = SystemClock.elapsedRealtime(),
+        )
+    }
+
+    private fun completePageTurn(chapter: Int, outcome: String) {
+        val pending = pendingPageTurn ?: return
+        if (pending.toChapter != chapter) return
+        pendingPageTurn = null
+        DiagnosticLog.record(
+            Category.READER,
+            "page_turn",
+            elapsedMs = (SystemClock.elapsedRealtime() - pending.startedAt).coerceAtLeast(0),
+            outcome = outcome,
+            details = mapOf(
+                "direction" to if (pending.direction < 0) "backward" else "forward",
+                "source" to pending.source,
+                "fromChapter" to pending.fromChapter,
+                "chapter" to chapter,
+            ),
         )
     }
 
@@ -1139,6 +1202,7 @@ class ReaderViewModel @AssistedInject constructor(
         val rendered = _uiState.value
         if (rendered.navigationVersion != navigationVersion || rendered.chapter == null) return
         locationJourney.rendered(rendered.chapterIndex, navigationVersion)
+        completePageTurn(rendered.chapterIndex, "success")
         if (rendered.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE) {
             _uiState.update { current ->
                 if (current.navigationVersion != navigationVersion) current else {

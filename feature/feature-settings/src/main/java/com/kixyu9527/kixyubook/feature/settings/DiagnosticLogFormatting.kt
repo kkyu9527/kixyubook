@@ -162,6 +162,16 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
             "missing" -> resources.getString(R.string.diag_chapter_navigation_failed) to resources.getString(R.string.diag_the_target_chapter_was_not_found)
             else -> resources.getString(R.string.diag_chapter_navigation_error) to resources.getString(R.string.diag_an_error_occurred_while_switching_chapters)
         }
+        "location_ready" -> if (outcome == "ready") {
+            resources.getString(R.string.diag_location_ready) to resources.getString(R.string.diag_the_requested_reading_position_is_now_visible)
+        } else {
+            resources.getString(R.string.diag_location_not_ready) to resources.getString(R.string.diag_jumping_to_the_requested_reading_position_did_not_finish)
+        }
+        "page_turn" -> if (outcome == "failed") {
+            resources.getString(R.string.diag_page_turn_failed) to resources.getString(R.string.diag_crossing_the_chapter_boundary_failed)
+        } else {
+            resources.getString(R.string.diag_page_turn_complete) to resources.getString(R.string.diag_the_reader_crossed_a_chapter_boundary)
+        }
         "restore" -> resources.getString(R.string.diag_pagination_cache_restored) to resources.getString(R.string.diag_previously_saved_pages_were_reused_without_new_layout_work)
         "measure" -> resources.getString(R.string.diag_chapter_pagination_complete) to resources.getString(R.string.diag_chapter_text_was_laid_out_into_readable_pages)
         "failed" -> resources.getString(R.string.diag_chapter_pagination_failed) to resources.getString(R.string.diag_laying_out_the_chapter_text_failed)
@@ -170,6 +180,7 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
 
     private fun readableOutcome(outcome: String): String = when (outcome) {
         "success" -> resources.getString(R.string.diag_success)
+        "ready" -> resources.getString(R.string.diag_ready)
         "partial" -> resources.getString(R.string.diag_partial_success)
         "missing" -> resources.getString(R.string.diag_content_not_found)
         "disk_cache" -> resources.getString(R.string.diag_disk_cache_hit)
@@ -216,6 +227,7 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
     private fun isFailureOutcome(outcome: String?): Boolean = when (outcome) {
         null,
         "success",
+        "ready",
         "disk_cache",
         "not_ready",
         "conflict_waiting",
@@ -239,6 +251,8 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
 
     private fun fieldLabel(key: String, category: String): String = when (key) {
         "chapter" -> if (category == "PAGINATION") resources.getString(R.string.diag_chapter_id) else resources.getString(R.string.diag_chapter_index)
+        "fromChapter" -> resources.getString(R.string.diag_from_chapter)
+        "direction" -> resources.getString(R.string.diag_page_turn_direction)
         "paragraphs" -> resources.getString(R.string.diag_paragraph_count)
         "pages" -> resources.getString(R.string.diag_pages_generated)
         "prefetch" -> resources.getString(R.string.diag_execution_mode)
@@ -313,6 +327,21 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
             "hyperos" -> resources.getString(R.string.diag_xiaomi_hyperos)
             "android" -> resources.getString(R.string.diag_android_memory_trimming)
             "android_low_memory" -> resources.getString(R.string.diag_android_low_memory_warning)
+            "DIRECTORY" -> resources.getString(R.string.diag_location_source_directory)
+            "BOOKMARK" -> resources.getString(R.string.diag_location_source_bookmark)
+            "ANNOTATION" -> resources.getString(R.string.diag_location_source_annotation)
+            "SEARCH" -> resources.getString(R.string.diag_location_source_search)
+            "DOCUMENT_LINK" -> resources.getString(R.string.diag_location_source_document_link)
+            "HISTORY" -> resources.getString(R.string.diag_location_source_history)
+            "RESTORE" -> resources.getString(R.string.diag_location_source_restore)
+            "pager" -> resources.getString(R.string.diag_page_turn_source_pager)
+            "chapter_button" -> resources.getString(R.string.diag_page_turn_source_chapter_button)
+            "page_boundary" -> resources.getString(R.string.diag_page_turn_source_page_boundary)
+            else -> value
+        }
+        "direction" -> when (value) {
+            "forward" -> resources.getString(R.string.diag_page_turn_forward)
+            "backward" -> resources.getString(R.string.diag_page_turn_backward)
             else -> value
         }
         "pressure" -> when (value) {
