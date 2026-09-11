@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -19,7 +18,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAdaptiveModal
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
@@ -58,10 +56,10 @@ internal fun AvailableUpdateModal(
             ReleaseNotesMarkdown(
                 markdown = update?.releaseNotes?.takeIf { it.isNotBlank() }
                     ?: stringResource(R.string.update_notes_fallback),
-                // A fixed notes viewport keeps this prompt the same size as the release-notes
-                // prompt while letting the dialog wrap its content instead of reserving the
-                // adaptive maximum and leaving a large empty strip at the bottom.
-                modifier = Modifier.fillMaxWidth().height(KixyuSize.updateNotesMaxHeight),
+                // Flexible viewport: the dialog wraps its content on tall screens and shrinks the
+                // notes (which scroll) on short screens, so the title and actions always stay
+                // visible in landscape instead of a fixed block pushing the buttons off-screen.
+                modifier = Modifier.weight(1f, fill = false),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),

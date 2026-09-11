@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -20,7 +19,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuAdaptiveModal
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.update.ReleaseNotesMarkdown
@@ -57,13 +55,13 @@ internal fun ReleaseNotesModal(
                     style = MaterialTheme.typography.titleMedium,
                 )
             }
-            // A fixed notes viewport keeps the dialog sized to its content instead of reserving the
-            // adaptive maximum, which used to leave a large empty strip below the buttons.
+            // Flexible viewport: content-sized on tall screens, and shrunk (scrolling) on short
+            // screens so the footer never runs off a landscape window.
             when (state) {
                 ReleaseNotesState.Idle,
                 ReleaseNotesState.Loading,
                 -> Box(
-                    Modifier.fillMaxWidth().height(KixyuSize.updateNotesMaxHeight),
+                    Modifier.fillMaxWidth().weight(1f, fill = false),
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator()
@@ -71,10 +69,10 @@ internal fun ReleaseNotesModal(
                 is ReleaseNotesState.Available -> ReleaseNotesMarkdown(
                     markdown = state.release.releaseNotes.takeIf { it.isNotBlank() }
                         ?: stringResource(R.string.release_notes_empty),
-                    modifier = Modifier.fillMaxWidth().height(KixyuSize.updateNotesMaxHeight),
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                 )
                 is ReleaseNotesState.Unavailable -> Column(
-                    modifier = Modifier.fillMaxWidth().height(KixyuSize.updateNotesMaxHeight),
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                     verticalArrangement = Arrangement.spacedBy(
                         KixyuSpacing.small,
                         Alignment.CenterVertically,
