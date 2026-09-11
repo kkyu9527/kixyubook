@@ -53,7 +53,14 @@ private fun OperationFeedback(controller: UserOperationController, modifier: Mod
     LaunchedEffect(state.attempt, state.succeeded, state.kind) {
         if (state.succeeded && state.kind == UserOperationKind.DELETE) {
             showDeleted = true
-            delay(1_800)
+            // A newer operation cancels this effect; the finally block still clears the notice so a
+            // success prompt cannot outlive its timer when another write starts within 1.8 seconds.
+            try {
+                delay(1_800)
+            } finally {
+                showDeleted = false
+            }
+        } else {
             showDeleted = false
         }
     }

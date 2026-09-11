@@ -57,6 +57,33 @@ class KixyuOperationHostTest {
         }
     }
 
+    @Test fun startingAnotherOperationClearsTheCompletionNotice() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val next = CompletableDeferred<Unit>()
+        val controller = UserOperationController(scope)
+        try {
+            compose.setContent {
+                KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = AppUiStyle.MATERIAL) {
+                    KixyuOperationHost(controller) { Box(Modifier.fillMaxSize()) }
+                }
+            }
+            compose.runOnIdle { controller.submit(kind = UserOperationKind.DELETE) { } }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("Deleted").fetchSemanticsNodes().isNotEmpty()
+            }
+            // A second write within the 1.8 s window must not leave the notice pinned on screen.
+            compose.runOnIdle {
+                controller.submit(kind = UserOperationKind.GENERIC) { next.await() }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("Deleted").fetchSemanticsNodes().isEmpty()
+            }
+        } finally {
+            next.complete(Unit)
+            scope.cancel()
+        }
+    }
+
     @Test fun completionNoticeReusesThePopupWithoutASpinner() {
         val indeterminate = SemanticsMatcher.expectValue(
             SemanticsProperties.ProgressBarRangeInfo,
