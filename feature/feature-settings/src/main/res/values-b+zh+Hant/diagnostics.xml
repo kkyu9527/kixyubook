@@ -103,6 +103,16 @@
     <string name="diag_the_reader_crossed_a_chapter_boundary">閱讀器已跨過章節邊界。</string>
     <string name="diag_page_turn_failed">跨章翻頁失敗</string>
     <string name="diag_crossing_the_chapter_boundary_failed">跨過章節邊界時發生錯誤。</string>
+    <string name="diag_cache">快取</string>
+    <string name="diag_cache_stats">快取統計</string>
+    <string name="diag_cache_hits_misses_evictions_and_repeated_parses_for_this_session">本次工作階段的命中、未命中、淘汰、超限丟棄與近期重複解析次數。</string>
+    <string name="diag_cache_name">快取名稱</string>
+    <string name="diag_cache_hits">命中</string>
+    <string name="diag_cache_misses">未命中</string>
+    <string name="diag_cache_evictions">淘汰</string>
+    <string name="diag_cache_oversized">超限丟棄</string>
+    <string name="diag_cache_parses">解析次數</string>
+    <string name="diag_cache_repeated_parses">近期重複解析</string>
     <string name="diag_no_description_is_available_for_this_diagnostic_event_yet">此診斷事件尚未提供說明。</string>
     <string name="diag_success">成功</string>
     <string name="diag_partial_success">部分成功</string>

@@ -39,6 +39,20 @@ class DiagnosticLogSessionTest {
         assertTrue(session.load(context, config, null, false).hasEntries)
     }
 
+    @Test fun clearingDiagnosticsAlsoDropsInMemoryCacheStatistics() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        DiagnosticLog.initialize(context)
+        DiagnosticLog.clearAndAwait()
+        com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.named("clear-test").parsed("entry")
+        assertTrue(
+            com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.snapshot().isNotEmpty(),
+        )
+        assertTrue(DiagnosticLog.clearAndAwait())
+        assertTrue(
+            com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.snapshot().isEmpty(),
+        )
+    }
+
     @Test fun categoryPreviewReusesSnapshotAndClearInvalidatesEveryPage() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         DiagnosticLog.initialize(context)

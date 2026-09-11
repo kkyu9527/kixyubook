@@ -207,6 +207,21 @@ class DiagnosticLogFormattingTest {
     }
 
     @Test
+    fun cacheStatisticsEntryIsRecognizedAndNotAFailure() {
+        val entry = parseDiagnosticEntry(
+            "2026-09-11T08:38:11.194Z | CACHE | cache_stats | cache=epub-package | hits=3 | misses=1 | " +
+                "evictions=0 | oversized=0 | parses=2 | repeatedRecentParses=1",
+        )
+
+        assertEquals("缓存", entry.category)
+        assertEquals("缓存统计", entry.title)
+        assertEquals(false, entry.isFailure)
+        assertTrue(entry.details.contains("缓存名称" to "epub-package"))
+        assertTrue(entry.details.contains("命中" to "3"))
+        assertTrue(entry.details.contains("近期重复解析" to "1"))
+    }
+
+    @Test
     fun backwardPageTurnKeepsDirectionAndSource() {
         val entry = parseDiagnosticEntry(
             "2026-09-11T08:38:11.194Z | READER | page_turn | elapsedMs=12 | outcome=success | " +

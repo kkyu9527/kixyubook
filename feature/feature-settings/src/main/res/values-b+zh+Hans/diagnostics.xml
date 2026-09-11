@@ -103,6 +103,16 @@
     <string name="diag_the_reader_crossed_a_chapter_boundary">阅读器已跨过章节边界。</string>
     <string name="diag_page_turn_failed">跨章翻页失败</string>
     <string name="diag_crossing_the_chapter_boundary_failed">跨过章节边界时发生错误。</string>
+    <string name="diag_cache">缓存</string>
+    <string name="diag_cache_stats">缓存统计</string>
+    <string name="diag_cache_hits_misses_evictions_and_repeated_parses_for_this_session">本次会话的命中、未命中、淘汰、超限丢弃和近期重复解析次数。</string>
+    <string name="diag_cache_name">缓存名称</string>
+    <string name="diag_cache_hits">命中</string>
+    <string name="diag_cache_misses">未命中</string>
+    <string name="diag_cache_evictions">淘汰</string>
+    <string name="diag_cache_oversized">超限丢弃</string>
+    <string name="diag_cache_parses">解析次数</string>
+    <string name="diag_cache_repeated_parses">近期重复解析</string>
     <string name="diag_no_description_is_available_for_this_diagnostic_event_yet">这是尚未添加中文说明的新诊断事件。</string>
     <string name="diag_success">成功</string>
     <string name="diag_partial_success">部分成功</string>

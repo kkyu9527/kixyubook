@@ -79,6 +79,9 @@ object DiagnosticLog {
     suspend fun clearAndAwait(): Boolean = withContext(Dispatchers.IO) {
         executor.submit<Boolean> {
             runCatching {
+                // Cache statistics live only in memory, so deleting the file alone left them
+                // visible after "clear". Reset them with the file to make the action complete.
+                com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.reset()
                 val file = logFile ?: return@runCatching true
                 !file.exists() || file.delete()
             }.getOrDefault(false)

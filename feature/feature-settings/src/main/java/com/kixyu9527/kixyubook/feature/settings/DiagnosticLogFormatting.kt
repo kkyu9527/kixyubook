@@ -85,6 +85,7 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
         "EPUB_PARSE" -> resources.getString(R.string.diag_epub_parsing)
         "READER" -> resources.getString(R.string.diag_reading)
         "PAGINATION" -> resources.getString(R.string.diag_pagination)
+        "CACHE" -> resources.getString(R.string.diag_cache)
         else -> resources.getString(R.string.diag_other)
     }
 
@@ -172,6 +173,8 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
         } else {
             resources.getString(R.string.diag_page_turn_complete) to resources.getString(R.string.diag_the_reader_crossed_a_chapter_boundary)
         }
+        "cache_stats" -> resources.getString(R.string.diag_cache_stats) to
+            resources.getString(R.string.diag_cache_hits_misses_evictions_and_repeated_parses_for_this_session)
         "restore" -> resources.getString(R.string.diag_pagination_cache_restored) to resources.getString(R.string.diag_previously_saved_pages_were_reused_without_new_layout_work)
         "measure" -> resources.getString(R.string.diag_chapter_pagination_complete) to resources.getString(R.string.diag_chapter_text_was_laid_out_into_readable_pages)
         "failed" -> resources.getString(R.string.diag_chapter_pagination_failed) to resources.getString(R.string.diag_laying_out_the_chapter_text_failed)
@@ -253,6 +256,13 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
         "chapter" -> if (category == "PAGINATION") resources.getString(R.string.diag_chapter_id) else resources.getString(R.string.diag_chapter_index)
         "fromChapter" -> resources.getString(R.string.diag_from_chapter)
         "direction" -> resources.getString(R.string.diag_page_turn_direction)
+        "cache" -> resources.getString(R.string.diag_cache_name)
+        "hits" -> resources.getString(R.string.diag_cache_hits)
+        "misses" -> resources.getString(R.string.diag_cache_misses)
+        "evictions" -> resources.getString(R.string.diag_cache_evictions)
+        "oversized" -> resources.getString(R.string.diag_cache_oversized)
+        "parses" -> resources.getString(R.string.diag_cache_parses)
+        "repeatedRecentParses" -> resources.getString(R.string.diag_cache_repeated_parses)
         "paragraphs" -> resources.getString(R.string.diag_paragraph_count)
         "pages" -> resources.getString(R.string.diag_pages_generated)
         "prefetch" -> resources.getString(R.string.diag_execution_mode)

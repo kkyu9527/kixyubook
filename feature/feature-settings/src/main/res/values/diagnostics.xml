@@ -103,6 +103,16 @@
     <string name="diag_the_reader_crossed_a_chapter_boundary">The reader crossed a chapter boundary.</string>
     <string name="diag_page_turn_failed">Page turn failed</string>
     <string name="diag_crossing_the_chapter_boundary_failed">Crossing the chapter boundary failed.</string>
+    <string name="diag_cache">Cache</string>
+    <string name="diag_cache_stats">Cache statistics</string>
+    <string name="diag_cache_hits_misses_evictions_and_repeated_parses_for_this_session">Hits, misses, evictions, oversized drops and recent repeated parses for this session.</string>
+    <string name="diag_cache_name">Cache</string>
+    <string name="diag_cache_hits">Hits</string>
+    <string name="diag_cache_misses">Misses</string>
+    <string name="diag_cache_evictions">Evictions</string>
+    <string name="diag_cache_oversized">Oversized drops</string>
+    <string name="diag_cache_parses">Parses</string>
+    <string name="diag_cache_repeated_parses">Recent repeated parses</string>
     <string name="diag_no_description_is_available_for_this_diagnostic_event_yet">No description is available for this diagnostic event yet.</string>
     <string name="diag_success">Success</string>
     <string name="diag_partial_success">Partial success</string>

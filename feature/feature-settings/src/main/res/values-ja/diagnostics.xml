@@ -103,6 +103,16 @@
     <string name="diag_the_reader_crossed_a_chapter_boundary">読書画面が章の境界を越えました。</string>
     <string name="diag_page_turn_failed">章をまたぐページ送り失敗</string>
     <string name="diag_crossing_the_chapter_boundary_failed">章の境界を越える際にエラーが発生しました。</string>
+    <string name="diag_cache">キャッシュ</string>
+    <string name="diag_cache_stats">キャッシュ統計</string>
+    <string name="diag_cache_hits_misses_evictions_and_repeated_parses_for_this_session">このセッションのヒット、ミス、破棄、サイズ超過、最近の重複解析の回数です。</string>
+    <string name="diag_cache_name">キャッシュ名</string>
+    <string name="diag_cache_hits">ヒット</string>
+    <string name="diag_cache_misses">ミス</string>
+    <string name="diag_cache_evictions">破棄</string>
+    <string name="diag_cache_oversized">サイズ超過</string>
+    <string name="diag_cache_parses">解析回数</string>
+    <string name="diag_cache_repeated_parses">最近の重複解析</string>
     <string name="diag_no_description_is_available_for_this_diagnostic_event_yet">この診断イベントの説明はまだありません。</string>
     <string name="diag_success">成功</string>
     <string name="diag_partial_success">一部成功</string>
