@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.core.sync
+import com.kixyu9527.kixyubook.core.common.configuration.*
 
 import android.content.Context
 import androidx.room.withTransaction
@@ -37,6 +38,7 @@ internal class CloudRemoteStateApplier(
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
+    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository = com.kixyu9527.kixyubook.core.common.repository.NoBookSettings,
 ) {
     suspend fun restoreBook(token: String, uuid: String, knownRemote: Map<String, DriveObject>) {
         val key = "books/$uuid/metadata"
@@ -155,6 +157,7 @@ internal class CloudRemoteStateApplier(
             json.optJSONObject("readingReminder")?.let { reminder ->
                 readingReminders.replace(jsonToReadingReminder(reminder))
             }
+            json.optJSONObject("bookOverrides")?.let { bookSettings.replaceAll(decodeBookSettings(it)) }
         }
     }
 

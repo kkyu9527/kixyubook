@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.core.sync
+import com.kixyu9527.kixyubook.core.common.configuration.*
 
 import android.content.Context
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
@@ -25,6 +26,7 @@ internal class CloudSyncPayloadFactory(
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val readingReminders: ReadingReminderScheduler,
     private val preferences: SyncPreferencesStore,
+    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository = com.kixyu9527.kixyubook.core.common.repository.NoBookSettings,
 ) {
     suspend fun materialize(
         mutation: SyncOutboxEntity,
@@ -89,6 +91,7 @@ internal class CloudSyncPayloadFactory(
         readingGoalMinutes = settingsRepository.readingGoalMinutes.first(),
         library = libraryPreferencesRepository.preferences.first(),
         readingReminder = readingReminders.settings.first(),
+        bookOverrides = bookSettings.overrides.first(),
     )
 
 

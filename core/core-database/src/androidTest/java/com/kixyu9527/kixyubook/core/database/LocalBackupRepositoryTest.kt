@@ -8,6 +8,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
+import com.kixyu9527.kixyubook.core.common.repository.ReadingReminderRepository
+import com.kixyu9527.kixyubook.core.common.repository.NoBookSettings
+import com.kixyu9527.kixyubook.core.common.model.LibraryPreferences
+import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
+import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
+import com.kixyu9527.kixyubook.core.common.model.ReadingReminderSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -69,11 +76,15 @@ class LocalBackupRepositoryTest {
                 "测试",
             ),
         )
-        val repository = LocalBackupRepository(context, database, FakeReaderSettingsRepository())
+        val library = FakeLibraryPreferences()
+        val reminders = FakeReminders()
+        val repository = LocalBackupRepository(context, database, FakeReaderSettingsRepository(), library, reminders, NoBookSettings)
 
         val exported = repository.exportTo(backupFile.toUri().toString()).getOrThrow()
         assertEquals(1, exported.bookCount)
         assertTrue(backupFile.length() > 0L)
+        library.replace(LibraryPreferences())
+        reminders.replace(ReadingReminderSettings())
 
         database.openHelper.writableDatabase.execSQL(
             "UPDATE books SET title = '被修改的书名' WHERE uuid = 'book-1'",
@@ -82,6 +93,8 @@ class LocalBackupRepositoryTest {
 
         assertEquals(1, restored.bookCount)
         assertTrue(restored.requiresRestart)
+        assertEquals(listOf("book-1"), library.preferences.value.customOrder)
+        assertEquals(ReadingReminderSettings(true, 21, 42), reminders.readingReminder.value)
         SQLiteDatabase.openDatabase(
             context.getDatabasePath(DATABASE_NAME).absolutePath,
             null,
@@ -122,6 +135,20 @@ class LocalBackupRepositoryTest {
         override suspend fun addSearchHistory(query: String) = Unit
 
         override suspend fun clearSearchHistory() = Unit
+    }
+
+    private class FakeReminders : ReadingReminderRepository {
+        override val readingReminder = MutableStateFlow(ReadingReminderSettings(true, 21, 42))
+        override suspend fun replace(settings: ReadingReminderSettings) { readingReminder.value = settings }
+    }
+
+    private class FakeLibraryPreferences : LibraryPreferencesRepository {
+        override val preferences = MutableStateFlow(LibraryPreferences(customOrder = listOf("book-1")))
+        override suspend fun replace(preferences: LibraryPreferences) { this.preferences.value = preferences }
+        override suspend fun setSortMode(mode: LibrarySortMode) { preferences.value = preferences.value.copy(sortMode = mode) }
+        override suspend fun setLayoutMode(mode: LibraryLayoutMode) { preferences.value = preferences.value.copy(layoutMode = mode) }
+        override suspend fun setCustomOrder(bookUuids: List<String>) { preferences.value = preferences.value.copy(customOrder = bookUuids) }
+        override suspend fun setCategoryHidden(category: String, hidden: Boolean) = Unit
     }
 
     private companion object {

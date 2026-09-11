@@ -7,6 +7,7 @@ android {
     namespace = "com.kixyu9527.kixyubook.core.datastore"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 
 dependencies {
@@ -15,4 +16,5 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }

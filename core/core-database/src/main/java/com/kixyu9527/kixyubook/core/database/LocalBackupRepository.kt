@@ -1,6 +1,10 @@
 package com.kixyu9527.kixyubook.core.database
 
 import android.content.Context
+import com.kixyu9527.kixyubook.core.common.configuration.*
+import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
+import com.kixyu9527.kixyubook.core.common.repository.ReadingReminderRepository
+import org.json.JSONObject
 import android.database.sqlite.SQLiteDatabase
 import android.os.storage.StorageManager
 import androidx.core.net.toUri
@@ -42,6 +46,9 @@ class LocalBackupRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val database: KixyuDatabase,
     private val settingsRepository: ReaderSettingsRepository,
+    private val libraryPreferences: LibraryPreferencesRepository,
+    private val readingReminders: ReadingReminderRepository,
+    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository,
 ) : BackupRepository {
     private val operationMutex = Mutex()
 
@@ -80,10 +87,22 @@ class LocalBackupRepository @Inject constructor(
             try {
                 val snapshot = File(work, DATABASE_NAME)
                 val escapedSnapshotPath = snapshot.absolutePath.replace("'", "''")
-                database.openHelper.writableDatabase.execSQL("VACUUM INTO '$escapedSnapshotPath'")
+                // Pin files while taking the DB snapshot. Compression and hashing then operate
+                // on private copies, so the user can keep reading or remove books afterwards.
+                val assets = LibraryStorageGate.mutex.withLock {
+                    database.openHelper.writableDatabase.execSQL("VACUUM INTO '$escapedSnapshotPath'")
+                    collectReferencedAssets(snapshot).map { asset ->
+                        val copy = File(work, asset.entryName)
+                        copy.parentFile?.mkdirs()
+                        asset.file.copyTo(copy)
+                        BackupAsset(copy, asset.entryName)
+                    }
+                }
                 val settings = settingsRepository.settings.first()
                 val goal = settingsRepository.readingGoalMinutes.first()
-                val assets = collectReferencedAssets(snapshot)
+                val portableSettings = settingsPayloadJson(settings, goal,
+                    libraryPreferences.preferences.first(), readingReminders.readingReminder.first(),
+                    bookOverrides = bookSettings.overrides.first())
                 val bookCount = countBooks(snapshot)
                 val totalBytes = snapshot.length() + assets.sumOf { it.file.length() }
                 val properties = Properties().apply {
@@ -98,39 +117,7 @@ class LocalBackupRepository @Inject constructor(
                         setProperty("asset.$index.path", asset.entryName)
                         setProperty("asset.$index.sha256", asset.file.sha256())
                     }
-                    setProperty("fontSize", settings.fontSize.toString())
-                    setProperty("lineHeight", settings.lineHeight.toString())
-                    setProperty("letterSpacing", settings.letterSpacing.toString())
-                    setProperty("margin", settings.margin.toString())
-                    setProperty("theme", settings.theme.name)
-                    setProperty("pageMode", settings.pageMode.name)
-                    setProperty("pageTurnAnimation", settings.pageTurnAnimation.name)
-                    setProperty("customThemeEnabled", settings.customThemeEnabled.toString())
-                    setProperty("customDayBackground", settings.customDayTheme.backgroundHex)
-                    setProperty("customDayBody", settings.customDayTheme.bodyHex)
-                    setProperty("customDayTitle", settings.customDayTheme.titleHex)
-                    setProperty("customDayAccent", settings.customDayTheme.accentHex)
-                    setProperty("customNightBackground", settings.customNightTheme.backgroundHex)
-                    setProperty("customNightBody", settings.customNightTheme.bodyHex)
-                    setProperty("customNightTitle", settings.customNightTheme.titleHex)
-                    setProperty("customNightAccent", settings.customNightTheme.accentHex)
-                    setProperty("showStatusBar", settings.showStatusBar.toString())
-                    setProperty("hideNavigationBar", settings.hideNavigationBar.toString())
-                    setProperty("showPageNumber", settings.showPageNumber.toString())
-                    setProperty("volumeKeyPageTurn", settings.volumeKeyPageTurn.toString())
-                    setProperty("keepScreenOn", settings.keepScreenOn.toString())
-                    setProperty("appColorTheme", settings.appColorTheme.name)
-                    setProperty("appUiStyle", settings.appUiStyle.name)
-                    setProperty("glassEffectEnabled", settings.glassEffectEnabled.toString())
-                    setProperty("glassFrostLevel", settings.glassFrostLevel.toString())
-                    setProperty("predictiveBackEnabled", settings.predictiveBackEnabled.toString())
-                    setProperty("showChapterTitle", settings.showChapterTitle.toString())
-                    setProperty("showReadingTime", settings.showReadingTime.toString())
-                    setProperty("showBatteryLevel", settings.showBatteryLevel.toString())
-                    setProperty("brightnessMode", settings.brightnessMode.name)
-                    setProperty("brightness", settings.brightness.toString())
-                    settings.fontUuid?.let { setProperty("fontUuid", it) }
-                    setProperty("readingGoalMinutes", goal.toString())
+                    setProperty("portableSettings", portableSettings.toString())
                 }
                 val output = context.contentResolver.openOutputStream(uriString.toUri(), "w") ?: error(context.getString(R.string.backup_create_failed))
                 output.use { raw -> ZipOutputStream(BufferedOutputStream(raw)).use { zip ->
@@ -211,7 +198,7 @@ class LocalBackupRepository @Inject constructor(
 
     private fun requireSupportedFormat(properties: Properties): Int =
         properties.getProperty("formatVersion")?.toIntOrNull()?.also { version ->
-            require(version == BACKUP_VERSION) { context.getString(R.string.backup_version_unsupported) }
+            require(version in 5..BACKUP_VERSION) { context.getString(R.string.backup_version_unsupported) }
         } ?: error(context.getString(R.string.backup_version_missing))
 
     /** Legacy v5 backups remain restorable; newly exported v5 backups carry a complete hash list. */
@@ -283,6 +270,11 @@ class LocalBackupRepository @Inject constructor(
     private suspend fun installRestore(snapshot: File, assets: File, properties: Properties): Unit = LibraryStorageGate.mutex.withLock {
         val oldSettings = settingsRepository.settings.first()
         val oldGoal = settingsRepository.readingGoalMinutes.first()
+        val oldLibrary = libraryPreferences.preferences.first()
+        val oldReminder = readingReminders.readingReminder.first()
+        val oldBookSettings = bookSettings.overrides.first()
+        context.getSharedPreferences("recovery_ui", Context.MODE_PRIVATE).edit()
+            .putString("style", oldSettings.appUiStyle.name).commit()
         val journal = backupRestoreJournal(context)
         try {
             journal.requireRecovered()
@@ -324,6 +316,9 @@ class LocalBackupRepository @Inject constructor(
                     if (settingsTouched) withoutRecordingSyncMutations {
                         settingsRepository.update { oldSettings }
                         settingsRepository.setReadingGoalMinutes(oldGoal)
+                        libraryPreferences.replace(oldLibrary)
+                        readingReminders.replace(oldReminder)
+                        bookSettings.replaceAll(oldBookSettings)
                     }
                     journal.cleanup()
                 } catch (rollbackFailure: Exception) {
@@ -352,6 +347,16 @@ class LocalBackupRepository @Inject constructor(
     }
 
     private suspend fun restoreSettings(properties: Properties) {
+        properties.getProperty("portableSettings")?.let { encoded ->
+            val snapshot = JSONObject(encoded)
+            require(snapshot.optInt("schema", 1) <= 4) { context.getString(R.string.backup_version_unsupported) }
+            settingsRepository.update { jsonToSettings(snapshot.getJSONObject("reader")) }
+            settingsRepository.setReadingGoalMinutes(snapshot.optInt("readingGoalMinutes", 30))
+            snapshot.optJSONObject("library")?.let { libraryPreferences.replace(jsonToLibraryPreferences(it)) }
+            snapshot.optJSONObject("readingReminder")?.let { readingReminders.replace(jsonToReadingReminder(it)) }
+            bookSettings.replaceAll(decodeBookSettings(snapshot.optJSONObject("bookOverrides")))
+            return
+        }
         settingsRepository.update { current -> current.copy(
             fontSize = properties.float("fontSize", current.fontSize),
             lineHeight = properties.float("lineHeight", current.lineHeight),
@@ -462,7 +467,7 @@ class LocalBackupRepository @Inject constructor(
 
     internal companion object {
         const val DATABASE_NAME = "kixyu-books.db"
-        const val BACKUP_VERSION = 5
+        const val BACKUP_VERSION = 6
         const val MANIFEST_ENTRY = "manifest.properties"
         const val DATABASE_ENTRY = "database/kixyu-books.db"
         const val EPUB_CACHE_DIRECTORY = "epub-chapters"

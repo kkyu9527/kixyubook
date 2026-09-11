@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.core.sync
+import com.kixyu9527.kixyubook.core.common.configuration.*
 
 import com.kixyu9527.kixyubook.core.common.model.*
 import org.json.JSONObject

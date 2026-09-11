@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.kixyu9527.kixyubook.core.common.model.*
+import com.kixyu9527.kixyubook.core.common.configuration.*
+import com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository
+import org.json.JSONObject
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,9 +25,50 @@ private val Context.readerSettingsDataStore by preferencesDataStore(name = "read
 class DataStoreReaderSettingsRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val syncMutations: SyncMutationRecorder,
-) : ReaderSettingsRepository {
+) : ReaderSettingsRepository, BookSettingsRepository {
     private val mutations = SettingsMutationJournal(context.readerSettingsDataStore, syncMutations)
     override val settings: Flow<ReaderSettings> = context.readerSettingsDataStore.data.map(::readSettings)
+    override val overrides: Flow<Map<String, String>> = context.readerSettingsDataStore.data.map {
+        decodeBookSettings(JSONObject(it[BOOK_OVERRIDES] ?: "{}"))
+    }
+
+    override suspend fun setEnabled(bookUuid: String, enabled: Boolean) {
+        mutations.edit { values ->
+            val all = JSONObject(values[BOOK_OVERRIDES] ?: "{}")
+            if (enabled) { if (!all.has(bookUuid)) all.put(bookUuid, "{}") } else all.remove(bookUuid)
+            values[BOOK_OVERRIDES] = all.toString()
+        }
+    }
+
+    override suspend fun updateField(bookUuid: String, field: String, encodedValue: String) {
+        mutations.edit { values ->
+            val all = JSONObject(values[BOOK_OVERRIDES] ?: "{}")
+            if (all.has(bookUuid)) {
+                all.put(bookUuid, mergeBookSetting(readSettings(values), all.getString(bookUuid), field, encodedValue))
+                values[BOOK_OVERRIDES] = all.toString()
+            }
+        }
+    }
+
+    override suspend fun replaceAll(values: Map<String, String>) {
+        val validated = decodeBookSettings(JSONObject(values))
+        mutations.edit { it[BOOK_OVERRIDES] = JSONObject(validated).toString() }
+    }
+
+    override suspend fun clearFontReferences(fontUuid: String) {
+        mutations.edit { values ->
+            if (values[FONT_UUID] == fontUuid) values.remove(FONT_UUID)
+            val all = JSONObject(values[BOOK_OVERRIDES] ?: "{}")
+            all.keys().asSequence().toList().forEach { book ->
+                val patch = JSONObject(all.getString(book))
+                if (patch.optString("fontUuid") == fontUuid) {
+                    patch.remove("fontUuid")
+                    all.put(book, patch.toString())
+                }
+            }
+            values[BOOK_OVERRIDES] = all.toString()
+        }
+    }
 
     private fun readSettings(values: Preferences): ReaderSettings {
         val storedTheme = values[THEME]
@@ -139,6 +183,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
     }
 
     private companion object {
+        val BOOK_OVERRIDES = stringPreferencesKey("book_reader_overrides")
         val FONT_SIZE = floatPreferencesKey("font_size"); val LINE_HEIGHT = floatPreferencesKey("line_height")
         val LETTER_SPACING = floatPreferencesKey("letter_spacing"); val MARGIN = floatPreferencesKey("margin")
         val THEME = stringPreferencesKey("theme"); val PAGE_MODE = stringPreferencesKey("page_mode")

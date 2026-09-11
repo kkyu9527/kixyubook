@@ -48,6 +48,7 @@ class CloudSyncEngine @Inject constructor(
     private val bookRepository: BookRepository,
     private val fontRepository: FontRepository,
     private val settingsRepository: ReaderSettingsRepository,
+    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val textCorrectionRepository: TextCorrectionRepository,
     private val readerAnnotationRepository: ReaderAnnotationRepository,
@@ -61,6 +62,7 @@ class CloudSyncEngine @Inject constructor(
     private val syncMutex = Mutex()
 
     private val remoteState = CloudRemoteStateApplier(
+        bookSettings = bookSettings,
         context = context,
         database = database,
         books = books,
@@ -77,6 +79,7 @@ class CloudSyncEngine @Inject constructor(
         drive = drive,
     )
     private val payloads = CloudSyncPayloadFactory(
+        bookSettings = bookSettings,
         context = context,
         books = books,
         fonts = fonts,

@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  * DataStore and Room cannot share a transaction. Persist the delivery token WITH the settings,
  * then acknowledge only after Room has its outbox entry. Replaying after death is idempotent.
  */
-internal class SettingsMutationJournal(
+class SettingsMutationJournal(
     private val store: DataStore<Preferences>,
     recorder: SyncMutationRecorder,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
