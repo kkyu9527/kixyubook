@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook
 
+import android.app.Application
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +33,7 @@ import org.robolectric.annotation.Config
  * captured a snapshot value and only reflected it after leaving and re-entering the screen.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], qualifiers = "en")
+@Config(sdk = [35], qualifiers = "en", application = Application::class)
 class NavigationEntryStateTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
