@@ -24,6 +24,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
     override val format = BookFormat.EPUB
     private val packageIndexCache = WeightedLruCache<PackageCacheKey, PackageDocument>(
         ReaderCacheBudget.EPUB_PACKAGE_MEMORY_BYTES, PACKAGE_INDEX_CACHE_SIZE,
+        diagnosticsName = "epub-package",
     ) { document ->
         256L + (document.identifier.length + document.title.length + document.author.length + document.description.length) * 2L +
             document.spine.sumOf { 40L + it.length * 2L } + document.manifest.entries.sumOf { (key, item) ->
@@ -32,6 +33,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
     }
     private val cssSourceCache = WeightedLruCache<CssSourceCacheKey, ParsedCssSource>(
         ReaderCacheBudget.EPUB_CSS_MEMORY_BYTES, CSS_SOURCE_CACHE_SIZE,
+        diagnosticsName = "epub-css",
     ) { source ->
         128L + source.imports.sumOf { 40L + it.length * 2L } + source.rules.sumOf { rule ->
             128L + (rule.selector.length + rule.sourcePath.length) * 2L + rule.declarations.entries.sumOf { (key, value) ->
@@ -282,6 +284,9 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         expectedTitle: String? = null,
         purpose: String = "interactive",
     ): DocumentChapter? {
+        com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.named("epub-body").parsed(
+            listOf(file.absolutePath, file.lastModified(), chapterIndex),
+        )
         val startedAt = System.nanoTime()
         return try {
             val chapter = ZipFile(file).use { zip ->

@@ -22,19 +22,23 @@ object ReaderCacheBudget {
 class WeightedLruCache<K, V>(
     private val maxBytes: Long,
     private val maxEntries: Int,
+    diagnosticsName: String? = null,
     private val weigh: (V) -> Long,
 ) {
+    private val diagnostics = diagnosticsName?.let(CacheDiagnostics::named)
     private data class Entry<V>(val value: V, val bytes: Long)
     private val entries = LinkedHashMap<K, Entry<V>>(16, .75f, true)
     var retainedBytes: Long = 0
         private set
     val size get() = entries.size
 
-    operator fun get(key: K): V? = entries[key]?.value
+    operator fun get(key: K): V? = entries[key]?.value.also {
+        if (it == null) diagnostics?.misses?.incrementAndGet() else diagnostics?.hits?.incrementAndGet()
+    }
     operator fun set(key: K, value: V) {
         entries.remove(key)?.let { retainedBytes -= it.bytes }
         val bytes = weigh(value).coerceAtLeast(1)
-        if (bytes > maxBytes) return
+        if (bytes > maxBytes) { diagnostics?.oversized?.incrementAndGet(); return }
         entries[key] = Entry(value, bytes)
         retainedBytes += bytes
         trimToSize(maxEntries)
@@ -44,6 +48,7 @@ class WeightedLruCache<K, V>(
         while ((retainedBytes > maxBytes || entries.size > maximum) && iterator.hasNext()) {
             retainedBytes -= iterator.next().value.bytes
             iterator.remove()
+            diagnostics?.evictions?.incrementAndGet()
         }
     }
     fun removeMatching(predicate: (K) -> Boolean) {

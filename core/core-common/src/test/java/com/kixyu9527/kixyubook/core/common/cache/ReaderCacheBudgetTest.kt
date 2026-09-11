@@ -7,6 +7,18 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class ReaderCacheBudgetTest {
+    @Test fun diagnosticsMeasureHitsEvictionAndOversizeWithoutBookText() {
+        val name = "test-${System.nanoTime()}"
+        val cache = WeightedLruCache<Int, String>(8, 1, name) { it.length.toLong() }
+        cache[1] = "one"; assertEquals("one", cache[1]); assertNull(cache[2])
+        cache[2] = "two"; cache[3] = "oversized-entry"
+        val counters = CacheDiagnostics.named(name)
+        counters.parsed("private-book"); counters.parsed("private-book")
+        assertEquals(1L, counters.hits.get()); assertEquals(1L, counters.misses.get())
+        assertEquals(1L, counters.evictions.get()); assertEquals(1L, counters.oversized.get())
+        assertEquals(1L, counters.repeatedParses.get())
+        assertFalse(CacheDiagnostics.snapshot().joinToString().contains("private-book"))
+    }
     @get:Rule val folder = TemporaryFolder()
 
     @Test fun imageAllocationRetainsLowMemoryPolicyAndHasAnUpperBound() {

@@ -205,6 +205,7 @@ class ReaderPaginationCoordinator internal constructor(
     private val pages = WeightedLruCache<PaginationCacheKey, List<ReaderPage>>(
         ReaderCacheBudget.PAGINATION_MEMORY_BYTES,
         ReaderCacheBudget.MAX_MEMORY_CHAPTERS,
+        diagnosticsName = "pagination",
     ) { chapterPages ->
         // fullText is shared between page fragments; count each paragraph once.
         val seen = hashSetOf<Int>()

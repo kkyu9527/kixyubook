@@ -18,6 +18,7 @@ class TxtBookParser : BookParser {
         inspectFrontMatter(file, fallbackTitle).metadata
 
     override suspend fun readChapters(file: File, emit: suspend (DocumentChapter) -> Unit) {
+        com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.named("txt-body").parsed(listOf(file.absolutePath, file.lastModified()))
         val frontMatter = inspectFrontMatter(file, file.name)
         file.bufferedReader(frontMatter.charset).use { reader ->
             var title = "正文"

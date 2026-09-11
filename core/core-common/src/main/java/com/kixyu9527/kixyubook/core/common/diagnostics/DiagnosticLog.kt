@@ -71,7 +71,8 @@ object DiagnosticLog {
 
     suspend fun snapshotLines(): List<String> = withContext(Dispatchers.IO) {
         executor.submit<List<String>> {
-            runCatching { logFile?.takeIf(File::exists)?.readLines().orEmpty() }.getOrDefault(emptyList())
+            runCatching { logFile?.takeIf(File::exists)?.readLines().orEmpty() }.getOrDefault(emptyList()) +
+                com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.snapshot()
         }.get()
     }
 
