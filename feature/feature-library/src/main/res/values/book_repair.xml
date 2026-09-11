@@ -1,0 +1,10 @@
+<resources>
+    <string name="library_repair_title">Check and repair</string>
+    <string name="library_repair_explanation">Cache rebuild clears disposable reading caches. Index rebuild repairs text lookup tables. Reparse reads the original file without deleting your book or reading records.</string>
+    <string name="library_repair_cache">Rebuild reading caches</string>
+    <string name="library_repair_index">Rebuild search index</string>
+    <string name="library_repair_parse">Reparse original file</string>
+    <string name="library_repair_preparing">Preparing repair…</string>
+    <string name="library_repair_preserved">The new content cannot safely match existing locations. Original data was kept; no reading records were removed.</string>
+    <string name="library_repair_complete">Repair completed. Reading records were preserved.</string>
+</resources>

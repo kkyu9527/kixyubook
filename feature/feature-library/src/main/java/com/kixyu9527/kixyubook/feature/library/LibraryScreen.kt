@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.feature.library
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
@@ -145,6 +146,10 @@ fun LibraryRoute(
     val state by stateFlow.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val importHistory by viewModel.importHistory.collectAsStateWithLifecycle()
+    val repairProgress by viewModel.repairProgress.collectAsStateWithLifecycle()
+    val repairOutcome by viewModel.repairOutcome.collectAsStateWithLifecycle()
+    val operation by viewModel.operations.state.collectAsStateWithLifecycle()
+    var repairTarget by rememberSaveable { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val exportedMessage = stringResource(R.string.library_exported)
     val exportedManyMessage = stringResource(R.string.library_exported_many)
@@ -161,6 +166,20 @@ fun LibraryRoute(
         viewModel.import(uris.map { it.toString() })
     }
     var pendingExportBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var exportChoiceUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingAnnotationBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    val exportNotes = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val uuid = pendingAnnotationBookUuid
+        pendingAnnotationBookUuid = null
+        if (uri != null && uuid != null) viewModel.exportAnnotations(uuid, uri.toString(),
+            com.kixyu9527.kixyubook.core.common.model.AnnotationExportFormat.PLAIN_TEXT)
+    }
+    val exportMarkdown = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
+        val uuid = pendingAnnotationBookUuid
+        pendingAnnotationBookUuid = null
+        if (uri != null && uuid != null) viewModel.exportAnnotations(uuid, uri.toString(),
+            com.kixyu9527.kixyubook.core.common.model.AnnotationExportFormat.MARKDOWN)
+    }
     val stringSetSaver = remember {
         Saver<Set<String>, List<String>>(save = { it.toList() }, restore = { it.toSet() })
     }
@@ -173,9 +192,33 @@ fun LibraryRoute(
         if (uri != null && bookUuid != null) viewModel.export(bookUuid, uri.toString())
     }
     val beginExport: (LibraryBook) -> Unit = { item ->
-        pendingExportBookUuid = item.book.uuid
-        val fileName = exportFileName(item)
-        exportTxt.launch(fileName)
+        exportChoiceUuid = item.book.uuid
+    }
+    state.books.firstOrNull { it.book.uuid == exportChoiceUuid }?.let { item ->
+        KixyuActionDialog(
+            show = true,
+            title = stringResource(R.string.library_export_choose),
+            onDismissRequest = { exportChoiceUuid = null },
+            confirmLabel = stringResource(com.kixyu9527.kixyubook.core.designsystem.R.string.kixyu_cancel),
+            onConfirm = { exportChoiceUuid = null },
+            dismissLabel = null,
+        ) {
+            Column {
+                KixyuTextButton(text = stringResource(R.string.library_export_body), onClick = {
+                    exportChoiceUuid = null
+                    pendingExportBookUuid = item.book.uuid
+                    exportTxt.launch(exportFileName(item))
+                })
+                listOf("MARKDOWN", "PLAIN_TEXT").forEach { format ->
+                    KixyuTextButton(text = stringResource(if (format == "MARKDOWN") R.string.library_export_notes_md else R.string.library_export_notes_txt), onClick = {
+                        exportChoiceUuid = null
+                        pendingAnnotationBookUuid = item.book.uuid
+                        val name = item.book.title.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                        if (format == "MARKDOWN") exportMarkdown.launch("$name.md") else exportNotes.launch("$name.txt")
+                    })
+                }
+            }
+        }
     }
     val exportDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val bookUuids = pendingBatchExportBookUuids
@@ -237,12 +280,13 @@ fun LibraryRoute(
         onOpenHiddenLibrary = onOpenHiddenLibrary,
         onBack = onBack,
         onImport = { picker.launch(arrayOf("text/plain", "application/epub+zip", "application/zip", "application/octet-stream")) },
-        onOpenBook = onOpenBook,
+        onOpenBook = { if (repairProgress == null) onOpenBook(it) },
         onDelete = viewModel::delete,
         onDeleteMany = viewModel::deleteBooks,
         onExport = beginExport,
         onExportMany = beginBatchExport,
         onUpdateMetadata = viewModel::updateMetadata,
+        onRepair = { viewModel.clearRepairOutcome(); repairTarget = it },
         onSetCategories = viewModel::setCategories,
         onDropDocuments = { uris, releasePermission ->
             viewModel.import(uris) { releasePermission?.invoke() }
@@ -252,6 +296,16 @@ fun LibraryRoute(
         onRetryImport = viewModel::retryImport,
         onClearImportHistory = viewModel::clearImportHistory,
     )
+        repairTarget?.let { uuid ->
+            LibraryBookRepairDialog(
+                title = state.books.firstOrNull { it.book.uuid == uuid }?.book?.title.orEmpty(),
+                running = operation.running,
+                progress = repairProgress,
+                outcome = repairOutcome,
+                onDismiss = { repairTarget = null },
+                onRepair = { viewModel.repairBook(uuid, it) },
+            )
+        }
     }
 }
 
@@ -284,6 +338,7 @@ private fun LibraryScreen(
     onCancelImport: (String) -> Unit,
     onRetryImport: (String) -> Unit,
     onClearImportHistory: () -> Unit,
+    onRepair: (String) -> Unit = {},
 ) {
     var managingUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var deletingUuid by rememberSaveable { mutableStateOf<String?>(null) }
@@ -593,6 +648,7 @@ private fun LibraryScreen(
     managing?.let { item ->
         BookManagementDialog(
             item = item,
+            onRepair = { onRepair(item.book.uuid) },
             dismiss = { managingUuid = null },
             save = { title, author, description, category ->
                 onUpdateMetadata(item.book.uuid, title, author, description, category)

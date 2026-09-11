@@ -112,6 +112,8 @@ interface BookDao {
         """,
     )
     suspend fun deleteBookParagraphFts(bookUuids: Set<String>)
+    @Query("INSERT INTO paragraphs_fts(rowid, text) SELECT p.id, p.text FROM paragraphs p JOIN chapters c ON c.id = p.chapterId WHERE c.bookUuid = :bookUuid")
+    suspend fun populateBookParagraphFts(bookUuid: String)
     @Query("DELETE FROM books WHERE uuid = :uuid") suspend fun deleteBook(uuid: String)
     @Query("DELETE FROM books WHERE uuid IN (:uuids)") suspend fun deleteBooks(uuids: Set<String>)
     @Query("DELETE FROM metadata_edits WHERE bookUuid IN (:uuids)") suspend fun deleteMetadataEdits(uuids: Set<String>)

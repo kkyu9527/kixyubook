@@ -575,16 +575,21 @@ internal fun BookManagementDialog(
     item: LibraryBook,
     dismiss: () -> Unit,
     save: (String, String, String, String) -> Unit,
+    onRepair: (() -> Unit)? = null,
 ) {
     var title by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.title) }
     var author by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.author) }
     var description by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.description) }
     var category by rememberSaveable(item.book.uuid) { mutableStateOf(item.book.category) }
     val operation = rememberKixyuEditorOperation(dismiss)
+    val dismissDraft = com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuDraftDismiss(
+        title != item.book.title || author != item.book.author || description != item.book.description || category != item.book.category,
+    ) { operation.edited(); dismiss() }
     KixyuActionDialog(
         show = true,
         title = stringResource(R.string.library_edit_book),
-        onDismissRequest = { operation.edited(); dismiss() },
+        onDismissRequest = dismissDraft,
+        dismissRequiresConfirmation = title != item.book.title || author != item.book.author || description != item.book.description || category != item.book.category,
         confirmLabel = stringResource(R.string.library_action_save),
         confirmEnabled = !operation.running,
         onConfirm = { operation.submit { save(title, author, description, category) } },
@@ -606,6 +611,9 @@ internal fun BookManagementDialog(
                 maxLines = 6,
             )
             OutlinedTextField(category, { operation.edited(); category = it }, enabled = !operation.running, modifier = Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.library_book_category)) }, singleLine = true)
+            onRepair?.let { action ->
+                KixyuTextButton(text = stringResource(R.string.library_repair_title), enabled = !operation.running, onClick = action)
+            }
         }
     }
 }

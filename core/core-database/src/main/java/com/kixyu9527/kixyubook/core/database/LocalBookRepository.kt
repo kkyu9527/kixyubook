@@ -4,7 +4,6 @@ import com.kixyu9527.kixyubook.core.common.cache.WeightedLruCache
 
 import android.content.Context
 import android.os.SystemClock
-import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import androidx.core.content.edit
@@ -119,6 +118,7 @@ class LocalBookRepository @Inject constructor(
     private val chapterCache = WeightedLruCache<ChapterCacheKey, ChapterContent>(
         ReaderCacheBudget.CHAPTER_MEMORY_BYTES,
         ReaderCacheBudget.MAX_MEMORY_CHAPTERS,
+        diagnosticsName = "chapter",
     ) { content ->
         256L + content.paragraphs.sumOf { paragraph ->
             128L + paragraph.text.length * 2L + paragraph.spans.size * 96L
@@ -290,94 +290,30 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
-    override suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit> = withContext(Dispatchers.IO) {
-        val startedAt = SystemClock.elapsedRealtime()
-        runCatching {
-            val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_removed))
-            val destination = uriString.toUri()
-            context.contentResolver.openOutputStream(destination, "w")?.use { output ->
-                output.bufferedWriter(Charsets.UTF_8).use { writer ->
-                    dao.getChapters(bookUuid).forEachIndexed { index, chapter ->
-                        getChapter(bookUuid, chapter.chapterIndex)?.let { content ->
-                            if (index > 0) writer.appendLine()
-                            writer.appendLine(content.chapter.title)
-                            content.paragraphs.asSequence()
-                                .filter { it.kind == ParagraphKind.TEXT && it.text.isNotBlank() }
-                                .forEach { paragraph ->
-                                    writer.appendLine()
-                                    writer.appendLine(paragraph.text)
-                                }
-                        }
-                    }
-                }
-            } ?: error(context.getString(R.string.db_write_location_failed))
-            Unit
-        }.onSuccess {
-            DiagnosticLog.record(
-                Category.LIBRARY,
-                "book_exported",
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                details = mapOf("book" to bookUuid.shortDiagnosticId()),
-            )
-        }.onFailure { error ->
-            val failure = error.toDiagnosticFailure()
-            DiagnosticLog.record(
-                Category.LIBRARY,
-                "book_export_failed",
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                outcome = failure.outcome,
-                details = mapOf(
-                    "book" to bookUuid.shortDiagnosticId(),
-                    "reason" to failure.reason,
-                ),
-            )
-        }
+    private val exporter by lazy { BookExportService(context, dao, annotations, ::getChapter) }
+
+    override suspend fun exportAnnotations(bookUuid: String, uriString: String, format: AnnotationExportFormat) =
+        exporter.exportAnnotations(bookUuid, uriString, format)
+
+    override suspend fun repairBook(bookUuid: String, mode: BookRepairMode, onProgress: suspend (BookRepairProgress) -> Unit): Result<BookRepairOutcome> = withContext(Dispatchers.IO) {
+        try {
+            val result = storageMutationMutex.withLock {
+                BookRepairService(context, database, dao, annotations, textCorrections, chapterLoadMutex) { uuid ->
+                    synchronized(chapterCacheLock) { chapterCache.removeMatching { it.bookUuid == uuid } }
+                    epubChapterCache.clearBook(uuid)
+                    ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, uuid)
+                }.repair(bookUuid, mode, onProgress)
+            }
+            Result.success(result)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { Result.failure(error) }
     }
 
-    override suspend fun exportBooks(
-        bookUuids: Set<String>,
-        directoryUriString: String,
-    ): BookExportSummary = withContext(Dispatchers.IO) {
-        val treeUri = directoryUriString.toUri()
-        val parent = DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            DocumentsContract.getTreeDocumentId(treeUri),
-        )
-        val books = dao.getBooks(bookUuids).associateBy { it.uuid }
-        val failedTitles = mutableListOf<String>()
-        var exportedCount = 0
-        bookUuids.forEach { uuid ->
-            val book = books[uuid]
-            if (book == null) {
-                failedTitles += uuid
-                return@forEach
-            }
-            val destination = runCatching {
-                DocumentsContract.createDocument(
-                    context.contentResolver,
-                    parent,
-                    "text/plain",
-                    correctedExportFileName(book.title, book.format),
-                ) ?: error(context.getString(R.string.db_create_export_failed))
-            }.getOrElse {
-                failedTitles += book.title
-                return@forEach
-            }
-            exportBook(uuid, destination.toString())
-                .onSuccess { exportedCount++ }
-                .onFailure {
-                    failedTitles += book.title
-                    runCatching {
-                        DocumentsContract.deleteDocument(context.contentResolver, destination)
-                    }
-                }
-        }
-        BookExportSummary(
-            exportedCount = exportedCount,
-            failedTitles = failedTitles,
-            directoryUri = directoryUriString,
-        )
-    }
+    override suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit> =
+        exporter.exportBook(bookUuid, uriString)
+
+    override suspend fun exportBooks(bookUuids: Set<String>, directoryUriString: String): BookExportSummary =
+        exporter.exportBooks(bookUuids, directoryUriString)
 
     /**
      * Registers every selected file before any expensive body parsing starts. Room observers can
@@ -1149,12 +1085,14 @@ class LocalBookRepository @Inject constructor(
         query: String,
         onProgress: suspend (BookSearchProgress) -> Unit,
         onResults: suspend (List<BookSearchResult>) -> Unit,
+        retainResults: Boolean,
     ): List<BookSearchResult> = withContext(Dispatchers.IO) {
         val normalizedQuery = query.trim()
         if (normalizedQuery.isBlank()) return@withContext emptyList()
         val chapters = dao.getChapters(bookUuid)
         onProgress(BookSearchProgress(BookSearchStage.SEARCHING, 0, chapters.size))
         BookSearchScanner(dao).search(
+            retainResults = retainResults,
             chapters = chapters,
             query = normalizedQuery,
             corrections = textCorrections.getBookCorrections(bookUuid),

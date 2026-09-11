@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook.feature.library
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
+import com.kixyu9527.kixyubook.core.common.operation.LatestOperationWriter
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,6 +16,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -68,7 +70,20 @@ class LibraryViewModel @Inject constructor(
     private var customOrderPersistence: Job? = null
     private val messages = Channel<String>(Channel.BUFFERED)
     val operations = UserOperationController(viewModelScope)
+    private val settingWrites = LatestOperationWriter(viewModelScope, operations)
     val messageEvents = messages.receiveAsFlow()
+    private val _repairProgress = MutableStateFlow<com.kixyu9527.kixyubook.core.common.model.BookRepairProgress?>(null)
+    private val _repairOutcome = MutableStateFlow<com.kixyu9527.kixyubook.core.common.model.BookRepairOutcome?>(null)
+    val repairProgress = _repairProgress.asStateFlow()
+    val repairOutcome = _repairOutcome.asStateFlow()
+    fun clearRepairOutcome() { _repairOutcome.value = null }
+
+    fun repairBook(uuid: String, mode: com.kixyu9527.kixyubook.core.common.model.BookRepairMode) = operations.submit {
+        _repairOutcome.value = null
+        _repairProgress.value = com.kixyu9527.kixyubook.core.common.model.BookRepairProgress(0, 0)
+        try { _repairOutcome.value = repository.repairBook(uuid, mode) { _repairProgress.value = it }.getOrThrow() }
+        finally { _repairProgress.value = null }
+    }
     private val exports = Channel<BookExportEvent>(Channel.BUFFERED)
     val exportEvents = exports.receiveAsFlow()
     val importProgress = repository.importProgress
@@ -136,14 +151,14 @@ class LibraryViewModel @Inject constructor(
 
     fun search(value: String) { query.value = value }
     fun selectCategory(value: String) { category.value = value }
-    fun setSortMode(mode: LibrarySortMode) = viewModelScope.launch {
+    fun setSortMode(mode: LibrarySortMode) = settingWrites.submit("sort") {
         if (mode != LibrarySortMode.CUSTOM) customOrderOverride.value = null
         if (mode == LibrarySortMode.CUSTOM && preferences.value.customOrder.isEmpty()) {
             preferencesRepository.setCustomOrder(catalog.value.allBooks.map { it.book.uuid })
         }
         preferencesRepository.setSortMode(mode)
     }
-    fun setLayoutMode(mode: LibraryLayoutMode) = viewModelScope.launch {
+    fun setLayoutMode(mode: LibraryLayoutMode) = settingWrites.submit("layout") {
         preferencesRepository.setLayoutMode(mode)
     }
 
@@ -162,7 +177,7 @@ class LibraryViewModel @Inject constructor(
         customOrderPersistence?.cancel()
         customOrderPersistence = viewModelScope.launch {
             delay(350)
-            persistCustomOrder(order)
+            settingWrites.submit("order") { persistCustomOrder(order) }
         }
     }
 
@@ -175,10 +190,10 @@ class LibraryViewModel @Inject constructor(
     fun finishCustomReorder() {
         val order = customOrderOverride.value ?: return
         customOrderPersistence?.cancel()
-        customOrderPersistence = viewModelScope.launch { persistCustomOrder(order) }
+        settingWrites.submit("order") { persistCustomOrder(order) }
     }
 
-    fun setCategoryHidden(value: String, hidden: Boolean) = viewModelScope.launch {
+    fun setCategoryHidden(value: String, hidden: Boolean) = settingWrites.submit("hidden:$value") {
         preferencesRepository.setCategoryHidden(value, hidden)
         if (category.value == value) category.value = ALL_LIBRARY_CATEGORIES
     }
@@ -232,6 +247,11 @@ class LibraryViewModel @Inject constructor(
         repository.exportBook(bookUuid, uriString)
             .onSuccess { exports.send(BookExportEvent(uriString)) }
             .onFailure { messages.send(it.message ?: context.getString(R.string.library_export_failed)) }
+    }
+
+    fun exportAnnotations(bookUuid: String, uriString: String, format: com.kixyu9527.kixyubook.core.common.model.AnnotationExportFormat) = operations.submit {
+        repository.exportAnnotations(bookUuid, uriString, format).getOrThrow()
+        exports.send(BookExportEvent(uriString))
     }
 
     fun exportBooks(bookUuids: Set<String>, directoryUriString: String) = viewModelScope.launch {

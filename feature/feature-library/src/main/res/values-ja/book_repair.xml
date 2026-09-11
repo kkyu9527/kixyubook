@@ -1,0 +1,10 @@
+<resources>
+    <string name="library_repair_title">本の確認と修復</string>
+    <string name="library_repair_explanation">キャッシュの再構築は再生成可能なデータのみを消去します。検索索引を修復したり、元のファイルを再解析したりできます。本や読書記録は削除しません。</string>
+    <string name="library_repair_cache">読書キャッシュを再構築</string>
+    <string name="library_repair_index">検索索引を再構築</string>
+    <string name="library_repair_parse">元のファイルを再解析</string>
+    <string name="library_repair_preparing">修復を準備中…</string>
+    <string name="library_repair_preserved">新しい内容と既存の位置を安全に対応付けられません。元のデータと読書記録を保持しました。</string>
+    <string name="library_repair_complete">修復が完了しました。読書記録は保持されています。</string>
+</resources>

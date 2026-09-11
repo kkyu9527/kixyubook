@@ -1,0 +1,6 @@
+<resources>
+    <string name="library_export_choose">导出书籍</string>
+    <string name="library_export_body">正文（TXT）</string>
+    <string name="library_export_notes_md">笔记与批注（Markdown）</string>
+    <string name="library_export_notes_txt">笔记与批注（TXT）</string>
+</resources>

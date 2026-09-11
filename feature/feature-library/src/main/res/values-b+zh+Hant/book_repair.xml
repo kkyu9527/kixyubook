@@ -1,0 +1,10 @@
+<resources>
+    <string name="library_repair_title">書籍檢查與修復</string>
+    <string name="library_repair_explanation">快取重建只清理可重新產生的閱讀快取；索引重建修復正文檢索表；重新解析讀取原始檔，不刪除書籍和閱讀紀錄。</string>
+    <string name="library_repair_cache">重建閱讀快取</string>
+    <string name="library_repair_index">重建搜尋索引</string>
+    <string name="library_repair_parse">重新解析原始檔</string>
+    <string name="library_repair_preparing">正在準備修復…</string>
+    <string name="library_repair_preserved">新內容無法安全對應現有位置，已保留原始資料，未刪除任何閱讀紀錄。</string>
+    <string name="library_repair_complete">修復完成，閱讀紀錄已保留。</string>
+</resources>

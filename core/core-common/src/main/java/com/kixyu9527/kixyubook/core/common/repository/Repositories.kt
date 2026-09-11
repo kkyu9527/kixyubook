@@ -5,6 +5,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 interface BookRepository {
+    suspend fun repairBook(bookUuid: String, mode: BookRepairMode, onProgress: suspend (BookRepairProgress) -> Unit): Result<BookRepairOutcome> =
+        Result.failure(UnsupportedOperationException("Book repair is not supported"))
+    suspend fun exportAnnotations(bookUuid: String, uriString: String, format: AnnotationExportFormat): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Annotation export is not supported"))
     fun observeImportEvents(): Flow<String>
     val importProgress: StateFlow<ImportProgress?>
     fun observeImportHistory(): Flow<List<ImportProgress>>
@@ -57,6 +61,7 @@ interface BookRepository {
         query: String,
         onProgress: suspend (BookSearchProgress) -> Unit = {},
         onResults: suspend (List<BookSearchResult>) -> Unit = {},
+        retainResults: Boolean = true,
     ): List<BookSearchResult>
     suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult?
     suspend fun readEpubNavigation(bookUuid: String): List<EpubNavigationEntry> = emptyList()

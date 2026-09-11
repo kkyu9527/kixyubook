@@ -1,0 +1,10 @@
+<resources>
+    <string name="library_repair_title">书籍检查与修复</string>
+    <string name="library_repair_explanation">缓存重建只清理可再生成的阅读缓存；索引重建修复正文检索表；重新解析读取原文件，不删除书籍和阅读记录。</string>
+    <string name="library_repair_cache">重建阅读缓存</string>
+    <string name="library_repair_index">重建搜索索引</string>
+    <string name="library_repair_parse">重新解析原文件</string>
+    <string name="library_repair_preparing">正在准备修复…</string>
+    <string name="library_repair_preserved">新内容无法安全对应现有位置，已保留原数据，未删除任何阅读记录。</string>
+    <string name="library_repair_complete">修复完成，阅读记录已保留。</string>
+</resources>
