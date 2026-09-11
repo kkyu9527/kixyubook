@@ -590,7 +590,7 @@ class ReaderEngineTest {
         )
     }
 
-    @Test fun epubChapterOutlinesAdoptUnlistedForewordIntoFollowingVolume() {
+    @Test fun epubChapterOutlinesAdoptUnlistedForewordIntoFollowingVolume() = runBlocking {
         val epub = folder.newFile("foreword-volume.epub")
         ZipOutputStream(epub.outputStream()).use { zip ->
             fun entry(path: String, value: String) {
@@ -613,6 +613,9 @@ class ReaderEngineTest {
             ),
             EpubBookParser().readChapterOutlines(epub),
         )
+        // Reading the body must keep the adopted directory title, otherwise the background index
+        // would write the front-matter heading "序" back and break the volume grouping.
+        assertEquals("第二卷", EpubBookParser().readChapter(epub, 1, "第二卷")?.title)
     }
 
     @Test fun epubChapterOutlinesRepairCoverPrefaceAndImageOnlyVolumePage() = runBlocking {

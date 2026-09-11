@@ -298,7 +298,13 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 readSpineChapter(zip, pkg, chapterIndex)?.let { parsed ->
                     val stableExpectedTitle = expectedTitle?.singleLineBookHeading()
                         ?.takeIf(String::isNotBlank)
-                    if (parsed.title.isGenericEpubChapterTitle() && stableExpectedTitle != null) {
+                    // The directory is the source of truth for grouping. A volume's adopted opening
+                    // page (for example "foreword2") resolves to the front-matter heading "序" in
+                    // the body; without this the background index would overwrite the directory
+                    // title and the grouping would silently fall apart.
+                    val headingIsReplaceable = parsed.title.isGenericEpubChapterTitle() ||
+                        parsed.title.semanticEpubSectionTitle() != null
+                    if (headingIsReplaceable && stableExpectedTitle != null) {
                         parsed.copy(title = stableExpectedTitle)
                     } else {
                         parsed
