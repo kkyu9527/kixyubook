@@ -21,6 +21,16 @@ object CacheDiagnostics {
             if (recent.size > 256) recent.entries.iterator().let { it.next(); it.remove() }
         }
 
+        @Synchronized fun reset() {
+            hits.set(0)
+            misses.set(0)
+            evictions.set(0)
+            oversized.set(0)
+            parses.set(0)
+            repeatedParses.set(0)
+            recent.clear()
+        }
+
         fun isEmpty(): Boolean = hits.get() == 0L && misses.get() == 0L && evictions.get() == 0L &&
             oversized.get() == 0L && parses.get() == 0L
     }
@@ -28,9 +38,12 @@ object CacheDiagnostics {
     private val counters = ConcurrentHashMap<String, Counters>()
     fun named(name: String): Counters = counters.getOrPut(name) { Counters() }
 
-    /** Drops every counter so a cleared log cannot immediately republish stale cache statistics. */
+    /**
+     * Zeroes every counter in place. Clearing the registry instead would orphan the counter objects
+     * already held by live caches, which would keep counting but never appear in [snapshot] again.
+     */
     fun reset() {
-        counters.clear()
+        counters.values.forEach(Counters::reset)
     }
 
     /**

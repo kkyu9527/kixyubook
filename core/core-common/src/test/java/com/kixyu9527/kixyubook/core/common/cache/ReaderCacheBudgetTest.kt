@@ -21,6 +21,27 @@ class ReaderCacheBudgetTest {
     }
     @get:Rule val folder = TemporaryFolder()
 
+    @Test fun resetKeepsLiveCacheCountersReporting() {
+        val name = "reset-${System.nanoTime()}"
+        val cache = WeightedLruCache<Int, String>(8, 1, name) { it.length.toLong() }
+        cache[1] = "one"
+        cache[1]
+        assertTrue(CacheDiagnostics.snapshot().any { it.contains("cache=$name") })
+
+        CacheDiagnostics.reset()
+        assertFalse(CacheDiagnostics.snapshot().any { it.contains("cache=$name") })
+
+        // The cache still holds the same counter object; clearing the registry instead of zeroing
+        // it in place would leave these live increments invisible forever.
+        cache[2] = "two"
+        cache[2]
+        cache[2]
+        assertTrue(
+            "a live cache must keep reporting after reset",
+            CacheDiagnostics.snapshot().any { it.contains("cache=$name") },
+        )
+    }
+
     @Test fun imageAllocationRetainsLowMemoryPolicyAndHasAnUpperBound() {
         assertEquals(8 * 1024 * 1024, ReaderCacheBudget.imageMemoryBytes(256, true))
         assertEquals(16 * 1024 * 1024, ReaderCacheBudget.imageMemoryBytes(256, false))
