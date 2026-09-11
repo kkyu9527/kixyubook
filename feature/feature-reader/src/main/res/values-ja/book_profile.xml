@@ -1,0 +1,4 @@
+<resources>
+    <string name="reader_book_profile">この本の個別設定を使う</string>
+    <string name="reader_book_profile_hint">フォント、レイアウト、カスタム配色のみを個別に保存します。オフにするとリセットされ、全体設定を継承します。</string>
+</resources>

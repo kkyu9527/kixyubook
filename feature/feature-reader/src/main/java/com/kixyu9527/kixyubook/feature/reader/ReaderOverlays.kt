@@ -130,6 +130,7 @@ internal fun ReaderSearchOverlay(
     onSearch: (String, ReaderSearchScope) -> Unit,
     onClearHistory: () -> Unit,
     onMove: (Int) -> Unit,
+    onPage: (Int) -> Unit = {},
     onReturn: () -> Unit,
     onSelect: (Int) -> Unit,
 ) {
@@ -141,6 +142,8 @@ internal fun ReaderSearchOverlay(
     var expanded by rememberSaveable { mutableStateOf(true) }
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
+    val resultListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(state.searchResultStart, state.searchQuery) { resultListState.scrollToItem(0) }
     LaunchedEffect(visible) {
         if (visible) {
             query = state.searchQuery
@@ -310,18 +313,18 @@ internal fun ReaderSearchOverlay(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "${state.selectedSearchIndex + 1}/${state.searchResults.size}",
+                            "${state.searchResultStart + state.selectedSearchIndex + 1}/${maxOf(state.searchMatchCount, state.searchResults.size)}",
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         KixyuIconButton(
                             onClick = { onMove(-1) },
-                            enabled = state.selectedSearchIndex > 0,
+                            enabled = state.searchResultStart + state.selectedSearchIndex > 0,
                         ) { Icon(KixyuSymbols.KeyboardArrowUp, stringResource(R.string.reader_previous_search_result)) }
                         KixyuIconButton(
                             onClick = { onMove(1) },
-                            enabled = state.selectedSearchIndex < state.searchResults.lastIndex,
+                            enabled = state.searchResultStart + state.selectedSearchIndex + 1 < maxOf(state.searchMatchCount, state.searchResults.size),
                         ) { Icon(KixyuSymbols.KeyboardArrowDown, stringResource(R.string.reader_next_search_result)) }
                         if (state.searchReturnAvailable) {
                             KixyuIconButton(
@@ -337,23 +340,27 @@ internal fun ReaderSearchOverlay(
                     }
                 } else {
                 Text(
-                    androidx.compose.ui.res.pluralStringResource(R.plurals.reader_search_result_count, state.searchResults.size, state.searchResults.size),
+                    androidx.compose.ui.res.pluralStringResource(R.plurals.reader_search_result_count,
+                        maxOf(state.searchMatchCount, state.searchResults.size), maxOf(state.searchMatchCount, state.searchResults.size)),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 androidx.compose.foundation.lazy.LazyColumn(
                     Modifier.fillMaxWidth().weight(1f, fill = false),
+                    state = resultListState,
                     // Keep the final row above the popup's rounded bottom edge. The popup itself
                     // remains edge-to-edge; only scrollable content reserves its visual safe area.
                     contentPadding = PaddingValues(bottom = KixyuSpacing.extraLarge),
                 ) {
-                    items(state.searchResults.size) { index ->
+                    items(state.searchResults.size, key = { index ->
+                        state.searchResults[index].let { "${it.chapterId}:${it.paragraphIndex}" }
+                    }) { index ->
                         val result = state.searchResults[index]
                         KixyuListRow(
                             title = result.chapterTitle,
                             supportingText = result.text,
                             selected = index == state.selectedSearchIndex,
-                            leading = { Text("${index + 1}", style = MaterialTheme.typography.labelMedium) },
+                            leading = { Text("${state.searchResultStart + index + 1}", style = MaterialTheme.typography.labelMedium) },
                             trailing = { Icon(KixyuSymbols.ChevronRight, null) },
                             onClick = {
                                 onSelect(index)
@@ -361,6 +368,17 @@ internal fun ReaderSearchOverlay(
                                 expanded = false
                             },
                         )
+                    }
+                    if (state.searchMatchCount > state.searchResults.size) {
+                        item {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                KixyuTextButton(text = stringResource(R.string.reader_search_results_previous),
+                                    enabled = state.searchResultStart > 0, onClick = { onPage(-1) })
+                                KixyuTextButton(text = stringResource(R.string.reader_search_results_next),
+                                    enabled = state.searchResultStart + state.searchResults.size < state.searchMatchCount,
+                                    onClick = { onPage(1) })
+                            }
+                        }
                     }
                 }
                 }
@@ -425,6 +443,7 @@ internal fun ReaderSearchOverlay(
 internal fun LayoutSheet(
     state: ReaderUiState,
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
+    setBookSettingsEnabled: (Boolean) -> Unit,
     addFont: () -> Unit,
     deleteFont: (UserFont) -> Unit,
     onBack: () -> Unit,
@@ -439,6 +458,14 @@ internal fun LayoutSheet(
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
         item { ReaderSettingsSheetHeader(stringResource(R.string.reader_layout_and_turning), onBack) }
+        item {
+            KixyuSection(title = stringResource(R.string.reader_book_profile)) {
+                KixyuSettingsRow(title = stringResource(R.string.reader_book_profile),
+                    supportingText = stringResource(R.string.reader_book_profile_hint),
+                    onClick = { setBookSettingsEnabled(!state.bookSettingsEnabled) },
+                    trailing = { KixyuSwitch(checked = state.bookSettingsEnabled, onCheckedChange = setBookSettingsEnabled) })
+            }
+        }
         item {
             KixyuSection(title = stringResource(R.string.reader_layout_and_turning)) {
                 KixyuFontControls(

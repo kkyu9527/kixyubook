@@ -20,6 +20,7 @@ internal class ScriptedSearchRepository : BookRepository by unsupportedBookRepos
         bookUuid: String, query: String,
         onProgress: suspend (BookSearchProgress) -> Unit,
         onResults: suspend (List<BookSearchResult>) -> Unit,
+        retainResults: Boolean,
     ): List<BookSearchResult> {
         check(bookUuid == "book")
         val request = Request(query, onProgress, onResults)

@@ -11,6 +11,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
+import java.io.File
 
 /**
  * Owns full-book search state and the temporary location used to return from a result.
@@ -28,13 +32,23 @@ internal class ReaderSearchController(
     private val jumpToPosition: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
     private val returnToOrigin: () -> Unit,
     private val failureMessage: () -> String,
+    private val resultDirectory: File? = null,
 ) {
     private var originRecorded = false
     private var searchJob: Job? = null
+    private var resultStore = SearchResultStore(resultDirectory)
+    @Volatile private var generation = 0L
+    private var lastPublished = 0L
+    private val storageDispatcher = if (resultDirectory == null) Dispatchers.Unconfined else Dispatchers.IO
 
     fun search(query: String, searchScope: ReaderSearchScope) {
         val normalized = query.trim()
         searchJob?.cancel()
+        val token = ++generation
+        val oldStore = resultStore
+        val store = SearchResultStore(resultDirectory).also { resultStore = it }
+        dispose(oldStore)
+        lastPublished = 0L
         originRecorded = false
         if (normalized.isBlank()) {
             clearState()
@@ -48,6 +62,8 @@ internal class ReaderSearchController(
                 searchHistory = (listOf(normalized) + it.searchHistory)
                     .distinct().take(MAX_SEARCH_HISTORY),
                 searchResults = immediateResults,
+                searchResultStart = 0,
+                searchMatchCount = immediateResults.size,
                 selectedSearchIndex = if (immediateResults.isEmpty()) -1 else 0,
                 searchReturnAvailable = false,
                 searchInProgress = searchScope == ReaderSearchScope.BOOK,
@@ -60,14 +76,26 @@ internal class ReaderSearchController(
         }
         searchJob = scope.launch {
             try {
-                recordHistory(normalized)
-                if (searchScope == ReaderSearchScope.CURRENT_CHAPTER) return@launch
+                withContext(storageDispatcher) { store.add(immediateResults) }
+                try { recordHistory(normalized) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) {
+                    com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.record(
+                        com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category.READER,
+                        "search_history_save_failed",
+                    )
+                }
+                if (searchScope == ReaderSearchScope.CURRENT_CHAPTER) {
+                    publishResults(token, store, emptyList(), force = true)
+                    return@launch
+                }
                 val results = books.searchBook(
                     bookUuid = bookUuid,
                     query = normalized,
+                    retainResults = false,
                     onProgress = { progress ->
                         state.update { current ->
-                            if (current.searchQuery != normalized || current.searchScope != searchScope) current
+                            if (token != generation) current
                             else current.copy(
                                 searchProgress = progress.fraction,
                                 searchStage = progress.stage,
@@ -77,13 +105,13 @@ internal class ReaderSearchController(
                         }
                     },
                     onResults = { partialResults ->
-                        publishResults(normalized, searchScope, immediateResults + partialResults)
+                        publishResults(token, store, partialResults)
                     },
                 )
-                val merged = mergeResults(immediateResults + results)
+                publishResults(token, store, results, force = true)
                 state.update { current ->
-                    if (current.searchQuery != normalized || current.searchScope != searchScope) current
-                    else current.withSearchResults(merged).copy(
+                    if (token != generation) current
+                    else current.copy(
                         searchInProgress = false,
                         searchProgress = 1f,
                         searchCompleted = current.searchTotal,
@@ -92,8 +120,12 @@ internal class ReaderSearchController(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
+                // Flush the last successful batch even when the next chapter fails.
+                try { publishResults(token, store, emptyList(), force = true) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Keep the already visible page if temporary storage failed. */ }
                 state.update { current ->
-                    if (current.searchQuery != normalized || current.searchScope != searchScope) current
+                    if (token != generation) current
                     else current.copy(
                         searchInProgress = false,
                         searchError = error.message ?: failureMessage(),
@@ -154,14 +186,28 @@ internal class ReaderSearchController(
         val snapshot = state.value
         if (snapshot.searchResults.isEmpty()) return
         val current = snapshot.selectedSearchIndex.coerceAtLeast(0)
-        select((current + delta).coerceIn(snapshot.searchResults.indices))
+        val localTarget = current + delta
+        if (localTarget in snapshot.searchResults.indices) select(localTarget)
+        else {
+            val target = (snapshot.searchResultStart + localTarget).coerceIn(0, (snapshot.searchMatchCount - 1).coerceAtLeast(0))
+            val token = generation
+            val store = resultStore
+            launchPageRequest(token) {
+                publishPage(token, store, target)
+                if (token == generation) select(target - state.value.searchResultStart)
+            }
+        }
     }
 
     fun clear() {
+        generation++
         searchJob?.cancel()
         searchJob = null
         originRecorded = false
         clearState()
+        val old = resultStore
+        resultStore = SearchResultStore(resultDirectory)
+        dispose(old)
     }
 
     private fun clearState() {
@@ -169,6 +215,8 @@ internal class ReaderSearchController(
             it.copy(
                 searchQuery = "",
                 searchResults = emptyList(),
+                searchResultStart = 0,
+                searchMatchCount = 0,
                 selectedSearchIndex = -1,
                 searchReturnAvailable = false,
                 searchInProgress = false,
@@ -181,20 +229,51 @@ internal class ReaderSearchController(
         }
     }
 
-    private fun publishResults(
-        query: String,
-        searchScope: ReaderSearchScope,
-        candidates: List<BookSearchResult>,
-    ) {
+    private suspend fun publishResults(token: Long, store: SearchResultStore, candidates: List<BookSearchResult>, force: Boolean = false) {
+        if (token != generation) return
+        withContext(storageDispatcher) { store.add(candidates) }
+        val now = System.nanoTime()
+        if (!force && resultDirectory != null && now - lastPublished < 120_000_000L) return
+        lastPublished = now
+        val selected = state.value.let { it.searchResults.getOrNull(it.selectedSearchIndex) }
+        val start = withContext(storageDispatcher) { selected?.let(store::indexOf)?.takeIf { it >= 0 } }
+            ?: state.value.searchResultStart
+        publishPage(token, store, start)
+    }
+
+    private suspend fun publishPage(token: Long, store: SearchResultStore, start: Int) {
+        val page = withContext(storageDispatcher) { store.page(start) }
         state.update { current ->
-            if (current.searchQuery != query || current.searchScope != searchScope) current
-            else current.withSearchResults(mergeResults(current.searchResults + candidates))
+            if (token != generation) current else current.withSearchResults(page.rows)
+                .copy(searchResultStart = page.start, searchMatchCount = page.total)
         }
     }
 
-    private fun mergeResults(candidates: List<BookSearchResult>): List<BookSearchResult> = candidates
-        .distinctBy { it.chapterId to it.paragraphIndex }
-        .sortedWith(compareBy(BookSearchResult::chapterIndex, BookSearchResult::paragraphIndex))
+    fun movePage(delta: Int) {
+        val token = generation
+        val store = resultStore
+        val start = state.value.searchResultStart + delta * SearchResultStore.PAGE_SIZE
+        launchPageRequest(token) { publishPage(token, store, start) }
+    }
+
+    private fun launchPageRequest(token: Long, action: suspend () -> Unit) = scope.launch {
+        try { action() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            state.update { if (token == generation) it.copy(searchError = failureMessage()) else it }
+        }
+    }
+
+    private fun dispose(store: SearchResultStore) {
+        // ViewModel scope is already cancelled in onCleared; cleanup must still finish off-main.
+        cleanupScope.launch { runCatching { store.close() } }
+    }
+
+    fun close() {
+        generation++
+        searchJob?.cancel()
+        dispose(resultStore)
+    }
 
     private fun ReaderUiState.withSearchResults(results: List<BookSearchResult>): ReaderUiState {
         val selected = searchResults.getOrNull(selectedSearchIndex)
@@ -208,5 +287,6 @@ internal class ReaderSearchController(
 
     private companion object {
         const val MAX_SEARCH_HISTORY = 10
+        val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }

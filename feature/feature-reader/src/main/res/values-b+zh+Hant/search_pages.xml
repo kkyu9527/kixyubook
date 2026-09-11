@@ -1,0 +1,4 @@
+<resources>
+    <string name="reader_search_results_previous">上一批結果</string>
+    <string name="reader_search_results_next">下一批結果</string>
+</resources>

@@ -1139,6 +1139,7 @@ class ReaderViewModel @AssistedInject constructor(
     fun returnFromSearchResult() = searchController.returnToReadingPosition()
 
     fun moveSearchResult(delta: Int) = searchController.move(delta)
+    fun moveSearchResultPage(delta: Int) = searchController.movePage(delta)
 
     fun clearSearch() = searchController.clear()
 
@@ -1243,6 +1244,7 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     override fun onCleared() {
+        searchController.close()
         locationJourney.finish()
         progressWriter.close()
         MemoryPressureRegistry.unregister(this)

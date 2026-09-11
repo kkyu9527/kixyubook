@@ -1,0 +1,4 @@
+<resources>
+    <string name="reader_book_profile">使用本書獨立設定</string>
+    <string name="reader_book_profile_hint">僅獨立儲存字型、排版與自訂閱讀配色。關閉即重設，重新繼承全域設定。</string>
+</resources>

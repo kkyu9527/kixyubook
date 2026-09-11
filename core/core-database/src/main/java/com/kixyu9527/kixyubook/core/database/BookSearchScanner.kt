@@ -16,6 +16,7 @@ internal class BookSearchScanner(private val dao: BookDao) {
         ensureIndexed: suspend (ChapterEntity) -> ChapterEntity,
         onProgress: suspend (BookSearchProgress) -> Unit,
         onResults: suspend (List<BookSearchResult>) -> Unit,
+        retainResults: Boolean = true,
     ): List<BookSearchResult> {
         val byParagraph = corrections.filter { it.status == TextCorrectionStatus.ACTIVE }
             .groupBy { it.chapterIndex to it.paragraphIndex }
@@ -38,7 +39,7 @@ internal class BookSearchScanner(private val dao: BookDao) {
                             paragraph.paragraphIndex, searchExcerpt(text, match, query.length)))
                     }
                 }
-                results.addAll(matches)
+                if (retainResults) results.addAll(matches)
                 if (matches.isNotEmpty()) onResults(matches)
                 afterIndex = batch.last().paragraphIndex
                 yield()

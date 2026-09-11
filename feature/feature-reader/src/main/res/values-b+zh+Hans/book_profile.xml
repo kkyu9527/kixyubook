@@ -1,0 +1,4 @@
+<resources>
+    <string name="reader_book_profile">使用本书独立设置</string>
+    <string name="reader_book_profile_hint">仅独立保存字体、排版与自定义阅读配色。关闭即重置，重新继承全局设置。</string>
+</resources>

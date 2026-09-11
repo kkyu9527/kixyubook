@@ -68,11 +68,13 @@ internal fun ReaderScreen(
     jumpPosition: (ReaderLocationRequest) -> Unit,
     savePosition: (Int, Int, Boolean, Int) -> Unit,
     updateSettings: ((ReaderSettings) -> ReaderSettings) -> Unit,
+    setBookSettingsEnabled: (Boolean) -> Unit,
     addBookmark: () -> Unit,
     deleteBookmark: (String) -> Unit,
     search: (String, ReaderSearchScope) -> Unit,
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
+    moveSearchResultPage: (Int) -> Unit,
     returnFromSearchResult: () -> Unit,
     navigateHistoryBack: () -> Unit,
     navigateHistoryForward: () -> Unit,
@@ -588,6 +590,7 @@ internal fun ReaderScreen(
             onSearch = search,
             onClearHistory = clearSearchHistory,
             onMove = moveSearchResult,
+            onPage = moveSearchResultPage,
             onReturn = returnFromSearchResult,
             onSelect = { index ->
                 selectSearchResult(index)
@@ -659,6 +662,7 @@ internal fun ReaderScreen(
                 ReaderSheet.LAYOUT -> LayoutSheet(
                     state,
                     updateSettings,
+                    setBookSettingsEnabled,
                     addFont,
                     deleteFont,
                     onBack = returnFromSettingsSheet,

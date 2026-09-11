@@ -37,8 +37,10 @@ class ReaderViewModelRecoveryTest {
 
     @Test fun txtLocationChainKeepsAnchorsAndCanStillRestore() = recreateReader(BookFormat.TXT, exerciseJumps = true)
     @Test fun epubLocationChainKeepsAnchorsAndCanStillRestore() = recreateReader(BookFormat.EPUB, exerciseJumps = true)
+    @Test fun failedBookmarkRetryAfterChapterJumpUsesOriginalPayload() = recreateReader(BookFormat.EPUB, exerciseBookmark = true)
 
-    private fun recreateReader(format: BookFormat, exerciseJumps: Boolean = false) = runBlocking { withTimeout(5_000) {
+    private fun recreateReader(format: BookFormat, exerciseJumps: Boolean = false, exerciseBookmark: Boolean = false) = runBlocking { withTimeout(5_000) {
+        val bookmarkAttempts = mutableListOf<Bookmark>()
         val chapters = MutableStateFlow(listOf(
             Chapter(12, "book", "第一章", 0, chapterKey = "first"),
             Chapter(33, "book", "第二章", 1, chapterKey = "second"),
@@ -59,6 +61,10 @@ class ReaderViewModelRecoveryTest {
                 else -> error("Unexpected book call: $method")
             }
         }) {
+            override suspend fun addBookmark(bookmark: Bookmark) {
+                bookmarkAttempts += bookmark
+                if (bookmarkAttempts.size == 1) throw java.io.IOException("temporary write error")
+            }
             override suspend fun getChapter(bookUuid: String, chapterIndex: Int, priority: ChapterLoadPriority): ChapterContent {
                 val chapter = chapters.value[chapterIndex]
                 return ChapterContent(chapter, List(10) { index ->
@@ -107,6 +113,22 @@ class ReaderViewModelRecoveryTest {
             first = newReader()
             firstStore.put("reader", first)
             first.uiState.first { !it.loading }
+            if (exerciseBookmark) {
+                first.savePosition(7, 5)
+                first.addBookmark()
+                first.operations.state.first { it.failed }
+                val attempt = first.operations.state.value.attempt
+                first.jumpToChapter(0)
+                first.uiState.first { it.chapterIndex == 0 }
+                first.operations.retry(attempt)
+                first.operations.state.first { it.succeeded }
+                assertEquals(2, bookmarkAttempts.size)
+                assertEquals(bookmarkAttempts.first(), bookmarkAttempts.last())
+                assertEquals(33L, bookmarkAttempts.last().chapterId)
+                assertEquals(7, bookmarkAttempts.last().position)
+                first.requestLocation(ReaderLocationRequest(1, 2, 4, ReaderLocationSource.BOOKMARK))
+                first.uiState.first { it.chapterIndex == 1 && it.restorePosition == 2 }
+            }
             if (exerciseJumps) {
                 first.requestLocation(ReaderLocationRequest(0, 4, 6, ReaderLocationSource.ANNOTATION))
                 first.uiState.first { it.chapterIndex == 0 && it.restorePosition == 4 }

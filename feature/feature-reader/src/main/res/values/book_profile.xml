@@ -1,0 +1,4 @@
+<resources>
+    <string name="reader_book_profile">Use settings for this book</string>
+    <string name="reader_book_profile_hint">Only font, layout and custom reading colors are saved for this book. Turn off to reset and inherit global settings.</string>
+</resources>

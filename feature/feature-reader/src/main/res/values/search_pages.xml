@@ -1,0 +1,4 @@
+<resources>
+    <string name="reader_search_results_previous">Previous results</string>
+    <string name="reader_search_results_next">Next results</string>
+</resources>
