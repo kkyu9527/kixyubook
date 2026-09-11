@@ -12,6 +12,8 @@ data class UserOperationState(
     val succeeded: Boolean = false,
     val failed: Boolean = false,
     val awaitingConfirmation: Boolean = false,
+    val failure: OperationFailure? = null,
+    val targetLabel: String? = null,
 )
 
 /** UI-thread owned write coordinator. Failed requests retain their payload until retry/dismiss. */
@@ -25,10 +27,10 @@ class UserOperationController(private val scope: CoroutineScope, private val rep
         start(state.value.attempt + 1, action)
     }
 
-    fun confirmDelete(action: suspend () -> Unit) {
+    fun confirmDelete(targetLabel: String? = null, action: suspend () -> Unit) {
         if (state.value.running || state.value.awaitingConfirmation) return
         retryAction = action
-        mutableState.value = UserOperationState(state.value.attempt + 1, awaitingConfirmation = true)
+        mutableState.value = UserOperationState(state.value.attempt + 1, awaitingConfirmation = true, targetLabel = targetLabel)
     }
 
     fun acceptConfirmation() {
@@ -55,14 +57,14 @@ class UserOperationController(private val scope: CoroutineScope, private val rep
                 mutableState.value = UserOperationState(attempt)
                 throw cancelled
             } catch (error: Exception) {
-                mutableState.value = UserOperationState(attempt, failed = true)
+                mutableState.value = UserOperationState(attempt, failed = true, failure = OperationFailure.from(error))
                 runCatching { reportFailure(error) }
             }
         }
     }
 
     fun retry(attempt: Long) {
-        if (state.value.attempt == attempt && state.value.failed) retryAction?.let { start(attempt, it) }
+        if (state.value.attempt == attempt && state.value.failed && state.value.failure?.retryable != false) retryAction?.let { start(attempt, it) }
     }
 
     fun dismissFailure(attempt: Long) {

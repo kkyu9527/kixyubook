@@ -4,6 +4,8 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
+import com.kixyu9527.kixyubook.core.common.operation.LatestOperationWriter
+import com.kixyu9527.kixyubook.core.common.configuration.*
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
@@ -49,6 +51,7 @@ class ReaderViewModel @AssistedInject constructor(
     private val textCorrections: TextCorrectionRepository,
     private val annotations: ReaderAnnotationRepository,
     @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
+    private val bookSettings: BookSettingsRepository = NoBookSettings,
 ) : ViewModel(), MemoryPressureListener {
     @AssistedFactory
     interface Factory {
@@ -139,6 +142,11 @@ class ReaderViewModel @AssistedInject constructor(
     )
 
     init {
+        viewModelScope.launch {
+            bookSettings.overrides.collect { overrides ->
+                _uiState.update { it.copy(bookSettingsEnabled = bookUuid in overrides) }
+            }
+        }
         MemoryPressureRegistry.register(this)
         cloudSync.prioritizeBook(bookUuid)
         viewModelScope.launch {
@@ -148,7 +156,7 @@ class ReaderViewModel @AssistedInject constructor(
             // not rebuild once for settings and again for content during its enter transition.
             loadInitial()
             launchReaderObserver("presentation") {
-                combine(settingsRepository.settings, fonts.observeFonts()) { settings, fontList ->
+                combine(effectiveSettings, fonts.observeFonts()) { settings, fontList ->
                     Triple(
                         settings,
                         fontList.firstOrNull { it.uuid == settings.fontUuid }?.filePath,
@@ -266,7 +274,7 @@ class ReaderViewModel @AssistedInject constructor(
             val chapters = async { books.observeChapters(bookUuid).first { it.isNotEmpty() } }
             val progress = async { books.observeProgress(bookUuid).first() }
             val presentation = async {
-                combine(settingsRepository.settings, fonts.observeFonts()) { settings, fontList ->
+                combine(effectiveSettings, fonts.observeFonts()) { settings, fontList ->
                     InitialReaderPresentation(
                         settings = settings,
                         fontPath = fontList.firstOrNull { it.uuid == settings.fontUuid }?.filePath,
@@ -1075,20 +1083,32 @@ class ReaderViewModel @AssistedInject constructor(
         check(saved == true) { "Reading progress checkpoint failed or exceeded its deadline" }
     }
 
-    fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { settingsRepository.update(transform) } }
-
-    fun importFont(uri: String) = viewModelScope.launch { fonts.importFont(uri) }
-
-    fun deleteFont(font: UserFont) = viewModelScope.launch {
-        if (_uiState.value.settings.fontUuid == font.uuid) {
-            settingsRepository.update { it.copy(fontUuid = null) }
+    fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) {
+        val current = _uiState.value.settings
+        val local = _uiState.value.bookSettingsEnabled
+        settingRequests.changes(current, transform).forEach { (field, patch) ->
+            settingWrites.submit("reader:$field") {
+                if (local && field in BOOK_SETTING_KEYS) bookSettings.updateField(bookUuid, field, patch)
+                else settingsRepository.update { applySettingsPatch(it, patch) }
+            }
         }
+    }
+
+    fun setBookSettingsEnabled(enabled: Boolean) {
+        settingRequests.clear()
+        settingWrites.submit("bookProfile") { bookSettings.setEnabled(bookUuid, enabled) }
+    }
+
+    fun importFont(uri: String) = operations.submit { fonts.importFont(uri).getOrThrow() }
+
+    fun deleteFont(font: UserFont) = operations.confirmDelete(font.name) {
+        bookSettings.clearFontReferences(font.uuid)
         fonts.deleteFont(font.uuid)
     }
 
-    fun addBookmark() = operations.submit {
+    fun addBookmark() {
         val state = _uiState.value
-        val chapter = state.chapter ?: return@submit
+        val chapter = state.chapter ?: return
         val position = lastPosition
         val preview = chapter.contentParagraphs()
             .firstOrNull { it.index >= position && it.kind == ParagraphKind.TEXT }
@@ -1096,8 +1116,7 @@ class ReaderViewModel @AssistedInject constructor(
             ?.replace(Regex("\\s+"), " ")
             ?.take(80)
             .orEmpty()
-        books.addBookmark(
-            Bookmark(
+        val request = Bookmark(
                 uuid = java.util.UUID.randomUUID().toString(),
                 bookUuid = bookUuid,
                 chapterId = chapter.id,
@@ -1106,11 +1125,12 @@ class ReaderViewModel @AssistedInject constructor(
                 position = position,
                 preview = preview,
                 createdTime = System.currentTimeMillis(),
-            ),
-        )
+            )
+        // Retry must repeat the original user intent, even after the reader has moved on.
+        operations.submit { books.addBookmark(request) }
     }
 
-    fun deleteBookmark(uuid: String) = operations.confirmDelete { books.deleteBookmark(uuid) }
+    fun deleteBookmark(uuid: String) = operations.confirmDelete(_uiState.value.bookmarks.firstOrNull { it.uuid == uuid }?.preview?.take(80)) { books.deleteBookmark(uuid) }
 
     fun search(query: String, scope: ReaderSearchScope) = searchController.search(query, scope)
 

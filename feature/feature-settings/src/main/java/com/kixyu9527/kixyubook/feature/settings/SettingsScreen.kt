@@ -62,7 +62,7 @@ fun SettingsRoute(
     currentVersion: String,
     detailContent: (@Composable (SettingsPane) -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
-) {
+) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val backupPreview by viewModel.backupPreview.collectAsStateWithLifecycle()
     val backupInspectionActive by viewModel.backupInspectionActive.collectAsStateWithLifecycle()

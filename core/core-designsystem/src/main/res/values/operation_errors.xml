@@ -1,0 +1,8 @@
+<resources>
+    <string name="kixyu_operation_storage_full">Storage is full. Free some space, then save again.</string>
+    <string name="kixyu_operation_permission">Access was denied. Check permissions or select the file again.</string>
+    <string name="kixyu_operation_source_missing">The source file is missing. Select it again.</string>
+    <string name="kixyu_operation_restart">Restart the app before trying again. Your draft is still visible.</string>
+    <string name="kixyu_operation_invalid">Check the input before saving again.</string>
+    <string name="kixyu_operation_delete_target">Delete %1$s? This action cannot be undone.</string>
+</resources>

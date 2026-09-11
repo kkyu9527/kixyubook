@@ -44,7 +44,7 @@ internal class ReaderAnnotationActions(
     }
 
     fun deleteCorrection(uuid: String) {
-        operations.confirmDelete {
+        operations.confirmDelete(_uiState.value.corrections.firstOrNull { it.uuid == uuid }?.replacementText?.take(80)) {
             textCorrections.deleteCorrection(uuid)
         }
     }
@@ -77,18 +77,19 @@ internal class ReaderAnnotationActions(
         endOffset: Int,
         note: String,
     ) {
+        val chapter = _uiState.value.chapters.firstOrNull { it.index == chapterIndex }
+        val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
         operations.submit {
-            val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
             if (existing != null) {
                 checkNotNull(annotations.updateNote(existing.uuid, note))
             } else {
-                createAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.HIGHLIGHT, note)
+                createAnnotation(chapter, paragraphIndex, displayedText, startOffset, endOffset, ReaderAnnotationStyle.HIGHLIGHT, note)
             }
         }
     }
 
     fun deleteAnnotation(uuid: String) {
-        operations.confirmDelete { annotations.deleteAnnotation(uuid) }
+        operations.confirmDelete(_uiState.value.annotations.firstOrNull { it.uuid == uuid }?.exactText?.take(80)) { annotations.deleteAnnotation(uuid) }
     }
 
     fun updateAnnotationNote(uuid: String, note: String) {
@@ -103,18 +104,19 @@ internal class ReaderAnnotationActions(
         endOffset: Int,
         style: ReaderAnnotationStyle,
     ) {
+        val chapter = _uiState.value.chapters.firstOrNull { it.index == chapterIndex }
+        val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
         operations.submit {
-            val existing = findAnnotation(chapterIndex, paragraphIndex, startOffset, endOffset)
             if (existing?.style == style && existing.note.isBlank()) {
                 annotations.deleteAnnotation(existing.uuid)
             } else {
-                createAnnotation(chapterIndex, paragraphIndex, displayedText, startOffset, endOffset, style, existing?.note.orEmpty())
+                createAnnotation(chapter, paragraphIndex, displayedText, startOffset, endOffset, style, existing?.note.orEmpty())
             }
         }
     }
 
     private suspend fun createAnnotation(
-        chapterIndex: Int,
+        requestedChapter: Chapter?,
         paragraphIndex: Int,
         displayedText: String,
         startOffset: Int,
@@ -122,7 +124,7 @@ internal class ReaderAnnotationActions(
         style: ReaderAnnotationStyle,
         note: String,
     ) {
-        val chapter = checkNotNull(_uiState.value.chapters.firstOrNull { it.index == chapterIndex })
+        val chapter = checkNotNull(requestedChapter)
         annotations.createAnnotation(
             bookUuid = bookUuid,
             chapterKey = chapter.chapterKey,

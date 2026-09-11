@@ -37,7 +37,7 @@ fun AppearanceRoute(
     onBack: () -> Unit,
     embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
-) {
+) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     KixyuPageScaffold(
         title = stringResource(R.string.settings_appearance),

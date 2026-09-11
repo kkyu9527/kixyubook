@@ -53,7 +53,7 @@ fun ReadingSettingsRoute(
     onReadingInformation: () -> Unit,
     embedded: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
-) {
+) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val requestNotificationPermission = rememberNotificationPermissionAction()

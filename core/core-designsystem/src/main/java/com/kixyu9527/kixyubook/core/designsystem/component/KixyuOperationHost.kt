@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
+import com.kixyu9527.kixyubook.core.common.operation.OperationFailure
 import com.kixyu9527.kixyubook.core.designsystem.R
 
 val LocalKixyuOperationController = compositionLocalOf<UserOperationController?> { null }
@@ -29,11 +30,20 @@ fun KixyuOperationHost(controller: UserOperationController, content: @Composable
 private fun OperationFeedback(controller: UserOperationController, modifier: Modifier) {
     val state by controller.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    val failure = stringResource(R.string.kixyu_operation_failed)
+    val failure = stringResource(when (state.failure) {
+        OperationFailure.STORAGE_FULL -> R.string.kixyu_operation_storage_full
+        OperationFailure.PERMISSION -> R.string.kixyu_operation_permission
+        OperationFailure.SOURCE_MISSING -> R.string.kixyu_operation_source_missing
+        OperationFailure.RESTART_REQUIRED -> R.string.kixyu_operation_restart
+        OperationFailure.INVALID_INPUT -> R.string.kixyu_operation_invalid
+        else -> R.string.kixyu_operation_failed
+    })
     val retry = stringResource(R.string.kixyu_operation_retry)
     LaunchedEffect(state.attempt, state.failed) {
-        if (state.failed && snackbar.showSnackbar(failure, actionLabel = retry, withDismissAction = true) == SnackbarResult.ActionPerformed) {
-            controller.retry(state.attempt)
+        if (state.failed) {
+            if (snackbar.showSnackbar(failure, actionLabel = retry.takeIf { state.failure?.retryable != false }, withDismissAction = true) == SnackbarResult.ActionPerformed) {
+                controller.retry(state.attempt)
+            } else controller.dismissFailure(state.attempt)
         }
     }
     KixyuSnackbarHost(snackbar, modifier)
@@ -44,6 +54,7 @@ private fun OperationFeedback(controller: UserOperationController, modifier: Mod
         confirmLabel = stringResource(R.string.kixyu_operation_delete),
         onConfirm = controller::acceptConfirmation,
     ) {
-        Text(stringResource(R.string.kixyu_operation_delete_warning))
+        Text(state.targetLabel?.let { stringResource(R.string.kixyu_operation_delete_target, it) }
+            ?: stringResource(R.string.kixyu_operation_delete_warning))
     }
 }

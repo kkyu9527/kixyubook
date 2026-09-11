@@ -25,6 +25,38 @@ class AnnotationOperationUiTest {
     @get:Rule val compose = createComposeRule()
     @Test fun materialSaveFailureKeepsDraftAndSuccessClosesEditor() = exercise(AppUiStyle.MATERIAL)
     @Test fun miuixSaveFailureKeepsDraftAndSuccessClosesEditor() = exercise(AppUiStyle.MIUIX)
+    @Test fun materialDirtyDraftRequiresExplicitDiscard() = discardDraft(AppUiStyle.MATERIAL)
+    @Test fun miuixDirtyDraftRequiresExplicitDiscard() = discardDraft(AppUiStyle.MIUIX)
+    @Test fun materialCancelDiscardReturnsFocusToDraft() = keepDraft(AppUiStyle.MATERIAL)
+    @Test fun miuixCancelDiscardReturnsFocusToDraft() = keepDraft(AppUiStyle.MIUIX)
+
+    private fun keepDraft(style: AppUiStyle) {
+        compose.setContent {
+            KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = style) {
+                AnnotationNoteDialog("excerpt", "", {}, {})
+            }
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("draft")
+        compose.onNodeWithText("取消").performClick()
+        compose.onNodeWithText("放弃未保存的修改？").assertIsDisplayed()
+        compose.onAllNodesWithText("取消").onLast().performClick()
+        compose.onNode(hasSetTextAction()).assertTextContains("draft").assertIsFocused()
+    }
+
+    private fun discardDraft(style: AppUiStyle) {
+        var open by mutableStateOf(true)
+        compose.setContent {
+            KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = style) {
+                if (open) AnnotationNoteDialog("excerpt", "", { open = false }, {})
+            }
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("draft")
+        compose.onNodeWithText("取消").performClick()
+        compose.onNodeWithText("放弃未保存的修改？").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(open) }
+        compose.onNodeWithText("放弃修改").performClick()
+        compose.runOnIdle { assertFalse(open) }
+    }
 
     private fun exercise(style: AppUiStyle) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)

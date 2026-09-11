@@ -25,6 +25,10 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.kixyu9527.kixyubook.core.common.operation.LatestOperationWriter
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
+import com.kixyu9527.kixyubook.core.common.configuration.ReaderSettingsRequests
+import com.kixyu9527.kixyubook.core.common.configuration.applySettingsPatch
 
 data class SettingsUiState(
     val settings: ReaderSettings = ReaderSettings(),
@@ -44,7 +48,11 @@ class SettingsViewModel @Inject constructor(
     private val cloudSync: CloudSyncManager,
     private val readingReminders: ReadingReminderScheduler,
     @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
+    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository,
 ) : ViewModel() {
+    val operations = UserOperationController(viewModelScope)
+    private val settingWrites = LatestOperationWriter(viewModelScope, operations)
+    private val settingRequests = ReaderSettingsRequests()
     private data class BasicSettings(
         val settings: ReaderSettings,
         val fonts: List<UserFont>,
@@ -108,7 +116,11 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun update(transform: (ReaderSettings) -> ReaderSettings) { viewModelScope.launch { repository.update(transform) } }
+    fun update(transform: (ReaderSettings) -> ReaderSettings) {
+        settingRequests.changes(uiState.value.settings, transform).forEach { (field, patch) ->
+            settingWrites.submit("reader:$field") { repository.update { applySettingsPatch(it, patch) } }
+        }
+    }
     fun resetReaderTheme() = resetSettingsGroup(context.getString(R.string.settings_theme_reset)) { current ->
         val defaults = ReaderSettings()
         current.copy(
@@ -150,7 +162,8 @@ class SettingsViewModel @Inject constructor(
             showBatteryLevel = defaults.showBatteryLevel,
         )
     }
-    fun resetAllReaderSettings() = viewModelScope.launch {
+    fun resetAllReaderSettings() = settingWrites.submit("resetAll") {
+        settingRequests.clear()
         val defaults = ReaderSettings()
         repository.update { current ->
             defaults.copy(
@@ -165,19 +178,16 @@ class SettingsViewModel @Inject constructor(
         readingReminders.setEnabled(false)
         _messages.emit(context.getString(R.string.settings_reading_reset))
     }
-    fun setGoal(minutes: Int) { viewModelScope.launch { repository.setReadingGoalMinutes(minutes) } }
+    fun setGoal(minutes: Int) = settingWrites.submit("goal") { repository.setReadingGoalMinutes(minutes) }
     fun importFont(uri: String) {
-        viewModelScope.launch {
-            fonts.importFont(uri)
-                .onSuccess { font ->
-                    repository.update { it.copy(fontUuid = font.uuid) }
-                    _messages.emit(context.getString(R.string.settings_font_applied, font.name))
-                }
-                .onFailure { _messages.emit(it.message ?: context.getString(R.string.settings_font_import_failed)) }
+        operations.submit {
+            val font = fonts.importFont(uri).getOrThrow()
+            repository.update { it.copy(fontUuid = font.uuid) }
+            _messages.emit(context.getString(R.string.settings_font_applied, font.name))
         }
     }
-    fun deleteFont(font: UserFont) { viewModelScope.launch {
-        if (uiState.value.settings.fontUuid == font.uuid) repository.update { it.copy(fontUuid = null) }
+    fun deleteFont(font: UserFont) { operations.confirmDelete(font.name) {
+        bookSettings.clearFontReferences(font.uuid)
         fonts.deleteFont(font.uuid)
     } }
 
@@ -197,11 +207,11 @@ class SettingsViewModel @Inject constructor(
         _backupPreview.value = null
     }
 
-    fun setReadingReminderEnabled(enabled: Boolean) = viewModelScope.launch {
+    fun setReadingReminderEnabled(enabled: Boolean) = settingWrites.submit("reminderEnabled") {
         readingReminders.setEnabled(enabled)
     }
 
-    fun setReadingReminderTime(hour: Int, minute: Int) = viewModelScope.launch {
+    fun setReadingReminderTime(hour: Int, minute: Int) = settingWrites.submit("reminderTime") {
         readingReminders.setTime(hour, minute)
     }
 
@@ -212,10 +222,10 @@ class SettingsViewModel @Inject constructor(
     fun finishGoogleAuthorization(activity: Activity, resultData: Intent?) = viewModelScope.launch {
         handleConnectResult(cloudSync.finishAuthorization(activity, resultData))
     }
-    fun setCloudSyncEnabled(enabled: Boolean) = viewModelScope.launch { cloudSync.setEnabled(enabled) }
-    fun setSyncOriginalFiles(enabled: Boolean) = viewModelScope.launch { cloudSync.setSyncOriginalFiles(enabled) }
-    fun setSyncFonts(enabled: Boolean) = viewModelScope.launch { cloudSync.setSyncFonts(enabled) }
-    fun setWifiOnlyForLargeFiles(enabled: Boolean) = viewModelScope.launch { cloudSync.setWifiOnlyForLargeFiles(enabled) }
+    fun setCloudSyncEnabled(enabled: Boolean) = settingWrites.submit("syncEnabled") { cloudSync.setEnabled(enabled) }
+    fun setSyncOriginalFiles(enabled: Boolean) = settingWrites.submit("syncOriginals") { cloudSync.setSyncOriginalFiles(enabled) }
+    fun setSyncFonts(enabled: Boolean) = settingWrites.submit("syncFonts") { cloudSync.setSyncFonts(enabled) }
+    fun setWifiOnlyForLargeFiles(enabled: Boolean) = settingWrites.submit("syncWifi") { cloudSync.setWifiOnlyForLargeFiles(enabled) }
     fun resolveInitialSync(choice: InitialSyncChoice) = viewModelScope.launch {
         cloudSync.resolveInitialSync(choice)
             .onFailure { _messages.emit(it.message ?: context.getString(R.string.settings_conflict_failed)) }
@@ -240,7 +250,8 @@ class SettingsViewModel @Inject constructor(
     private fun resetSettingsGroup(
         message: String,
         transform: (ReaderSettings) -> ReaderSettings,
-    ) = viewModelScope.launch {
+    ) = settingWrites.submit("reset:$message") {
+        settingRequests.clear()
         repository.update(transform)
         _messages.emit(message)
     }

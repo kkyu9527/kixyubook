@@ -63,7 +63,7 @@ import kotlinx.coroutines.launch
 fun GoogleAccountRoute(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
-) {
+) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = context as? Activity

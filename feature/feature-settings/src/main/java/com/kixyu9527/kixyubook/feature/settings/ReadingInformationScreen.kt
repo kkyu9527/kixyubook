@@ -33,7 +33,7 @@ import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 fun ReadingInformationRoute(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
-) {
+) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }

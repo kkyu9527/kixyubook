@@ -1,0 +1,8 @@
+<resources>
+    <string name="kixyu_operation_storage_full">存储空间不足，请清理后重新保存。</string>
+    <string name="kixyu_operation_permission">无法访问，请检查权限或重新选择文件。</string>
+    <string name="kixyu_operation_source_missing">源文件不存在，请重新选择。</string>
+    <string name="kixyu_operation_restart">请重启应用后再试，当前草稿仍保留在页面中。</string>
+    <string name="kixyu_operation_invalid">请检查输入内容后重新保存。</string>
+    <string name="kixyu_operation_delete_target">确定删除“%1$s”？此操作无法撤销。</string>
+</resources>
