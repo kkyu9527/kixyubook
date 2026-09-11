@@ -1,7 +1,8 @@
 *.iml
 .gradle
-# Local design and planning notes are kept on disk but not tracked.
+# Local design, planning and agent notes are kept on disk but not tracked.
 /docs/
+/AGENTS.md
 /local.properties
 /.idea/
 .DS_Store
