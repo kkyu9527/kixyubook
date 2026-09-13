@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.sync
 
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,5 +30,31 @@ class PendingLocalChangeTest {
 
     @Test fun noPendingChangeNeverBlocks() {
         assertFalse(hasPendingLocalChange("settings/global", emptyList()))
+    }
+
+    @Test fun skippedPriorityPullKeepsTheQueuedEditAndTheRemoteBaseline() = kotlinx.coroutines.runBlocking {
+        val removed = mutableListOf<List<String>>()
+        var remembered = false
+        acknowledgePriorityPull(
+            applied = false,
+            localMutation = mutation("BOOKMARKS", "book"),
+            removeOutbox = { removed += it },
+            rememberRemote = { remembered = true },
+        )
+        assertTrue(removed.isEmpty())
+        assertFalse(remembered)
+    }
+
+    @Test fun appliedPriorityPullDropsTheQueuedEdit() = kotlinx.coroutines.runBlocking {
+        val removed = mutableListOf<List<String>>()
+        var remembered = false
+        acknowledgePriorityPull(
+            applied = true,
+            localMutation = mutation("BOOKMARKS", "book"),
+            removeOutbox = { removed += it },
+            rememberRemote = { remembered = true },
+        )
+        assertEquals(listOf(listOf("m-BOOKMARKS-book")), removed)
+        assertTrue(remembered)
     }
 }

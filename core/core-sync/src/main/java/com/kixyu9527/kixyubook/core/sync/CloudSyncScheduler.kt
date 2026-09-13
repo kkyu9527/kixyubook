@@ -216,8 +216,13 @@ class CloudSyncWorker(
             operation.fold(
                 onSuccess = { Result.success() },
                 onFailure = { error ->
-                    if (error is DriveHttpException && error.statusCode in 400..499) Result.failure()
-                    else Result.retry()
+                    when {
+                        error is DriveHttpException && error.statusCode in 400..499 -> Result.failure()
+                        // Re-authorization needs the user; retrying cannot fix it and only burns
+                        // WorkManager attempts until they sign in again.
+                        error is CloudSyncEngine.AuthorizationRequiredException -> Result.failure()
+                        else -> Result.retry()
+                    }
                 },
             )
         } finally {

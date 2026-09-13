@@ -115,13 +115,13 @@ internal class CloudRemoteStateApplier(
         return true
     }
 
-    suspend fun applyBookmarks(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
+    suspend fun applyBookmarks(token: String, info: DriveObject): Boolean = withJsonDownload(token, info) { json ->
         applyBookmarksJson(json)
     }
 
-    suspend fun applyBookmarksJson(json: JSONObject) {
+    /** Returns whether the remote snapshot replaced the local list; false means a local edit won. */
+    suspend fun applyBookmarksJson(json: JSONObject): Boolean =
         mutations.withoutRecording { replaceBookmarksFromRemote(database, books, syncDao, json) }
-    }
 
     suspend fun applySettings(token: String, info: DriveObject) {
         // Capture before the network read so a local edit made while the file downloads wins.
@@ -134,7 +134,8 @@ internal class CloudRemoteStateApplier(
         }
     }
 
-    suspend fun applySettingsJson(json: JSONObject) {
+    /** Returns whether the remote settings were applied; false means a local edit won the guard. */
+    suspend fun applySettingsJson(json: JSONObject): Boolean {
         val remote = jsonToSettings(json.getJSONObject("reader"))
         val goal = json.optInt("readingGoalMinutes", 30)
         mutations.withoutRecording {
@@ -148,6 +149,7 @@ internal class CloudRemoteStateApplier(
             }
             json.optJSONObject("bookOverrides")?.let { bookSettings.replaceAll(decodeBookSettings(it)) }
         }
+        return true
     }
 
     suspend fun applySession(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
@@ -198,13 +200,13 @@ internal class CloudRemoteStateApplier(
         }
     }
 
-    private suspend fun withJsonDownload(
+    private suspend fun <T> withJsonDownload(
         token: String,
         info: DriveObject,
-        block: suspend (JSONObject) -> Unit,
-    ) {
+        block: suspend (JSONObject) -> T,
+    ): T {
         val file = tempFile("json")
-        try {
+        return try {
             drive.download(token, info.id, file)
             block(JSONObject(file.readText()))
         } finally {
@@ -276,17 +278,20 @@ internal suspend fun applyBookMetadataFromRemote(
  * inside the same transaction is race-free: either the local add committed first (skip the remote
  * snapshot and let local win), or it commits after the replace (the add survives). The skipped
  * remote snapshot is superseded by the pending push and reconciled on the next run.
+ *
+ * @return true when the remote list replaced the local one; false when it was skipped because a
+ * local edit still owns the book (the caller must keep that edit queued for upload).
  */
 internal suspend fun replaceBookmarksFromRemote(
     database: KixyuDatabase,
     books: BookDao,
     syncDao: SyncDao,
     json: JSONObject,
-) {
+): Boolean {
     val bookUuid = json.getString("bookUuid")
-    if (!books.bookExists(bookUuid)) return
-    database.withTransaction {
-        if (syncDao.pendingCount(SyncEntityType.BOOKMARKS.name, bookUuid) > 0) return@withTransaction
+    if (!books.bookExists(bookUuid)) return false
+    return database.withTransaction {
+        if (syncDao.pendingCount(SyncEntityType.BOOKMARKS.name, bookUuid) > 0) return@withTransaction false
         books.deleteBookmarksForBook(bookUuid)
         val items = json.optJSONArray("items") ?: JSONArray()
         for (index in 0 until items.length()) {
@@ -305,5 +310,6 @@ internal suspend fun replaceBookmarksFromRemote(
                 ),
             )
         }
+        true
     }
 }

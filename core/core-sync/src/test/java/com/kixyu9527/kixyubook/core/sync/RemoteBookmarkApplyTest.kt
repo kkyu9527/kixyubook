@@ -13,6 +13,8 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -59,8 +61,9 @@ class RemoteBookmarkApplyTest {
                 SyncOutboxEntity("m1", SyncEntityType.BOOKMARKS.name, "book", "UPSERT", 1, 1, "device"),
             )
 
-            replaceBookmarksFromRemote(database, books, syncDao, remoteJson("remote"))
+            val applied = replaceBookmarksFromRemote(database, books, syncDao, remoteJson("remote"))
 
+            assertFalse("a skipped apply must tell the caller to keep the queued edit", applied)
             assertEquals(listOf("local"), books.getAllBookmarkEntities().map { it.uuid })
         } finally {
             database.close()
@@ -76,8 +79,9 @@ class RemoteBookmarkApplyTest {
             books.insertChapter(ChapterEntity(1, "book", "第一章", 0, chapterKey = "k"))
             books.insertBookmark(BookmarkEntity("local", "book", 1, 0, "本地", 1))
 
-            replaceBookmarksFromRemote(database, books, syncDao, remoteJson("remote"))
+            val applied = replaceBookmarksFromRemote(database, books, syncDao, remoteJson("remote"))
 
+            assertTrue(applied)
             assertEquals(listOf("remote"), books.getAllBookmarkEntities().map { it.uuid })
         } finally {
             database.close()

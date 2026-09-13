@@ -149,6 +149,11 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override suspend fun disconnect() {
         scheduler.cancel()
+        // A priority sync may already be past its account check; stop it so it cannot keep
+        // downloading/uploading after the account is cleared.
+        priorityBookJob?.cancel()
+        priorityBookJob = null
+        activeBookUuid = null
         initialSyncDecision.value = null
         inspectingInitialSync.value = false
         accounts.disconnect()
@@ -388,9 +393,11 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         val authorization = accounts.authorize(activity)
         require(authorization is GoogleConnectResult.Connected) { context.getString(R.string.sync_authorize_first) }
         val token = accounts.accessToken() ?: error(context.getString(R.string.sync_reauthorize))
-        engine.deleteAllCloudData(token)
+        // Stop scheduling new runs before the wipe so nothing re-uploads objects that the wipe
+        // removed or recreates the object states it cleared.
         preferences.setEnabled(false)
         scheduler.cancel()
+        engine.deleteAllCloudData(token)
         storageQuota.value = storageQuota.value.copy(refreshedAt = 0L)
         refreshStorageQuota(force = true)
     }

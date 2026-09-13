@@ -118,11 +118,10 @@ class CloudSyncEngine @Inject constructor(
     suspend fun inspectInitialSync(): InitialSyncDecision = withContext(Dispatchers.IO) {
         val token = accountClient.accessToken()
             ?: throw AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
-        val (objects, pageToken) = coroutineScope {
-            val objects = async { drive.listAll(token) }
-            val pageToken = async { drive.startPageToken(token) }
-            objects.await() to pageToken.await()
-        }
+        // Capture the page token before listing: anything committed during the listing is then
+        // still discoverable through listChanges instead of falling between the two calls.
+        val pageToken = drive.startPageToken(token)
+        val objects = drive.listAll(token)
         val remote = objects.associateBy(DriveObject::objectKey)
         preferences.current().account?.subject?.let { accountSubject ->
             synchronized(preparedSnapshotLock) {
@@ -280,7 +279,9 @@ class CloudSyncEngine @Inject constructor(
 
             syncStage = FullSyncStage.PREPARING_UPLOADS
             if (!persisted.initialMergeComplete) seedInitialOutbox()
-            val pending = syncDao.pending().sortedWith(
+            // Drain the whole outbox: the paged read would leave a large backlog for later runs
+            // while still advancing the page token as if the run had synced everything.
+            val pending = syncDao.allPending().sortedWith(
                 compareBy<SyncOutboxEntity> {
                     when {
                         it.entityType == SyncEntityType.SETTINGS.name -> 0
@@ -638,7 +639,7 @@ class CloudSyncEngine @Inject constructor(
         type: SyncEntityType,
         entityId: String,
         guardSettingsWrites: Boolean = false,
-        apply: suspend (JSONObject) -> Unit,
+        apply: suspend (JSONObject) -> Boolean,
     ) {
         val known = syncDao.objectState(key)
         var remote = drive.findByObjectKey(token, key) ?: return
@@ -661,7 +662,7 @@ class CloudSyncEngine @Inject constructor(
         // needs the generation guard captured before the download. Other types are guarded by their
         // own transaction/timestamp rules.
         val startGeneration = if (guardSettingsWrites) SettingsWriteGate.currentGeneration() else 0L
-        suspend fun applyDownloaded(json: JSONObject) {
+        suspend fun applyDownloaded(json: JSONObject): Boolean =
             if (guardSettingsWrites) {
                 withSettingsWriteGuard(
                     startGeneration,
@@ -670,8 +671,7 @@ class CloudSyncEngine @Inject constructor(
             } else {
                 apply(json)
             }
-        }
-        try {
+        val applied = try {
             withJsonDownload(token, remote) { json -> applyDownloaded(json) }
         } catch (error: DriveHttpException) {
             if (error.statusCode != 404) throw error
@@ -679,10 +679,12 @@ class CloudSyncEngine @Inject constructor(
             remote = drive.findByObjectKey(token, key) ?: return
             withJsonDownload(token, remote) { json -> applyDownloaded(json) }
         }
-        // Keep an edit created while the cloud object was being downloaded. Its replacement
-        // outbox row carries another UUID and must be uploaded on the next flush.
-        localMutation?.let { syncDao.removeOutbox(listOf(it.uuid)) }
-        rememberRemote(key, remote)
+        acknowledgePriorityPull(
+            applied = applied,
+            localMutation = localMutation,
+            removeOutbox = { ids -> syncDao.removeOutbox(ids) },
+            rememberRemote = { rememberRemote(key, remote) },
+        )
     }
 
     suspend fun requiresLongRunningWorker(): Boolean = withContext(Dispatchers.IO) {
@@ -706,11 +708,13 @@ class CloudSyncEngine @Inject constructor(
     ): RemoteSnapshot {
         if (!persisted.initialMergeComplete || persisted.pageToken == null) {
             takePreparedInitialSnapshot(persisted.account?.subject)?.let { return it }
+            // Token first, then list: a write committed during the listing stays discoverable.
+            val pageToken = drive.startPageToken(token)
             val all = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
             return RemoteSnapshot(
                 known = all.toMutableMap(),
                 changed = all,
-                nextPageToken = drive.startPageToken(token),
+                nextPageToken = pageToken,
             )
         }
 
@@ -737,8 +741,9 @@ class CloudSyncEngine @Inject constructor(
             drive.listChanges(token, persisted.pageToken)
         } catch (error: DriveHttpException) {
             if (error.statusCode != 410) throw error
+            val pageToken = drive.startPageToken(token)
             val all = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
-            return RemoteSnapshot(all.toMutableMap(), all, drive.startPageToken(token))
+            return RemoteSnapshot(all.toMutableMap(), all, pageToken)
         }
         val changed = mutableMapOf<String, DriveObject>()
         val statesByFileId = states.mapNotNull { state -> state.driveFileId?.let { it to state } }.toMap()
@@ -779,10 +784,14 @@ class CloudSyncEngine @Inject constructor(
         }
 
     suspend fun deleteAllCloudData(token: String) = withContext(Dispatchers.IO) {
-        drive.listAll(token).forEach { drive.delete(token, it.id) }
-        syncDao.clearObjectStates()
-        syncDao.clearOutbox()
-        syncDao.clearTombstones()
+        // Serialize with a running sync, otherwise it can re-upload objects listed after the wipe
+        // started or recreate object states the wipe just cleared.
+        syncMutex.withLock {
+            drive.listAll(token).forEach { drive.delete(token, it.id) }
+            syncDao.clearObjectStates()
+            syncDao.clearOutbox()
+            syncDao.clearTombstones()
+        }
     }
 
     suspend fun enqueueAllCurrentState() = withContext(Dispatchers.IO) { seedInitialOutbox() }
@@ -814,11 +823,15 @@ class CloudSyncEngine @Inject constructor(
             ) return@forEach
             val cloud = remote["progress/${mutation.entityId}"] ?: return@forEach
             val localTime = books.getProgress(mutation.entityId)?.updatedTime ?: Long.MIN_VALUE
-            var cloudTime = Long.MIN_VALUE
-            withJsonDownload(token, cloud) { json -> cloudTime = json.optLong("updatedTime") }
-            if (cloudTime > localTime) {
-                syncDao.removeOutbox(listOf(mutation.uuid))
+            var applied = false
+            withJsonDownload(token, cloud) { json ->
+                // Only drop the queued local write once the newer cloud value actually replaced it;
+                // otherwise the row would be lost without ever uploading or applying the change.
+                if (json.optLong("updatedTime") > localTime) {
+                    applied = remoteState.applyProgressJson(json)
+                }
             }
+            if (applied) syncDao.removeOutbox(listOf(mutation.uuid))
         }
     }
 
@@ -850,9 +863,14 @@ class CloudSyncEngine @Inject constructor(
         annotationDao.getAll().forEach { mutations.record(SyncEntityType.ANNOTATION, it.uuid) }
     }
 
-    private suspend fun withJsonDownload(token: String, info: DriveObject, block: suspend (JSONObject) -> Unit) {
+    private suspend fun <T> withJsonDownload(token: String, info: DriveObject, block: suspend (JSONObject) -> T): T {
         val file = tempFile("json")
-        try { drive.download(token, info.id, file); block(JSONObject(file.readText())) } finally { file.delete() }
+        return try {
+            drive.download(token, info.id, file)
+            block(JSONObject(file.readText()))
+        } finally {
+            file.delete()
+        }
     }
 
     private suspend fun rememberRemote(key: String, value: DriveObject) {

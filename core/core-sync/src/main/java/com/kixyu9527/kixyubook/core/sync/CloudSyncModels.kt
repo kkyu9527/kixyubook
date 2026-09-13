@@ -175,8 +175,41 @@ internal fun keysForMutation(value: SyncOutboxEntity): List<String> =
  * object-level "local dirty wins" rule used by mature sync engines; the skipped snapshot is
  * reconciled on a later run, after the local change has been pushed.
  */
+/**
+ * Whether a remote object is newer than the locally recorded baseline. Drive's `version` is
+ * monotonic and distinguishes two writes inside the same second, where `modifiedAt` cannot; fall
+ * back to `modifiedAt` when either side has no version.
+ */
+internal fun isRemoteNewer(remote: DriveObject, localModifiedAt: Long, localVersion: Long): Boolean =
+    if (remote.version != 0L && localVersion != 0L) remote.version > localVersion
+    else remote.modifiedAt > localModifiedAt
+
+/** A remote deletion must not discard an edit this device has not uploaded yet. */
+internal fun shouldApplyRemoteTombstone(localPendingCount: Int): Boolean = localPendingCount == 0
+
+/** Like [keysForMutation] but tolerant of an unknown entity type (downgrade or corruption). */
+internal fun keysForMutationOrEmpty(value: SyncOutboxEntity): List<String> =
+    runCatching { keysForMutation(value) }.getOrDefault(emptyList())
+
 internal fun hasPendingLocalChange(key: String, pending: List<SyncOutboxEntity>): Boolean =
-    pending.any { mutation -> key in keysForMutation(mutation) }
+    pending.any { mutation -> runCatching { key in keysForMutation(mutation) }.getOrDefault(false) }
+
+/**
+ * Records the outcome of a priority pull. An applied remote snapshot supersedes the queued local
+ * edit, so that edit can be dropped and the remote baseline advanced. A skipped apply means a local
+ * edit won: the queued edit must survive and the baseline must stay put so the object is re-pulled
+ * and reconciled once the local edit has been pushed.
+ */
+internal suspend fun acknowledgePriorityPull(
+    applied: Boolean,
+    localMutation: SyncOutboxEntity?,
+    removeOutbox: suspend (List<String>) -> Unit,
+    rememberRemote: suspend () -> Unit,
+) {
+    if (!applied) return
+    localMutation?.let { removeOutbox(listOf(it.uuid)) }
+    rememberRemote()
+}
 
 /** A pending deletion always wins over an older cloud object, including priority reader pulls. */
 internal fun shouldPullPriorityRemote(

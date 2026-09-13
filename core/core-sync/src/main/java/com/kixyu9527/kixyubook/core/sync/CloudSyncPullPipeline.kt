@@ -1,6 +1,8 @@
 package com.kixyu9527.kixyubook.core.sync
 
 import android.content.Context
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
@@ -34,16 +36,27 @@ internal class CloudSyncPullPipeline(
                 val json = JSONObject(temp.readText())
                 val type = runCatching { SyncEntityType.valueOf(json.getString("type")) }.getOrNull() ?: return@forEach
                 val id = json.getString("entityId")
-                mutations.withoutRecording {
-                    when (type) {
-                        SyncEntityType.BOOK -> if (books.bookExists(id)) bookRepository.deleteBook(id)
-                        SyncEntityType.FONT -> fontRepository.deleteFont(id)
-                        SyncEntityType.CORRECTION -> textCorrectionRepository.deleteRemote(id)
-                        SyncEntityType.ANNOTATION -> readerAnnotationRepository.deleteRemote(id)
-                        else -> Unit
+                // A tombstone must not discard an edit this device has not uploaded yet. Keep the
+                // local change (it will be pushed and re-create the object) instead of deleting it.
+                if (!shouldApplyRemoteTombstone(syncDao.pendingCount(type.name, id))) {
+                    DiagnosticLog.record(
+                        Category.SYNC,
+                        "tombstone_skipped_local_pending",
+                        outcome = "local_wins",
+                        details = mapOf("entity" to type.name.lowercase()),
+                    )
+                } else {
+                    mutations.withoutRecording {
+                        when (type) {
+                            SyncEntityType.BOOK -> if (books.bookExists(id)) bookRepository.deleteBook(id)
+                            SyncEntityType.FONT -> fontRepository.deleteFont(id)
+                            SyncEntityType.CORRECTION -> textCorrectionRepository.deleteRemote(id)
+                            SyncEntityType.ANNOTATION -> readerAnnotationRepository.deleteRemote(id)
+                            else -> Unit
+                        }
                     }
+                    syncDao.removeOutbox(type.name, id)
                 }
-                syncDao.removeOutbox(type.name, id)
                 syncDao.upsertTombstone(
                     SyncTombstoneEntity(
                         objectKey = key,
@@ -68,12 +81,14 @@ internal class CloudSyncPullPipeline(
     ) {
         // Read the whole outbox, not a 256-row page: a truncated set would let a remote object
         // overwrite a local change that was not visible in the snapshot.
-        val dirty = syncDao.allPending().flatMap(::keysForMutation).toSet()
+        val dirty = syncDao.allPending().flatMap(::keysForMutationOrEmpty).toSet()
         val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
         val handledKeys = mutableSetOf<String>()
         val candidates = changedRemote.filter { (key, value) ->
-            !key.startsWith("tombstones/") && key !in dirty &&
-                (!initialMergeComplete || value.modifiedAt > (localStates[key]?.remoteModifiedAt ?: 0))
+            if (key.startsWith("tombstones/") || key in dirty) return@filter false
+            if (!initialMergeComplete) return@filter true
+            val state = localStates[key] ?: return@filter true
+            isRemoteNewer(value, state.remoteModifiedAt, state.remoteVersion)
         }
         // Re-read the outbox right before applying. A local edit made while this pull is running
         // must win until it is pushed; the skipped remote snapshot is reconciled on the next run.

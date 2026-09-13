@@ -135,7 +135,11 @@ class DriveAppDataClient @Inject constructor(
     suspend fun download(token: String, fileId: String, destination: File) {
         destination.parentFile?.mkdirs()
         val downloadKey = fileId.hashCode().toUInt().toString(16)
-        val partial = File(destination.parentFile, ".drive-$downloadKey.part")
+        // Key the resume file by destination as well: two downloads of the same object into the
+        // same directory must not share (and corrupt) one partial file.
+        val destinationKey = destination.name.hashCode().toUInt().toString(16)
+        cleanupStalePartialDownloads(destination.parentFile)
+        val partial = File(destination.parentFile, ".drive-$downloadKey-$destinationKey.part")
         withBackoff {
             val offset = partial.length()
             val connection = open("$DRIVE_API/files/${encode(fileId)}?alt=media", "GET", token).apply {
@@ -175,6 +179,18 @@ class DriveAppDataClient @Inject constructor(
         partial.copyTo(destination, overwrite = true)
         partial.delete()
         uploadSessions.edit { remove("download.$downloadKey.etag") }
+    }
+
+    /** Removes resume files abandoned by a crash so they do not accumulate in the cache. */
+    private fun cleanupStalePartialDownloads(directory: File?) {
+        val cutoff = System.currentTimeMillis() - PARTIAL_DOWNLOAD_RETENTION_MILLIS
+        directory?.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.startsWith(".drive-") && file.name.endsWith(".part") &&
+                file.lastModified() < cutoff
+            ) {
+                runCatching { file.delete() }
+            }
+        }
     }
 
     suspend fun upload(
@@ -497,6 +513,7 @@ class DriveAppDataClient @Inject constructor(
         const val UPLOAD_CHUNK_BYTES = 8L * 1024 * 1024
         const val MAX_BACKOFF_RETRIES = 3
         const val BASE_BACKOFF_MILLIS = 1_000L
+        const val PARTIAL_DOWNLOAD_RETENTION_MILLIS = 6L * 60 * 60 * 1000
         const val HTTP_RANGE_NOT_SATISFIABLE = 416
         const val DRIVE_API = "https://www.googleapis.com/drive/v3"
         const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3"
