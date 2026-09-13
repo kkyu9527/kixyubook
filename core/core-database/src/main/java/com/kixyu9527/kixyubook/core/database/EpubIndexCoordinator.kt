@@ -235,9 +235,29 @@ internal class EpubIndexCoordinator(
     }
 
     suspend fun continueAll() = withContext(Dispatchers.IO) {
+        // Skip a book that keeps throwing instead of aborting the whole queue. Without this, one
+        // corrupt EPUB makes the unique worker retry forever and no other book is ever indexed.
+        // The skipped book stays pending and is retried on the next enqueue.
+        val failed = mutableSetOf<String>()
         while (true) {
-            val nextBook = dao.getBooksPendingEpubIndex().firstOrNull() ?: return@withContext
-            continueIndex(nextBook)
+            val nextBook = dao.getBooksPendingEpubIndex().firstOrNull { it !in failed } ?: return@withContext
+            try {
+                continueIndex(nextBook)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                failed += nextBook
+                val failure = error.toDiagnosticFailure()
+                DiagnosticLog.record(
+                    Category.EPUB_PARSE,
+                    "background_index_book_failed",
+                    outcome = failure.outcome,
+                    details = mapOf(
+                        "book" to nextBook.shortIndexDiagnosticId(),
+                        "reason" to failure.reason,
+                    ),
+                )
+            }
         }
     }
 

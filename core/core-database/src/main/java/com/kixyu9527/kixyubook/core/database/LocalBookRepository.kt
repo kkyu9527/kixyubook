@@ -186,23 +186,31 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun cancelImport(runId: String) = withContext(Dispatchers.IO) {
         canceledImportRuns += runId
-        val active = importDao.getRun(runId).filterNot { it.status.isTerminalImportStatus() }
-        importDao.upsert(
-            active.map { item ->
-                item.copy(
-                    stage = ImportStage.FINISHED.name,
-                    progress = 1f,
-                    status = ImportItemStatus.CANCELED.name,
-                    message = context.getString(R.string.import_status_canceled),
-                    updatedTime = System.currentTimeMillis(),
-                )
-            },
-        )
-        active.mapNotNull(ImportItemEntity::bookUuid).forEach { uuid ->
-            workManager.cancelUniqueWork(TxtIndexWorker.uniqueName(uuid))
-        }
         storageMutationMutex.withLock {
-            active.mapNotNull(ImportItemEntity::bookUuid).forEach { uuid -> removeIncompleteImport(uuid) }
+            // Re-read inside the gate. An item that finished while cancel was queued is already
+            // SUCCEEDED and must keep its delivered book instead of being removed as "incomplete".
+            val active = importDao.getRun(runId).filterNot { it.status.isTerminalImportStatus() }
+            importDao.upsert(
+                active.map { item ->
+                    item.copy(
+                        stage = ImportStage.FINISHED.name,
+                        progress = 1f,
+                        status = ImportItemStatus.CANCELED.name,
+                        message = context.getString(R.string.import_status_canceled),
+                        updatedTime = System.currentTimeMillis(),
+                    )
+                },
+            )
+            active.mapNotNull(ImportItemEntity::bookUuid).forEach { uuid ->
+                workManager.cancelUniqueWork(TxtIndexWorker.uniqueName(uuid))
+                removeIncompleteImport(uuid)
+            }
+        }
+        // Drop the flag once nothing is running: an import that never started would otherwise leak
+        // its run id for the process lifetime. A run still in flight keeps the flag so its next
+        // ensureImportActive() call observes the cancellation.
+        if (importDao.getRun(runId).none { it.status == ImportItemStatus.RUNNING.name }) {
+            canceledImportRuns -= runId
         }
     }
 
@@ -211,7 +219,7 @@ class LocalBookRepository @Inject constructor(
         // Publish before Room I/O so the shelf order changes in the same input dispatch as the
         // tap. The durable column keeps that order after process recreation without pretending
         // that the user's reading position changed or creating a cloud-sync conflict.
-        openedAtOverrides.update { it + (bookUuid to openedAt) }
+        openedAtOverrides.update { (it + (bookUuid to openedAt)).boundedOpenedAtOverrides() }
         importScope.launch {
             runCatching { dao.markBookOpened(bookUuid, openedAt) }
                 .onSuccess { updated ->
@@ -409,7 +417,8 @@ class LocalBookRepository @Inject constructor(
                     ImportItemStatus.RUNNING,
                     bookUuid = bookUuid,
                 )
-                imports += RegisteredImport(importRun, rawUri, bookUuid, displayName, format, stored, parser)
+                // Record the item only after its final progress write succeeds. Appending first and
+                // then failing would report a book as imported while the catch below deletes it.
                 updateImportProgress(
                     importRun, rawUri,
                     if (format == BookFormat.EPUB) ImportStage.FINISHED else ImportStage.INDEXING,
@@ -418,6 +427,7 @@ class LocalBookRepository @Inject constructor(
                     bookUuid = bookUuid,
                     message = if (format == BookFormat.EPUB) context.getString(R.string.db_import_background) else context.getString(R.string.db_indexing),
                 )
+                imports += RegisteredImport(importRun, rawUri, bookUuid, displayName, format, stored, parser)
             } catch (error: ImportCanceledException) {
                 insertedUuid?.let { removeIncompleteImport(it) }
                 storedFile?.delete()
@@ -716,13 +726,16 @@ class LocalBookRepository @Inject constructor(
             bookUuids.forEach { uuid -> workManager.cancelUniqueWork(TxtIndexWorker.uniqueName(uuid)) }
             val books = dao.getBooks(bookUuids)
             val progressCount = bookUuids.count { uuid -> dao.getProgress(uuid) != null }
-            val correctionUuids = bookUuids.flatMap { uuid ->
-                textCorrections.getBookCorrections(uuid).map(TextCorrection::uuid)
-            }
-            val annotationUuids = bookUuids.flatMap { uuid ->
-                annotations.getBookAnnotations(uuid).map(ReaderAnnotation::uuid)
-            }
             database.withTransaction {
+                // Read the child ids inside the delete transaction. Reading them first would miss a
+                // correction/annotation inserted in between, which the FK then deletes without a
+                // tombstone, so it could be resurrected from Drive.
+                val correctionUuids = bookUuids.flatMap { uuid ->
+                    textCorrections.getBookCorrections(uuid).map(TextCorrection::uuid)
+                }
+                val annotationUuids = bookUuids.flatMap { uuid ->
+                    annotations.getBookAnnotations(uuid).map(ReaderAnnotation::uuid)
+                }
                 dao.deleteMetadataEdits(bookUuids)
                 dao.deleteBookParagraphFts(bookUuids)
                 dao.deleteBooks(bookUuids)
@@ -1186,6 +1199,13 @@ class LocalBookRepository @Inject constructor(
 }
 
 private class ImportCanceledException : Exception()
+
+/** Keeps the in-memory optimistic shelf order from growing with every book ever opened. */
+private fun Map<String, Long>.boundedOpenedAtOverrides(): Map<String, Long> =
+    if (size <= MAX_OPENED_AT_OVERRIDES) this
+    else entries.sortedByDescending { it.value }.take(MAX_OPENED_AT_OVERRIDES).associate { it.key to it.value }
+
+private const val MAX_OPENED_AT_OVERRIDES = 512
 
 /**
  * Re-anchors saved reading progress after a TXT reparse. The reader reads `paragraphIndex` and
