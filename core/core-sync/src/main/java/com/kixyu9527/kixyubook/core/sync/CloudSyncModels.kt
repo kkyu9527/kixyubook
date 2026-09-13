@@ -187,6 +187,44 @@ internal fun isRemoteNewer(remote: DriveObject, localModifiedAt: Long, localVers
 /** A remote deletion must not discard an edit this device has not uploaded yet. */
 internal fun shouldApplyRemoteTombstone(localPendingCount: Int): Boolean = localPendingCount == 0
 
+/**
+ * Applies three settings stores with best-effort rollback. DataStore has no cross-store transaction,
+ * so if a later store fails the stores already written are restored from their previous values
+ * before the error is rethrown; the caller holds SettingsWriteGate, so no local write can
+ * interleave. A null apply/rollback pair means the snapshot omitted that store.
+ */
+internal suspend fun applySettingsWithRollback(
+    applyReader: suspend () -> Unit,
+    applyLibrary: suspend () -> Unit,
+    applyReminder: suspend () -> Unit,
+    hasLibrary: Boolean,
+    hasReminder: Boolean,
+    rollbackReader: suspend () -> Unit,
+    rollbackLibrary: suspend () -> Unit,
+    rollbackReminder: suspend () -> Unit,
+) {
+    var readerApplied = false
+    var libraryApplied = false
+    var reminderApplied = false
+    try {
+        applyReader()
+        readerApplied = true
+        if (hasLibrary) {
+            applyLibrary()
+            libraryApplied = true
+        }
+        if (hasReminder) {
+            applyReminder()
+            reminderApplied = true
+        }
+    } catch (error: Throwable) {
+        if (reminderApplied) runCatching { rollbackReminder() }
+        if (libraryApplied) runCatching { rollbackLibrary() }
+        if (readerApplied) runCatching { rollbackReader() }
+        throw error
+    }
+}
+
 /** Like [keysForMutation] but tolerant of an unknown entity type (downgrade or corruption). */
 internal fun keysForMutationOrEmpty(value: SyncOutboxEntity): List<String> =
     runCatching { keysForMutation(value) }.getOrDefault(emptyList())

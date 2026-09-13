@@ -32,6 +32,45 @@ class PendingLocalChangeTest {
         assertFalse(hasPendingLocalChange("settings/global", emptyList()))
     }
 
+    @Test fun aFailedSettingsStoreRollsBackTheStoresAlreadyWritten() = kotlinx.coroutines.runBlocking {
+        val events = mutableListOf<String>()
+        val failure = IllegalStateException("reminder store down")
+        try {
+            applySettingsWithRollback(
+                applyReader = { events += "applyReader" },
+                applyLibrary = { events += "applyLibrary" },
+                applyReminder = { events += "applyReminder"; throw failure },
+                hasLibrary = true,
+                hasReminder = true,
+                rollbackReader = { events += "rollbackReader" },
+                rollbackLibrary = { events += "rollbackLibrary" },
+                rollbackReminder = { events += "rollbackReminder" },
+            )
+            error("expected the reminder failure to propagate")
+        } catch (error: IllegalStateException) {
+            assertEquals(failure, error)
+        }
+        assertEquals(
+            listOf("applyReader", "applyLibrary", "applyReminder", "rollbackLibrary", "rollbackReader"),
+            events,
+        )
+    }
+
+    @Test fun omittedSettingsStoresAreNotAppliedOrRolledBack() = kotlinx.coroutines.runBlocking {
+        val events = mutableListOf<String>()
+        applySettingsWithRollback(
+            applyReader = { events += "applyReader" },
+            applyLibrary = { events += "applyLibrary" },
+            applyReminder = { events += "applyReminder" },
+            hasLibrary = false,
+            hasReminder = false,
+            rollbackReader = { events += "rollbackReader" },
+            rollbackLibrary = { events += "rollbackLibrary" },
+            rollbackReminder = { events += "rollbackReminder" },
+        )
+        assertEquals(listOf("applyReader"), events)
+    }
+
     @Test fun skippedPriorityPullKeepsTheQueuedEditAndTheRemoteBaseline() = kotlinx.coroutines.runBlocking {
         val removed = mutableListOf<List<String>>()
         var remembered = false

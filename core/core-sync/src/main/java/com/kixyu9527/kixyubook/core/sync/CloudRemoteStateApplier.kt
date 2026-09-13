@@ -3,12 +3,16 @@ import com.kixyu9527.kixyubook.core.common.configuration.*
 
 import android.content.Context
 import androidx.room.withTransaction
+import com.kixyu9527.kixyubook.core.common.model.LibraryPreferences
+import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReadingProgress
+import com.kixyu9527.kixyubook.core.common.model.ReadingReminderSettings
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.common.repository.SettingsWriteGate
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderAnnotationRepository
@@ -138,18 +142,53 @@ internal class CloudRemoteStateApplier(
     suspend fun applySettingsJson(json: JSONObject): Boolean {
         val remote = jsonToSettings(json.getJSONObject("reader"))
         val goal = json.optInt("readingGoalMinutes", 30)
+        val library = json.optJSONObject("library")?.let(::jsonToLibraryPreferences)
+        val reminder = json.optJSONObject("readingReminder")?.let(::jsonToReadingReminder)
+        val overrides = json.optJSONObject("bookOverrides")?.let(::decodeBookSettings)
         mutations.withoutRecording {
-            settingsRepository.update { remote }
-            settingsRepository.setReadingGoalMinutes(goal)
-            json.optJSONObject("library")?.let { library ->
-                libraryPreferencesRepository.replace(jsonToLibraryPreferences(library))
-            }
-            json.optJSONObject("readingReminder")?.let { reminder ->
-                readingReminders.replace(jsonToReadingReminder(reminder))
-            }
-            json.optJSONObject("bookOverrides")?.let { bookSettings.replaceAll(decodeBookSettings(it)) }
+            applySettingsAcrossStores(remote, goal, library, reminder, overrides)
         }
         return true
+    }
+
+    /**
+     * Applies a settings snapshot across the reader, library and reminder stores. DataStore has no
+     * cross-store transaction, so capture the previous values first and roll back the stores that
+     * were already written if a later write fails: a failure then leaves the device untouched
+     * instead of half-updated. The caller holds [SettingsWriteGate], so no local write can
+     * interleave with the snapshot or the rollback.
+     */
+    private suspend fun applySettingsAcrossStores(
+        reader: ReaderSettings,
+        goal: Int,
+        library: LibraryPreferences?,
+        reminder: ReadingReminderSettings?,
+        overrides: Map<String, String>?,
+    ) {
+        val previousReader = settingsRepository.settings.first()
+        val previousGoal = settingsRepository.readingGoalMinutes.first()
+        val previousLibrary = library?.let { libraryPreferencesRepository.preferences.first() }
+        val previousReminder = reminder?.let { readingReminders.settings.first() }
+        val previousOverrides = overrides?.let { bookSettings.overrides.first() }
+
+        applySettingsWithRollback(
+            applyReader = {
+                settingsRepository.update { reader }
+                settingsRepository.setReadingGoalMinutes(goal)
+                overrides?.let { bookSettings.replaceAll(it) }
+            },
+            applyLibrary = { libraryPreferencesRepository.replace(requireNotNull(library)) },
+            applyReminder = { readingReminders.replace(requireNotNull(reminder)) },
+            hasLibrary = library != null,
+            hasReminder = reminder != null,
+            rollbackReader = {
+                settingsRepository.update { previousReader }
+                settingsRepository.setReadingGoalMinutes(previousGoal)
+                previousOverrides?.let { bookSettings.replaceAll(it) }
+            },
+            rollbackLibrary = { libraryPreferencesRepository.replace(requireNotNull(previousLibrary)) },
+            rollbackReminder = { readingReminders.replace(requireNotNull(previousReminder)) },
+        )
     }
 
     suspend fun applySession(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
