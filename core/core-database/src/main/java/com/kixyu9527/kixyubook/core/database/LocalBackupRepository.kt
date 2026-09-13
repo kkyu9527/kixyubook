@@ -8,8 +8,8 @@ import org.json.JSONObject
 import android.database.sqlite.SQLiteDatabase
 import android.os.storage.StorageManager
 import androidx.core.net.toUri
+import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.PageMode
-import com.kixyu9527.kixyubook.core.common.model.PageTurnAnimation
 import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.legacyGlassBlurRadiusToFrostLevel
@@ -55,7 +55,7 @@ class LocalBackupRepository @Inject constructor(
     override suspend fun inspect(uriString: String): Result<BackupPreview> = withContext(Dispatchers.IO) {
         operationMutex.withLock { runCatching {
             cleanupBackupWorkDirectories()
-            val work = File(context.cacheDir, "$INSPECT_WORK_PREFIX${UUID.randomUUID()}").apply { mkdirs() }
+            val work = newWorkDirectory(INSPECT_WORK_PREFIX)
             val extracted = File(work, "payload").apply { mkdirs() }
             try {
                 val totalBytes = extractArchive(uriString, extracted, work)
@@ -112,7 +112,7 @@ class LocalBackupRepository @Inject constructor(
      * instead of silently writing an archive whose settings reference an absent font.
      */
     private suspend fun pinConsistentBackup(): PinnedBackup {
-        val work = File(context.cacheDir, "$BACKUP_WORK_PREFIX${UUID.randomUUID()}").apply { mkdirs() }
+        val work = newWorkDirectory(BACKUP_WORK_PREFIX)
         try {
             val snapshot = File(work, DATABASE_NAME)
             val escapedSnapshotPath = snapshot.absolutePath.replace("'", "''")
@@ -173,7 +173,7 @@ class LocalBackupRepository @Inject constructor(
     override suspend fun restoreFrom(uriString: String): Result<BackupResult> = withContext(Dispatchers.IO) {
         operationMutex.withLock { runCatching {
             cleanupBackupWorkDirectories()
-            val work = File(context.cacheDir, "restore-${UUID.randomUUID()}").apply { mkdirs() }
+            val work = newWorkDirectory(RESTORE_WORK_PREFIX)
             val extracted = File(work, "payload").apply { mkdirs() }
             try {
                 val totalBytes = extractArchive(uriString, extracted, work)
@@ -270,12 +270,18 @@ class LocalBackupRepository @Inject constructor(
             db.rawQuery("SELECT uuid, format, coverPath FROM books", null).use { cursor ->
                 while (cursor.moveToNext()) {
                     val uuid = cursor.getString(0)
-                    val format = cursor.getString(1).lowercase()
-                    val storedBook = File(assets, "books/$uuid.$format")
-                    require(storedBook.isFile) { context.getString(R.string.backup_book_missing, uuid) }
+                    val resolved = resolveArchivedBook(assets, uuid, cursor.getString(1))
+                        ?: error(context.getString(R.string.backup_book_missing, uuid))
+                    // Only point at a cover the archive actually shipped; otherwise clear it so the
+                    // restored row does not reference a missing file.
                     val coverName = cursor.getString(2)?.let { File(it).name }
-                    val cover = coverName?.let { File(context.filesDir, "covers/$it").absolutePath }
-                    db.execSQL("UPDATE books SET storagePath = ?, coverPath = ? WHERE uuid = ?", arrayOf(storedBook.livePath("books"), cover, uuid))
+                    val cover = coverName
+                        ?.takeIf { File(assets, "covers/$it").isFile }
+                        ?.let { File(context.filesDir, "covers/$it").absolutePath }
+                    db.execSQL(
+                        "UPDATE books SET format = ?, storagePath = ?, coverPath = ? WHERE uuid = ?",
+                        arrayOf(resolved.format.name, resolved.file.livePath("books"), cover, uuid),
+                    )
                 }
             }
             db.rawQuery("SELECT uuid, filePath FROM user_fonts", null).use { cursor ->
@@ -371,16 +377,15 @@ class LocalBackupRepository @Inject constructor(
         Unit
     }
 
+    private fun workRoot() = File(context.cacheDir, WORK_ROOT_NAME)
+
+    private fun newWorkDirectory(prefix: String) =
+        File(workRoot(), "$prefix${UUID.randomUUID()}").apply { mkdirs() }
+
     private fun cleanupBackupWorkDirectories() {
-        context.cacheDir.listFiles().orEmpty().forEach { file ->
-            if (
-                file.name.startsWith(BACKUP_WORK_PREFIX) ||
-                file.name.startsWith(RESTORE_WORK_PREFIX) ||
-                file.name.startsWith(INSPECT_WORK_PREFIX)
-            ) {
-                file.deleteRecursively()
-            }
-        }
+        // All operation scratch dirs live under one root, so cleanup can never delete an unrelated
+        // cache that happens to share a name prefix.
+        workRoot().deleteRecursively()
         File(context.getDatabasePath(DATABASE_NAME).parentFile, "$DATABASE_NAME.restoring").delete()
     }
 
@@ -452,9 +457,7 @@ class LocalBackupRepository @Inject constructor(
             showBatteryLevel = properties.boolean("showBatteryLevel", current.showBatteryLevel),
             brightnessMode = properties.enum("brightnessMode", current.brightnessMode),
             brightness = properties.float("brightness", current.brightness).coerceIn(.05f, 1f),
-            pageTurnAnimation = properties.getProperty("pageTurnAnimation")
-                ?.let(PageTurnAnimation::valueOf)
-                ?: current.pageTurnAnimation,
+            pageTurnAnimation = properties.enum("pageTurnAnimation", current.pageTurnAnimation),
         ) }
         settingsRepository.setReadingGoalMinutes(properties.getProperty("readingGoalMinutes")?.toIntOrNull() ?: 30)
     }
@@ -557,6 +560,7 @@ class LocalBackupRepository @Inject constructor(
         const val MANIFEST_ENTRY = "manifest.properties"
         const val DATABASE_ENTRY = "database/kixyu-books.db"
         const val EPUB_CACHE_DIRECTORY = "epub-chapters"
+        const val WORK_ROOT_NAME = "kixyu-backup-operations"
         const val BACKUP_WORK_PREFIX = "backup-"
         const val RESTORE_WORK_PREFIX = "restore-"
         const val INSPECT_WORK_PREFIX = "inspect-"
@@ -586,6 +590,21 @@ private class PinnedBackup(
 
 /** A settings-referenced resource disappeared; the caller must rebuild a consistent snapshot. */
 private class BackupResourceUnavailable(message: String) : Exception(message)
+
+internal data class ArchivedBookFile(val format: BookFormat, val file: File)
+
+/**
+ * Resolves a book row from an untrusted archive database to its archived file. Rejects a uuid that
+ * is not a plain file name and a format that is not a known [BookFormat], so a crafted backup can
+ * never make the restore read or write outside the extracted assets directory.
+ */
+internal fun resolveArchivedBook(assets: File, uuid: String, rawFormat: String?): ArchivedBookFile? {
+    if (uuid.isBlank() || File(uuid).name != uuid) return null
+    val format = runCatching { BookFormat.valueOf(rawFormat.orEmpty().uppercase()) }.getOrNull() ?: return null
+    val file = File(assets, "books/$uuid.${format.name.lowercase()}").canonicalFile
+    if (!file.isFile || !file.path.startsWith(assets.canonicalPath + File.separator)) return null
+    return ArchivedBookFile(format, file)
+}
 
 private fun ZipOutputStream.putFile(file: File, entryName: String) {
     putNextEntry(ZipEntry(entryName)); file.inputStream().buffered().use { it.copyTo(this) }; closeEntry()
