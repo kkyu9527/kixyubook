@@ -91,11 +91,16 @@ class NavigationEntryStateTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Reading").fetchSemanticsNodes().isNotEmpty()
         }
+        // The screen reloads on Dispatchers.Default, so wait for the new page instead of idle.
         compose.runOnIdle { onlyFailures.value = true }
-        compose.waitForIdle()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("No error logs").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onAllNodesWithText("No error logs").assertCountEquals(1)
         compose.runOnIdle { onlyFailures.value = false }
-        compose.waitForIdle()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Reading").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onAllNodesWithText("Reading").assertCountEquals(1)
     }
 }
