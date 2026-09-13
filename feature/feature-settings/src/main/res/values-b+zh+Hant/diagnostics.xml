@@ -253,6 +253,7 @@
     <string name="diag_export_empty">暫無可匯出的診斷記錄</string>
     <string name="diag_export_title">匯出診斷日誌</string>
     <string name="diag_export_error">無法匯出診斷日誌</string>
+    <string name="diag_load_error">無法載入診斷日誌</string>
     <string name="diag_cleared">診斷日誌已清空</string>
     <string name="diag_clear_error">無法清空診斷日誌</string>
     <string name="diag_errors_only">僅顯示異常</string>

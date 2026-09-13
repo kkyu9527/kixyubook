@@ -112,11 +112,19 @@ private fun DiagnosticLogScreen(
         // Navigation 3 caps moving scenes at STARTED. Cached previews remain visible, while
         // uncached parsing and publishing a new list wait for the scene to settle.
         lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
-        val loaded = session.load(context, android.content.res.Configuration(localeConfiguration), categoryKey, onlyFailures) {
+        try {
+            val loaded = session.load(context, android.content.res.Configuration(localeConfiguration), categoryKey, onlyFailures) {
+                lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+            }
             lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+            page = loaded
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Never leave the screen on an infinite spinner when the log cannot be read.
+            page = DiagnosticLogPage(false, emptyList(), emptyList())
+            snackbar.showSnackbar(resources.getString(R.string.diag_load_error))
         }
-        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
-        page = loaded
     }
 
     fun exportLog() {

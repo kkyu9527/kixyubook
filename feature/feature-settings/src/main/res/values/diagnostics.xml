@@ -253,6 +253,7 @@
     <string name="diag_export_empty">No diagnostic entries to export</string>
     <string name="diag_export_title">Export diagnostic log</string>
     <string name="diag_export_error">Cannot export diagnostic log</string>
+    <string name="diag_load_error">Cannot load diagnostic log</string>
     <string name="diag_cleared">Diagnostic log cleared</string>
     <string name="diag_clear_error">Cannot clear diagnostic log</string>
     <string name="diag_errors_only">Errors only</string>

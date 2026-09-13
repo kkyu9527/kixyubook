@@ -31,7 +31,9 @@ import java.util.Locale
 import javax.inject.Inject
 
 // Internal filter token, never translated or used as a localized category name.
-internal const val ALL_LIBRARY_CATEGORIES = "全部"
+// A control-prefixed token can never equal a user-created category, so the "all" filter is
+// unambiguous even when a category is named like its displayed label.
+internal const val ALL_LIBRARY_CATEGORIES = "\u0000all"
 
 data class LibraryUiState(
     val books: List<LibraryBook> = emptyList(),
@@ -228,14 +230,26 @@ class LibraryViewModel @Inject constructor(
     fun clearFinishedImportProgress() = repository.clearFinishedImportProgress()
 
     fun cancelImport(runId: String) = viewModelScope.launch {
-        repository.cancelImport(runId)
-        messages.send(context.getString(R.string.library_import_stopped))
+        try {
+            repository.cancelImport(runId)
+            messages.send(context.getString(R.string.library_import_stopped))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            messages.send(error.message ?: context.getString(R.string.library_import_error))
+        }
     }
 
     fun retryImport(runId: String) = viewModelScope.launch {
-        val result = repository.retryImport(runId)
-        if (result.importedCount == 0 && result.failures.isEmpty()) {
-            messages.send(context.getString(R.string.library_no_retry_files))
+        try {
+            val result = repository.retryImport(runId)
+            if (result.importedCount == 0 && result.failures.isEmpty()) {
+                messages.send(context.getString(R.string.library_no_retry_files))
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            messages.send(error.message ?: context.getString(R.string.library_import_error))
         }
     }
 

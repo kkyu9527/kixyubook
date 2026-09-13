@@ -253,6 +253,7 @@
     <string name="diag_export_empty">暂无可导出的诊断记录</string>
     <string name="diag_export_title">导出诊断日志</string>
     <string name="diag_export_error">无法导出诊断日志</string>
+    <string name="diag_load_error">无法加载诊断日志</string>
     <string name="diag_cleared">诊断日志已清空</string>
     <string name="diag_clear_error">无法清空诊断日志</string>
     <string name="diag_errors_only">仅显示异常</string>

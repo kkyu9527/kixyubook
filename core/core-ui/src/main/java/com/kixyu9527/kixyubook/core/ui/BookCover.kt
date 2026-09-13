@@ -50,7 +50,7 @@ private object BookCoverMemoryCache : MemoryPressureListener {
                 .toInt()
     }
     private val decodeSlots = Semaphore(2)
-    private val pathLocks = ConcurrentHashMap<String, Mutex>()
+    private val pathLocks = KeyedMutex()
 
     init {
         MemoryPressureRegistry.register(this)
@@ -59,7 +59,7 @@ private object BookCoverMemoryCache : MemoryPressureListener {
     operator fun get(path: String): ImageBitmap? = bitmaps.get(path)
 
     suspend fun load(path: String): ImageBitmap? = withContext(Dispatchers.IO) {
-        bitmaps.get(path) ?: pathLocks.getOrPut(path, ::Mutex).withLock {
+        bitmaps.get(path) ?: pathLocks.withLock(path) {
             bitmaps.get(path) ?: decodeSlots.withPermit {
                 runCatching { decodeSampled(path) }
                     .getOrNull()
@@ -169,5 +169,25 @@ fun BookCover(
                 .fillMaxSize()
                 .background(Brush.horizontalGradient(listOf(Color(0x22000000), Color.Transparent), endX = 22f)),
         )
+    }
+}
+
+/** Per-key mutexes that are dropped once the last waiter releases, so paths cannot accumulate. */
+private class KeyedMutex {
+    private class Entry(val mutex: Mutex = Mutex()) {
+        var users = 0
+    }
+
+    private val entries = ConcurrentHashMap<String, Entry>()
+
+    suspend fun <T> withLock(key: String, block: suspend () -> T): T {
+        val entry = entries.compute(key) { _, existing -> (existing ?: Entry()).apply { users++ } }!!
+        try {
+            return entry.mutex.withLock { block() }
+        } finally {
+            entries.computeIfPresent(key) { _, current ->
+                if (current === entry && --current.users == 0) null else current
+            }
+        }
     }
 }

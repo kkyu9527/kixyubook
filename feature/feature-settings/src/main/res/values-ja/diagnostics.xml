@@ -253,6 +253,7 @@
     <string name="diag_export_empty">エクスポートできる診断ログがありません</string>
     <string name="diag_export_title">診断ログをエクスポート</string>
     <string name="diag_export_error">診断ログをエクスポートできません</string>
+    <string name="diag_load_error">診断ログを読み込めません</string>
     <string name="diag_cleared">診断ログを消去しました</string>
     <string name="diag_clear_error">診断ログを消去できません</string>
     <string name="diag_errors_only">エラーのみ</string>
