@@ -70,8 +70,14 @@ class SettingsMutationJournal(
             // Mark before the outbox row exists: a cloud apply that starts right now must still see
             // this persisted-but-unregistered write. The token collector only retries after failure.
             SettingsWriteGate.markLocalWrite()
-            runCatching { recorder.record(SyncEntityType.SETTINGS, "global") }.onSuccess {
+            try {
+                recorder.record(SyncEntityType.SETTINGS, "global")
                 store.edit { if (it[PENDING] == token) it.remove(PENDING) }
+            } catch (error: CancellationException) {
+                // Keep the durable token for the replay collector but never swallow cancellation.
+                throw error
+            } catch (_: Exception) {
+                // Leaving PENDING lets the crash-safety collector retry this write.
             }
         }
     }

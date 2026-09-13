@@ -25,16 +25,13 @@ fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("brightness", value.brightness)
 
 fun jsonToSettings(value: JSONObject) = ReaderSettings(
-    fontSize = value.optDouble("fontSize", 19.0).toFloat(),
-    lineHeight = value.optDouble("lineHeight", 1.72).toFloat(),
-    letterSpacing = value.optDouble("letterSpacing", .01).toFloat(),
-    margin = value.optDouble("margin", 24.0).toFloat(),
+    fontSize = value.sanitizedFloat("fontSize", 19f, 8f..96f),
+    lineHeight = value.sanitizedFloat("lineHeight", 1.72f, 1f..4f),
+    letterSpacing = value.sanitizedFloat("letterSpacing", .01f, -.1f..0.5f),
+    margin = value.sanitizedFloat("margin", 24f, 0f..128f),
     theme = enumValue(value, "theme", ReaderTheme.SYSTEM),
     pageMode = enumValue(value, "pageMode", PageMode.SCROLL),
-    pageTurnAnimation = value.optString("pageTurnAnimation")
-        .takeIf(String::isNotBlank)
-        ?.let(PageTurnAnimation::valueOf)
-        ?: PageTurnAnimation.HORIZONTAL_SLIDE,
+    pageTurnAnimation = enumValue(value, "pageTurnAnimation", PageTurnAnimation.HORIZONTAL_SLIDE),
     customThemeEnabled = value.optBoolean("customThemeEnabled"),
     customDayTheme = jsonToCustomTheme(value.optJSONObject("customDayTheme"), CustomReaderTheme()),
     customNightTheme = jsonToCustomTheme(value.optJSONObject("customNightTheme"), ReaderSettings().customNightTheme),
@@ -114,3 +111,9 @@ fun jsonToCustomTheme(value: JSONObject?, fallback: CustomReaderTheme) = value?.
 
 inline fun <reified T : Enum<T>> enumValue(json: JSONObject, key: String, fallback: T): T =
     runCatching { enumValueOf<T>(json.optString(key)) }.getOrDefault(fallback)
+
+/** Rejects NaN/Infinity and clamps out-of-range typography so a bad payload cannot break layout. */
+private fun JSONObject.sanitizedFloat(key: String, default: Float, range: ClosedFloatingPointRange<Float>): Float {
+    val value = optDouble(key, default.toDouble()).toFloat()
+    return if (value.isFinite()) value.coerceIn(range) else default
+}

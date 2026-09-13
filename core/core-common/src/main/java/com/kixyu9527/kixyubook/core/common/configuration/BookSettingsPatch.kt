@@ -35,10 +35,15 @@ fun mergeBookSetting(global: ReaderSettings, existing: String, field: String, en
     return patch.toString()
 }
 
-fun decodeBookSettings(value: JSONObject?): Map<String, String> = value?.keys()?.asSequence()?.associateWith { key ->
-    // Only approved reader fields can be restored; never allow a per-book UI/navigation override.
-    val source = JSONObject(value.getString(key))
-    val safe = JSONObject()
-    source.keys().forEach { field -> if (field in BOOK_SETTING_KEYS) safe.put(field, source.get(field)) }
-    safe.toString()
-}.orEmpty()
+fun decodeBookSettings(value: JSONObject?): Map<String, String> {
+    val keys = value?.keys()?.asSequence() ?: return emptyMap()
+    return keys.mapNotNull { key ->
+        // A malformed patch is dropped (the book then inherits global settings) instead of aborting
+        // the whole restore. Only approved reader fields can be restored; never a UI/navigation one.
+        val encoded = runCatching { value.getString(key) }.getOrNull() ?: return@mapNotNull null
+        val source = runCatching { JSONObject(encoded) }.getOrNull() ?: return@mapNotNull null
+        val safe = JSONObject()
+        source.keys().forEach { field -> if (field in BOOK_SETTING_KEYS) safe.put(field, source.get(field)) }
+        key to safe.toString()
+    }.toMap()
+}

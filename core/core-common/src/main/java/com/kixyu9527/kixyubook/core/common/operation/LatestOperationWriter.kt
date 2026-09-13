@@ -11,7 +11,13 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-/** UI-thread owned. Coalesces each setting independently without cancelling an in-flight write. */
+/**
+ * Coalesces each setting independently without cancelling an in-flight write.
+ *
+ * Thread-affine contract: [submit] and the internal worker must run on the same single-threaded
+ * dispatcher (the UI scope in production). The pending map is intentionally unsynchronized; passing
+ * a multi-threaded [scope] would race it.
+ */
 class LatestOperationWriter(private val scope: CoroutineScope, private val controller: UserOperationController) {
     private val pending = linkedMapOf<String, suspend () -> Unit>()
     private var worker: Job? = null

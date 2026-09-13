@@ -41,6 +41,9 @@ class DataStoreReaderSettingsRepository @Inject constructor(
     }
 
     override suspend fun updateField(bookUuid: String, field: String, encodedValue: String) {
+        // Skip when the book has no per-book profile: entering the journal would record a cloud
+        // mutation for settings that did not change.
+        if (!JSONObject(context.readerSettingsDataStore.data.first()[BOOK_OVERRIDES] ?: "{}").has(bookUuid)) return
         mutations.edit { values ->
             val all = JSONObject(values[BOOK_OVERRIDES] ?: "{}")
             if (all.has(bookUuid)) {
@@ -80,7 +83,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             theme = storedTheme?.let { runCatching { ReaderTheme.valueOf(it) }.getOrNull() } ?: ReaderTheme.SYSTEM,
             pageMode = values[PAGE_MODE]?.let { runCatching { PageMode.valueOf(it) }.getOrNull() } ?: PageMode.SCROLL,
             pageTurnAnimation = values[PAGE_TURN_ANIMATION]
-                ?.let(PageTurnAnimation::valueOf)
+                ?.let { runCatching { PageTurnAnimation.valueOf(it) }.getOrNull() }
                 ?: PageTurnAnimation.HORIZONTAL_SLIDE,
             customThemeEnabled = values[CUSTOM_THEME_ENABLED] ?: (storedTheme == "CUSTOM"),
             customDayTheme = CustomReaderTheme(

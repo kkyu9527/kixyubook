@@ -48,6 +48,27 @@ class PortableConfigTest {
         assertEquals("{}", mergeBookSetting(global, patch, "fontSize", "{\"fontSize\":19}"))
     }
 
+    @Test fun hostileReaderPayloadFallsBackForUnknownAnimationAndNonFiniteTypography() {
+        val reader = jsonToSettings(
+            JSONObject()
+                .put("pageTurnAnimation", "FLIP")
+                .put("fontSize", "NaN")
+                .put("lineHeight", "1e400")
+                .put("letterSpacing", -100)
+                .put("margin", "1e400"),
+        )
+        assertEquals(PageTurnAnimation.HORIZONTAL_SLIDE, reader.pageTurnAnimation)
+        assertEquals(19f, reader.fontSize, 1e-4f)
+        assertEquals(1.72f, reader.lineHeight, 1e-4f)
+        assertEquals(-.1f, reader.letterSpacing, 1e-4f)
+        assertEquals(24f, reader.margin, 1e-4f)
+    }
+
+    @Test fun malformedBookOverrideIsSkippedInsteadOfAbortingTheRestore() {
+        val input = JSONObject().put("bad", "not-json").put("good", "{\"fontSize\":24}")
+        assertEquals(setOf("good"), decodeBookSettings(input).keys)
+    }
+
     @Test fun restoredBookOverridesCannotChangeGlobalNavigationOrGlass() {
         val input = JSONObject().put("book", "{\"fontSize\":24,\"predictiveBackEnabled\":true,\"glassFrostLevel\":0}")
         val patch = decodeBookSettings(input).getValue("book")
