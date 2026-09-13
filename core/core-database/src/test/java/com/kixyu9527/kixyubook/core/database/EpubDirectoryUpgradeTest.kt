@@ -85,4 +85,59 @@ class EpubDirectoryUpgradeTest {
             preferences.edit().clear().commit()
         }
     }
+
+    @Test fun directoryUpgradeRestoresAdoptedVolumeTitleAndKeepsReadingData() = runBlocking(Dispatchers.IO) {
+        val source = folder.newFile("foreword-upgrade.epub")
+        ZipOutputStream(source.outputStream()).use { zip ->
+            fun entry(path: String, text: String) {
+                zip.putNextEntry(ZipEntry(path))
+                zip.write(text.toByteArray())
+                zip.closeEntry()
+            }
+            entry("META-INF/container.xml", """<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>""")
+            entry("book.opf", """<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>卷首升级</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/><item id="fw2" href="foreword2.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="fw2"/><itemref idref="c2"/></spine></package>""")
+            entry("nav.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><span>第一卷</span><ol><li><a href="c1.xhtml">第一章</a></li></ol></li><li><span>第二卷</span><ol><li><a href="c2.xhtml">第二章</a></li></ol></li></ol></nav></body></html>""")
+            entry("c1.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>第一章</h1></body></html>")
+            entry("foreword2.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>致读者</h1><p>卷首正文。</p></body></html>")
+            entry("c2.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>第二章</h1></body></html>")
+        }
+        val context = RuntimeEnvironment.getApplication() as Context
+        val preferences = context.getSharedPreferences("foreword-upgrade-test", Context.MODE_PRIVATE)
+        // Previous directory version: the adopted title was already overwritten by the body heading.
+        preferences.edit().clear().putInt("epub_directory_version", 4).commit()
+        val database = Room.inMemoryDatabaseBuilder(context, KixyuDatabase::class.java).build()
+        try {
+            val dao = database.bookDao()
+            dao.insertBook(BookEntity("book", "卷首升级", "", "", null, "EPUB", "", source.path, 1, "hash", ""))
+            val chapter = ChapterEntity(7, "book", "致读者", 1, chapterKey = "stable-key")
+            dao.insertChapter(chapter)
+            dao.insertParagraphsChunked(chapter.id, listOf("卷首正文。"))
+            val bookmark = BookmarkEntity("bookmark", "book", chapter.id, 0, "卷首正文。", 1)
+            dao.insertBookmark(bookmark)
+            val progress = ReadingProgressEntity("book", chapter.id, 0, 0, 10, .1f, chapter.chapterKey)
+            dao.saveProgress(progress)
+            val note = ReaderAnnotationEntity(
+                "note", "book", "hash", chapter.chapterKey, 0, 0, 0, 4,
+                "卷首正文。", "HIGHLIGHT", "原有笔记", 1, 1, "device",
+            )
+            database.readerAnnotationDao().upsert(note)
+
+            var scheduled = 0
+            val coordinator = EpubIndexCoordinator(
+                database, dao, EpubParseCoordinator(), EpubChapterCache(folder.newFolder("foreword-cache")),
+                Mutex(), Mutex(), preferences, { scheduled++ },
+            )
+            coordinator.upgradeDirectoryDataIfNeeded()
+
+            val repaired = dao.getChapter("book", 1)!!
+            assertEquals("第二卷", repaired.title)
+            assertEquals(7L, repaired.id)
+            assertEquals(listOf(bookmark), dao.getAllBookmarkEntities())
+            assertEquals(progress, dao.getProgress("book"))
+            assertEquals(listOf(note), database.readerAnnotationDao().getForBook("book"))
+        } finally {
+            database.close()
+            preferences.edit().clear().commit()
+        }
+    }
 }

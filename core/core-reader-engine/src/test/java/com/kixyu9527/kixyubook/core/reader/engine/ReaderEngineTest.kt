@@ -601,7 +601,7 @@ class ReaderEngineTest {
             entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>卷首目录</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/><item id="fw2" href="foreword2.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="fw2"/><itemref idref="c2"/></spine></package>""")
             entry("OPS/nav.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><span>第一卷</span><ol><li><a href="c1.xhtml">第一章</a></li></ol></li><li><span>第二卷</span><ol><li><a href="c2.xhtml">第二章</a></li></ol></li></ol></nav></body></html>""")
             entry("OPS/c1.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>第一章</h1></body></html>")
-            entry("OPS/foreword2.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>序</h1><p>卷首。</p></body></html>")
+            entry("OPS/foreword2.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>致读者</h1><p>卷首。</p></body></html>")
             entry("OPS/c2.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>第二章</h1></body></html>")
         }
 

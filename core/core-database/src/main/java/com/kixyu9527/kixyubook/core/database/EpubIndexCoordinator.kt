@@ -299,7 +299,9 @@ internal class EpubIndexCoordinator(
 }
 
 private const val KEY_EPUB_DIRECTORY_VERSION = "epub_directory_version"
-private const val EPUB_DIRECTORY_VERSION = 4
+// v5 reapplies outline titles in place, repairing books whose volume-opening pages had the body
+// heading ("序") written back over the adopted volume title by the previous parser.
+private const val EPUB_DIRECTORY_VERSION = 5
 private fun String.shortIndexDiagnosticId(): String = take(8)
 
 private fun stableIndexChapterKey(bookUuid: String, index: Int, title: String): String {
