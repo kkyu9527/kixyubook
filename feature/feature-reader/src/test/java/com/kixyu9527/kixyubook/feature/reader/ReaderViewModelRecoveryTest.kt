@@ -222,6 +222,86 @@ class ReaderViewModelRecoveryTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test fun failedChapterNavigationStartsAFreshLoadWhenRetried() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            var failSecondChapter = true
+            val chapters = listOf(
+                Chapter(1, "book", "第一章", 0, chapterKey = "first"),
+                Chapter(2, "book", "第二章", 1, chapterKey = "second"),
+            )
+            val repository = object : BookRepository by fake<BookRepository>({ method, _ ->
+                when (method) {
+                    "observeChapters" -> MutableStateFlow(chapters)
+                    "observeProgress" -> MutableStateFlow<ReadingProgress?>(null)
+                    "observeBookmarks" -> flowOf(emptyList<Bookmark>())
+                    "getBook" -> Book("book", "测试", "", "", null, BookFormat.EPUB, "", "", 0, "hash")
+                    "readEpubNavigation" -> emptyList<EpubNavigationEntry>()
+                    "setReaderSessionActive", "setReaderInteractionActive", "releaseReaderMemory" -> Unit
+                    else -> error("Unexpected book call: $method")
+                }
+            }) {
+                override suspend fun getChapter(
+                    bookUuid: String,
+                    chapterIndex: Int,
+                    priority: ChapterLoadPriority,
+                ): ChapterContent? {
+                    if (chapterIndex == 1) {
+                        // Speculative loads return nothing so only the user jump exercises the
+                        // failure path; the first user jump fails, the retry must reload.
+                        if (priority != ChapterLoadPriority.USER) return null
+                        if (failSecondChapter) throw java.io.IOException("temporary parse error")
+                    }
+                    val chapter = chapters[chapterIndex]
+                    return ChapterContent(chapter, listOf(Paragraph(0, chapter.id, 0, "正文")))
+                }
+                override suspend fun saveProgress(progress: ReadingProgress) = Unit
+            }
+            val settings = fake<ReaderSettingsRepository> { method, _ ->
+                when (method) {
+                    "getSettings" -> flowOf(ReaderSettings())
+                    "getSearchHistory" -> flowOf(emptyList<String>())
+                    else -> error("Unexpected settings call: $method")
+                }
+            }
+            val fonts = fake<FontRepository> { method, _ ->
+                check(method == "observeFonts"); flowOf(emptyList<UserFont>())
+            }
+            val stats = fake<ReadingStatsRepository> { method, _ -> error("Unexpected stats call: $method") }
+            val sync = fake<CloudSyncCoordinator> { method, _ ->
+                when (method) {
+                    "getPriorityBookSync" ->
+                        MutableStateFlow(PriorityBookSyncState("book", PriorityBookSyncPhase.PULLING))
+                    "prioritizeBook", "releaseBook" -> Unit
+                    else -> error("Unexpected sync call: $method")
+                }
+            }
+            val corrections = fake<TextCorrectionRepository> { method, _ ->
+                check(method == "observeBookCorrections"); flowOf(emptyList<TextCorrection>())
+            }
+            val annotations = fake<ReaderAnnotationRepository> { method, _ ->
+                check(method == "observeBookAnnotations"); flowOf(emptyList<ReaderAnnotation>())
+            }
+            val viewModel = ReaderViewModel(
+                "book", repository, settings, fonts, stats, sync, corrections, annotations,
+                androidx.test.core.app.ApplicationProvider.getApplicationContext(),
+            )
+            advanceUntilIdle()
+            assertEquals(0, viewModel.uiState.value.chapterIndex)
+
+            viewModel.jumpToChapter(1)
+            advanceUntilIdle()
+            assertNotNull("the first navigation must surface the failure", viewModel.uiState.value.error)
+
+            failSecondChapter = false
+            viewModel.jumpToChapter(1)
+            advanceUntilIdle()
+            assertEquals(1, viewModel.uiState.value.chapterIndex)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
 }
 
 private class PerBookHarness(

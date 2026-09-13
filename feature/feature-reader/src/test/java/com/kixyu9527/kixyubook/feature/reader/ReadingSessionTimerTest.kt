@@ -33,4 +33,18 @@ class ReadingSessionTimerTest {
 
         assertEquals(1_000L, timer.finish())
     }
+
+    @Test
+    fun finishStartsAFreshTotalForAReenteredReaderScene() {
+        var now = 0L
+        val timer = ReadingSessionTimer { now }
+
+        timer.setActive(true)
+        now += 3_000
+        assertEquals(3_000L, timer.finish())
+
+        timer.setActive(true)
+        now += 2_000
+        assertEquals(2_000L, timer.finish())
+    }
 }

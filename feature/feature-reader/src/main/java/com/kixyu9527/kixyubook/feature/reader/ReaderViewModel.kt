@@ -352,7 +352,19 @@ class ReaderViewModel @AssistedInject constructor(
                 // Publisher navigation is optional. The complete spine directory stays usable.
             }
         }
-    }.onFailure { error -> _uiState.update { it.copy(loading = false, error = error.message) } }
+    }.onFailure { error ->
+        if (error is CancellationException) throw error
+        // A throwable without a message must still produce a visible failure surface, never a blank
+        // reader with no retry affordance.
+        _uiState.update {
+            it.copy(loading = false, error = error.message ?: context.getString(R.string.reader_error_chapter))
+        }
+    }
+
+    /** Clears an error that has already been surfaced without replacing the visible chapter. */
+    fun clearTransientError() {
+        _uiState.update { if (it.chapter != null) it.copy(error = null) else it }
+    }
 
     fun retryInitialLoad() {
         if (_uiState.value.loading || initialRetryJob?.isActive == true) return
@@ -709,10 +721,12 @@ class ReaderViewModel @AssistedInject constructor(
                 latestLocalWriteAt = latestLocalProgressWriteAt,
             )
         ) return
-        acceptedProgressUpdatedAt = progress.updatedTime
         val state = _uiState.value
         val targetIndex = readerProgressChapterIndex(state.chapters, progress)
+        // Only mark the update as accepted once it can actually be applied. Advancing the watermark
+        // for an unresolvable chapter would suppress a later valid update.
         if (targetIndex < 0) return
+        acceptedProgressUpdatedAt = progress.updatedTime
         val targetPosition = progress.paragraphIndex.coerceAtLeast(0)
         val targetCharOffset = progress.charOffset.coerceAtLeast(0)
         val currentPosition = _positionState.value
@@ -764,19 +778,24 @@ class ReaderViewModel @AssistedInject constructor(
     ): Deferred<ReaderChapter?> {
         val existing = chapterLoads[index]
         if (existing != null && !existing.deferred.isCancelled) {
+            // A completed failure must not be cached: retrying the same chapter has to start a new
+            // load instead of rethrowing the old exception forever.
+            val failed = existing.deferred.isCompleted &&
+                runCatching { existing.deferred.getCompleted() }.isFailure
             val promotesSpeculativeLoad = priority != ChapterLoadPriority.PREFETCH &&
                 existing.priority == ChapterLoadPriority.PREFETCH
             val promotesReadAheadToUser = priority == ChapterLoadPriority.USER &&
                 existing.priority == ChapterLoadPriority.READ_AHEAD
-            if (promotesSpeculativeLoad || promotesReadAheadToUser) {
+            if (!failed && !(promotesSpeculativeLoad || promotesReadAheadToUser)) {
+                return existing.deferred
+            }
+            if (!failed) {
                 // Current content must never inherit speculative scheduling. The prefetch parser
                 // may still be unwinding a difficult XHTML file, but parsing happens outside the
                 // repository commit lock so this USER request can overtake it immediately.
                 existing.deferred.cancel()
-                chapterLoads.remove(index)
-            } else {
-                return existing.deferred
             }
+            chapterLoads.remove(index)
         }
         return viewModelScope.async {
             val target = chapters.getOrNull(index) ?: return@async null
@@ -1078,8 +1097,9 @@ class ReaderViewModel @AssistedInject constructor(
     /** HyperOS can ask for a process checkpoint immediately before enforcing its memory budget. */
     override fun onMemoryPressure(level: MemoryPressureLevel) {
         if (level != MemoryPressureLevel.CRITICAL) return
-        // The registry dispatches on the vendor receiver's background HandlerThread. Keep a firm
-        // deadline so the complete TRIM/KILL response remains inside HyperOS's three-second limit.
+        // The registry always dispatches off the main thread (the vendor receiver and the Android
+        // trim callbacks both run on a background HandlerThread). Keep a firm deadline so the
+        // complete TRIM/KILL response remains inside HyperOS's three-second limit.
         val saved = runBlocking(Dispatchers.IO) {
             withTimeoutOrNull(PROGRESS_CHECKPOINT_TIMEOUT_MS) {
                 progressWriter.flush()
@@ -1164,7 +1184,12 @@ class ReaderViewModel @AssistedInject constructor(
 
     /** Counts only time during which this reader destination is resumed with readable content. */
     fun setReadingActive(active: Boolean) {
-        if (sessionFinished.get()) return
+        if (sessionFinished.get()) {
+            // The scene may be disposed (e.g. a nested route on top) and composed again while the
+            // ViewModel survives. Re-activating starts a fresh session instead of staying latched.
+            if (!active) return
+            sessionFinished.set(false)
+        }
         sessionTimer.setActive(active)
     }
 

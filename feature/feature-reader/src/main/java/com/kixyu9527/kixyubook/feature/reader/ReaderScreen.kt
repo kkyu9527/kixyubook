@@ -308,6 +308,14 @@ internal fun ReaderScreen(
             onExit()
         }
     }
+    // If the exit is not honored (e.g. a transitioning scene swallows the pop), unblock the button
+    // instead of leaving the reader impossible to leave.
+    LaunchedEffect(exitRequested) {
+        if (exitRequested) {
+            delay(1_000)
+            exitRequested = false
+        }
+    }
     KixyuOverlayHost(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalKixyuGlassBackdrop provides readerBackdrop) {
         CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(palette.accent, palette.accent.copy(alpha = .32f))) {

@@ -21,6 +21,9 @@ internal class ReadingSessionTimer(
 
     fun finish(): Long {
         setActive(false)
-        return accumulatedMillis
+        val total = accumulatedMillis
+        // Reset so a re-entered reader scene records a fresh session instead of adding to the total.
+        accumulatedMillis = 0L
+        return total
     }
 }

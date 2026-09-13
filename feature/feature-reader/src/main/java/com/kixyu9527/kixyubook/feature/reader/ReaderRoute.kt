@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -11,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -95,6 +97,16 @@ private fun LoadedReaderRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val position by viewModel.positionState.collectAsStateWithLifecycle()
     val contentState by viewModel.contentState.collectAsStateWithLifecycle()
+    // A chapter-navigation failure keeps the current chapter on screen, so the full-screen failure
+    // surface never shows. Surface it transiently instead, then clear it.
+    val errorContext = LocalContext.current
+    LaunchedEffect(state.error, state.chapter) {
+        val message = state.error
+        if (message != null && state.chapter != null) {
+            Toast.makeText(errorContext, message, Toast.LENGTH_SHORT).show()
+            viewModel.clearTransientError()
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     var readerResumed by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
