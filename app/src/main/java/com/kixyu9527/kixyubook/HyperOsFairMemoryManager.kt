@@ -66,22 +66,25 @@ internal class HyperOsFairMemoryManager(
 
     fun handleAndroidTrim(level: Int) {
         val pressure = androidPressureLevel(level) ?: return
-        val result = MemoryPressureRegistry.dispatch(pressure)
-        recordHandled(
-            source = "android",
-            pressure = pressure,
-            result = result,
-            details = mapOf("trimLevel" to level),
-        )
+        // Application.onTrimMemory runs on the main thread. Dispatch on the manager's HandlerThread
+        // so a final progress checkpoint can never block the UI thread (and cause an ANR).
+        dispatchOffMainThread("android", pressure, mapOf("trimLevel" to level))
     }
 
     fun handleAndroidLowMemory() {
-        val result = MemoryPressureRegistry.dispatch(MemoryPressureLevel.CRITICAL)
-        recordHandled(
-            source = "android_low_memory",
-            pressure = MemoryPressureLevel.CRITICAL,
-            result = result,
-        )
+        dispatchOffMainThread("android_low_memory", MemoryPressureLevel.CRITICAL, emptyMap())
+    }
+
+    private fun dispatchOffMainThread(
+        source: String,
+        pressure: MemoryPressureLevel,
+        details: Map<String, Any?>,
+    ) {
+        if (!started) return
+        handler.post {
+            val result = MemoryPressureRegistry.dispatch(pressure)
+            recordHandled(source, pressure, result, details)
+        }
     }
 
     private fun handleHyperOsRequest(intent: Intent) {
