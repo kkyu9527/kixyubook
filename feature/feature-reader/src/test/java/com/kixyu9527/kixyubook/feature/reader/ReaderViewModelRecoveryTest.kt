@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
 import androidx.lifecycle.ViewModelStore
+import com.kixyu9527.kixyubook.core.common.configuration.mergeBookSetting
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.*
 import kotlinx.coroutines.CompletableDeferred
@@ -8,11 +9,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.*
 import org.junit.After
@@ -173,6 +178,139 @@ class ReaderViewModelRecoveryTest {
             secondStore.clear()
         }
     } }
+
+    @Test fun perBookProfileRoutesAnEditQueuedRightAfterEnablingToThisBook() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = perBookHarness()
+            advanceUntilIdle()
+            assertFalse(harness.viewModel.uiState.value.bookSettingsEnabled)
+
+            // Toggle and edit within the same frame: the edit must follow the new per-book mode.
+            harness.viewModel.setBookSettingsEnabled(true)
+            harness.viewModel.updateSettings { it.copy(fontSize = 25f) }
+            advanceUntilIdle()
+
+            assertEquals(listOf(true), harness.enabledCalls)
+            assertTrue(
+                "fontSize must be written to the per-book profile",
+                harness.fieldWrites.any { it.first == "fontSize" && it.second.contains("25") },
+            )
+            assertTrue("global fontSize must not change", harness.globalFontWrites.none { it == 25f })
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun disablingPerBookProfileBeforeTheDebouncedWriteKeepsGlobalUntouched() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = perBookHarness()
+            advanceUntilIdle()
+            harness.viewModel.setBookSettingsEnabled(true)
+            advanceUntilIdle()
+            // The edit is queued for the debounced writer, then the mode is switched off first.
+            harness.viewModel.updateSettings { it.copy(fontSize = 26f) }
+            harness.viewModel.setBookSettingsEnabled(false)
+            advanceUntilIdle()
+
+            assertTrue(
+                "a per-book edit must not be reinterpreted as a global write",
+                harness.globalFontWrites.none { it == 26f },
+            )
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+}
+
+private class PerBookHarness(
+    val viewModel: ReaderViewModel,
+    val enabledCalls: MutableList<Boolean>,
+    val fieldWrites: MutableList<Pair<String, String>>,
+    val globalFontWrites: MutableList<Float>,
+)
+
+private fun perBookHarness(): PerBookHarness {
+    val globalSettings = MutableStateFlow(ReaderSettings())
+    val globalFontWrites = mutableListOf<Float>()
+    val settingsRepository = object : ReaderSettingsRepository {
+        override val settings: Flow<ReaderSettings> = globalSettings
+        override val readingGoalMinutes: Flow<Int> = flowOf(30)
+        override val searchHistory: Flow<List<String>> = flowOf(emptyList())
+        override suspend fun update(transform: (ReaderSettings) -> ReaderSettings) {
+            globalSettings.value = transform(globalSettings.value)
+            globalFontWrites += globalSettings.value.fontSize
+        }
+        override suspend fun setReadingGoalMinutes(minutes: Int) = Unit
+        override suspend fun addSearchHistory(query: String) = Unit
+        override suspend fun clearSearchHistory() = Unit
+    }
+    val overrides = MutableStateFlow<Map<String, String>>(emptyMap())
+    val enabledCalls = mutableListOf<Boolean>()
+    val fieldWrites = mutableListOf<Pair<String, String>>()
+    val bookSettings = object : BookSettingsRepository {
+        override val overrides: Flow<Map<String, String>> = overrides
+        override suspend fun setEnabled(bookUuid: String, enabled: Boolean) {
+            enabledCalls += enabled
+            overrides.value = if (enabled) overrides.value + (bookUuid to "{}") else overrides.value - bookUuid
+        }
+        override suspend fun updateField(bookUuid: String, field: String, encodedValue: String) {
+            fieldWrites += field to encodedValue
+            overrides.value = overrides.value + (bookUuid to mergeBookSetting(
+                globalSettings.value, overrides.value[bookUuid] ?: "{}", field, encodedValue,
+            ))
+        }
+        override suspend fun clearFontReferences(fontUuid: String) = Unit
+        override suspend fun replaceAll(values: Map<String, String>) { overrides.value = values }
+    }
+    val chapters = MutableStateFlow(listOf(Chapter(12, "book", "第一章", 0, chapterKey = "first")))
+    val repository = object : BookRepository by fake<BookRepository>({ method, _ ->
+        when (method) {
+            "observeChapters" -> chapters
+            "observeProgress" -> MutableStateFlow<ReadingProgress?>(null)
+            "observeBookmarks" -> flowOf(emptyList<Bookmark>())
+            "getBook" -> Book("book", "测试", "", "", null, BookFormat.EPUB, "", "", 0, "hash")
+            "readEpubNavigation" -> emptyList<EpubNavigationEntry>()
+            "setReaderSessionActive", "setReaderInteractionActive", "releaseReaderMemory" -> Unit
+            else -> error("Unexpected book call: $method")
+        }
+    }) {
+        override suspend fun getChapter(
+            bookUuid: String,
+            chapterIndex: Int,
+            priority: ChapterLoadPriority,
+        ): ChapterContent {
+            val chapter = chapters.value[chapterIndex]
+            return ChapterContent(
+                chapter,
+                List(5) { index -> Paragraph(index.toLong(), chapter.id, index, "正文 $index") },
+            )
+        }
+        override suspend fun saveProgress(progress: ReadingProgress) = Unit
+    }
+    val fonts = fake<FontRepository> { method, _ ->
+        check(method == "observeFonts"); flowOf(emptyList<UserFont>())
+    }
+    val stats = fake<ReadingStatsRepository> { method, _ -> error("Unexpected stats call: $method") }
+    val sync = fake<CloudSyncCoordinator> { method, _ ->
+        when (method) {
+            "getPriorityBookSync" -> MutableStateFlow(PriorityBookSyncState("book", PriorityBookSyncPhase.PULLING))
+            "prioritizeBook", "releaseBook" -> Unit
+            else -> error("Unexpected sync call: $method")
+        }
+    }
+    val corrections = fake<TextCorrectionRepository> { method, _ ->
+        check(method == "observeBookCorrections"); flowOf(emptyList<TextCorrection>())
+    }
+    val annotations = fake<ReaderAnnotationRepository> { method, _ ->
+        check(method == "observeBookAnnotations"); flowOf(emptyList<ReaderAnnotation>())
+    }
+    val viewModel = ReaderViewModel(
+        "book", repository, settingsRepository, fonts, stats, sync, corrections, annotations,
+        androidx.test.core.app.ApplicationProvider.getApplicationContext(), bookSettings,
+    )
+    return PerBookHarness(viewModel, enabledCalls, fieldWrites, globalFontWrites)
 }
 
 private inline fun <reified T> fake(crossinline call: (String, Array<out Any?>?) -> Any?): T =

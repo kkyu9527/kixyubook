@@ -141,10 +141,15 @@ class ReaderViewModel @AssistedInject constructor(
         failureMessage = { context.getString(R.string.reader_error_search) },
     )
 
+    // Authoritative in-memory toggle. The DataStore flow only confirms it later, so edits right
+    // after enabling per-book settings must not read a stale value and fall back to the global copy.
+    private var bookSettingsEnabled = false
+
     init {
         viewModelScope.launch {
             bookSettings.overrides.collect { overrides ->
-                _uiState.update { it.copy(bookSettingsEnabled = bookUuid in overrides) }
+                bookSettingsEnabled = bookUuid in overrides
+                _uiState.update { it.copy(bookSettingsEnabled = bookSettingsEnabled) }
             }
         }
         MemoryPressureRegistry.register(this)
@@ -1085,16 +1090,25 @@ class ReaderViewModel @AssistedInject constructor(
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) {
         val current = _uiState.value.settings
-        val local = _uiState.value.bookSettingsEnabled
+        // Record the scope at submit time. The mode toggle is applied synchronously, so an edit
+        // made while per-book settings are on targets this book even if the user turns the mode
+        // off before the debounced write runs. The write must not be reinterpreted later.
+        val local = bookSettingsEnabled
         settingRequests.changes(current, transform).forEach { (field, patch) ->
             settingWrites.submit("reader:$field") {
-                if (local && field in BOOK_SETTING_KEYS) bookSettings.updateField(bookUuid, field, patch)
-                else settingsRepository.update { applySettingsPatch(it, patch) }
+                if (local && field in BOOK_SETTING_KEYS) {
+                    bookSettings.updateField(bookUuid, field, patch)
+                } else {
+                    settingsRepository.update { applySettingsPatch(it, patch) }
+                }
             }
         }
     }
 
     fun setBookSettingsEnabled(enabled: Boolean) {
+        // Apply in memory before the persisted write so an immediate edit sees the new mode.
+        bookSettingsEnabled = enabled
+        _uiState.update { it.copy(bookSettingsEnabled = enabled) }
         settingRequests.clear()
         settingWrites.submit("bookProfile") { bookSettings.setEnabled(bookUuid, enabled) }
     }
