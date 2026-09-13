@@ -71,7 +71,10 @@ internal fun Element.backgroundImage(cssRules: List<CssRule>, xhtmlPath: String)
 
 internal fun Element.toStyledText(stylesheet: CssStylesheet, xhtmlPath: String): StyledText {
     val builder = StyledTextBuilder()
-    fun visit(node: Node, inherited: NormalizedInlineState) {
+    fun visit(node: Node, inherited: NormalizedInlineState, depth: Int = 0) {
+        // Bound recursion: deeply nested inline markup could otherwise overflow the stack, which the
+        // element-count budget does not prevent.
+        if (depth > MAX_INLINE_DEPTH) return
         when (node.nodeType) {
             Node.TEXT_NODE, Node.CDATA_SECTION_NODE -> builder.append(node.nodeValue.orEmpty(), inherited)
             Node.ELEMENT_NODE -> {
@@ -104,7 +107,7 @@ internal fun Element.toStyledText(stylesheet: CssStylesheet, xhtmlPath: String):
                 if (styles.hidden) return
                 var child = element.firstChild
                 while (child != null) {
-                    visit(child, styles)
+                    visit(child, styles, depth + 1)
                     child = child.nextSibling
                 }
             }
@@ -401,3 +404,5 @@ internal val CSS_IMPORT = Regex(
     RegexOption.IGNORE_CASE,
 )
 private val CSS_COVER_VALUE = Regex("(?:^|\\s|/)cover(?:$|\\s)", RegexOption.IGNORE_CASE)
+
+private const val MAX_INLINE_DEPTH = 256

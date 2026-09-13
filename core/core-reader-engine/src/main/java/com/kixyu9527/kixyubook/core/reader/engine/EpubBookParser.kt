@@ -446,18 +446,25 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 ?.takeIf(String::isNotBlank)
                 ?: error("EPUB 缺少 container rootfile")
         } catch (_: EpubDomLimitExceeded) {
-            zip.getInputStream(containerEntry).use(::readContainerRootfileStreaming)
+            zip.openBoundedEntry(containerEntry, MAX_STREAMED_EPUB_XML_BYTES).use { readContainerRootfileStreaming(it) }
+        } catch (_: Exception) {
+            zip.openBoundedEntry(containerEntry, MAX_STREAMED_EPUB_XML_BYTES).use { readContainerRootfileStreaming(it, lenient = true) }
         }
         val opfEntry = zip.findEntry(opfPath) ?: error("EPUB 缺少 $opfPath")
         return try {
             parsePackageDom(zip, opfPath)
         } catch (_: EpubDomLimitExceeded) {
             zip.openBoundedEntry(opfEntry, MAX_STREAMED_EPUB_XML_BYTES).use { input -> readPackageStreaming(input, opfPath) }
+        } catch (_: Exception) {
+            // A DOCTYPE or malformed prolog can defeat the strict parser; retry leniently.
+            zip.openBoundedEntry(opfEntry, MAX_STREAMED_EPUB_XML_BYTES).use { input ->
+                readPackageStreaming(input, opfPath, lenient = true)
+            }
         }
     }
 
-    private fun parsePackageDom(zip: ZipFile, opfPath: String): PackageDocument {
-        val document = parseXml(zip, opfPath)
+    private fun parsePackageDom(zip: ZipFile, opfPath: String, lenient: Boolean = false): PackageDocument {
+        val document = parseXml(zip, opfPath, lenient)
         val metadata = document.getElementsByTagNameNS("*", "metadata").item(0) as? Element
         val manifest = linkedMapOf<String, ManifestItem>()
         val items = document.getElementsByTagNameNS("*", "item")
@@ -582,10 +589,10 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         return null
     }
 
-    private fun parseXml(zip: ZipFile, path: String): org.w3c.dom.Document {
+    private fun parseXml(zip: ZipFile, path: String, lenient: Boolean = false): org.w3c.dom.Document {
         val entry = zip.findEntry(path) ?: error("EPUB 缺少 $path")
         return zip.openBoundedEntry(entry, MAX_EPUB_XML_BYTES, path).use { input ->
-            newDocumentBuilder().parse(input).also(::validateXmlDocument)
+            newDocumentBuilder(lenient).parse(input).also(::validateXmlDocument)
         }
     }
 
@@ -595,12 +602,14 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         }
     }
 
-    private fun newDocumentBuilder() = DocumentBuilderFactory.newInstance().run {
+    private fun newDocumentBuilder(lenient: Boolean = false) = DocumentBuilderFactory.newInstance().run {
         isNamespaceAware = true
         isExpandEntityReferences = false
-        runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+        // Lenient parsing permits an internal DTD but still blocks external entities.
+        if (!lenient) runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
         runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
         runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+        runCatching { setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true) }
         newDocumentBuilder()
     }
 
@@ -707,6 +716,12 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         )
         zip.openBoundedEntry(entry, MAX_STREAMED_EPUB_XHTML_BYTES).use { input ->
             readXhtmlStreaming(input, zip, xhtmlPath, manifest)
+        }
+    } catch (_: Exception) {
+        // A DOCTYPE or a slightly malformed prolog defeats the strict parser. Retry the streaming
+        // path with DOCTYPE permitted (external entities stay disabled) before giving up.
+        zip.openBoundedEntry(entry, MAX_STREAMED_EPUB_XHTML_BYTES).use { input ->
+            readXhtmlStreaming(input, zip, xhtmlPath, manifest, lenient = true)
         }
     }
 

@@ -76,6 +76,31 @@ class EpubFallbackTest {
         assertEquals("第0段", chapter.paragraphs.first())
         assertEquals("第${MAX_CHAPTER_DOM_BLOCKS_FOR_TEST}段", chapter.paragraphs.last())
     }
+
+    @Test fun doctypeAndLenientMarkupStillParse() = runBlocking {
+        val epub = folder.newFile("doctype.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            zip.textEntry("mimetype", "application/epub+zip")
+            zip.textEntry(
+                "META-INF/container.xml",
+                """<?xml version="1.0"?><!DOCTYPE container><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""",
+            )
+            zip.textEntry(
+                "OPS/book.opf",
+                """<?xml version="1.0"?><!DOCTYPE package><package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>DOCTYPE 测试</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>""",
+            )
+            zip.textEntry(
+                "OPS/c1.xhtml",
+                """<?xml version="1.0"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>DOCTYPE 正文。</p></body></html>""",
+            )
+        }
+
+        val parser = EpubBookParser()
+        assertEquals("DOCTYPE 测试", parser.readMetadata(epub, epub.name).title)
+        val chapter = parser.readChapter(epub, 0)!!
+        assertEquals("第一章", chapter.title)
+        assertTrue(chapter.paragraphs.contains("DOCTYPE 正文。"))
+    }
 }
 
 private fun ZipOutputStream.textEntry(path: String, value: String) {

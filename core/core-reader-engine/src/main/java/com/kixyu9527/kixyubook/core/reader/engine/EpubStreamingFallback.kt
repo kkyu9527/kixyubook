@@ -11,9 +11,9 @@ import javax.xml.parsers.SAXParserFactory
  * Low-memory fallbacks for publisher files that are too large or too deeply structured for DOM.
  * They intentionally preserve readable content before decorative CSS and directory hierarchy.
  */
-internal fun readContainerRootfileStreaming(input: InputStream): String {
+internal fun readContainerRootfileStreaming(input: InputStream, lenient: Boolean = false): String {
     var rootfile = ""
-    parseSax(input, object : DefaultHandler() {
+    parseSax(input, lenient, object : DefaultHandler() {
         override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes) {
             if (elementName(localName, qName) == "rootfile" && rootfile.isBlank()) {
                 rootfile = attributes.value("full-path")
@@ -26,6 +26,7 @@ internal fun readContainerRootfileStreaming(input: InputStream): String {
 internal fun readPackageStreaming(
     input: InputStream,
     opfPath: String,
+    lenient: Boolean = false,
 ): PackageDocument {
     val manifest = linkedMapOf<String, ManifestItem>()
     val spine = mutableListOf<String>()
@@ -33,7 +34,7 @@ internal fun readPackageStreaming(
     var capture: String? = null
     var metadataDepth = 0
     var coverId: String? = null
-    parseSax(input, object : DefaultHandler() {
+    parseSax(input, lenient, object : DefaultHandler() {
         override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes) {
             val name = elementName(localName, qName)
             when (name) {
@@ -95,6 +96,7 @@ internal fun readXhtmlStreaming(
     zip: ZipFile,
     xhtmlPath: String,
     manifest: Collection<ManifestItem>,
+    lenient: Boolean = false,
 ): XhtmlContent {
     val blocks = mutableListOf<XhtmlBlock>()
     var heading: String? = null
@@ -136,7 +138,7 @@ internal fun readXhtmlStreaming(
         }
     }
 
-    parseSax(input, object : DefaultHandler() {
+    parseSax(input, lenient, object : DefaultHandler() {
         override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes) {
             val name = elementName(localName, qName)
             depth++
@@ -196,12 +198,15 @@ internal fun readXhtmlStreaming(
     return XhtmlContent(heading, blocks)
 }
 
-private fun parseSax(input: InputStream, handler: DefaultHandler) {
+private fun parseSax(input: InputStream, lenient: Boolean, handler: DefaultHandler) {
     val factory = SAXParserFactory.newInstance().apply {
         isNamespaceAware = true
-        runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+        // Strict parsing forbids DOCTYPE. A lenient retry allows an internal DTD (some publishers
+        // ship one) while still disabling external entities, so XXE stays blocked either way.
+        if (!lenient) runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
         runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
         runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+        runCatching { setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true) }
     }
     factory.newSAXParser().parse(input, handler)
 }
