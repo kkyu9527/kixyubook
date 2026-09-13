@@ -981,18 +981,23 @@ class LocalBookRepository @Inject constructor(
                 dao.deleteChapters(bookUuid)
                 var chapterIndex = 0
                 val chapterIds = mutableListOf<Long>()
+                val chapterKeys = mutableListOf<String>()
                 parser.readChapters(source) { chapter ->
+                    val index = chapterIndex
+                    val chapterKey = stableChapterKey(bookUuid, index, chapter.title)
                     val chapterId = dao.insertChapter(
                         ChapterEntity(
                             bookUuid = bookUuid,
                             title = chapter.title,
-                            chapterIndex = chapterIndex++,
+                            chapterIndex = index,
                             volumeTitle = chapter.volumeTitle,
                             volumeIndex = chapter.volumeIndex,
-                            chapterKey = stableChapterKey(bookUuid, chapterIndex - 1, chapter.title),
+                            chapterKey = chapterKey,
                         ),
                     )
+                    chapterIndex = index + 1
                     chapterIds += chapterId
+                    chapterKeys += chapterKey
                     dao.insertParagraphsChunked(chapterId, chapter.paragraphs)
                 }
                 require(chapterIndex > 0) { context.getString(R.string.db_no_chapters) }
@@ -1019,20 +1024,14 @@ class LocalBookRepository @Inject constructor(
                 }
 
                 previousProgress?.let { progress ->
-                    val targetChapterId = previousChapterIndex[progress.chapterId]
-                        ?.coerceIn(0, chapterIds.lastIndex)
-                        ?.let(chapterIds::get)
-                        ?: chapterIds.first()
-                    val targetParagraphs = paragraphsByChapter[targetChapterId].orEmpty()
-                    val lastParagraph = targetParagraphs.lastIndex.coerceAtLeast(0)
-                    val targetPosition = previousProgressText
-                        ?.let { text -> targetParagraphs.indexOfFirst { it.text == text } }
-                        ?.takeIf { it >= 0 }
-                        ?: progress.position.coerceIn(0, lastParagraph)
                     dao.saveProgress(
-                        progress.copy(
-                            chapterId = targetChapterId,
-                            position = targetPosition,
+                        migrateReparsedProgress(
+                            progress = progress,
+                            previousChapterIndex = previousChapterIndex,
+                            chapterIds = chapterIds,
+                            chapterKeys = chapterKeys,
+                            paragraphsByChapter = paragraphsByChapter,
+                            previousProgressText = previousProgressText,
                         ),
                     )
                 }
@@ -1187,3 +1186,42 @@ class LocalBookRepository @Inject constructor(
 }
 
 private class ImportCanceledException : Exception()
+
+/**
+ * Re-anchors saved reading progress after a TXT reparse. The reader reads `paragraphIndex` and
+ * `charOffset` (not the legacy `position`/`offset` columns), so every field must move together or
+ * the restored page is wrong. The anchor is relocated by matching the previously read paragraph
+ * text inside the reparsed chapter.
+ */
+internal fun migrateReparsedProgress(
+    progress: ReadingProgressEntity,
+    previousChapterIndex: Map<Long, Int>,
+    chapterIds: List<Long>,
+    chapterKeys: List<String>,
+    paragraphsByChapter: Map<Long, List<ParagraphEntity>>,
+    previousProgressText: String?,
+): ReadingProgressEntity {
+    val targetIndex = previousChapterIndex[progress.chapterId]?.coerceIn(0, chapterIds.lastIndex) ?: 0
+    val targetChapterId = chapterIds[targetIndex]
+    val targetParagraphs = paragraphsByChapter[targetChapterId].orEmpty()
+    val lastParagraph = targetParagraphs.lastIndex.coerceAtLeast(0)
+    val matchedIndex = previousProgressText
+        ?.let { text -> targetParagraphs.indexOfFirst { it.text == text } }
+        ?.takeIf { it >= 0 }
+    val targetPosition = matchedIndex ?: progress.position.coerceIn(0, lastParagraph)
+    // The matched paragraph text is unchanged, so the saved intra-paragraph offset is still valid;
+    // only reset it when the anchor could not be matched and we fell back to the legacy position.
+    val charOffset = if (matchedIndex != null) {
+        progress.charOffset.coerceIn(0, targetParagraphs[matchedIndex].text.length)
+    } else {
+        0
+    }
+    return progress.copy(
+        chapterId = targetChapterId,
+        position = targetPosition,
+        offset = charOffset,
+        paragraphIndex = targetPosition,
+        charOffset = charOffset,
+        chapterKey = chapterKeys[targetIndex],
+    )
+}
