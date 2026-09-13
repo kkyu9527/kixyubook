@@ -170,6 +170,14 @@ internal fun keysForMutation(value: SyncOutboxEntity): List<String> =
         SyncEntityType.ANNOTATION -> listOf("annotations/${value.entityId}")
     }
 
+/**
+ * A remote object must never overwrite a change that is still queued for upload. This is the
+ * object-level "local dirty wins" rule used by mature sync engines; the skipped snapshot is
+ * reconciled on a later run, after the local change has been pushed.
+ */
+internal fun hasPendingLocalChange(key: String, pending: List<SyncOutboxEntity>): Boolean =
+    pending.any { mutation -> key in keysForMutation(mutation) }
+
 /** A pending deletion always wins over an older cloud object, including priority reader pulls. */
 internal fun shouldPullPriorityRemote(
     localMutation: SyncOutboxEntity?,

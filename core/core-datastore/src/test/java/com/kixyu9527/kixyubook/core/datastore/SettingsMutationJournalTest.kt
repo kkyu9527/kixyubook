@@ -47,6 +47,74 @@ class SettingsMutationJournalTest {
         } finally { secondScope.cancel() }
     }
 
+    @Test fun pendingTokenOnDiskBlocksRemoteApplyAfterProcessDeath() = runBlocking {
+        val store = Store()
+        store.data.value = preferencesOf(token to "crashed-token")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val replayBlocked = CompletableDeferred<Unit>()
+        try {
+            // No in-memory state exists after a restart; only the persisted token can block an apply.
+            SettingsMutationJournal(store, object : SyncMutationRecorder {
+                override suspend fun record(type: SyncEntityType, entityId: String, operation: SyncMutationOperation) {
+                    replayBlocked.await()
+                }
+            }, scope)
+            assertTrue(SettingsWriteGate.hasPendingLocalWrite())
+        } finally {
+            scope.cancel()
+            replayBlocked.complete(Unit)
+        }
+    }
+
+    @Test fun repeatedFailedRegistrationsLeaveNoStalePendingAfterReplay() = runBlocking {
+        val store = Store()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val failing = object : SyncMutationRecorder {
+            override suspend fun record(type: SyncEntityType, entityId: String, operation: SyncMutationOperation) {
+                throw IOException("outbox unavailable")
+            }
+        }
+        val journal = SettingsMutationJournal(store, failing, scope)
+        journal.edit { it[setting] = "first" }
+        journal.edit { it[setting] = "second" }
+        assertNotNull(store.data.value[token])
+        scope.cancel()
+
+        val replayScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        var delivered = 0
+        try {
+            SettingsMutationJournal(store, object : SyncMutationRecorder {
+                override suspend fun record(type: SyncEntityType, entityId: String, operation: SyncMutationOperation) { delivered++ }
+            }, replayScope)
+            assertEquals(1, delivered)
+            assertEquals("second", store.data.value[setting])
+            assertNull(store.data.value[token])
+            assertFalse(SettingsWriteGate.hasPendingLocalWrite())
+        } finally {
+            replayScope.cancel()
+        }
+    }
+
+    @Test fun localEditAdvancesTheSettingsWriteGenerationAndRemoteRestoreDoesNot() = runBlocking {
+        val store = Store()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val journal = SettingsMutationJournal(store, object : SyncMutationRecorder {
+                override suspend fun record(type: SyncEntityType, entityId: String, operation: SyncMutationOperation) = Unit
+            }, scope)
+            val before = SettingsWriteGate.currentGeneration()
+            journal.edit { it[setting] = "local" }
+            val afterLocal = SettingsWriteGate.currentGeneration()
+            assertTrue(afterLocal > before)
+
+            withoutRecordingSyncMutations { journal.edit { it[setting] = "remote" } }
+            assertEquals(afterLocal, SettingsWriteGate.currentGeneration())
+            assertEquals("remote", store.data.value[setting])
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test fun failedEditHasNoMutationAndRemoteRestoreDoesNotEcho() = runBlocking {
         val store = Store()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)

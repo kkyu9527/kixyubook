@@ -7,6 +7,9 @@ import com.kixyu9527.kixyubook.core.common.model.ReadingProgress
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
+import com.kixyu9527.kixyubook.core.common.repository.SettingsWriteGate
+import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
+import kotlinx.coroutines.sync.withLock
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
@@ -62,8 +65,10 @@ internal class CloudRemoteStateApplier(
                 drive.download(token, metadata.id, temp)
                 val book = parseBook(JSONObject(temp.readText()))
                 mutations.withoutRecording {
-                    bookRepository.updateBookMetadata(book.uuid, book.title, book.author, book.description)
-                    bookRepository.setCategory(book.uuid, book.category)
+                    applyBookMetadataFromRemote(database, syncDao, book.uuid) {
+                        bookRepository.updateBookMetadata(book.uuid, book.title, book.author, book.description)
+                        bookRepository.setCategory(book.uuid, book.category)
+                    }
                 }
             } finally {
                 temp.delete()
@@ -115,34 +120,18 @@ internal class CloudRemoteStateApplier(
     }
 
     suspend fun applyBookmarksJson(json: JSONObject) {
-        val bookUuid = json.getString("bookUuid")
-        if (!books.bookExists(bookUuid)) return
-        mutations.withoutRecording {
-            database.withTransaction {
-                books.deleteBookmarksForBook(bookUuid)
-                val items = json.optJSONArray("items") ?: JSONArray()
-                for (index in 0 until items.length()) {
-                    val value = items.getJSONObject(index)
-                    val chapter = books.getChapterByKey(bookUuid, value.optString("chapterKey"))
-                        ?: books.getChapter(bookUuid, value.optInt("chapterIndex"))
-                        ?: continue
-                    books.insertBookmark(
-                        BookmarkEntity(
-                            uuid = value.getString("uuid"),
-                            bookUuid = bookUuid,
-                            chapterId = chapter.id,
-                            position = value.optInt("paragraphIndex"),
-                            preview = value.optString("preview"),
-                            createdTime = value.optLong("createdTime"),
-                        ),
-                    )
-                }
-            }
-        }
+        mutations.withoutRecording { replaceBookmarksFromRemote(database, books, syncDao, json) }
     }
 
-    suspend fun applySettings(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        applySettingsJson(json)
+    suspend fun applySettings(token: String, info: DriveObject) {
+        // Capture before the network read so a local edit made while the file downloads wins.
+        val startGeneration = SettingsWriteGate.currentGeneration()
+        withJsonDownload(token, info) { json ->
+            withSettingsWriteGuard(
+                startGeneration,
+                isLocallyPending = { syncDao.pendingCount(SyncEntityType.SETTINGS.name, "global") > 0 },
+            ) { applySettingsJson(json) }
+        }
     }
 
     suspend fun applySettingsJson(json: JSONObject) {
@@ -242,5 +231,79 @@ internal class CloudRemoteStateApplier(
 
     private companion object {
         const val PROGRESS_EPSILON = 0.000_001f
+    }
+}
+
+/**
+ * Applies a downloaded settings snapshot only when no local settings write happened since
+ * [startGeneration]. The check and the apply run under the same lock that local settings writes
+ * take, so there is no window between the check and the write.
+ */
+internal suspend fun withSettingsWriteGuard(
+    startGeneration: Long,
+    isLocallyPending: suspend () -> Boolean,
+    apply: suspend () -> Unit,
+): Boolean = SettingsWriteGate.mutex.withLock {
+    if (SettingsWriteGate.currentGeneration() != startGeneration) return@withLock false
+    // A write persisted to DataStore but not yet durable in the outbox must also win.
+    if (SettingsWriteGate.hasPendingLocalWrite()) return@withLock false
+    if (isLocallyPending()) return@withLock false
+    apply()
+    true
+}
+
+/**
+ * Applies downloaded book metadata only when no local edit is pending. The check and the write run
+ * in one Room transaction, so a rename/description/category edit made while the metadata file was
+ * downloading is never overwritten by the older remote snapshot.
+ */
+internal suspend fun applyBookMetadataFromRemote(
+    database: KixyuDatabase,
+    syncDao: SyncDao,
+    bookUuid: String,
+    update: suspend () -> Unit,
+): Boolean = database.withTransaction {
+    if (syncDao.pendingCount(SyncEntityType.BOOK.name, bookUuid) > 0) return@withTransaction false
+    update()
+    true
+}
+
+/**
+ * Replaces one book's bookmark list from a remote snapshot.
+ *
+ * A bookmark added while the pull is running is still queued in the outbox. Wiping the list here
+ * would erase it before the push uploads it. Room serializes transactions, so checking the outbox
+ * inside the same transaction is race-free: either the local add committed first (skip the remote
+ * snapshot and let local win), or it commits after the replace (the add survives). The skipped
+ * remote snapshot is superseded by the pending push and reconciled on the next run.
+ */
+internal suspend fun replaceBookmarksFromRemote(
+    database: KixyuDatabase,
+    books: BookDao,
+    syncDao: SyncDao,
+    json: JSONObject,
+) {
+    val bookUuid = json.getString("bookUuid")
+    if (!books.bookExists(bookUuid)) return
+    database.withTransaction {
+        if (syncDao.pendingCount(SyncEntityType.BOOKMARKS.name, bookUuid) > 0) return@withTransaction
+        books.deleteBookmarksForBook(bookUuid)
+        val items = json.optJSONArray("items") ?: JSONArray()
+        for (index in 0 until items.length()) {
+            val value = items.getJSONObject(index)
+            val chapter = books.getChapterByKey(bookUuid, value.optString("chapterKey"))
+                ?: books.getChapter(bookUuid, value.optInt("chapterIndex"))
+                ?: continue
+            books.insertBookmark(
+                BookmarkEntity(
+                    uuid = value.getString("uuid"),
+                    bookUuid = bookUuid,
+                    chapterId = chapter.id,
+                    position = value.optInt("paragraphIndex"),
+                    preview = value.optString("preview"),
+                    createdTime = value.optLong("createdTime"),
+                ),
+            )
+        }
     }
 }

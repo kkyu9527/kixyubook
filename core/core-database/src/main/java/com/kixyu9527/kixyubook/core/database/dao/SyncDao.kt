@@ -24,6 +24,10 @@ interface SyncDao {
     @Query("SELECT * FROM sync_outbox ORDER BY changedAt, logicalCounter")
     suspend fun allPending(): List<SyncOutboxEntity>
 
+    /** Non-zero while the local device still owns un-pushed changes for one object. */
+    @Query("SELECT COUNT(*) FROM sync_outbox WHERE entityType = :type AND entityId = :entityId")
+    suspend fun pendingCount(type: String, entityId: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertOutbox(value: SyncOutboxEntity)
 

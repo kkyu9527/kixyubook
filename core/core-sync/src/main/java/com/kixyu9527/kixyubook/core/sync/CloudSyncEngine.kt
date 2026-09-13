@@ -9,6 +9,7 @@ import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
+import com.kixyu9527.kixyubook.core.common.repository.SettingsWriteGate
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
@@ -550,6 +551,7 @@ class CloudSyncEngine @Inject constructor(
                     name = "settings-global.json",
                     type = SyncEntityType.SETTINGS,
                     entityId = "global",
+                    guardSettingsWrites = true,
                     apply = remoteState::applySettingsJson,
                 )
             }
@@ -635,6 +637,7 @@ class CloudSyncEngine @Inject constructor(
         name: String,
         type: SyncEntityType,
         entityId: String,
+        guardSettingsWrites: Boolean = false,
         apply: suspend (JSONObject) -> Unit,
     ) {
         val known = syncDao.objectState(key)
@@ -654,13 +657,27 @@ class CloudSyncEngine @Inject constructor(
             }
             return
         }
+        // Settings has no per-object timestamp and its outbox row is written asynchronously, so it
+        // needs the generation guard captured before the download. Other types are guarded by their
+        // own transaction/timestamp rules.
+        val startGeneration = if (guardSettingsWrites) SettingsWriteGate.currentGeneration() else 0L
+        suspend fun applyDownloaded(json: JSONObject) {
+            if (guardSettingsWrites) {
+                withSettingsWriteGuard(
+                    startGeneration,
+                    isLocallyPending = { syncDao.pendingCount(SyncEntityType.SETTINGS.name, "global") > 0 },
+                ) { apply(json) }
+            } else {
+                apply(json)
+            }
+        }
         try {
-            withJsonDownload(token, remote) { json -> apply(json) }
+            withJsonDownload(token, remote) { json -> applyDownloaded(json) }
         } catch (error: DriveHttpException) {
             if (error.statusCode != 404) throw error
             syncDao.removeObjectState(key)
             remote = drive.findByObjectKey(token, key) ?: return
-            withJsonDownload(token, remote) { json -> apply(json) }
+            withJsonDownload(token, remote) { json -> applyDownloaded(json) }
         }
         // Keep an edit created while the cloud object was being downloaded. Its replacement
         // outbox row carries another UUID and must be uploaded on the next flush.

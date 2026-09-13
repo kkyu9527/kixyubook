@@ -66,21 +66,29 @@ internal class CloudSyncPullPipeline(
         preferredBookUuid: String?,
         onProgress: suspend (CloudSyncProgress) -> Unit,
     ) {
-        val dirty = syncDao.pending().flatMap(::keysForMutation).toSet()
+        // Read the whole outbox, not a 256-row page: a truncated set would let a remote object
+        // overwrite a local change that was not visible in the snapshot.
+        val dirty = syncDao.allPending().flatMap(::keysForMutation).toSet()
         val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
         val handledKeys = mutableSetOf<String>()
         val candidates = changedRemote.filter { (key, value) ->
             !key.startsWith("tombstones/") && key !in dirty &&
                 (!initialMergeComplete || value.modifiedAt > (localStates[key]?.remoteModifiedAt ?: 0))
         }
+        // Re-read the outbox right before applying. A local edit made while this pull is running
+        // must win until it is pushed; the skipped remote snapshot is reconciled on the next run.
+        suspend fun stillDirty(key: String): Boolean =
+            hasPendingLocalChange(key, syncDao.allPending())
 
         // Configuration changes affect the presentation and behavior of everything restored
         // afterwards. Apply them before progress and book data during both initial and incremental
         // synchronization, not only during the first shelf rebuild.
         candidates["settings/global"]?.let { info ->
-            remoteState.applySettings(token, info)
-            rememberRemote("settings/global", info)
-            handledKeys += "settings/global"
+            if (!stillDirty("settings/global")) {
+                remoteState.applySettings(token, info)
+                rememberRemote("settings/global", info)
+                handledKeys += "settings/global"
+            }
         }
 
         // Existing-book progress is the latency-sensitive path. Apply it before metadata/source
@@ -90,6 +98,7 @@ internal class CloudSyncPullPipeline(
                 key.startsWith("progress/") &&
                     key.substringAfter("progress/") == preferredBookUuid
             }.forEach { (key, info) ->
+                if (stillDirty(key)) return@forEach
                 remoteState.applyProgress(token, info)
                 rememberRemote(key, info)
                 handledKeys += key
@@ -133,18 +142,23 @@ internal class CloudSyncPullPipeline(
             )
         }
 
+        suspend fun bookIsDirty(uuid: String): Boolean =
+            stillDirty("books/$uuid/metadata") || stillDirty("books/$uuid/source")
+
         if (initialMergeComplete) {
-            changedBookUuids.forEach { restoreBook(it) }
+            changedBookUuids.forEach { if (!bookIsDirty(it)) restoreBook(it) }
         } else {
             val restorePlan = planInitialRestore(changedBookUuids, knownRemote)
             restorePlan.priorityBookUuids.forEach { uuid ->
-                restoreBook(uuid)
+                if (!bookIsDirty(uuid)) restoreBook(uuid)
                 candidates["progress/$uuid"]?.let { info ->
+                    if (stillDirty("progress/$uuid")) return@let
                     remoteState.applyProgress(token, info)
                     rememberRemote("progress/$uuid", info)
                     handledKeys += "progress/$uuid"
                 }
                 candidates["bookmarks/$uuid"]?.let { info ->
+                    if (stillDirty("bookmarks/$uuid")) return@let
                     remoteState.applyBookmarks(token, info)
                     rememberRemote("bookmarks/$uuid", info)
                     handledKeys += "bookmarks/$uuid"
@@ -152,7 +166,7 @@ internal class CloudSyncPullPipeline(
             }
 
             // Put every other source-backed book on the shelf before restoring its secondary data.
-            restorePlan.remainingBookUuids.forEach { restoreBook(it) }
+            restorePlan.remainingBookUuids.forEach { if (!bookIsDirty(it)) restoreBook(it) }
         }
 
         // A font is represented by two Drive objects. Apply the pair once even when both objects
@@ -174,7 +188,7 @@ internal class CloudSyncPullPipeline(
             }
 
         candidates.forEach { (key, info) ->
-            if (key in handledKeys) return@forEach
+            if (key in handledKeys || stillDirty(key)) return@forEach
             when {
                 key.startsWith("progress/") -> remoteState.applyProgress(token, info)
                 key.startsWith("bookmarks/") -> remoteState.applyBookmarks(token, info)
