@@ -195,6 +195,8 @@ data class BackupResult(
     val bookCount: Int,
     val totalBytes: Long,
     val requiresRestart: Boolean = false,
+    /** False when the restored archive predates the integrity manifest and could not be hashed. */
+    val integrityProtected: Boolean = true,
 )
 
 data class BackupPreview(

@@ -181,12 +181,17 @@ class LocalBackupRepository @Inject constructor(
                 requireSupportedFormat(properties)
                 val snapshot = File(extracted, DATABASE_ENTRY)
                 require(snapshot.isFile) { context.getString(R.string.backup_no_database) }
-                verifyIntegrity(properties, extracted)
+                val integrityProtected = verifyIntegrity(properties, extracted)
                 validateAndRebase(snapshot, File(extracted, "files"))
                 ensureRestoreInstallSpace(snapshot, File(extracted, "files"))
                 val bookCount = countBooks(snapshot)
                 installRestore(snapshot, File(extracted, "files"), properties)
-                BackupResult(bookCount, totalBytes, requiresRestart = true)
+                BackupResult(
+                    bookCount = bookCount,
+                    totalBytes = totalBytes,
+                    requiresRestart = true,
+                    integrityProtected = integrityProtected,
+                )
             } finally {
                 work.deleteRecursively()
             }
