@@ -39,8 +39,9 @@ internal class ReaderPaginationDiskCache(private val root: File) {
                         val bottomSpacing = input.readBoolean()
                         val kind = ParagraphKind.entries.getOrNull(input.readUnsignedByte())
                             ?: error("Invalid paragraph kind")
-                        val imageWidthDp = Float.fromBits(input.readInt())
-                        val imageHeightDp = Float.fromBits(input.readInt())
+                        // A corrupt cache file can hold NaN/negative floats; fall back to unset.
+                        val imageWidthDp = Float.fromBits(input.readInt()).takeIf { it.isFinite() && it >= 0f } ?: 0f
+                        val imageHeightDp = Float.fromBits(input.readInt()).takeIf { it.isFinite() && it >= 0f } ?: 0f
                         val paragraph = requireNotNull(paragraphs[paragraphIndex])
                         require(paragraph.kind == kind)
                         require(textStart >= 0 && visibleLength >= 0)

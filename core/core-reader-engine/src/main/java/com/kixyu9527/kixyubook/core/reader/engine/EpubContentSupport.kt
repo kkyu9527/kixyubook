@@ -162,6 +162,10 @@ internal const val MAX_NAVIGATION_TITLE_LENGTH = 160
 // to the streaming compatibility path; it must never reject an otherwise readable book.
 internal const val MAX_EPUB_XML_BYTES = 2 * 1024 * 1024
 internal const val MAX_EPUB_XHTML_BYTES = 8 * 1024 * 1024
+// The streaming fallback exists for files past the DOM budget, so its input cap is higher, but it
+// still bounds a falsified entry size that would otherwise stream without limit.
+internal const val MAX_STREAMED_EPUB_XML_BYTES = 64 * 1024 * 1024
+internal const val MAX_STREAMED_EPUB_XHTML_BYTES = 64 * 1024 * 1024
 internal const val NCX_MEDIA_TYPE = "application/x-dtbncx+xml"
 internal val JPEG_START_OF_FRAME = setOf(0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF)
 

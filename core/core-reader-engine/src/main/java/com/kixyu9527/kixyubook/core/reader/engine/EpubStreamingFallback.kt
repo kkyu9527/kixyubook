@@ -48,7 +48,9 @@ internal fun readPackageStreaming(
                 "item" -> {
                     val id = attributes.value("id")
                     val href = attributes.value("href")
-                    if (id.isNotBlank() && href.isNotBlank()) {
+                    // Ignore items past the cap instead of failing: the fallback exists for large
+                    // legitimate books, but a hostile OPF must not grow this map without bound.
+                    if (id.isNotBlank() && href.isNotBlank() && manifest.size < MAX_STREAMED_MANIFEST_ITEMS) {
                         manifest[id] = ManifestItem(
                             path = resolveArchivePath(opfPath, href),
                             mediaType = attributes.value("media-type"),
@@ -56,7 +58,9 @@ internal fun readPackageStreaming(
                         )
                     }
                 }
-                "itemref" -> attributes.value("idref").takeIf(String::isNotBlank)?.let(spine::add)
+                "itemref" -> if (spine.size < MAX_STREAMED_SPINE_ITEMS) {
+                    attributes.value("idref").takeIf(String::isNotBlank)?.let(spine::add)
+                }
             }
         }
 
@@ -98,6 +102,7 @@ internal fun readXhtmlStreaming(
     var activeDepth = -1
     var activeTag = ""
     var depth = 0
+    var streamedTextChars = 0
     var buffer = StringBuilder()
 
     fun appendTextBlock(rawValue: String) {
@@ -105,6 +110,10 @@ internal fun readXhtmlStreaming(
             .replace(Regex(" *\\n+ *"), "\n")
             .trim()
         if (value.isBlank()) return
+        // Truncate rather than fail: the streaming fallback is the last resort for large books,
+        // but an oversized chapter must not grow the block list without bound.
+        if (blocks.size >= MAX_STREAMED_CHAPTER_BLOCKS || streamedTextChars >= MAX_STREAMED_CHAPTER_CHARS) return
+        streamedTextChars += value.length
         if (heading == null && activeTag in HEADING_TAGS) heading = value.singleLineBookHeading()
         blocks += XhtmlBlock.Text(StyledText(value, emptyList()))
     }
@@ -141,7 +150,7 @@ internal fun readXhtmlStreaming(
                 }
             }
             if (name == "br" && activeDepth >= 0) buffer.append('\n')
-            if (name == "img") {
+            if (name == "img" && blocks.size < MAX_STREAMED_CHAPTER_BLOCKS) {
                 val reference = attributes.value("src").ifBlank { attributes.value("href") }
                 val resourcePath = resolveArchivePath(xhtmlPath, reference)
                 val entry = zip.findEntry(resourcePath)
@@ -214,4 +223,8 @@ private fun StringBuilder?.normalizedMetadata() = this?.toString().orEmpty()
 
 private const val MAX_STREAMED_METADATA_CHARS = 64 * 1024
 private const val STREAMED_TEXT_CHUNK_CHARS = 64 * 1024
+private const val MAX_STREAMED_MANIFEST_ITEMS = 200_000
+private const val MAX_STREAMED_SPINE_ITEMS = 100_000
+private const val MAX_STREAMED_CHAPTER_BLOCKS = 1_000_000
+private const val MAX_STREAMED_CHAPTER_CHARS = 64 * 1024 * 1024
 private val STREAM_IGNORED_TAGS = setOf("style", "script", "noscript", "head")

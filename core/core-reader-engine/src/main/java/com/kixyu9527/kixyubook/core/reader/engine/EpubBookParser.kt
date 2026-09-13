@@ -129,8 +129,11 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         val coverItem = pkg.manifest.values.firstOrNull { "cover-image" in it.properties }
             ?: pkg.coverId?.let(pkg.manifest::get)
         val cover = coverItem?.let { item ->
-            zip.findEntry(item.path)?.takeIf { it.size in 1..MAX_COVER_BYTES.toLong() }
-                ?.let { zip.getInputStream(it).use { input -> input.readBytes() } }
+            // Bound the read by the declared size *and* the actual stream: a falsified ZipEntry.size
+            // must not let a small cover entry inflate into an unbounded allocation.
+            zip.findEntry(item.path)?.takeIf { it.size in 1..MAX_COVER_BYTES.toLong() }?.let { entry ->
+                runCatching { zip.openBoundedEntry(entry, MAX_COVER_BYTES).use { it.readBytes() } }.getOrNull()
+            }
         }
         DocumentMetadata(
             identityHint = pkg.identifier.takeIf { it.startsWith("urn:uuid:", true) }?.substringAfterLast(':'),
@@ -449,7 +452,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         return try {
             parsePackageDom(zip, opfPath)
         } catch (_: EpubDomLimitExceeded) {
-            zip.getInputStream(opfEntry).use { input -> readPackageStreaming(input, opfPath) }
+            zip.openBoundedEntry(opfEntry, MAX_STREAMED_EPUB_XML_BYTES).use { input -> readPackageStreaming(input, opfPath) }
         }
     }
 
@@ -656,6 +659,9 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                     ?.takeIf { it.startsWith("image/", true) }
                     ?: mediaTypeFor(resourcePath)
                 if (!mediaType.startsWith("image/")) continue
+                // Cap image blocks too: a hostile page can otherwise repeat one <img> tens of
+                // thousands of times and trigger an unbounded number of entry reads.
+                if (size >= MAX_CHAPTER_BLOCKS) throw EpubDomLimitExceeded(xhtmlPath)
                 val dimensions = zip.readImageDimensions(entry, mediaType)
                 add(
                     XhtmlBlock.Image(
@@ -699,7 +705,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
             "xhtml_streaming_fallback",
             details = mapOf("entry" to entry.name.takeLast(96), "size" to entry.size),
         )
-        zip.getInputStream(entry).use { input ->
+        zip.openBoundedEntry(entry, MAX_STREAMED_EPUB_XHTML_BYTES).use { input ->
             readXhtmlStreaming(input, zip, xhtmlPath, manifest)
         }
     }
@@ -752,9 +758,11 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                         val entry = zip.findEntry(path)?.takeIf {
                             it.size in 1..MAX_CSS_BYTES.toLong()
                         } ?: return@forEach
-                        val imported = zip.getInputStream(entry).use {
-                            it.readBytes().toString(StandardCharsets.UTF_8)
-                        }
+                        val imported = runCatching {
+                            zip.openBoundedEntry(entry, MAX_CSS_BYTES).use {
+                                it.readBytes().toString(StandardCharsets.UTF_8)
+                            }
+                        }.getOrNull() ?: return@forEach
                         appendCss(imported, path, depth + 1)
                     }
                 }
@@ -768,9 +776,11 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 } ?: return
                 val key = CssSourceCacheKey(zip.name, entry.name, entry.crc, entry.size)
                 val parsed = synchronized(cssSourceCache) { cssSourceCache[key] } ?: run {
-                    val source = zip.getInputStream(entry).use { input ->
-                        input.readBytes().toString(StandardCharsets.UTF_8)
-                    }
+                    val source = runCatching {
+                        zip.openBoundedEntry(entry, MAX_CSS_BYTES).use { input ->
+                            input.readBytes().toString(StandardCharsets.UTF_8)
+                        }
+                    }.getOrNull() ?: return
                     ParsedCssSource(
                         imports = CSS_IMPORT.findAll(source).map { it.groupValues[1] }.toList(),
                         rules = parseCss(source, entry.name),

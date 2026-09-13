@@ -13,7 +13,30 @@ data class DocumentMetadata(
     val description: String = "",
     val coverBytes: ByteArray? = null,
     val coverExtension: String = "jpg",
-)
+) {
+    // ByteArray uses identity equality in a generated data class, so equals/hashCode would disagree
+    // with content. Compare the array by reference (cheap, and consistent for identical metadata).
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is DocumentMetadata) return false
+        return identityHint == other.identityHint &&
+            title == other.title &&
+            author == other.author &&
+            description == other.description &&
+            coverExtension == other.coverExtension &&
+            coverBytes === other.coverBytes
+    }
+
+    override fun hashCode(): Int {
+        var result = identityHint?.hashCode() ?: 0
+        result = 31 * result + title.hashCode()
+        result = 31 * result + author.hashCode()
+        result = 31 * result + description.hashCode()
+        result = 31 * result + coverExtension.hashCode()
+        result = 31 * result + System.identityHashCode(coverBytes)
+        return result
+    }
+}
 
 data class DocumentImage(
     /** Position among text and image blocks in the XHTML reading order. */
