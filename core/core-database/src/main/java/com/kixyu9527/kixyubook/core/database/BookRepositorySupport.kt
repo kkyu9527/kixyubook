@@ -9,7 +9,8 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
 
-internal data class ChapterCacheKey(val bookUuid: String, val chapterIndex: Int)
+/** Includes the book revision so a uuid re-bound to different bytes cannot serve stale chapters. */
+internal data class ChapterCacheKey(val bookUuid: String, val contentHash: String, val chapterIndex: Int)
 
 internal data class ImportRegistration(
     val imports: List<RegisteredImport>,

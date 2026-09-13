@@ -791,13 +791,15 @@ class LocalBookRepository @Inject constructor(
         val startedAt = SystemClock.elapsedRealtime()
         var diagnosticSource = "unknown"
         try {
-            val cacheKey = ChapterCacheKey(bookUuid, chapterIndex)
+            // Keying by the book revision closes the window where the same uuid is re-bound to new
+            // bytes (restore/repair) before the in-memory cache is cleared.
+            val initialBook = dao.getBook(bookUuid)
+            val cacheKey = ChapterCacheKey(bookUuid, initialBook?.contentHash.orEmpty(), chapterIndex)
             synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
                 return@withContext textCorrections.applyToChapter(it)
             }
 
             val initialChapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withContext null
-            val initialBook = dao.getBook(bookUuid)
             var source = "database"
             diagnosticSource = source
             val parsed = if (initialBook?.format == BookFormat.EPUB.name) {
@@ -856,11 +858,12 @@ class LocalBookRepository @Inject constructor(
             // XHTML parsing deliberately happens outside the shared commit lock. A current-page
             // request can therefore overtake a low-priority neighbour that is slow to decode.
             val content = chapterLoadMutex.withLock {
-                synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
+                val book = dao.getBook(bookUuid) ?: return@withLock null
+                val lockedKey = ChapterCacheKey(bookUuid, book.contentHash, chapterIndex)
+                synchronized(chapterCacheLock) { chapterCache[lockedKey] }?.let {
                     return@withLock it
                 }
                 val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
-                val book = dao.getBook(bookUuid) ?: return@withLock null
                 var storedParagraphs = dao.getParagraphs(chapter.id)
                 val isSameEpubRevision = book.format == BookFormat.EPUB.name &&
                     initialBook?.contentHash == book.contentHash &&
@@ -883,7 +886,7 @@ class LocalBookRepository @Inject constructor(
                     }
                 }
                 ChapterContent(chapter.toModel(), paragraphs).also { loaded ->
-                    synchronized(chapterCacheLock) { chapterCache[cacheKey] = loaded }
+                    synchronized(chapterCacheLock) { chapterCache[lockedKey] = loaded }
                 }
             } ?: return@withContext null
 
