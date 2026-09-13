@@ -83,53 +83,91 @@ class LocalBackupRepository @Inject constructor(
     override suspend fun exportTo(uriString: String): Result<BackupResult> = withContext(Dispatchers.IO) {
         operationMutex.withLock { runCatching {
             cleanupBackupWorkDirectories()
-            val work = File(context.cacheDir, "backup-${UUID.randomUUID()}").apply { mkdirs() }
+            var pinned: PinnedBackup? = null
+            var lastUnavailable: BackupResourceUnavailable? = null
+            for (attempt in 0 until BACKUP_SNAPSHOT_ATTEMPTS) {
+                try {
+                    pinned = pinConsistentBackup()
+                    break
+                } catch (unavailable: BackupResourceUnavailable) {
+                    // A referenced resource vanished between reading the settings and pinning them.
+                    // Rebuild from a fresh snapshot rather than exporting a dangling reference.
+                    lastUnavailable = unavailable
+                }
+            }
+            val backup = pinned ?: throw (lastUnavailable ?: IllegalStateException(context.getString(R.string.backup_create_failed)))
             try {
-                val snapshot = File(work, DATABASE_NAME)
-                val escapedSnapshotPath = snapshot.absolutePath.replace("'", "''")
-                // Pin files while taking the DB snapshot. Compression and hashing then operate
-                // on private copies, so the user can keep reading or remove books afterwards.
-                val assets = LibraryStorageGate.mutex.withLock {
-                    database.openHelper.writableDatabase.execSQL("VACUUM INTO '$escapedSnapshotPath'")
-                    collectReferencedAssets(snapshot).map { asset ->
-                        val copy = File(work, asset.entryName)
-                        copy.parentFile?.mkdirs()
-                        asset.file.copyTo(copy)
-                        BackupAsset(copy, asset.entryName)
-                    }
-                }
-                val settings = settingsRepository.settings.first()
-                val goal = settingsRepository.readingGoalMinutes.first()
-                val portableSettings = settingsPayloadJson(settings, goal,
-                    libraryPreferences.preferences.first(), readingReminders.readingReminder.first(),
-                    bookOverrides = bookSettings.overrides.first())
-                val bookCount = countBooks(snapshot)
-                val totalBytes = snapshot.length() + assets.sumOf { it.file.length() }
-                val properties = Properties().apply {
-                    setProperty("formatVersion", BACKUP_VERSION.toString())
-                    setProperty("createdTime", System.currentTimeMillis().toString())
-                    setProperty("bookCount", bookCount.toString())
-                    setProperty("totalBytes", totalBytes.toString())
-                    setProperty("integrityVersion", INTEGRITY_VERSION.toString())
-                    setProperty("databaseSha256", snapshot.sha256())
-                    setProperty("assetCount", assets.size.toString())
-                    assets.forEachIndexed { index, asset ->
-                        setProperty("asset.$index.path", asset.entryName)
-                        setProperty("asset.$index.sha256", asset.file.sha256())
-                    }
-                    setProperty("portableSettings", portableSettings.toString())
-                }
-                val output = context.contentResolver.openOutputStream(uriString.toUri(), "w") ?: error(context.getString(R.string.backup_create_failed))
-                output.use { raw -> ZipOutputStream(BufferedOutputStream(raw)).use { zip ->
-                    zip.putNextEntry(ZipEntry(MANIFEST_ENTRY)); properties.store(zip, "KixyuBook full backup") ; zip.closeEntry()
-                    zip.putFile(snapshot, DATABASE_ENTRY)
-                    assets.forEach { asset -> zip.putFile(asset.file, asset.entryName) }
-                } }
-                BackupResult(bookCount, totalBytes)
+                writeBackup(uriString, backup)
             } finally {
-                work.deleteRecursively()
+                backup.work.deleteRecursively()
             }
         } }
+    }
+
+    /**
+     * Pins a database snapshot, the assets it references and every font the portable settings
+     * reference, then verifies they agree. The settings are read outside the storage lock (the lock
+     * must stay free for imports/deletions), so a font selected or deleted in between can make the
+     * two views disagree; [BackupResourceUnavailable] asks the caller to retry from a fresh snapshot
+     * instead of silently writing an archive whose settings reference an absent font.
+     */
+    private suspend fun pinConsistentBackup(): PinnedBackup {
+        val work = File(context.cacheDir, "$BACKUP_WORK_PREFIX${UUID.randomUUID()}").apply { mkdirs() }
+        try {
+            val snapshot = File(work, DATABASE_NAME)
+            val escapedSnapshotPath = snapshot.absolutePath.replace("'", "''")
+            // Pin files while taking the DB snapshot. Compression and hashing then operate on
+            // private copies, so the user can keep reading or remove books afterwards.
+            val snapshotAssets = LibraryStorageGate.mutex.withLock {
+                database.openHelper.writableDatabase.execSQL("VACUUM INTO '$escapedSnapshotPath'")
+                collectReferencedAssets(snapshot).map { asset ->
+                    val copy = File(work, asset.entryName)
+                    copy.parentFile?.mkdirs()
+                    asset.file.copyTo(copy)
+                    BackupAsset(copy, asset.entryName)
+                }
+            }
+            val settings = settingsRepository.settings.first()
+            val goal = settingsRepository.readingGoalMinutes.first()
+            val bookOverrides = bookSettings.overrides.first()
+            val referencedFonts = collectReferencedFonts(settings.fontUuid, bookOverrides)
+            val assets = LibraryStorageGate.mutex.withLock {
+                pinReferencedFonts(snapshot, work, snapshotAssets, referencedFonts)
+            }
+            val portableSettings = settingsPayloadJson(settings, goal,
+                libraryPreferences.preferences.first(), readingReminders.readingReminder.first(),
+                bookOverrides = bookOverrides)
+            val bookCount = countBooks(snapshot)
+            val totalBytes = snapshot.length() + assets.sumOf { it.file.length() }
+            return PinnedBackup(work, snapshot, assets, bookCount, totalBytes, portableSettings)
+        } catch (failure: Throwable) {
+            work.deleteRecursively()
+            throw failure
+        }
+    }
+
+    private suspend fun writeBackup(uriString: String, backup: PinnedBackup): BackupResult {
+        val properties = Properties().apply {
+            setProperty("formatVersion", BACKUP_VERSION.toString())
+            setProperty("createdTime", System.currentTimeMillis().toString())
+            setProperty("bookCount", backup.bookCount.toString())
+            setProperty("totalBytes", backup.totalBytes.toString())
+            setProperty("integrityVersion", INTEGRITY_VERSION.toString())
+            setProperty("databaseSha256", backup.snapshot.sha256())
+            setProperty("assetCount", backup.assets.size.toString())
+            backup.assets.forEachIndexed { index, asset ->
+                setProperty("asset.$index.path", asset.entryName)
+                setProperty("asset.$index.sha256", asset.file.sha256())
+            }
+            setProperty("portableSettings", backup.portableSettings.toString())
+        }
+        val output = context.contentResolver.openOutputStream(uriString.toUri(), "w") ?: error(context.getString(R.string.backup_create_failed))
+        output.use { raw -> ZipOutputStream(BufferedOutputStream(raw)).use { zip ->
+            zip.putNextEntry(ZipEntry(MANIFEST_ENTRY)); properties.store(zip, "KixyuBook full backup") ; zip.closeEntry()
+            zip.putFile(backup.snapshot, DATABASE_ENTRY)
+            backup.assets.forEach { asset -> zip.putFile(asset.file, asset.entryName) }
+        } }
+        return BackupResult(backup.bookCount, backup.totalBytes)
     }
 
     override suspend fun restoreFrom(uriString: String): Result<BackupResult> = withContext(Dispatchers.IO) {
@@ -463,6 +501,54 @@ class LocalBackupRepository @Inject constructor(
         return assets.values.toList()
     }
 
+    private fun collectReferencedFonts(fontUuid: String?, overrides: Map<String, String>): Set<String> = buildSet {
+        fontUuid?.takeIf { it.isNotBlank() }?.let(::add)
+        overrides.values.forEach { patch ->
+            val referenced = runCatching { JSONObject(patch).optString("fontUuid") }.getOrNull()
+            if (!referenced.isNullOrBlank()) add(referenced)
+        }
+    }
+
+    /**
+     * Copies every font referenced by the portable settings into the archive and declares it in the
+     * pinned database, so the archive never references a resource it does not contain. The snapshot
+     * predates the settings read, so fonts selected after it must be added here. A font that no
+     * longer exists means the settings view is stale: report it instead of silently dropping the
+     * reference, letting the caller rebuild a consistent snapshot. Database failures must surface,
+     * never be swallowed, or the archive would be inconsistent while still reporting success.
+     */
+    private suspend fun pinReferencedFonts(
+        snapshot: File,
+        work: File,
+        assets: List<BackupAsset>,
+        fontUuids: Set<String>,
+    ): List<BackupAsset> {
+        var pinned = assets
+        val pinnedFontUuids = pinned.asSequence()
+            .map { it.entryName }
+            .filter { it.startsWith(FONT_ENTRY_PREFIX) }
+            .mapTo(mutableSetOf()) { it.substringAfterLast('/').substringBeforeLast('.') }
+        for (fontUuid in fontUuids) {
+            if (fontUuid in pinnedFontUuids) continue
+            val font = database.fontDao().getFont(fontUuid)?.takeIf { File(it.filePath).isFile }
+                ?: throw BackupResourceUnavailable(context.getString(R.string.backup_original_font_missing, fontUuid))
+            val source = File(font.filePath)
+            val entryName = "$FONT_ENTRY_PREFIX${source.name}"
+            val copy = File(work, entryName)
+            copy.parentFile?.mkdirs()
+            source.copyTo(copy)
+            SQLiteDatabase.openDatabase(snapshot.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+                db.execSQL(
+                    "INSERT OR IGNORE INTO user_fonts (uuid, name, filePath, createdTime) VALUES (?, ?, ?, ?)",
+                    arrayOf<Any?>(font.uuid, font.name, font.filePath, font.createdTime),
+                )
+            }
+            pinned = pinned + BackupAsset(copy, entryName)
+            pinnedFontUuids += fontUuid
+        }
+        return pinned
+    }
+
     private fun File.livePath(directory: String) = File(context.filesDir, "$directory/$name").absolutePath
 
     internal companion object {
@@ -480,12 +566,26 @@ class LocalBackupRepository @Inject constructor(
         const val BYTES_PER_MEBIBYTE = 1024L * 1024
         const val RESTORE_WORKING_SPACE_RESERVE_BYTES = 16L * BYTES_PER_MEBIBYTE
         const val RESTORE_SPACE_CHECK_INTERVAL_BYTES = 8L * BYTES_PER_MEBIBYTE
+        const val FONT_ENTRY_PREFIX = "files/fonts/"
+        const val BACKUP_SNAPSHOT_ATTEMPTS = 3
         val SUPPORTED_BACKUP_DATABASE_VERSIONS = 6..KIXYU_DATABASE_VERSION
         val ASSET_DIRECTORIES = listOf("books", "covers", "fonts")
     }
 }
 
 private data class BackupAsset(val file: File, val entryName: String)
+
+private class PinnedBackup(
+    val work: File,
+    val snapshot: File,
+    val assets: List<BackupAsset>,
+    val bookCount: Int,
+    val totalBytes: Long,
+    val portableSettings: JSONObject,
+)
+
+/** A settings-referenced resource disappeared; the caller must rebuild a consistent snapshot. */
+private class BackupResourceUnavailable(message: String) : Exception(message)
 
 private fun ZipOutputStream.putFile(file: File, entryName: String) {
     putNextEntry(ZipEntry(entryName)); file.inputStream().buffered().use { it.copyTo(this) }; closeEntry()
