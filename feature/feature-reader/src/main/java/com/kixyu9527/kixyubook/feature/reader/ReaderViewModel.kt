@@ -77,7 +77,7 @@ class ReaderViewModel @AssistedInject constructor(
     private var chapterPrefetchJob: Job? = null
     private var criticalNeighborPublishJob: Job? = null
     private val criticalNeighbourJobs = mutableMapOf<Int, Job>()
-    private var pendingChapterIndex: Int? = null
+    private val session = ReaderSessionCoordinator()
     private var prefetchedAroundChapterIndex: Int? = null
     private var pageInteractionActive = false
     private var acceptedProgressUpdatedAt = Long.MIN_VALUE
@@ -195,7 +195,7 @@ class ReaderViewModel @AssistedInject constructor(
                     val orderingChanged = previous.chapters.map(Chapter::id) != chapters.map(Chapter::id)
                     if (orderingChanged) {
                         chapterNavigationJob?.cancel()
-                        pendingChapterIndex = null
+                        session.clear()
                         chapterPrefetchJob?.cancel()
                         criticalNeighborPublishJob?.cancel()
                         criticalNeighbourJobs.values.forEach(Job::cancel)
@@ -387,7 +387,7 @@ class ReaderViewModel @AssistedInject constructor(
     fun moveChapter(delta: Int, openAtEnd: Boolean = false) {
         locationJourney.finish("superseded")
         val state = _uiState.value
-        val baseIndex = pendingChapterIndex ?: state.chapterIndex
+        val baseIndex = session.pendingIndex ?: state.chapterIndex
         val target = (baseIndex + delta).coerceIn(0, state.chapters.lastIndex)
         beginPageTurn(delta, "chapter_button", state.chapterIndex, target)
         navigateToChapter(
@@ -566,7 +566,7 @@ class ReaderViewModel @AssistedInject constructor(
         val state = _uiState.value
         if (index == state.chapterIndex && state.chapter != null) {
             chapterNavigationJob?.cancel()
-            pendingChapterIndex = null
+            session.clear()
             applyPositionWithinCurrentChapter(position, charOffset, persistProgress)
             return
         }
@@ -585,12 +585,12 @@ class ReaderViewModel @AssistedInject constructor(
         // Commit an in-memory neighbour synchronously so the next gesture always reaches the
         // newly active Pager.
         state.prefetchedChapters[index]?.let { cached ->
-            pendingChapterIndex = null
+            session.clear()
             activateChapter(index, position, charOffset, cached, persistProgress, settledPageIndex)
             return
         }
 
-        pendingChapterIndex = index
+        val token = session.begin(index)
         _uiState.update {
             it.copy(
                 error = null,
@@ -602,15 +602,13 @@ class ReaderViewModel @AssistedInject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (pendingChapterIndex == index) {
+                if (session.isCurrent(token)) {
                     locationJourney.failed(index)
                     completePageTurn(index, "failed")
                     _uiState.update { it.copy(error = error.message ?: context.getString(R.string.reader_error_chapter)) }
                 }
             } finally {
-                if (pendingChapterIndex == index) {
-                    pendingChapterIndex = null
-                }
+                session.finish(token)
             }
         }
     }
@@ -741,7 +739,7 @@ class ReaderViewModel @AssistedInject constructor(
 
         if (targetIndex == state.chapterIndex && state.chapter != null) {
             chapterNavigationJob?.cancel()
-            pendingChapterIndex = null
+            session.clear()
             lastPosition = targetPosition
             lastCharOffset = targetCharOffset
             _positionState.value = ReaderPositionState(targetPosition, targetCharOffset)
@@ -1230,7 +1228,7 @@ class ReaderViewModel @AssistedInject constructor(
         criticalNeighborPublishJob?.cancel()
         criticalNeighborPublishJob = null
         val state = _uiState.value
-        if (state.chapter != null && pendingChapterIndex == null) {
+        if (state.chapter != null && session.pendingIndex == null) {
             prefetchedAroundChapterIndex = state.chapterIndex
             prefetchNearbyChapters(state.chapterIndex, state.chapters)
         }
