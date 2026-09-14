@@ -38,6 +38,15 @@ class ReaderViewModelRecoveryTest {
     @Before fun setMain() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
     @After fun resetMain() { Dispatchers.resetMain() }
 
+    /** [MID_PARAGRAPH_OFFSET] only makes sense inside a paragraph long enough to contain it. */
+    private fun longParagraphHarness(): ReaderRecoveryHarness = readerRecoveryHarness(
+        paragraphText = { index -> if (index == 5) "很长的正文内容。".repeat(240) else "第 $index 段短正文" },
+    )
+
+    private companion object {
+        const val MID_PARAGRAPH_OFFSET = 190
+    }
+
     @Test fun txtReopensAtLastCheckpointAfterReaderIsCleared() = recreateReader(BookFormat.TXT)
 
     @Test fun epubReopensAtLastCheckpointAfterReaderIsCleared() = recreateReader(BookFormat.EPUB)
@@ -366,6 +375,130 @@ class ReaderViewModelRecoveryTest {
         }
     }
 
+    @Test fun aLayoutSettingChangeKeepsThePresentedCharacterOffsetWithoutReopening() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = longParagraphHarness()
+            val reader = harness.open()
+            awaitCondition("the chapter did not load") { reader.uiState.value.chapter != null }
+
+            // Natural reading settles mid-paragraph; the explicit restore target is the page start.
+            reader.onPageSettled(5, MID_PARAGRAPH_OFFSET, chapterComplete = false, visibleEndPosition = 6)
+            awaitDurable(harness, MID_PARAGRAPH_OFFSET)
+
+            harness.globalSettings.value = harness.globalSettings.value.copy(fontSize = 30f)
+            awaitCondition("the font change was not observed") {
+                reader.uiState.value.settings.fontSize == 30f
+            }
+
+            // The reflow must target the character actually on screen, not the stale paragraph start.
+            assertEquals(5, reader.uiState.value.restorePosition)
+            assertEquals(MID_PARAGRAPH_OFFSET, reader.uiState.value.restoreCharOffset)
+            harness.closeAll()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun aLateSettleFromThePreReflowLayoutCannotOverwriteTheAnchor() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = longParagraphHarness()
+            val reader = harness.open()
+            awaitCondition("the chapter did not load") { reader.uiState.value.chapter != null }
+            reader.onPageSettled(5, MID_PARAGRAPH_OFFSET, chapterComplete = false, visibleEndPosition = 6)
+            awaitDurable(harness, MID_PARAGRAPH_OFFSET)
+
+            harness.globalSettings.value = harness.globalSettings.value.copy(fontSize = 30f)
+            awaitCondition("the font change was not observed") {
+                reader.uiState.value.settings.fontSize == 30f
+            }
+            // The old layout reports its own first page after the reflow was requested.
+            reader.onPageSettled(0, 0, chapterComplete = false, visibleEndPosition = 0)
+            advanceUntilIdle()
+
+            assertEquals(5, reader.uiState.value.restorePosition)
+            assertEquals(MID_PARAGRAPH_OFFSET, reader.uiState.value.restoreCharOffset)
+            assertEquals(MID_PARAGRAPH_OFFSET, harness.durable.value?.charOffset)
+            harness.closeAll()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun newSettlesAreAcceptedAgainOnceTheReflowHasRendered() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = longParagraphHarness()
+            val reader = harness.open()
+            awaitCondition("the chapter did not load") { reader.uiState.value.chapter != null }
+            reader.onPageSettled(5, MID_PARAGRAPH_OFFSET, chapterComplete = false, visibleEndPosition = 6)
+            awaitDurable(harness, MID_PARAGRAPH_OFFSET)
+            harness.globalSettings.value = harness.globalSettings.value.copy(fontSize = 30f)
+            awaitCondition("the font change was not observed") {
+                reader.uiState.value.settings.fontSize == 30f
+            }
+
+            // The reflowed layout is on screen; a genuine page turn must still persist.
+            reader.chapterRendered(reader.uiState.value.navigationVersion)
+            reader.onPageSettled(7, 3, chapterComplete = false, visibleEndPosition = 8)
+            awaitDurable(harness, 3)
+
+            assertEquals(7, harness.durable.value?.paragraphIndex)
+            harness.closeAll()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    /**
+     * Advances virtual time until [condition] holds. The progress writer owns a real
+     * [Dispatchers.IO] scope, so a short real sleep is needed alongside virtual time.
+     */
+    private fun TestScope.awaitCondition(
+        message: String,
+        timeoutMillis: Long = 10_000,
+        condition: () -> Boolean,
+    ) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            advanceUntilIdle()
+            if (condition()) return
+            Thread.sleep(5)
+        }
+        advanceUntilIdle()
+        assertTrue(message, condition())
+    }
+
+    private fun TestScope.awaitDurable(harness: ReaderRecoveryHarness, charOffset: Int) {
+        awaitCondition("progress at offset $charOffset was not persisted") {
+            harness.durable.value?.charOffset == charOffset
+        }
+    }
+
+    @Test fun aNonLayoutSettingChangeDoesNotDisturbTheRestoreTarget() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = longParagraphHarness()
+            val reader = harness.open()
+            advanceUntilIdle()
+            reader.onPageSettled(5, MID_PARAGRAPH_OFFSET, chapterComplete = false, visibleEndPosition = 6)
+            advanceUntilIdle()
+            val before = reader.uiState.value
+
+            harness.globalSettings.value = harness.globalSettings.value.copy(theme = ReaderTheme.NIGHT)
+            advanceUntilIdle()
+
+            // A theme change does not reflow, so the restore target must not move.
+            assertEquals(before.restorePosition, reader.uiState.value.restorePosition)
+            assertEquals(before.restoreCharOffset, reader.uiState.value.restoreCharOffset)
+            assertEquals(ReaderTheme.NIGHT, reader.uiState.value.settings.theme)
+            harness.closeAll()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test fun aSettledPageTurnIsWhatNavigationHistoryReturnsTo() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
@@ -380,9 +513,9 @@ class ReaderViewModelRecoveryTest {
             reader.jumpToPosition(0, 2)
             advanceUntilIdle()
             reader.navigateHistoryBack()
-            advanceUntilIdle()
-
-            assertEquals(6, reader.uiState.value.restorePosition)
+            awaitCondition("history did not return to the settled page") {
+                reader.uiState.value.restorePosition == 6
+            }
         } finally {
             Dispatchers.resetMain()
         }

@@ -70,6 +70,8 @@ class ReaderViewModel @AssistedInject constructor(
     private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
     private var lastCharOffset = 0
+    /** True between a layout-setting change and the reflowed layout actually rendering. */
+    private var awaitingReflow = false
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, ChapterLoadRequest>()
     private var chapterNavigationJob: Job? = null
@@ -168,16 +170,31 @@ class ReaderViewModel @AssistedInject constructor(
                         fontList,
                     )
                 }.collect { (settings, path, available) ->
+                    // The pre-reflow layout is still on screen until the new spec renders. Only an
+                    // actual on-screen location makes this a reflow: the initial settings load has
+                    // nothing to protect, and guarding it would drop the first real page settle.
+                    if (_uiState.value.paginationReflowAnchor(settings) != null) awaitingReflow = true
                     _uiState.update { current ->
                         if (
                             current.settings == settings && current.fontPath == path &&
                             current.availableFonts == available && current.settingsLoaded
-                        ) current else current.copy(
-                            settings = settings,
-                            settingsLoaded = true,
-                            fontPath = path,
-                            availableFonts = available,
-                        )
+                        ) {
+                            current
+                        } else {
+                            // A layout change must reflow from the location actually on screen. The
+                            // last explicit restore target can be stale after natural page turns, so
+                            // capture the presented anchor once as this reflow's target.
+                            val anchor = current.paginationReflowAnchor(settings)
+                            current.copy(
+                                settings = settings,
+                                settingsLoaded = true,
+                                fontPath = path,
+                                availableFonts = available,
+                                restorePosition = anchor?.paragraphIndex ?: current.restorePosition,
+                                restoreCharOffset = anchor?.charOffset ?: current.restoreCharOffset,
+                                settledPageIndex = if (anchor != null) null else current.settledPageIndex,
+                            )
+                        }
                     }
                 }
             }
@@ -1037,6 +1054,17 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     /**
+     * The anchor a pagination-affecting settings change should reflow to: the paragraph and character
+     * currently on screen, but only while the presented chapter is still the visible one. Returns
+     * null when the change does not affect layout or nothing has been presented yet.
+     */
+    private fun ReaderUiState.paginationReflowAnchor(next: ReaderSettings): PresentedLocation? {
+        if (!settings.paginationLayoutDiffers(next)) return null
+        val presented = session.presentedLocation ?: return null
+        return presented.takeIf { it.chapterPosition == chapterIndex }
+    }
+
+    /**
      * The pager settled on a page: this is the location actually displayed, so the session
      * coordinator records it before the position is persisted. [savePosition] alone is only a
      * request to persist and is also called for targets that are not yet rendered.
@@ -1047,6 +1075,9 @@ class ReaderViewModel @AssistedInject constructor(
         chapterComplete: Boolean,
         visibleEndPosition: Int,
     ) {
+        // A settle from the layout that is being replaced is stale: it reflects the old pagination
+        // and would overwrite the reflow anchor with a location the new layout never showed.
+        if (awaitingReflow) return
         session.onPresented(_uiState.value.chapterIndex, position, charOffset)
         savePosition(position, charOffset, chapterComplete, visibleEndPosition)
     }
@@ -1290,6 +1321,8 @@ class ReaderViewModel @AssistedInject constructor(
     fun chapterRendered(navigationVersion: Int) {
         val rendered = _uiState.value
         if (rendered.navigationVersion != navigationVersion || rendered.chapter == null) return
+        // The reflowed (or newly navigated) layout is on screen; settles are authoritative again.
+        awaitingReflow = false
         // The page is on screen now, so this is the session's authoritative presented location.
         val presented = _positionState.value
         session.onPresented(rendered.chapterIndex, presented.paragraphIndex, presented.charOffset)
@@ -1335,3 +1368,13 @@ class ReaderViewModel @AssistedInject constructor(
 }
 
 private const val READER_OBSERVER_RETRY_MILLIS = 1_000L
+
+/** Settings that change the measured page layout and therefore require a reflow. */
+private fun ReaderSettings.paginationLayoutDiffers(other: ReaderSettings): Boolean =
+    fontSize != other.fontSize ||
+        lineHeight != other.lineHeight ||
+        letterSpacing != other.letterSpacing ||
+        margin != other.margin ||
+        fontUuid != other.fontUuid ||
+        pageMode != other.pageMode ||
+        showChapterTitle != other.showChapterTitle
