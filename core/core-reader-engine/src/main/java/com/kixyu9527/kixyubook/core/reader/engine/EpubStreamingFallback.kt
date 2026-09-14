@@ -23,10 +23,30 @@ internal fun readContainerRootfileStreaming(input: InputStream, lenient: Boolean
     return rootfile.ifBlank { error("EPUB 缺少 container rootfile") }
 }
 
+/**
+ * Collects only the reading-order idrefs. A second pass over the same OPF can then keep every
+ * manifest entry the reader actually needs even when the decorative manifest exceeds its cap.
+ */
+internal fun readSpineRefsStreaming(input: InputStream, lenient: Boolean = false): Set<String> {
+    val spine = linkedSetOf<String>()
+    parseSax(input, lenient, object : DefaultHandler() {
+        override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes) {
+            if (elementName(localName, qName) == "itemref") {
+                val idref = attributes.value("idref").takeIf(String::isNotBlank) ?: return
+                if (spine.size >= MAX_STREAMED_SPINE_ITEMS) throw EpubDomLimitExceeded("EPUB spine")
+                spine.add(idref)
+            }
+        }
+    })
+    return spine
+}
+
 internal fun readPackageStreaming(
     input: InputStream,
     opfPath: String,
     lenient: Boolean = false,
+    requiredIds: Set<String> = emptySet(),
+    manifestLimit: Int = MAX_STREAMED_MANIFEST_ITEMS,
 ): PackageDocument {
     val manifest = linkedMapOf<String, ManifestItem>()
     val spine = mutableListOf<String>()
@@ -49,9 +69,11 @@ internal fun readPackageStreaming(
                 "item" -> {
                     val id = attributes.value("id")
                     val href = attributes.value("href")
-                    // Ignore items past the cap instead of failing: the fallback exists for large
-                    // legitimate books, but a hostile OPF must not grow this map without bound.
-                    if (id.isNotBlank() && href.isNotBlank() && manifest.size < MAX_STREAMED_MANIFEST_ITEMS) {
+                    // Keep every entry the reading order references; cap only the decorative rest.
+                    // Dropping a spine's item would silently lose that chapter's content.
+                    if (id.isNotBlank() && href.isNotBlank() &&
+                        (id in requiredIds || manifest.size < manifestLimit)
+                    ) {
                         manifest[id] = ManifestItem(
                             path = resolveArchivePath(opfPath, href),
                             mediaType = attributes.value("media-type"),
@@ -59,8 +81,13 @@ internal fun readPackageStreaming(
                         )
                     }
                 }
-                "itemref" -> if (spine.size < MAX_STREAMED_SPINE_ITEMS) {
-                    attributes.value("idref").takeIf(String::isNotBlank)?.let(spine::add)
+                "itemref" -> {
+                    val idref = attributes.value("idref").takeIf(String::isNotBlank)
+                    if (idref != null) {
+                        // The reading order itself is never truncated silently.
+                        if (spine.size >= MAX_STREAMED_SPINE_ITEMS) throw EpubDomLimitExceeded("EPUB spine")
+                        spine.add(idref)
+                    }
                 }
             }
         }
@@ -112,9 +139,11 @@ internal fun readXhtmlStreaming(
             .replace(Regex(" *\\n+ *"), "\n")
             .trim()
         if (value.isBlank()) return
-        // Truncate rather than fail: the streaming fallback is the last resort for large books,
-        // but an oversized chapter must not grow the block list without bound.
-        if (blocks.size >= MAX_STREAMED_CHAPTER_BLOCKS || streamedTextChars >= MAX_STREAMED_CHAPTER_CHARS) return
+        // Never truncate silently: exceeding the cap means the chapter cannot be represented
+        // completely, so report it instead of returning a partial "successful" parse.
+        if (blocks.size >= MAX_STREAMED_CHAPTER_BLOCKS || streamedTextChars >= MAX_STREAMED_CHAPTER_CHARS) {
+            throw EpubDomLimitExceeded(xhtmlPath)
+        }
         streamedTextChars += value.length
         if (heading == null && activeTag in HEADING_TAGS) heading = value.singleLineBookHeading()
         blocks += XhtmlBlock.Text(StyledText(value, emptyList()))
@@ -152,7 +181,8 @@ internal fun readXhtmlStreaming(
                 }
             }
             if (name == "br" && activeDepth >= 0) buffer.append('\n')
-            if (name == "img" && blocks.size < MAX_STREAMED_CHAPTER_BLOCKS) {
+            if (name == "img") {
+                if (blocks.size >= MAX_STREAMED_CHAPTER_BLOCKS) throw EpubDomLimitExceeded(xhtmlPath)
                 val reference = attributes.value("src").ifBlank { attributes.value("href") }
                 val resourcePath = resolveArchivePath(xhtmlPath, reference)
                 val entry = zip.findEntry(resourcePath)

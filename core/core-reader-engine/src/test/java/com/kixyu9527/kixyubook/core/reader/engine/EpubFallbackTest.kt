@@ -101,6 +101,74 @@ class EpubFallbackTest {
         assertEquals("第一章", chapter.title)
         assertTrue(chapter.paragraphs.contains("DOCTYPE 正文。"))
     }
+
+    @Test fun oversizedDoctypeOpfStillParsesThroughTheLenientStreamingRetry() = runBlocking {
+        val epub = folder.newFile("doctype-large-opf.epub")
+        val bigDescription = "d".repeat(MAX_EPUB_XML_BYTES + 1024)
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            zip.textEntry("mimetype", "application/epub+zip")
+            zip.textEntry(
+                "META-INF/container.xml",
+                """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""",
+            )
+            zip.textEntry(
+                "OPS/book.opf",
+                """<?xml version="1.0"?><!DOCTYPE package><package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>大 OPF</dc:title><dc:description>$bigDescription</dc:description></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>""",
+            )
+            zip.textEntry("OPS/c1.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>正文。</p></body></html>""")
+        }
+
+        val parser = EpubBookParser()
+        assertEquals("大 OPF", parser.readMetadata(epub, epub.name).title)
+        assertEquals("第一章", parser.readChapter(epub, 0)?.title)
+    }
+
+    @Test fun oversizedDoctypeXhtmlStillParsesThroughTheLenientStreamingRetry() = runBlocking {
+        val epub = folder.newFile("doctype-large-xhtml.epub")
+        val bigBody = buildString(MAX_EPUB_XHTML_BYTES + 1024) {
+            append("流式正文开始。")
+            while (length <= MAX_EPUB_XHTML_BYTES + 512) append('a')
+            append("流式正文结束。")
+        }
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            zip.textEntry("mimetype", "application/epub+zip")
+            zip.textEntry(
+                "META-INF/container.xml",
+                """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""",
+            )
+            zip.textEntry(
+                "OPS/book.opf",
+                """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>大 XHTML</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>""",
+            )
+            zip.textEntry(
+                "OPS/c1.xhtml",
+                """<?xml version="1.0"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>$bigBody</p></body></html>""",
+            )
+        }
+
+        val chapter = EpubBookParser().readChapter(epub, 0)!!
+        assertEquals("第一章", chapter.title)
+        assertTrue(chapter.paragraphs.first().startsWith("流式正文开始。"))
+        assertTrue(chapter.paragraphs.last().endsWith("流式正文结束。"))
+    }
+
+    @Test fun spineReferencedManifestEntrySurvivesTheManifestCap() {
+        // The body's manifest entry sits last, behind two decorative entries that exhaust the cap.
+        val opf = """
+            <package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>限流测试</dc:title></metadata><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/><item id="b" href="b.xhtml" media-type="application/xhtml+xml"/><item id="body" href="body.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="body"/></spine></package>
+        """.trimIndent()
+
+        val required = readSpineRefsStreaming(opf.byteInputStream())
+        val document = readPackageStreaming(
+            opf.byteInputStream(),
+            "OPS/book.opf",
+            requiredIds = required,
+            manifestLimit = 1,
+        )
+
+        assertEquals(listOf("body"), document.spine)
+        assertTrue("the reading order's manifest entry must survive the cap", "body" in document.manifest)
+    }
 }
 
 private fun ZipOutputStream.textEntry(path: String, value: String) {

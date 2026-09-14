@@ -445,21 +445,60 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 ?.getAttribute("full-path")
                 ?.takeIf(String::isNotBlank)
                 ?: error("EPUB 缺少 container rootfile")
-        } catch (_: EpubDomLimitExceeded) {
-            zip.openBoundedEntry(containerEntry, MAX_STREAMED_EPUB_XML_BYTES).use { readContainerRootfileStreaming(it) }
         } catch (_: Exception) {
-            zip.openBoundedEntry(containerEntry, MAX_STREAMED_EPUB_XML_BYTES).use { readContainerRootfileStreaming(it, lenient = true) }
+            // As with the OPF, a large container must still get the lenient streaming retry.
+            readContainerRootfileWithRetry(zip, containerEntry)
         }
         val opfEntry = zip.findEntry(opfPath) ?: error("EPUB 缺少 $opfPath")
         return try {
             parsePackageDom(zip, opfPath)
-        } catch (_: EpubDomLimitExceeded) {
-            zip.openBoundedEntry(opfEntry, MAX_STREAMED_EPUB_XML_BYTES).use { input -> readPackageStreaming(input, opfPath) }
         } catch (_: Exception) {
-            // A DOCTYPE or malformed prolog can defeat the strict parser; retry leniently.
-            zip.openBoundedEntry(opfEntry, MAX_STREAMED_EPUB_XML_BYTES).use { input ->
-                readPackageStreaming(input, opfPath, lenient = true)
-            }
+            // The DOM path fails either on the size budget (large OPF) or on the XML itself
+            // (DOCTYPE). Both must run the streaming path, which retries leniently on parse errors.
+            parsePackageStreaming(zip, opfEntry, opfPath, lenient = false)
+        }
+    }
+
+    private fun readContainerRootfileWithRetry(
+        zip: ZipFile,
+        containerEntry: java.util.zip.ZipEntry,
+    ): String = try {
+        zip.openBoundedEntry(containerEntry, MAX_STREAMED_EPUB_XML_BYTES).use { readContainerRootfileStreaming(it) }
+    } catch (error: Exception) {
+        if (error is EpubDomLimitExceeded) throw error
+        zip.openBoundedEntry(containerEntry, MAX_STREAMED_EPUB_XML_BYTES).use {
+            readContainerRootfileStreaming(it, lenient = true)
+        }
+    }
+
+    private fun parsePackageStreaming(
+        zip: ZipFile,
+        opfEntry: java.util.zip.ZipEntry,
+        opfPath: String,
+        lenient: Boolean,
+    ): PackageDocument = try {
+        readPackageTwoPass(zip, opfEntry, opfPath, lenient)
+    } catch (error: Exception) {
+        // A DOCTYPE or malformed prolog defeats the strict streaming parser too; retry leniently.
+        // A size limit is not a parse error, so it must not loop into the lenient pass.
+        if (lenient || error is EpubDomLimitExceeded) throw error
+        readPackageTwoPass(zip, opfEntry, opfPath, lenient = true)
+    }
+
+    private fun readPackageTwoPass(
+        zip: ZipFile,
+        opfEntry: java.util.zip.ZipEntry,
+        opfPath: String,
+        lenient: Boolean,
+    ): PackageDocument {
+        // Two passes over the OPF: collect the reading order first, then keep every manifest entry
+        // it references. Decorative entries past the cap are dropped, but a chapter the reader can
+        // reach is never lost to the manifest limit.
+        val required = zip.openBoundedEntry(opfEntry, MAX_STREAMED_EPUB_XML_BYTES).use {
+            readSpineRefsStreaming(it, lenient)
+        }
+        return zip.openBoundedEntry(opfEntry, MAX_STREAMED_EPUB_XML_BYTES).use {
+            readPackageStreaming(it, opfPath, lenient, required)
         }
     }
 
@@ -708,18 +747,31 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         zip.openBoundedEntry(entry, MAX_EPUB_XHTML_BYTES).use { input ->
             readXhtml(input, zip, xhtmlPath, manifest)
         }
-    } catch (_: EpubDomLimitExceeded) {
-        DiagnosticLog.record(
-            Category.EPUB_PARSE,
-            "xhtml_streaming_fallback",
-            details = mapOf("entry" to entry.name.takeLast(96), "size" to entry.size),
-        )
+    } catch (error: Exception) {
+        if (error is EpubDomLimitExceeded) {
+            DiagnosticLog.record(
+                Category.EPUB_PARSE,
+                "xhtml_streaming_fallback",
+                details = mapOf("entry" to entry.name.takeLast(96), "size" to entry.size),
+            )
+        }
+        // Whether the DOM path hit the size budget (large XHTML) or the XML itself (DOCTYPE), the
+        // streaming path must still retry leniently on a parse error.
+        readXhtmlStreamingWithRetry(entry, zip, xhtmlPath, manifest)
+    }
+
+    private fun readXhtmlStreamingWithRetry(
+        entry: java.util.zip.ZipEntry,
+        zip: ZipFile,
+        xhtmlPath: String,
+        manifest: Collection<ManifestItem>,
+    ): XhtmlContent = try {
         zip.openBoundedEntry(entry, MAX_STREAMED_EPUB_XHTML_BYTES).use { input ->
             readXhtmlStreaming(input, zip, xhtmlPath, manifest)
         }
-    } catch (_: Exception) {
-        // A DOCTYPE or a slightly malformed prolog defeats the strict parser. Retry the streaming
-        // path with DOCTYPE permitted (external entities stay disabled) before giving up.
+    } catch (error: Exception) {
+        // A size limit is not a parse error; retrying leniently would only hit the same budget.
+        if (error is EpubDomLimitExceeded) throw error
         zip.openBoundedEntry(entry, MAX_STREAMED_EPUB_XHTML_BYTES).use { input ->
             readXhtmlStreaming(input, zip, xhtmlPath, manifest, lenient = true)
         }
