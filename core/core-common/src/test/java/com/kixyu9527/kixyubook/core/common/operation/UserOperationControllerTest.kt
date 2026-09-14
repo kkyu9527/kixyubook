@@ -5,6 +5,13 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
 
+private fun UserOperationState.kindOrNull(): UserOperationKind? = when (this) {
+    is UserOperationState.Running -> kind
+    is UserOperationState.Succeeded -> kind
+    is UserOperationState.Failed -> kind
+    else -> null
+}
+
 class UserOperationControllerTest {
     @Test fun dismissedFailureCannotRetryAnObsoletePayload() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
@@ -17,7 +24,7 @@ class UserOperationControllerTest {
             controller.retry(failed)
             assertEquals(1, calls)
             controller.submit { calls++ }
-            assertTrue(controller.state.value.succeeded)
+            assertTrue(controller.state.value is UserOperationState.Succeeded)
             assertEquals(2, calls)
         } finally { scope.cancel() }
     }
@@ -27,6 +34,7 @@ class UserOperationControllerTest {
             val controller = UserOperationController(scope)
             var deleted = false
             controller.confirmDelete { deleted = true }
+            assertTrue(controller.state.value is UserOperationState.Confirming)
             assertFalse(deleted)
             controller.cancelConfirmation()
             controller.acceptConfirmation()
@@ -36,7 +44,7 @@ class UserOperationControllerTest {
             controller.acceptConfirmation()
             assertTrue(deleted)
             assertEquals(request, controller.state.value.attempt)
-            assertTrue(controller.state.value.succeeded)
+            assertTrue(controller.state.value is UserOperationState.Succeeded)
         } finally { scope.cancel() }
     }
     @Test fun failedPayloadCanRetryWithoutChangingRequestIdentity() {
@@ -45,12 +53,12 @@ class UserOperationControllerTest {
             val controller = UserOperationController(scope)
             var calls = 0
             controller.submit { if (++calls == 1) throw IOException("disk full") }
-            assertTrue(controller.state.value.failed)
+            assertTrue(controller.state.value is UserOperationState.Failed)
             val request = controller.state.value.attempt
             controller.retry(request)
             assertEquals(2, calls)
             assertEquals(request, controller.state.value.attempt)
-            assertTrue(controller.state.value.succeeded)
+            assertTrue(controller.state.value is UserOperationState.Succeeded)
             controller.retry(request)
             assertEquals(2, calls)
         } finally { scope.cancel() }
@@ -65,11 +73,11 @@ class UserOperationControllerTest {
                 calls++
                 if (calls == 1) throw IOException()
             }
-            assertEquals(UserOperationKind.DELETE, controller.state.value.kind)
-            assertTrue(controller.state.value.failed)
+            assertEquals(UserOperationKind.DELETE, controller.state.value.kindOrNull())
+            assertTrue(controller.state.value is UserOperationState.Failed)
             controller.retry(controller.state.value.attempt)
-            assertTrue(controller.state.value.succeeded)
-            assertEquals(UserOperationKind.DELETE, controller.state.value.kind)
+            assertTrue(controller.state.value is UserOperationState.Succeeded)
+            assertEquals(UserOperationKind.DELETE, controller.state.value.kindOrNull())
         } finally { scope.cancel() }
     }
 
@@ -78,7 +86,7 @@ class UserOperationControllerTest {
         try {
             val controller = UserOperationController(scope)
             controller.submit { }
-            assertEquals(UserOperationKind.GENERIC, controller.state.value.kind)
+            assertEquals(UserOperationKind.GENERIC, controller.state.value.kindOrNull())
         } finally { scope.cancel() }
     }
 
@@ -90,10 +98,23 @@ class UserOperationControllerTest {
         var duplicate = false
         controller.submit { duplicate = true }
         assertFalse(duplicate)
-        assertTrue(controller.state.value.running)
+        assertTrue(controller.state.value is UserOperationState.Running)
         scope.cancel()
-        assertFalse(controller.state.value.failed)
-        assertFalse(controller.state.value.running)
+        assertFalse(controller.state.value is UserOperationState.Failed)
+        assertFalse(controller.state.value is UserOperationState.Running)
         assertEquals(0, errors)
+    }
+
+    @Test fun confirmationAndRunningAreMutuallyExclusive() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val controller = UserOperationController(scope)
+            controller.confirmDelete { }
+            // A normal submit cannot start while a confirmation is pending.
+            var started = false
+            controller.submit { started = true }
+            assertFalse(started)
+            assertTrue(controller.state.value is UserOperationState.Confirming)
+        } finally { scope.cancel() }
     }
 }

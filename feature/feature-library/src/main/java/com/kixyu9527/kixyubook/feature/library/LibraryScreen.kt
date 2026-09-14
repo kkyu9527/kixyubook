@@ -90,6 +90,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -299,7 +300,7 @@ fun LibraryRoute(
         repairTarget?.let { uuid ->
             LibraryBookRepairDialog(
                 title = state.books.firstOrNull { it.book.uuid == uuid }?.book?.title.orEmpty(),
-                running = operation.running,
+                running = operation is UserOperationState.Running,
                 progress = repairProgress,
                 outcome = repairOutcome,
                 onDismiss = { repairTarget = null },

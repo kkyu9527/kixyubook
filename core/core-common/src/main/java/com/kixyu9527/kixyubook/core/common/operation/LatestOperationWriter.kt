@@ -32,18 +32,22 @@ class LatestOperationWriter(private val scope: CoroutineScope, private val contr
             try {
                 delay(180)
                 while (pending.isNotEmpty()) {
-                    controller.state.first { !it.running && !it.awaitingConfirmation && !it.failed }
+                    controller.state.first {
+                        it is UserOperationState.Idle || it is UserOperationState.Succeeded
+                    }
                     val entry = pending.entries.first()
                     val keyToWrite = entry.key
                     val write = entry.value
                     pending.remove(keyToWrite)
                     active = keyToWrite to write
                     controller.submit(action = write)
-                    val result = controller.state.first { !it.running }
-                    if (result.succeeded || result.failed) active = null
-                    failedKey = keyToWrite.takeIf { result.failed }
+                    val result = controller.state.first { it !is UserOperationState.Running }
+                    if (result is UserOperationState.Succeeded || result is UserOperationState.Failed) active = null
+                    failedKey = keyToWrite.takeIf { result is UserOperationState.Failed }
                     // A newer value supersedes the failed payload, not the user's latest intention.
-                    if (result.failed && pending.containsKey(keyToWrite)) controller.dismissFailure(result.attempt)
+                    if (result is UserOperationState.Failed && pending.containsKey(keyToWrite)) {
+                        controller.dismissFailure(result.attempt)
+                    }
                 }
             } finally {
                 if (!currentCoroutineContext().isActive) {

@@ -9,75 +9,93 @@ import kotlinx.coroutines.flow.asStateFlow
 /** Lets the feedback host label long operations without coupling it to a feature module. */
 enum class UserOperationKind { GENERIC, DELETE }
 
-data class UserOperationState(
-    val attempt: Long = 0,
-    val running: Boolean = false,
-    val succeeded: Boolean = false,
-    val failed: Boolean = false,
-    val awaitingConfirmation: Boolean = false,
-    val failure: OperationFailure? = null,
-    val targetLabel: String? = null,
-    val kind: UserOperationKind = UserOperationKind.GENERIC,
-)
+/**
+ * Mutually exclusive operation phase. A single sealed state makes impossible combinations (for
+ * example "succeeded and failed", or "running while awaiting confirmation") unrepresentable, so new
+ * features cannot forget an invariant the old boolean flags required them to remember.
+ */
+sealed interface UserOperationState {
+    val attempt: Long
+
+    data class Idle(override val attempt: Long) : UserOperationState
+    data class Confirming(override val attempt: Long, val targetLabel: String?) : UserOperationState
+    data class Running(override val attempt: Long, val kind: UserOperationKind) : UserOperationState
+    data class Succeeded(override val attempt: Long, val kind: UserOperationKind) : UserOperationState
+    data class Failed(
+        override val attempt: Long,
+        val failure: OperationFailure,
+        val kind: UserOperationKind,
+    ) : UserOperationState {
+        val retryable: Boolean get() = failure.retryable
+    }
+}
 
 /** UI-thread owned write coordinator. Failed requests retain their payload until retry/dismiss. */
 class UserOperationController(private val scope: CoroutineScope, private val reportFailure: (Exception) -> Unit = {}) {
-    private val mutableState = MutableStateFlow(UserOperationState())
+    private val mutableState = MutableStateFlow<UserOperationState>(UserOperationState.Idle(0))
     val state = mutableState.asStateFlow()
     private var retryAction: (suspend () -> Unit)? = null
     private var retryKind = UserOperationKind.GENERIC
 
     // `kind` precedes `action` so existing trailing-lambda calls keep binding to the action.
     fun submit(kind: UserOperationKind = UserOperationKind.GENERIC, action: suspend () -> Unit) {
-        if (state.value.awaitingConfirmation) return
-        start(state.value.attempt + 1, action, kind)
+        val current = state.value
+        if (current is UserOperationState.Confirming) return
+        start(current.attempt + 1, action, kind)
     }
 
     fun confirmDelete(targetLabel: String? = null, action: suspend () -> Unit) {
-        if (state.value.running || state.value.awaitingConfirmation) return
+        val current = state.value
+        if (current is UserOperationState.Running || current is UserOperationState.Confirming) return
         retryAction = action
         retryKind = UserOperationKind.GENERIC
-        mutableState.value = UserOperationState(state.value.attempt + 1, awaitingConfirmation = true, targetLabel = targetLabel)
+        mutableState.value = UserOperationState.Confirming(current.attempt + 1, targetLabel)
     }
 
     fun acceptConfirmation() {
-        if (state.value.awaitingConfirmation) retryAction?.let { start(state.value.attempt, it, retryKind) }
+        val current = state.value
+        if (current is UserOperationState.Confirming) retryAction?.let { start(current.attempt, it, retryKind) }
     }
 
     fun cancelConfirmation() {
-        if (!state.value.awaitingConfirmation) return
+        val current = state.value
+        if (current !is UserOperationState.Confirming) return
         retryAction = null
-        mutableState.value = UserOperationState(state.value.attempt)
+        mutableState.value = UserOperationState.Idle(current.attempt)
     }
 
     private fun start(attempt: Long, action: suspend () -> Unit, kind: UserOperationKind) {
-        if (state.value.running) return
+        if (state.value is UserOperationState.Running) return
         retryAction = action
         retryKind = kind
-        mutableState.value = UserOperationState(attempt, running = true, kind = kind)
+        mutableState.value = UserOperationState.Running(attempt, kind)
         scope.launch {
             try {
                 action()
                 retryAction = null
-                mutableState.value = UserOperationState(attempt, succeeded = true, kind = kind)
+                mutableState.value = UserOperationState.Succeeded(attempt, kind)
             } catch (cancelled: CancellationException) {
                 retryAction = null
-                mutableState.value = UserOperationState(attempt, kind = kind)
+                mutableState.value = UserOperationState.Idle(attempt)
                 throw cancelled
             } catch (error: Exception) {
-                mutableState.value = UserOperationState(attempt, failed = true, failure = OperationFailure.from(error), kind = kind)
+                mutableState.value = UserOperationState.Failed(attempt, OperationFailure.from(error), kind)
                 runCatching { reportFailure(error) }
             }
         }
     }
 
     fun retry(attempt: Long) {
-        if (state.value.attempt == attempt && state.value.failed && state.value.failure?.retryable != false) retryAction?.let { start(attempt, it, retryKind) }
+        val current = state.value
+        if (current is UserOperationState.Failed && current.attempt == attempt && current.retryable) {
+            retryAction?.let { start(attempt, it, current.kind) }
+        }
     }
 
     fun dismissFailure(attempt: Long) {
-        if (state.value.attempt != attempt || !state.value.failed) return
+        val current = state.value
+        if (current !is UserOperationState.Failed || current.attempt != attempt) return
         retryAction = null
-        mutableState.value = UserOperationState(attempt)
+        mutableState.value = UserOperationState.Idle(attempt)
     }
 }

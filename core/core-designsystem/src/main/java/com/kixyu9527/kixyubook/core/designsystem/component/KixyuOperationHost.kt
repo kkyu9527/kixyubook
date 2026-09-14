@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationController
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationKind
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationState
 import com.kixyu9527.kixyubook.core.common.operation.OperationFailure
 import com.kixyu9527.kixyubook.core.designsystem.R
 import kotlinx.coroutines.delay
@@ -32,7 +33,7 @@ fun KixyuOperationHost(controller: UserOperationController, content: @Composable
 private fun OperationFeedback(controller: UserOperationController, modifier: Modifier) {
     val state by controller.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    val failure = stringResource(when (state.failure) {
+    val failure = stringResource(when ((state as? UserOperationState.Failed)?.failure) {
         OperationFailure.STORAGE_FULL -> R.string.kixyu_operation_storage_full
         OperationFailure.PERMISSION -> R.string.kixyu_operation_permission
         OperationFailure.SOURCE_MISSING -> R.string.kixyu_operation_source_missing
@@ -41,17 +42,23 @@ private fun OperationFeedback(controller: UserOperationController, modifier: Mod
         else -> R.string.kixyu_operation_failed
     })
     val retry = stringResource(R.string.kixyu_operation_retry)
-    LaunchedEffect(state.attempt, state.failed) {
-        if (state.failed) {
-            if (snackbar.showSnackbar(failure, actionLabel = retry.takeIf { state.failure?.retryable != false }, withDismissAction = true) == SnackbarResult.ActionPerformed) {
-                controller.retry(state.attempt)
-            } else controller.dismissFailure(state.attempt)
+    LaunchedEffect(state) {
+        val failed = state as? UserOperationState.Failed ?: return@LaunchedEffect
+        if (snackbar.showSnackbar(
+                failure,
+                actionLabel = retry.takeIf { failed.retryable },
+                withDismissAction = true,
+            ) == SnackbarResult.ActionPerformed
+        ) {
+            controller.retry(failed.attempt)
+        } else {
+            controller.dismissFailure(failed.attempt)
         }
     }
-    val deleting = state.running && state.kind == UserOperationKind.DELETE
+    val deleting = (state as? UserOperationState.Running)?.kind == UserOperationKind.DELETE
     var showDeleted by remember { mutableStateOf(false) }
-    LaunchedEffect(state.attempt, state.succeeded, state.kind) {
-        if (state.succeeded && state.kind == UserOperationKind.DELETE) {
+    LaunchedEffect(state) {
+        if ((state as? UserOperationState.Succeeded)?.kind == UserOperationKind.DELETE) {
             showDeleted = true
             // A newer operation cancels this effect; the finally block still clears the notice so a
             // success prompt cannot outlive its timer when another write starts within 1.8 seconds.
@@ -75,14 +82,15 @@ private fun OperationFeedback(controller: UserOperationController, modifier: Mod
         message = stringResource(R.string.kixyu_operation_deleted),
         progress = false,
     )
+    val confirming = state as? UserOperationState.Confirming
     KixyuActionDialog(
-        show = state.awaitingConfirmation,
+        show = confirming != null,
         title = stringResource(R.string.kixyu_operation_delete_title),
         onDismissRequest = controller::cancelConfirmation,
         confirmLabel = stringResource(R.string.kixyu_operation_delete),
         onConfirm = controller::acceptConfirmation,
     ) {
-        Text(state.targetLabel?.let { stringResource(R.string.kixyu_operation_delete_target, it) }
+        Text(confirming?.targetLabel?.let { stringResource(R.string.kixyu_operation_delete_target, it) }
             ?: stringResource(R.string.kixyu_operation_delete_warning))
     }
 }

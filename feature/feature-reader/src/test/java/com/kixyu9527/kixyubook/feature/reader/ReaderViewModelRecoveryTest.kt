@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.feature.reader
 import androidx.lifecycle.ViewModelStore
 import com.kixyu9527.kixyubook.core.common.configuration.mergeBookSetting
 import com.kixyu9527.kixyubook.core.common.model.*
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationState
 import com.kixyu9527.kixyubook.core.common.repository.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -121,12 +122,12 @@ class ReaderViewModelRecoveryTest {
             if (exerciseBookmark) {
                 first.savePosition(7, 5)
                 first.addBookmark()
-                first.operations.state.first { it.failed }
+                first.operations.state.first { it is UserOperationState.Failed }
                 val attempt = first.operations.state.value.attempt
                 first.jumpToChapter(0)
                 first.uiState.first { it.chapterIndex == 0 }
                 first.operations.retry(attempt)
-                first.operations.state.first { it.succeeded }
+                first.operations.state.first { it is UserOperationState.Succeeded }
                 assertEquals(2, bookmarkAttempts.size)
                 assertEquals(bookmarkAttempts.first(), bookmarkAttempts.last())
                 assertEquals(33L, bookmarkAttempts.last().chapterId)

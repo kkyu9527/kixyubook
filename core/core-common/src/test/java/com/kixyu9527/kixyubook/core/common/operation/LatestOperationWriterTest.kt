@@ -40,7 +40,7 @@ class LatestOperationWriterTest {
         writer.submit("size") { saved = 25 }
         controller.retry(failed)
         advanceUntilIdle()
-        assertEquals(25, saved); assertTrue(controller.state.value.succeeded)
+        assertEquals(25, saved); assertTrue(controller.state.value is UserOperationState.Succeeded)
     }
 
     @Test fun failuresDistinguishUserActionFromRetryableIo() {
