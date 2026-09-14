@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
 import com.kixyu9527.kixyubook.core.common.model.BookSearchResult
+import com.kixyu9527.kixyubook.core.common.model.SearchMatch
 import java.io.Closeable
 import java.io.File
 import java.io.RandomAccessFile
@@ -54,9 +55,14 @@ internal class SearchResultStore(private val directory: File? = null, private va
         val paged = disk != null
         val start = if (paged) requestedStart.coerceIn(0, (entries.size - 1).coerceAtLeast(0)) / PAGE_SIZE * PAGE_SIZE else 0
         val rows = entries.entries.asSequence().drop(start).take(if (paged) PAGE_SIZE else Int.MAX_VALUE).map { (key, entry) ->
-            entry.memory ?: checkNotNull(disk).let {
-                it.seek(entry.offset)
-                BookSearchResult(key.id, readText(it), key.chapter, key.paragraph, readText(it))
+            entry.memory ?: checkNotNull(disk).let { source ->
+                source.seek(entry.offset)
+                val title = readText(source)
+                val text = readText(source)
+                val matchCount = source.readInt()
+                require(matchCount in 0..text.length) { "Invalid match count" }
+                val matches = List(matchCount) { SearchMatch(source.readInt(), source.readInt()) }
+                BookSearchResult(key.id, title, key.chapter, key.paragraph, text, matches)
             }
         }.toList()
         return Page(rows, start, entries.size)
@@ -69,6 +75,11 @@ internal class SearchResultStore(private val directory: File? = null, private va
         listOf(result.chapterTitle, result.text).forEach { text ->
             val bytes = text.toByteArray(Charsets.UTF_8)
             target.writeInt(bytes.size); target.write(bytes)
+        }
+        target.writeInt(result.matches.size)
+        result.matches.forEach { match ->
+            target.writeInt(match.start)
+            target.writeInt(match.length)
         }
         entry.memory = null
     }

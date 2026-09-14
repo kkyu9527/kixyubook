@@ -40,6 +40,7 @@ class ReaderSearchOverlayTest {
                             visible = visible, progress = { 0f }, state = state,
                             onDismiss = { visible = false }, onSearch = fixture.controller::search,
                             onClearHistory = {}, onMove = fixture.controller::move,
+                            onMoveMatch = fixture.controller::moveMatch,
                             onReturn = fixture.controller::returnToReadingPosition,
                             onSelect = fixture.controller::select,
                         )
@@ -66,7 +67,7 @@ class ReaderSearchOverlayTest {
             compose.runOnIdle {
                 fixture.repository.requests.single().result.complete(emptyList())
             }
-            compose.onNodeWithText("1 个匹配结果").assertIsDisplayed()
+            compose.onNodeWithText("1 段 · 1 处").assertIsDisplayed()
             compose.onNodeWithText("当前章节").performTouchInput { click() }
             compose.waitForIdle()
             compose.runOnIdle { assertEquals(listOf(5 to 3), fixture.jumps) }
@@ -74,7 +75,7 @@ class ReaderSearchOverlayTest {
             compose.waitForIdle()
             compose.runOnIdle { assertEquals(1, fixture.returns) }
             compose.onNode(hasSetTextAction()).performTextReplacement("不存在的词")
-            compose.onNodeWithText("1 个匹配结果").assertDoesNotExist()
+            compose.onNodeWithText("1 段 · 1 处").assertDoesNotExist()
             compose.onNode(hasSetTextAction()).performImeAction()
             compose.runOnIdle {
                 assertEquals("不存在的词", fixture.repository.requests.last().query)

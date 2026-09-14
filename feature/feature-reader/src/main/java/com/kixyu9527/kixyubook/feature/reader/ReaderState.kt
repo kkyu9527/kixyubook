@@ -44,8 +44,13 @@ data class ReaderUiState(
     val searchHistory: List<String> = emptyList(),
     val searchResults: List<BookSearchResult> = emptyList(),
     val searchResultStart: Int = 0,
+    /** Number of matching paragraphs. */
     val searchMatchCount: Int = 0,
+    /** Total occurrences across all matching paragraphs; one paragraph can match several times. */
+    val searchOccurrenceCount: Int = 0,
     val selectedSearchIndex: Int = -1,
+    /** Index of the selected occurrence inside the selected result's matches. */
+    val selectedSearchMatch: Int = 0,
     val searchReturnAvailable: Boolean = false,
     val searchInProgress: Boolean = false,
     val searchProgress: Float = 0f,

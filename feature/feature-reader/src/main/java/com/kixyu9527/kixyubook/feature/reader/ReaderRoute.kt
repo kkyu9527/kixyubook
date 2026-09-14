@@ -182,6 +182,7 @@ private fun LoadedReaderRoute(
             search = viewModel::search,
             selectSearchResult = viewModel::selectSearchResult,
             moveSearchResult = viewModel::moveSearchResult,
+            moveSearchMatch = viewModel::moveSearchMatch,
             moveSearchResultPage = viewModel::moveSearchResultPage,
             returnFromSearchResult = viewModel::returnFromSearchResult,
             navigateHistoryBack = viewModel::navigateHistoryBack,

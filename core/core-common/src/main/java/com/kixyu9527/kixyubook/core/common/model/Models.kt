@@ -141,12 +141,32 @@ data class Bookmark(
     val createdTime: Long,
 )
 
+/** One in-paragraph match: UTF-16 offset and length inside the paragraph text. */
+data class SearchMatch(
+    val start: Int,
+    val length: Int,
+)
+
+/** All non-overlapping, case-insensitive occurrences of [query], in reading order. */
+fun String.searchMatches(query: String): List<SearchMatch> {
+    if (query.isEmpty()) return emptyList()
+    val matches = mutableListOf<SearchMatch>()
+    var index = indexOf(query, 0, ignoreCase = true)
+    while (index >= 0) {
+        matches += SearchMatch(index, query.length)
+        index = indexOf(query, index + query.length, ignoreCase = true)
+    }
+    return matches
+}
+
 data class BookSearchResult(
     val chapterId: Long,
     val chapterTitle: String,
     val chapterIndex: Int,
     val paragraphIndex: Int,
     val text: String,
+    /** Every occurrence in this paragraph, in reading order. A paragraph can match several times. */
+    val matches: List<SearchMatch> = emptyList(),
 )
 
 enum class BookSearchStage { INDEXING, SEARCHING }

@@ -514,6 +514,9 @@ class ReaderViewModel @AssistedInject constructor(
             val state = _uiState.value
             if (state.chapter != null) prefetchNearbyChapters(state.chapterIndex, state.chapters)
         }
+        // Corrected text can add or remove hits; re-run the active query so the result list and its
+        // occurrence counts are never shown against stale text.
+        searchController.invalidate()
     }
 
     private suspend fun reloadCorrectedChapter(position: Int) {
@@ -913,8 +916,16 @@ class ReaderViewModel @AssistedInject constructor(
         requestLocation(ReaderLocationRequest(chapterIndex, position, source = ReaderLocationSource.BOOKMARK))
     }
 
-    private fun jumpToPositionRaw(chapterIndex: Int, position: Int) {
-        requestLocation(ReaderLocationRequest(chapterIndex, position, source = ReaderLocationSource.SEARCH, rememberOrigin = false))
+    private fun jumpToPositionRaw(chapterIndex: Int, position: Int, charOffset: Int) {
+        requestLocation(
+            ReaderLocationRequest(
+                chapterIndex = chapterIndex,
+                paragraphIndex = position,
+                charOffset = charOffset,
+                source = ReaderLocationSource.SEARCH,
+                rememberOrigin = false,
+            ),
+        )
     }
 
     internal fun requestLocation(request: ReaderLocationRequest) {
@@ -1173,6 +1184,7 @@ class ReaderViewModel @AssistedInject constructor(
     fun returnFromSearchResult() = searchController.returnToReadingPosition()
 
     fun moveSearchResult(delta: Int) = searchController.move(delta)
+    fun moveSearchMatch(delta: Int) = searchController.moveMatch(delta)
     fun moveSearchResultPage(delta: Int) = searchController.movePage(delta)
 
     fun clearSearch() = searchController.clear()

@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.feature.reader
 import com.kixyu9527.kixyubook.core.common.model.BookSearchResult
 import com.kixyu9527.kixyubook.core.common.model.BookSearchStage
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
+import com.kixyu9527.kixyubook.core.common.model.searchMatches
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.reader.engine.contentParagraphs
 import kotlinx.coroutines.CoroutineScope
@@ -29,7 +30,7 @@ internal class ReaderSearchController(
     private val state: MutableStateFlow<ReaderUiState>,
     private val recordHistory: suspend (String) -> Unit,
     private val recordOrigin: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
-    private val jumpToPosition: (chapterIndex: Int, paragraphIndex: Int) -> Unit,
+    private val jumpToPosition: (chapterIndex: Int, paragraphIndex: Int, charOffset: Int) -> Unit,
     private val returnToOrigin: () -> Unit,
     private val failureMessage: () -> String,
     private val resultDirectory: File? = null,
@@ -39,6 +40,7 @@ internal class ReaderSearchController(
     private var resultStore = SearchResultStore(resultDirectory)
     @Volatile private var generation = 0L
     private var lastPublished = 0L
+    private var occurrenceCount = 0L
     private val storageDispatcher = if (resultDirectory == null) Dispatchers.Unconfined else Dispatchers.IO
 
     fun search(query: String, searchScope: ReaderSearchScope) {
@@ -55,6 +57,7 @@ internal class ReaderSearchController(
             return
         }
         val immediateResults = currentChapterResults(normalized)
+        occurrenceCount = immediateResults.sumOf { it.matches.size }.toLong()
         state.update {
             it.copy(
                 searchQuery = normalized,
@@ -64,7 +67,9 @@ internal class ReaderSearchController(
                 searchResults = immediateResults,
                 searchResultStart = 0,
                 searchMatchCount = immediateResults.size,
+                searchOccurrenceCount = occurrenceCount.toInt(),
                 selectedSearchIndex = if (immediateResults.isEmpty()) -1 else 0,
+                selectedSearchMatch = 0,
                 searchReturnAvailable = false,
                 searchInProgress = searchScope == ReaderSearchScope.BOOK,
                 searchProgress = if (searchScope == ReaderSearchScope.BOOK) 0f else 1f,
@@ -144,17 +149,17 @@ internal class ReaderSearchController(
             ?: snapshot.chapterIndex
         return chapter.contentParagraphs()
             .asSequence()
-            .filter { paragraph ->
-                paragraph.kind == ParagraphKind.TEXT &&
-                    paragraph.text.contains(query, ignoreCase = true)
-            }
-            .map { paragraph ->
-                BookSearchResult(
+            .filter { paragraph -> paragraph.kind == ParagraphKind.TEXT }
+            .mapNotNull { paragraph ->
+                val matches = paragraph.text.searchMatches(query)
+                if (matches.isEmpty()) null
+                else BookSearchResult(
                     chapterId = chapter.id,
                     chapterTitle = chapter.title,
                     chapterIndex = chapterIndex,
                     paragraphIndex = paragraph.index,
                     text = paragraph.text,
+                    matches = matches,
                 )
             }
             .toList()
@@ -170,9 +175,34 @@ internal class ReaderSearchController(
             originRecorded = true
         }
         state.update {
-            it.copy(selectedSearchIndex = safeIndex, searchReturnAvailable = true)
+            it.copy(selectedSearchIndex = safeIndex, selectedSearchMatch = 0, searchReturnAvailable = true)
         }
-        jumpToPosition(result.chapterIndex, result.paragraphIndex)
+        jumpToMatch(result, 0)
+    }
+
+    /** Moves to the previous/next occurrence, crossing into the neighbouring matching paragraph. */
+    fun moveMatch(delta: Int) {
+        val snapshot = state.value
+        val result = snapshot.searchResults.getOrNull(snapshot.selectedSearchIndex) ?: return
+        val target = snapshot.selectedSearchMatch + delta
+        if (target in result.matches.indices) {
+            state.update { it.copy(selectedSearchMatch = target) }
+            jumpToMatch(result, target)
+        } else {
+            move(delta)
+        }
+    }
+
+    /** Re-runs the active query after the underlying text changed (correction saved / reparse). */
+    fun invalidate() {
+        val query = state.value.searchQuery
+        if (query.isBlank()) return
+        search(query, state.value.searchScope)
+    }
+
+    private fun jumpToMatch(result: BookSearchResult, matchIndex: Int) {
+        val offset = result.matches.getOrNull(matchIndex)?.start ?: 0
+        jumpToPosition(result.chapterIndex, result.paragraphIndex, offset)
     }
 
     fun returnToReadingPosition() {
@@ -211,13 +241,16 @@ internal class ReaderSearchController(
     }
 
     private fun clearState() {
+        occurrenceCount = 0L
         state.update {
             it.copy(
                 searchQuery = "",
                 searchResults = emptyList(),
                 searchResultStart = 0,
                 searchMatchCount = 0,
+                searchOccurrenceCount = 0,
                 selectedSearchIndex = -1,
+                selectedSearchMatch = 0,
                 searchReturnAvailable = false,
                 searchInProgress = false,
                 searchProgress = 0f,
@@ -232,6 +265,7 @@ internal class ReaderSearchController(
     private suspend fun publishResults(token: Long, store: SearchResultStore, candidates: List<BookSearchResult>, force: Boolean = false) {
         if (token != generation) return
         withContext(storageDispatcher) { store.add(candidates) }
+        occurrenceCount += candidates.sumOf { it.matches.size }
         val now = System.nanoTime()
         if (!force && resultDirectory != null && now - lastPublished < 120_000_000L) return
         lastPublished = now
@@ -245,7 +279,11 @@ internal class ReaderSearchController(
         val page = withContext(storageDispatcher) { store.page(start) }
         state.update { current ->
             if (token != generation) current else current.withSearchResults(page.rows)
-                .copy(searchResultStart = page.start, searchMatchCount = page.total)
+                .copy(
+                    searchResultStart = page.start,
+                    searchMatchCount = page.total,
+                    searchOccurrenceCount = occurrenceCount.toInt(),
+                )
         }
     }
 

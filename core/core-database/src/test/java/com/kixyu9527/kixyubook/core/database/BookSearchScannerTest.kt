@@ -45,6 +45,27 @@ class BookSearchScannerTest {
         } finally { db.close() }
     }
 
+    @Test fun aParagraphReportsEveryOccurrenceAndItsCharacterRange() = runBlocking {
+        val context = RuntimeEnvironment.getApplication() as Context
+        val db = Room.inMemoryDatabaseBuilder(context, KixyuDatabase::class.java).build()
+        try {
+            val dao = db.bookDao()
+            dao.insertBook(BookEntity("book", "title", "", "", null, "TXT", "", "", 1, "hash", ""))
+            dao.insertChapter(ChapterEntity(1, "book", "chapter", 0, indexed = true))
+            dao.insertParagraphsChunked(1, listOf("NEEDLE 和 needle，还有一个 needle"))
+            val results = BookSearchScanner(dao).search(
+                dao.getChapters("book"), "needle", emptyList(),
+                { error("already indexed") }, {}, {},
+            )
+            assertEquals(1, results.size)
+            val result = results.single()
+            assertEquals(3, result.matches.size)
+            result.matches.forEach { match ->
+                assertEquals("needle", result.text.substring(match.start, match.start + match.length).lowercase())
+            }
+        } finally { db.close() }
+    }
+
     @Test fun excerptKeepsSupplementaryCharactersIntact() {
         val text = "a".repeat(47) + "😀" + "b".repeat(47) + "needle" + "c".repeat(111) + "😀end"
         val excerpt = searchExcerpt(text, text.indexOf("needle"), 6)

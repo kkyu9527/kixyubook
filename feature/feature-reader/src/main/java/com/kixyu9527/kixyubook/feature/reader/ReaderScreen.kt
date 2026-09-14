@@ -74,6 +74,7 @@ internal fun ReaderScreen(
     search: (String, ReaderSearchScope) -> Unit,
     selectSearchResult: (Int) -> Unit,
     moveSearchResult: (Int) -> Unit,
+    moveSearchMatch: (Int) -> Unit,
     moveSearchResultPage: (Int) -> Unit,
     returnFromSearchResult: () -> Unit,
     navigateHistoryBack: () -> Unit,
@@ -598,6 +599,7 @@ internal fun ReaderScreen(
             onSearch = search,
             onClearHistory = clearSearchHistory,
             onMove = moveSearchResult,
+            onMoveMatch = moveSearchMatch,
             onPage = moveSearchResultPage,
             onReturn = returnFromSearchResult,
             onSelect = { index ->

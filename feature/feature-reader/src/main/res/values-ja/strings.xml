@@ -56,6 +56,8 @@
     <string name="reader_close_search">検索を閉じる</string>
     <string name="reader_search">検索</string>
     <string name="reader_previous_search_result">前の結果</string>
+    <string name="reader_search_position">%1$d/%2$d 段落 · %3$d/%4$d 箇所</string>
+    <string name="reader_search_occurrence_summary">%1$d 段落 · %2$d 箇所</string>
     <string name="reader_next_search_result">次の結果</string>
     <string name="reader_return_before_search">移動前の位置に戻る</string>
     <string name="reader_exit_search">検索を終了</string>

@@ -34,9 +34,9 @@ internal class BookSearchScanner(private val dao: BookDao) {
                     batch.forEach { paragraph ->
                         currentCoroutineContext().ensureActive()
                         val text = applyCorrections(paragraph.text, byParagraph[chapter.chapterIndex to paragraph.paragraphIndex].orEmpty())
-                        val match = text.indexOf(query, ignoreCase = true)
-                        if (match >= 0) add(BookSearchResult(chapter.id, chapter.title, chapter.chapterIndex,
-                            paragraph.paragraphIndex, searchExcerpt(text, match, query.length)))
+                        val matches = text.searchMatches(query)
+                        if (matches.isNotEmpty()) add(BookSearchResult(chapter.id, chapter.title, chapter.chapterIndex,
+                            paragraph.paragraphIndex, searchExcerpt(text, matches.first().start, query.length), matches))
                     }
                 }
                 if (retainResults) results.addAll(matches)

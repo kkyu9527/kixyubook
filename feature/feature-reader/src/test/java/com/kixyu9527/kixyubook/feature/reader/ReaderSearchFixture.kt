@@ -49,7 +49,7 @@ internal class ReaderSearchFixture : AutoCloseable {
     val controller = ReaderSearchController(
         scope, "book", repository, state, { history += it },
         { chapter, paragraph -> origins += chapter to paragraph },
-        { chapter, paragraph -> jumps += chapter to paragraph }, { returns++ },
+        { chapter, paragraph, _ -> jumps += chapter to paragraph }, { returns++ },
         { "Search failed" },
     )
     override fun close() { scope.cancel() }

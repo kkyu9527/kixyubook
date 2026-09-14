@@ -56,6 +56,8 @@
     <string name="reader_close_search">關閉搜尋</string>
     <string name="reader_search">搜尋</string>
     <string name="reader_previous_search_result">上一個結果</string>
+    <string name="reader_search_position">第 %1$d/%2$d 段 · 第 %3$d/%4$d 處</string>
+    <string name="reader_search_occurrence_summary">%1$d 段 · %2$d 處</string>
     <string name="reader_next_search_result">下一個結果</string>
     <string name="reader_return_before_search">返回跳轉前位置</string>
     <string name="reader_exit_search">退出搜尋</string>

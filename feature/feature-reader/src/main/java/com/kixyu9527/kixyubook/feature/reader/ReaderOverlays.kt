@@ -130,6 +130,7 @@ internal fun ReaderSearchOverlay(
     onSearch: (String, ReaderSearchScope) -> Unit,
     onClearHistory: () -> Unit,
     onMove: (Int) -> Unit,
+    onMoveMatch: (Int) -> Unit,
     onPage: (Int) -> Unit = {},
     onReturn: () -> Unit,
     onSelect: (Int) -> Unit,
@@ -308,23 +309,33 @@ internal fun ReaderSearchOverlay(
                     }
                     if (state.searchResults.isNotEmpty() && query.trim() == state.searchQuery) {
                 if (!expanded) {
+                    val selectedResult = state.searchResults.getOrNull(state.selectedSearchIndex)
+                    val paragraphOrdinal = state.searchResultStart + state.selectedSearchIndex
+                    val paragraphTotal = maxOf(state.searchMatchCount, state.searchResults.size)
+                    val matchCount = selectedResult?.matches?.size ?: 0
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "${state.searchResultStart + state.selectedSearchIndex + 1}/${maxOf(state.searchMatchCount, state.searchResults.size)}",
+                            stringResource(
+                                R.string.reader_search_position,
+                                paragraphOrdinal + 1,
+                                paragraphTotal,
+                                state.selectedSearchMatch + 1,
+                                matchCount.coerceAtLeast(1),
+                            ),
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         KixyuIconButton(
-                            onClick = { onMove(-1) },
-                            enabled = state.searchResultStart + state.selectedSearchIndex > 0,
+                            onClick = { onMoveMatch(-1) },
+                            enabled = state.selectedSearchMatch > 0 || paragraphOrdinal > 0,
                         ) { Icon(KixyuSymbols.KeyboardArrowUp, stringResource(R.string.reader_previous_search_result)) }
                         KixyuIconButton(
-                            onClick = { onMove(1) },
-                            enabled = state.searchResultStart + state.selectedSearchIndex + 1 < maxOf(state.searchMatchCount, state.searchResults.size),
+                            onClick = { onMoveMatch(1) },
+                            enabled = state.selectedSearchMatch + 1 < matchCount || paragraphOrdinal + 1 < paragraphTotal,
                         ) { Icon(KixyuSymbols.KeyboardArrowDown, stringResource(R.string.reader_next_search_result)) }
                         if (state.searchReturnAvailable) {
                             KixyuIconButton(
@@ -340,8 +351,11 @@ internal fun ReaderSearchOverlay(
                     }
                 } else {
                 Text(
-                    androidx.compose.ui.res.pluralStringResource(R.plurals.reader_search_result_count,
-                        maxOf(state.searchMatchCount, state.searchResults.size), maxOf(state.searchMatchCount, state.searchResults.size)),
+                    stringResource(
+                        R.string.reader_search_occurrence_summary,
+                        maxOf(state.searchMatchCount, state.searchResults.size),
+                        state.searchOccurrenceCount,
+                    ),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
