@@ -101,6 +101,8 @@ data class BookmarkEntity(
     val position: Int,
     val preview: String,
     val createdTime: Long,
+    /** Stable chapter identity so the bookmark can be re-anchored after a reparse. */
+    @ColumnInfo(defaultValue = "''") val chapterKey: String = "",
 )
 
 data class BookmarkRow(
@@ -112,6 +114,7 @@ data class BookmarkRow(
     val position: Int,
     val preview: String,
     val createdTime: Long,
+    val chapterKey: String = "",
 )
 
 data class BookSearchResultRow(

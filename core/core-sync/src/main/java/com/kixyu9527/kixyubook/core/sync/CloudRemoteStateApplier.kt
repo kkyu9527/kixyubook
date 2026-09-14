@@ -346,6 +346,7 @@ internal suspend fun replaceBookmarksFromRemote(
                     position = value.optInt("paragraphIndex"),
                     preview = value.optString("preview"),
                     createdTime = value.optLong("createdTime"),
+                    chapterKey = value.optString("chapterKey").ifBlank { chapter.chapterKey },
                 ),
             )
         }

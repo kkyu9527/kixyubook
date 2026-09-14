@@ -35,17 +35,18 @@ interface BookDao {
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId ORDER BY paragraphIndex") suspend fun getParagraphs(chapterId: Long): List<ParagraphEntity>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId AND paragraphIndex = :index") suspend fun getParagraph(chapterId: Long, index: Int): ParagraphEntity?
     @Query("SELECT EXISTS(SELECT 1 FROM metadata_edits WHERE bookUuid = :uuid)") suspend fun hasMetadataEdits(uuid: String): Boolean
-    @Query("""SELECT b.uuid, b.bookUuid, b.chapterId, c.title AS chapterTitle, c.chapterIndex, b.position, b.preview, b.createdTime
+    @Query("""SELECT b.uuid, b.bookUuid, b.chapterId, c.title AS chapterTitle, c.chapterIndex, b.position, b.preview, b.createdTime, b.chapterKey
         FROM bookmarks b JOIN chapters c ON c.id = b.chapterId
         WHERE b.bookUuid = :uuid ORDER BY c.chapterIndex, b.position""")
     fun observeBookmarks(uuid: String): Flow<List<BookmarkRow>>
-    @Query("""SELECT b.uuid, b.bookUuid, b.chapterId, c.title AS chapterTitle, c.chapterIndex, b.position, b.preview, b.createdTime
+    @Query("""SELECT b.uuid, b.bookUuid, b.chapterId, c.title AS chapterTitle, c.chapterIndex, b.position, b.preview, b.createdTime, b.chapterKey
         FROM bookmarks b JOIN chapters c ON c.id = b.chapterId
         WHERE b.bookUuid = :uuid ORDER BY c.chapterIndex, b.position""")
     suspend fun getBookmarks(uuid: String): List<BookmarkRow>
     @Query("SELECT * FROM bookmarks") suspend fun getAllBookmarkEntities(): List<BookmarkEntity>
     @Query("SELECT * FROM bookmarks WHERE uuid = :uuid LIMIT 1")
     suspend fun getBookmarkEntity(uuid: String): BookmarkEntity?
+    @Query("SELECT chapterKey FROM chapters WHERE id = :chapterId") suspend fun getChapterKey(chapterId: Long): String?
     @Query("""SELECT c.id AS chapterId, c.title AS chapterTitle, c.chapterIndex,
         p.paragraphIndex, p.text
         FROM paragraphs_fts f

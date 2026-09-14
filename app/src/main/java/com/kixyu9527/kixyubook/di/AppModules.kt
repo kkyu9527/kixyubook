@@ -31,6 +31,7 @@ import com.kixyu9527.kixyubook.core.database.MIGRATION_11_12
 import com.kixyu9527.kixyubook.core.database.MIGRATION_12_13
 import com.kixyu9527.kixyubook.core.database.MIGRATION_12_14
 import com.kixyu9527.kixyubook.core.database.MIGRATION_13_14
+import com.kixyu9527.kixyubook.core.database.MIGRATION_14_15
 import com.kixyu9527.kixyubook.core.database.LocalTextCorrectionRepository
 import com.kixyu9527.kixyubook.core.database.LocalReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
@@ -65,6 +66,7 @@ object DatabaseModule {
                 MIGRATION_12_13,
                 MIGRATION_12_14,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
     }

@@ -139,6 +139,8 @@ data class Bookmark(
     val position: Int,
     val preview: String,
     val createdTime: Long,
+    /** Stable chapter identity so the bookmark survives a reparse; '' for legacy rows. */
+    val chapterKey: String = "",
 )
 
 /** One in-paragraph match: UTF-16 offset and length inside the paragraph text. */

@@ -10,7 +10,7 @@ import com.kixyu9527.kixyubook.core.database.dao.ReaderAnnotationDao
 import com.kixyu9527.kixyubook.core.database.dao.ImportDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 
-const val KIXYU_DATABASE_VERSION = 14
+const val KIXYU_DATABASE_VERSION = 15
 
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, ParagraphEntity::class, ReadingProgressEntity::class,

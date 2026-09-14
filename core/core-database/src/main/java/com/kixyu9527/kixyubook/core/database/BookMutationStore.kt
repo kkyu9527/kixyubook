@@ -64,6 +64,9 @@ internal class BookMutationStore(
     }
 
     suspend fun addBookmark(bookmark: Bookmark): Unit = database.withTransaction {
+        // Persist the stable chapter key alongside the mutable row id so the bookmark can be
+        // re-anchored after a reparse. Callers may supply it; otherwise derive it from the chapter.
+        val chapterKey = bookmark.chapterKey.ifBlank { dao.getChapterKey(bookmark.chapterId).orEmpty() }
         dao.insertBookmark(
             BookmarkEntity(
                 uuid = bookmark.uuid,
@@ -72,6 +75,7 @@ internal class BookMutationStore(
                 position = bookmark.position,
                 preview = bookmark.preview,
                 createdTime = bookmark.createdTime,
+                chapterKey = chapterKey,
             ),
         )
         syncMutations.record(SyncEntityType.BOOKMARKS, bookmark.bookUuid)

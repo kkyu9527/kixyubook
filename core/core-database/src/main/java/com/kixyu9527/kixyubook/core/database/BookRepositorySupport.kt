@@ -115,6 +115,7 @@ internal fun BookmarkRow.toModel() = Bookmark(
     position,
     preview,
     createdTime,
+    chapterKey,
 )
 internal fun BookSearchResultRow.toModel() = BookSearchResult(
     chapterId,

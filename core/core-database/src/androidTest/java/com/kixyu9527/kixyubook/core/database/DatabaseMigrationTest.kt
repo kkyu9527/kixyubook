@@ -33,6 +33,7 @@ class DatabaseMigrationTest {
             MIGRATION_8_9,
             MIGRATION_9_12,
             MIGRATION_12_14,
+            MIGRATION_14_15,
         ).use { database ->
             assertPublishedLibraryStateWasPreserved(database)
             assertEquals(0L, database.bookLastOpenedTime())
@@ -57,6 +58,7 @@ class DatabaseMigrationTest {
             MIGRATION_8_9,
             MIGRATION_9_12,
             MIGRATION_12_14,
+            MIGRATION_14_15,
         ).use { database ->
             assertPublishedLibraryStateWasPreserved(database)
             assertEquals(0L, database.bookLastOpenedTime())
@@ -80,6 +82,7 @@ class DatabaseMigrationTest {
             MIGRATION_9_12,
             MIGRATION_12_13,
             MIGRATION_13_14,
+            MIGRATION_14_15,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             database.insertCorrection()
@@ -103,6 +106,7 @@ class DatabaseMigrationTest {
             MIGRATION_9_12,
             MIGRATION_12_13,
             MIGRATION_13_14,
+            MIGRATION_14_15,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             assertEquals(1, database.correctionCount())
@@ -122,6 +126,7 @@ class DatabaseMigrationTest {
             KIXYU_DATABASE_VERSION,
             true,
             MIGRATION_12_14,
+            MIGRATION_14_15,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             assertEquals("第一章", database.chapterTitle())
@@ -152,6 +157,7 @@ class DatabaseMigrationTest {
             KIXYU_DATABASE_VERSION,
             true,
             MIGRATION_13_14,
+            MIGRATION_14_15,
         ).use { database ->
             assertEquals(
                 1,
@@ -165,6 +171,34 @@ class DatabaseMigrationTest {
                     bookUuid, message, startedTime, updatedTime
                 ) VALUES('run', 'source', '测试.txt', 0, 'QUEUED', 0, 'PENDING', NULL, NULL, 1, 1)
                 """.trimIndent(),
+            )
+        }
+    }
+
+    @Test
+    fun migrate14To15_backfillsBookmarkChapterKey() {
+        helper.createDatabase(TEST_DATABASE, 14).use { database ->
+            database.insertBook()
+            database.execSQL(
+                "INSERT INTO chapters(id, bookUuid, title, chapterIndex, volumeTitle, volumeIndex, indexed, chapterKey) " +
+                    "VALUES(7, 'migration-book', '第一章', 0, NULL, NULL, 1, 'chapter-0')",
+            )
+            database.execSQL(
+                "INSERT INTO bookmarks(uuid, bookUuid, chapterId, position, preview, createdTime) " +
+                    "VALUES('bm', 'migration-book', 7, 1, '预览', 1)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            KIXYU_DATABASE_VERSION,
+            true,
+            MIGRATION_14_15,
+        ).use { database ->
+            assertEquals(
+                "chapter-0",
+                database.query("SELECT chapterKey FROM bookmarks WHERE uuid = 'bm'")
+                    .use { cursor -> check(cursor.moveToFirst()); cursor.getString(0) },
             )
         }
     }

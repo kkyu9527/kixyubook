@@ -146,6 +146,22 @@ val MIGRATION_12_14 = object : Migration(12, 14) {
     }
 }
 
+/**
+ * Adds a stable chapter anchor to bookmarks so a bookmark can be re-resolved after a reparse
+ * instead of depending only on the mutable chapter row id. Existing bookmarks are backfilled from
+ * the chapter they currently point at, so no reading data is lost.
+ */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `chapterKey` TEXT NOT NULL DEFAULT ''")
+        db.execSQL(
+            "UPDATE `bookmarks` SET `chapterKey` = COALESCE(" +
+                "(SELECT `chapters`.`chapterKey` FROM `chapters` " +
+                "WHERE `chapters`.`id` = `bookmarks`.`chapterId`), '')",
+        )
+    }
+}
+
 private fun createReaderAnnotationsTable(db: SupportSQLiteDatabase) {
     db.execSQL(
         """
