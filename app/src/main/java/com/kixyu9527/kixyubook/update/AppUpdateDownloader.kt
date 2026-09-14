@@ -7,13 +7,14 @@ import android.content.Intent
 import android.database.Cursor
 import android.os.Environment
 import android.provider.Settings
-import android.widget.Toast
 import androidx.core.content.edit
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import com.kixyu9527.kixyubook.AppTransientMessages
 import com.kixyu9527.kixyubook.BuildConfig
 import com.kixyu9527.kixyubook.R
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateInfo
+import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -22,11 +23,12 @@ import javax.inject.Singleton
 @Singleton
 class AppUpdateDownloader @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val messages: AppTransientMessages,
 ) {
     fun download(update: AppUpdateInfo): Boolean = runCatching {
         enqueue(update)
     }.getOrElse {
-        Toast.makeText(context, R.string.update_download_start_failed, Toast.LENGTH_LONG).show()
+        messages.send(context.getString(R.string.update_download_start_failed))
         false
     }
 
@@ -55,7 +57,7 @@ class AppUpdateDownloader @Inject constructor(
             putString(KEY_VERSION, update.versionName)
             putBoolean(KEY_INSTALL_LAUNCHED, false)
         }
-        Toast.makeText(context, R.string.update_download_started, Toast.LENGTH_LONG).show()
+        messages.send(context.getString(R.string.update_download_started))
         return true
     }
 
@@ -66,7 +68,7 @@ class AppUpdateDownloader @Inject constructor(
             return
         }
         if (context.packageManager.canRequestPackageInstalls()) {
-            launchPendingInstaller(context)
+            launchPendingInstaller(context, messages)
         }
     }
 
@@ -81,7 +83,11 @@ class AppUpdateDownloader @Inject constructor(
         private const val KEY_VERSION = "version"
         private const val KEY_INSTALL_LAUNCHED = "install_launched"
 
-        internal fun handleDownloadCompleted(context: Context, completedId: Long) {
+        internal fun handleDownloadCompleted(
+            context: Context,
+            completedId: Long,
+            messages: AppTransientMessages,
+        ) {
             val prefs = preferences(context)
             if (completedId <= 0L || completedId != prefs.getLong(KEY_DOWNLOAD_ID, -1L)) return
             if (!downloadSucceeded(context, completedId)) return
@@ -89,10 +95,11 @@ class AppUpdateDownloader @Inject constructor(
                 clearPendingDownload(context)
                 return
             }
-            if (!verifyPendingApk(context)) return
+            if (!verifyPendingApk(context, messages)) return
+            messages.send(context.getString(R.string.update_download_completed))
 
             if (context.packageManager.canRequestPackageInstalls()) {
-                launchPendingInstaller(context)
+                launchPendingInstaller(context, messages)
             } else {
                 val permissionIntent = Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -102,13 +109,13 @@ class AppUpdateDownloader @Inject constructor(
             }
         }
 
-        private fun launchPendingInstaller(context: Context) {
+        private fun launchPendingInstaller(context: Context, messages: AppTransientMessages) {
             val prefs = preferences(context)
             if (prefs.getBoolean(KEY_INSTALL_LAUNCHED, false)) return
             val downloadId = prefs.getLong(KEY_DOWNLOAD_ID, -1L)
             val apk = prefs.getString(KEY_APK_PATH, null)?.let(::File) ?: return
             if (!apk.isFile || !downloadSucceeded(context, downloadId)) return
-            if (!verifyPendingApk(context)) return
+            if (!verifyPendingApk(context, messages)) return
 
             val uri = FileProvider.getUriForFile(
                 context,
@@ -146,7 +153,7 @@ class AppUpdateDownloader @Inject constructor(
             return isNewerVersion(version, BuildConfig.VERSION_NAME)
         }
 
-        private fun verifyPendingApk(context: Context): Boolean {
+        private fun verifyPendingApk(context: Context, messages: AppTransientMessages): Boolean {
             val apk = preferences(context).getString(KEY_APK_PATH, null)?.let(::File)
             val result = apk?.let { verifyUpdateApk(context, it) } ?: ApkVerificationResult.Unreadable
             if (result == ApkVerificationResult.Valid) return true
@@ -158,7 +165,9 @@ class AppUpdateDownloader @Inject constructor(
                 ApkVerificationResult.NotNewer -> R.string.update_apk_not_newer
                 ApkVerificationResult.WrongSignature -> R.string.update_apk_wrong_signature
             }
-            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            // Durable: the receiver may run with no Activity attached, so the reason must survive
+            // until the user actually sees and dismisses it.
+            messages.sendDurable(context.getString(message))
             clearPendingDownload(context)
             return false
         }
@@ -177,12 +186,16 @@ class AppUpdateDownloader @Inject constructor(
     }
 }
 
+@AndroidEntryPoint
 class AppUpdateDownloadReceiver : BroadcastReceiver() {
+    @Inject lateinit var messages: AppTransientMessages
+
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
         AppUpdateDownloader.handleDownloadCompleted(
             context.applicationContext,
             intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L),
+            messages,
         )
     }
 }

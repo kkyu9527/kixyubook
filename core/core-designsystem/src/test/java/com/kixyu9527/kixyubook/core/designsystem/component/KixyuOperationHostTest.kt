@@ -1,8 +1,12 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -10,6 +14,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -21,6 +26,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -80,6 +86,31 @@ class KixyuOperationHostTest {
             }
         } finally {
             next.complete(Unit)
+            scope.cancel()
+        }
+    }
+
+    @Test fun bottomSnackbarShowsTheProvidedBrandIcon() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val snackbar = SnackbarHostState()
+        try {
+            compose.setContent {
+                KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = AppUiStyle.MATERIAL) {
+                    CompositionLocalProvider(
+                        LocalKixyuBrandIcon provides { modifier ->
+                            Spacer(modifier.testTag("brand-icon"))
+                        },
+                    ) {
+                        KixyuSnackbarHost(snackbar)
+                    }
+                }
+            }
+            compose.runOnIdle { scope.launch { snackbar.showSnackbar("Saved") } }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("Saved").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("brand-icon").assertIsDisplayed()
+        } finally {
             scope.cancel()
         }
     }

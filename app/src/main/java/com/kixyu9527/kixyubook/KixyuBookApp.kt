@@ -5,10 +5,13 @@ import android.view.ViewTreeObserver
 import android.view.Window
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -21,8 +24,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.edit
 import androidx.core.view.WindowCompat
@@ -34,8 +39,10 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSystemBarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTransientStatusPopup
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuBrandIcon
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuSystemBarHost
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
@@ -78,6 +85,7 @@ internal fun KixyuBookApp(
     onBookOpened: (String) -> Unit,
     onDownloadUpdate: (AppUpdateInfo) -> Boolean,
     onExitApp: () -> Unit,
+    appMessages: AppTransientMessages,
 ) {
     val navigator = rememberKixyuNavigator()
     val context = LocalView.current.context
@@ -195,6 +203,15 @@ internal fun KixyuBookApp(
 
     CompositionLocalProvider(
         LocalKixyuSystemBarHost provides systemBarHost,
+        // Every bottom snackbar shows the app mark, the same way the platform toast (download
+        // started/completed) carries the app icon.
+        LocalKixyuBrandIcon provides { iconModifier ->
+            Image(
+                painter = painterResource(R.drawable.ic_launcher_foreground),
+                contentDescription = stringResource(R.string.app_logo_description),
+                modifier = iconModifier,
+            )
+        },
     ) {
         KixyuBookTheme(
             themeMode = settings.theme,
@@ -229,6 +246,26 @@ internal fun KixyuBookApp(
                         visible = showGlobalSync,
                         message = stringResource(R.string.app_syncing_cloud_data),
                     )
+                    // Non-Compose emitters (update downloader start/complete) surface here, using
+                    // the same glass + logo snackbar as every other bottom notification.
+                    val appSnackbar = remember { SnackbarHostState() }
+                    LaunchedEffect(appMessages) {
+                        appMessages.messages.collect { appSnackbar.showSnackbar(it) }
+                    }
+                    LaunchedEffect(appMessages) {
+                        // Durable results (for example a background verification failure) stay until
+                        // the user dismisses them; acknowledging removes it and shows the next.
+                        appMessages.pending.collect { pending ->
+                            val message = pending.firstOrNull() ?: return@collect
+                            appSnackbar.showSnackbar(
+                                message = message,
+                                withDismissAction = true,
+                                duration = SnackbarDuration.Indefinite,
+                            )
+                            appMessages.acknowledge(message)
+                        }
+                    }
+                    KixyuSnackbarHost(appSnackbar, Modifier.align(Alignment.BottomCenter))
                 }
             }
         }

@@ -28,7 +28,9 @@ class AppViewModel @Inject constructor(
     private val cloudSync: CloudSyncCoordinator,
     cloudSyncManager: CloudSyncManager,
     private val readingReminders: ReadingReminderScheduler,
+    val appMessages: AppTransientMessages,
 ) : ViewModel() {
+
     /**
      * `null` means that the persisted app appearance has not been read yet.
      * Rendering a default ReaderSettings here would briefly build the Material

@@ -5,6 +5,7 @@
     <string name="update_download_start_failed">Could not start download. Please try again later.</string>
     <string name="update_downloading">Downloading app update</string>
     <string name="update_download_started">Downloading in the background. Installation will open after verification.</string>
+    <string name="update_download_completed">Download complete. Verifying the update…</string>
     <string name="update_apk_unreadable">Cannot read the update package. Download it again.</string>
     <string name="update_apk_wrong_package">Installation blocked: the package is for a different app.</string>
     <string name="update_apk_not_newer">The downloaded version is not newer than the installed version.</string>

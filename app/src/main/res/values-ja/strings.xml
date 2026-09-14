@@ -4,6 +4,7 @@
     <string name="update_download_start_failed">ダウンロードを開始できませんでした。後でもう一度お試しください</string>
     <string name="update_downloading">アプリの更新をダウンロード中</string>
     <string name="update_download_started">バックグラウンドでダウンロード中です。検証後にインストール画面が開きます</string>
+    <string name="update_download_completed">ダウンロードが完了しました。更新を確認しています…</string>
     <string name="update_apk_unreadable">更新パッケージを読み込めません。再度ダウンロードしてください</string>
     <string name="update_apk_wrong_package">別のアプリのパッケージのため、インストールを中止しました</string>
     <string name="update_apk_not_newer">ダウンロードしたバージョンは現在のバージョンより新しくありません</string>

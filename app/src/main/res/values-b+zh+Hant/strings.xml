@@ -4,6 +4,7 @@
     <string name="update_download_start_failed">下載啟動失敗，請稍後重試</string>
     <string name="update_downloading">正在下載應用程式更新</string>
     <string name="update_download_started">已在背景下載，完成並驗證後將開啟安裝頁面</string>
+    <string name="update_download_completed">下載完成，正在驗證更新…</string>
     <string name="update_apk_unreadable">無法讀取更新套件，請重新下載</string>
     <string name="update_apk_wrong_package">更新套件不屬於此應用程式，已阻止安裝</string>
     <string name="update_apk_not_newer">下載的版本不高於目前版本</string>

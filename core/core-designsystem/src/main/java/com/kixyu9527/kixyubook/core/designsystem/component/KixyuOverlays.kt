@@ -62,6 +62,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.designsystem.R
 import androidx.compose.runtime.CompositionLocalProvider
@@ -847,6 +848,19 @@ fun KixyuTransientStatusPopup(
 }
 
 /**
+ * Optional app brand mark shown at the leading edge of every transient bottom snackbar, matching the
+ * platform toast that carries the app icon. Provided once at the app root so all [KixyuSnackbarHost]
+ * call sites share the same logo treatment.
+ */
+val LocalKixyuBrandIcon = staticCompositionLocalOf<(@Composable (Modifier) -> Unit)?> { null }
+
+@Composable
+private fun SnackbarBrandIcon() {
+    val brand = LocalKixyuBrandIcon.current ?: return
+    brand(Modifier.size(KixyuSize.icon))
+}
+
+/**
  * Shared transient message surface. SnackbarHost retains Material's queue and motion behavior,
  * while the visible container follows the selected Material/MIUIX component system.
  */
@@ -886,6 +900,7 @@ fun KixyuSnackbarHost(
                     ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    SnackbarBrandIcon()
                     Text(
                         text = data.visuals.message,
                         modifier = Modifier.fillMaxWidth(),
@@ -910,6 +925,7 @@ fun KixyuSnackbarHost(
                     horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    SnackbarBrandIcon()
                     Text(
                         text = data.visuals.message,
                         modifier = Modifier.weight(1f),
@@ -924,17 +940,19 @@ fun KixyuSnackbarHost(
                     }
                 }
             } else {
-                Box(
+                Row(
                     modifier = Modifier
                         .heightIn(min = KixyuSize.bottomNavigationBarHeight)
                         .padding(horizontal = KixyuSpacing.large),
-                    contentAlignment = Alignment.Center,
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    SnackbarBrandIcon()
                     Text(
                         text = data.visuals.message,
+                        modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Center,
                     )
                 }
             }

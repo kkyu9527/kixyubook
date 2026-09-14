@@ -129,6 +129,7 @@ class MainActivity : ComponentActivity() {
                     onBookOpened = bookRepository::markBookOpened,
                     onDownloadUpdate = updateDownloader::download,
                     onExitApp = ::finish,
+                    appMessages = appViewModel.appMessages,
                 )
             }
         }
