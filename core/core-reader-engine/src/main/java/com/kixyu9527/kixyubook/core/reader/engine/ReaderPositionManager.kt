@@ -10,31 +10,45 @@ class ReaderPositionManager {
      * Comparing only page start positions is insufficient: a long paragraph can span several
      * pages, and EPUB images can share their neighbouring text paragraph's index. In both cases
      * `indexOfLast(start <= target)` lands after the searched text.
+     *
+     * [charOffset] is nullable on purpose: `null` means "the position is unknown" (fall back to the
+     * query), while `0` is a real, precise offset at the paragraph start. Treating `0` as unknown
+     * let a first-hit-at-start jump to a later, complete hit on another page.
      */
     fun pageFor(
         pages: List<ReaderPage>,
         paragraphIndex: Int,
         searchQuery: String? = null,
-        charOffset: Int = 0,
+        charOffset: Int? = null,
     ): Int {
         if (pages.isEmpty()) return 0
         val normalizedQuery = searchQuery?.trim().orEmpty()
-        val safeCharOffset = charOffset.coerceAtLeast(0)
-        val exactTextPage = pages.indexOfFirst { page ->
-            page.blocks.any { block ->
-                block.kind == ParagraphKind.TEXT &&
-                    block.paragraphIndex == paragraphIndex &&
-                    safeCharOffset >= block.textStart &&
-                    safeCharOffset < block.textStart + block.visibleText.length.coerceAtLeast(1)
+        val safeCharOffset = charOffset?.coerceAtLeast(0)
+        if (safeCharOffset != null) {
+            // A precise position (including 0) is authoritative: two hits in one long paragraph
+            // can land on different pages, and matching the query alone always picks the first.
+            val exactTextPage = pages.indexOfFirst { page ->
+                page.blocks.any { block ->
+                    block.kind == ParagraphKind.TEXT &&
+                        block.paragraphIndex == paragraphIndex &&
+                        safeCharOffset >= block.textStart &&
+                        safeCharOffset < block.textStart + block.visibleText.length.coerceAtLeast(1)
+                }
             }
-        }
+            if (exactTextPage >= 0) return exactTextPage
 
-        // An explicit character position is authoritative: two hits in one long paragraph can land
-        // on different pages, and matching the query alone always picks the first of them.
-        if (safeCharOffset > 0 && exactTextPage >= 0) return exactTextPage
-
-        // Compatibility fallback for positions saved without a precise offset.
-        if (safeCharOffset == 0 && normalizedQuery.isNotEmpty()) {
+            // Pagination may skip whitespace between two fragments. Prefer the first fragment
+            // after the offset so a cross-device restore still lands at the same reading point.
+            val followingFragmentPage = pages.indexOfFirst { page ->
+                page.blocks.any { block ->
+                    block.kind == ParagraphKind.TEXT &&
+                        block.paragraphIndex == paragraphIndex &&
+                        block.textStart >= safeCharOffset
+                }
+            }
+            if (followingFragmentPage >= 0) return followingFragmentPage
+        } else if (normalizedQuery.isNotEmpty()) {
+            // Compatibility fallback for positions saved without a precise offset.
             val matchingTextPage = pages.indexOfFirst { page ->
                 page.blocks.any { block ->
                     block.kind == ParagraphKind.TEXT &&
@@ -58,19 +72,14 @@ class ReaderPositionManager {
                 }
             }
             if (matchingOffsetPage >= 0) return matchingOffsetPage
-        }
-        if (exactTextPage >= 0) return exactTextPage
-
-        // Pagination may skip whitespace between two fragments. Prefer the first fragment after
-        // the persisted offset so a cross-device restore still lands at the same reading point.
-        val followingFragmentPage = pages.indexOfFirst { page ->
-            page.blocks.any { block ->
-                block.kind == ParagraphKind.TEXT &&
-                    block.paragraphIndex == paragraphIndex &&
-                    block.textStart >= safeCharOffset
+        } else {
+            val firstParagraphPage = pages.indexOfFirst { page ->
+                page.blocks.any { block ->
+                    block.kind == ParagraphKind.TEXT && block.paragraphIndex == paragraphIndex
+                }
             }
+            if (firstParagraphPage >= 0) return firstParagraphPage
         }
-        if (followingFragmentPage >= 0) return followingFragmentPage
 
         val lastParagraphPage = pages.indexOfLast { page ->
             page.blocks.any { block ->

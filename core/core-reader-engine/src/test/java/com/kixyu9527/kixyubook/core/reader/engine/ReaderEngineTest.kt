@@ -369,6 +369,20 @@ class ReaderEngineTest {
         assertEquals(0, positions.pageFor(pages, 7, "目标词"))
     }
 
+    @Test fun offsetZeroIsPreciseAndDoesNotJumpToALaterCompleteMatch() {
+        val positions = ReaderPositionManager()
+        // The first hit starts at offset 0 and crosses the page boundary; a complete hit of the same
+        // word exists on page 1. Offset 0 is a real position, so page 0 must win.
+        val pages = listOf(
+            ReaderPage(0, 0, "章", false, listOf(DocumentBlock(7, "目标词xx目标词", "目标", continuation = false, textStart = 0))),
+            ReaderPage(1, 0, "章", false, listOf(DocumentBlock(7, "目标词xx目标词", "词xx目标词", continuation = true, textStart = 2))),
+        )
+
+        assertEquals(0, positions.pageFor(pages, 7, "目标词", charOffset = 0))
+        // A null offset means "unknown" and falls back to the query, which here lands on page 1.
+        assertEquals(1, positions.pageFor(pages, 7, "目标词", charOffset = null))
+    }
+
     @Test fun characterOffsetSurvivesRepaginationWithDifferentPageBoundaries() {
         val positions = ReaderPositionManager()
         val full = "字".repeat(300)
