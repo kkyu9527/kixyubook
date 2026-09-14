@@ -1036,6 +1036,21 @@ class ReaderViewModel @AssistedInject constructor(
         }
     }
 
+    /**
+     * The pager settled on a page: this is the location actually displayed, so the session
+     * coordinator records it before the position is persisted. [savePosition] alone is only a
+     * request to persist and is also called for targets that are not yet rendered.
+     */
+    fun onPageSettled(
+        position: Int,
+        charOffset: Int,
+        chapterComplete: Boolean,
+        visibleEndPosition: Int,
+    ) {
+        session.onPresented(_uiState.value.chapterIndex, position, charOffset)
+        savePosition(position, charOffset, chapterComplete, visibleEndPosition)
+    }
+
     fun savePosition(
         position: Int,
         charOffset: Int = 0,

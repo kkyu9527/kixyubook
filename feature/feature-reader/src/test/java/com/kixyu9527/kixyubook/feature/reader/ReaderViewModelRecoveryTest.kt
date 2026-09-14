@@ -366,6 +366,28 @@ class ReaderViewModelRecoveryTest {
         }
     }
 
+    @Test fun aSettledPageTurnIsWhatNavigationHistoryReturnsTo() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val reader = readerRecoveryHarness().open()
+            advanceUntilIdle()
+
+            // Natural reading settles on paragraph 6 (no chapter render callback fires).
+            reader.onPageSettled(6, 0, chapterComplete = false, visibleEndPosition = 8)
+            advanceUntilIdle()
+
+            // Jump elsewhere: the recorded origin must be the settled location, not the start.
+            reader.jumpToPosition(0, 2)
+            advanceUntilIdle()
+            reader.navigateHistoryBack()
+            advanceUntilIdle()
+
+            assertEquals(6, reader.uiState.value.restorePosition)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     private fun TestScope.assertFontChangeThenReopenRecovers(
         harness: ReaderRecoveryHarness,
         transform: (ReaderSettings) -> ReaderSettings,

@@ -174,7 +174,7 @@ private fun LoadedReaderRoute(
             settlePage = viewModel::settlePage,
             jumpChapter = viewModel::jumpToChapter,
             jumpPosition = viewModel::requestLocation,
-            savePosition = viewModel::savePosition,
+            savePosition = viewModel::onPageSettled,
             updateSettings = viewModel::updateSettings,
             setBookSettingsEnabled = viewModel::setBookSettingsEnabled,
             addBookmark = viewModel::addBookmark,
