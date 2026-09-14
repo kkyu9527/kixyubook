@@ -337,6 +337,7 @@ class ReaderViewModel @AssistedInject constructor(
                 error = null,
             )
         }
+        session.onPresented(index, lastPosition, lastCharOffset)
         // A reader session owns a real previous/current/next chapter window. Both neighbours start
         // loading with the first visible chapter so opening a book at a saved position can move in
         // either direction immediately; pagination promotes them after the first leaf is visible.
@@ -684,6 +685,7 @@ class ReaderViewModel @AssistedInject constructor(
                 error = null,
             )
         }
+        session.onPresented(index, lastPosition, lastCharOffset)
         // Rotate the same three-chapter window after activation. Cached neighbours are published
         // synchronously, while missing ones are decoded outside the page-turn animation.
         prioritizeAdjacentChapter(index, -1)
@@ -712,6 +714,7 @@ class ReaderViewModel @AssistedInject constructor(
                 settledPageIndex = null,
             )
         }
+        session.onPresented(_uiState.value.chapterIndex, lastPosition, lastCharOffset)
         if (persistProgress) savePosition(lastPosition, lastCharOffset)
     }
 
@@ -751,6 +754,7 @@ class ReaderViewModel @AssistedInject constructor(
                     settledPageIndex = null,
                 )
             }
+            session.onPresented(targetIndex, targetPosition, targetCharOffset)
         } else {
             requestLocation(directoryLocation(targetIndex, targetPosition, targetCharOffset,
                 ReaderLocationSource.RESTORE, rememberOrigin = false))
@@ -1051,6 +1055,7 @@ class ReaderViewModel @AssistedInject constructor(
         lastPosition = safePosition
         lastCharOffset = safeCharOffset
         _positionState.value = ReaderPositionState(safePosition, safeCharOffset, safeVisibleEnd)
+        session.onPresented(state.chapterIndex, safePosition, safeCharOffset)
         val total = positions.bookFraction(
             chapterIndex = state.chapterIndex,
             chapterCount = state.chapters.size,

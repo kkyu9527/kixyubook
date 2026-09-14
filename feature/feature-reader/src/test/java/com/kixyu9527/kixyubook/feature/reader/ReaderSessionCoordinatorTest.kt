@@ -25,6 +25,16 @@ class ReaderSessionCoordinatorTest {
     }
 
     @Test
+    fun presentedLocationIsOwnedByTheCoordinator() {
+        val session = ReaderSessionCoordinator()
+        assertNull(session.presentedLocation)
+
+        session.onPresented(chapterPosition = 2, paragraphIndex = 4, charOffset = 7)
+
+        assertEquals(PresentedLocation(2, 4, 7), session.presentedLocation)
+    }
+
+    @Test
     fun clearInvalidatesTheInFlightRequest() {
         val session = ReaderSessionCoordinator()
         val token = session.begin(1)
