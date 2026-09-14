@@ -991,6 +991,11 @@ class LocalBookRepository @Inject constructor(
             val previousProgressText = previousProgress?.let { progress ->
                 dao.getParagraph(progress.chapterId, progress.position)?.text
             }
+            // Capture each bookmark's anchored paragraph text before the chapters are replaced so it
+            // can be re-matched against the reparsed text.
+            val previousBookmarkTexts = previousBookmarks.associateWith { bookmark ->
+                dao.getParagraph(bookmark.chapterId, bookmark.position)?.text
+            }
             database.withTransaction {
                 dao.deleteProgress(bookUuid)
                 dao.deleteBookParagraphFts(setOf(bookUuid))
@@ -1022,19 +1027,23 @@ class LocalBookRepository @Inject constructor(
                 }
 
                 previousBookmarks.forEach { bookmark ->
-                    val targetChapterId = chapterIds[bookmark.chapterIndex.coerceIn(chapterIds.indices)]
-                    val targetPosition = bookmark.position.coerceIn(
-                        0,
-                        paragraphsByChapter[targetChapterId].orEmpty().lastIndex.coerceAtLeast(0),
+                    val migrated = migrateReparsedBookmark(
+                        bookmark = bookmark,
+                        previousChapterIndex = previousChapterIndex,
+                        previousParagraphText = previousBookmarkTexts[bookmark],
+                        chapterIds = chapterIds,
+                        chapterKeys = chapterKeys,
+                        paragraphsByChapter = paragraphsByChapter,
                     )
                     dao.insertBookmark(
                         BookmarkEntity(
-                            uuid = bookmark.uuid,
+                            uuid = migrated.uuid,
                             bookUuid = bookUuid,
-                            chapterId = targetChapterId,
-                            position = targetPosition,
-                            preview = bookmark.preview,
-                            createdTime = bookmark.createdTime,
+                            chapterId = migrated.chapterId,
+                            position = migrated.position,
+                            preview = migrated.preview,
+                            createdTime = migrated.createdTime,
+                            chapterKey = migrated.chapterKey,
                         ),
                     )
                 }
@@ -1245,6 +1254,46 @@ internal fun migrateReparsedProgress(
         offset = charOffset,
         paragraphIndex = targetPosition,
         charOffset = charOffset,
+        chapterKey = chapterKeys[targetIndex],
+    )
+}
+
+/** A bookmark re-anchored to the reparsed chapters, carrying the new stable chapter key. */
+internal data class ReparsedBookmark(
+    val uuid: String,
+    val chapterId: Long,
+    val position: Int,
+    val preview: String,
+    val createdTime: Long,
+    val chapterKey: String,
+)
+
+/**
+ * Re-anchors a bookmark after a TXT reparse. The bookmark is mapped through the old chapter id and
+ * relocated by matching the previously bookmarked paragraph text, then carries the reparsed
+ * chapter's stable key so it survives the next reparse as well.
+ */
+internal fun migrateReparsedBookmark(
+    bookmark: BookmarkRow,
+    previousChapterIndex: Map<Long, Int>,
+    previousParagraphText: String?,
+    chapterIds: List<Long>,
+    chapterKeys: List<String>,
+    paragraphsByChapter: Map<Long, List<ParagraphEntity>>,
+): ReparsedBookmark {
+    val targetIndex = previousChapterIndex[bookmark.chapterId]?.coerceIn(0, chapterIds.lastIndex) ?: 0
+    val targetChapterId = chapterIds[targetIndex]
+    val targetParagraphs = paragraphsByChapter[targetChapterId].orEmpty()
+    val matched = previousParagraphText
+        ?.let { text -> targetParagraphs.indexOfFirst { it.text == text } }
+        ?.takeIf { it >= 0 }
+    val position = matched ?: bookmark.position.coerceIn(0, targetParagraphs.lastIndex.coerceAtLeast(0))
+    return ReparsedBookmark(
+        uuid = bookmark.uuid,
+        chapterId = targetChapterId,
+        position = position,
+        preview = bookmark.preview,
+        createdTime = bookmark.createdTime,
         chapterKey = chapterKeys[targetIndex],
     )
 }

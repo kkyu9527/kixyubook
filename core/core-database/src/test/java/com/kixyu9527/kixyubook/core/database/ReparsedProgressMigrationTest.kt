@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook.core.database
 
+import com.kixyu9527.kixyubook.core.database.entity.BookmarkRow
 import com.kixyu9527.kixyubook.core.database.entity.ParagraphEntity
 import com.kixyu9527.kixyubook.core.database.entity.ReadingProgressEntity
 import org.junit.Assert.assertEquals
@@ -93,6 +94,38 @@ class ReparsedProgressMigrationTest {
         assertEquals(0, migrated.paragraphIndex)
         assertEquals(0, migrated.charOffset)
         assertEquals(0, migrated.offset)
+        assertEquals("new-key", migrated.chapterKey)
+    }
+
+    @Test
+    fun reparsedBookmarkReAnchorsByTextAndCarriesTheNewChapterKey() {
+        val anchoredText = "被书签的段落"
+        val migrated = migrateReparsedBookmark(
+            bookmark = BookmarkRow(
+                uuid = "bm",
+                bookUuid = "book",
+                chapterId = 10,
+                chapterTitle = "旧标题",
+                chapterIndex = 0,
+                position = 0,
+                preview = "被书签…",
+                createdTime = 1,
+                chapterKey = "old-key",
+            ),
+            previousChapterIndex = mapOf(10L to 0),
+            previousParagraphText = anchoredText,
+            chapterIds = listOf(100L),
+            chapterKeys = listOf("new-key"),
+            paragraphsByChapter = mapOf(
+                100L to listOf(
+                    ParagraphEntity(chapterId = 100L, paragraphIndex = 0, text = "新增段"),
+                    ParagraphEntity(chapterId = 100L, paragraphIndex = 1, text = anchoredText),
+                ),
+            ),
+        )
+
+        assertEquals(1, migrated.position)
+        assertEquals(100L, migrated.chapterId)
         assertEquals("new-key", migrated.chapterKey)
     }
 }
