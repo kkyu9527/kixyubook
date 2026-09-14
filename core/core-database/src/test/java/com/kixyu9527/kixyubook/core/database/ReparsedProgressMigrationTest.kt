@@ -122,10 +122,68 @@ class ReparsedProgressMigrationTest {
                     ParagraphEntity(chapterId = 100L, paragraphIndex = 1, text = anchoredText),
                 ),
             ),
-        )
+        )!!
 
         assertEquals(1, migrated.position)
         assertEquals(100L, migrated.chapterId)
         assertEquals("new-key", migrated.chapterKey)
+    }
+
+    @Test
+    fun reparsedBookmarkFollowsItsAnchorIntoTheNextChapterWhenBoundariesShift() {
+        // The reparse recognised a new front chapter, so the target paragraph moved to the next
+        // chapter while its old index-mapped chapter no longer contains it.
+        val migrated = migrateReparsedBookmark(
+            bookmark = BookmarkRow(
+                uuid = "bm",
+                bookUuid = "book",
+                chapterId = 10,
+                chapterTitle = "旧章",
+                chapterIndex = 0,
+                position = 0,
+                preview = "锚点…",
+                createdTime = 1,
+                chapterKey = "old-shifted-key",
+            ),
+            previousChapterIndex = mapOf(10L to 0),
+            previousParagraphText = "目标正文",
+            chapterIds = listOf(100L, 200L),
+            chapterKeys = listOf("new-front", "new-body"),
+            paragraphsByChapter = mapOf(
+                100L to listOf(ParagraphEntity(chapterId = 100L, paragraphIndex = 0, text = "新增前置章")),
+                200L to listOf(ParagraphEntity(chapterId = 200L, paragraphIndex = 0, text = "目标正文")),
+            ),
+        )!!
+
+        assertEquals(200L, migrated.chapterId)
+        assertEquals(0, migrated.position)
+        assertEquals("new-body", migrated.chapterKey)
+    }
+
+    @Test
+    fun reparsedBookmarkWithAGoneAnchorIsNotBoundToAnotherChapter() {
+        val migrated = migrateReparsedBookmark(
+            bookmark = BookmarkRow(
+                uuid = "bm",
+                bookUuid = "book",
+                chapterId = 10,
+                chapterTitle = "旧章",
+                chapterIndex = 0,
+                position = 0,
+                preview = "锚点…",
+                createdTime = 1,
+                chapterKey = "gone-key",
+            ),
+            previousChapterIndex = mapOf(10L to 0),
+            previousParagraphText = "已删除的正文",
+            chapterIds = listOf(100L, 200L),
+            chapterKeys = listOf("new-a", "new-b"),
+            paragraphsByChapter = mapOf(
+                100L to listOf(ParagraphEntity(chapterId = 100L, paragraphIndex = 0, text = "第一章")),
+                200L to listOf(ParagraphEntity(chapterId = 200L, paragraphIndex = 0, text = "第二章")),
+            ),
+        )
+
+        assertEquals(null, migrated)
     }
 }

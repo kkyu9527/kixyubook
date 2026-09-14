@@ -1034,7 +1034,7 @@ class LocalBookRepository @Inject constructor(
                         chapterIds = chapterIds,
                         chapterKeys = chapterKeys,
                         paragraphsByChapter = paragraphsByChapter,
-                    )
+                    ) ?: return@forEach
                     dao.insertBookmark(
                         BookmarkEntity(
                             uuid = migrated.uuid,
@@ -1269,9 +1269,17 @@ internal data class ReparsedBookmark(
 )
 
 /**
- * Re-anchors a bookmark after a TXT reparse. The bookmark is mapped through the old chapter id and
- * relocated by matching the previously bookmarked paragraph text, then carries the reparsed
- * chapter's stable key so it survives the next reparse as well.
+ * Re-anchors a bookmark after a TXT reparse.
+ *
+ * Chapter boundaries can shift (for example a new front-matter chapter is recognised), so the old
+ * chapter index is not reliable. Resolution order:
+ * 1. the reparsed chapter with the same stable key, when it still exists;
+ * 2. a chapter that uniquely contains the bookmarked paragraph text;
+ * 3. an ambiguous text match, preferring the index-mapped chapter, then reading order;
+ * 4. when no anchor text was captured, the index-mapped chapter (legacy best effort).
+ *
+ * Returns null when the anchor text existed but can no longer be found, so the caller does not bind
+ * the bookmark to a different chapter that does not contain it.
  */
 internal fun migrateReparsedBookmark(
     bookmark: BookmarkRow,
@@ -1280,14 +1288,37 @@ internal fun migrateReparsedBookmark(
     chapterIds: List<Long>,
     chapterKeys: List<String>,
     paragraphsByChapter: Map<Long, List<ParagraphEntity>>,
-): ReparsedBookmark {
-    val targetIndex = previousChapterIndex[bookmark.chapterId]?.coerceIn(0, chapterIds.lastIndex) ?: 0
+): ReparsedBookmark? {
+    if (chapterIds.isEmpty()) return null
+    val keyedIndex = bookmark.chapterKey
+        .takeIf { it.isNotBlank() }
+        ?.let { key -> chapterKeys.indexOf(key).takeIf { it >= 0 } }
+    val textMatches = previousParagraphText?.let { text ->
+        chapterIds.indices.flatMap { index ->
+            paragraphsByChapter[chapterIds[index]].orEmpty()
+                .withIndex()
+                .filter { it.value.text == text }
+                .map { index to it.index }
+        }
+    }.orEmpty()
+    val indexMapped = previousChapterIndex[bookmark.chapterId]?.coerceIn(0, chapterIds.lastIndex)
+
+    val targetIndex = when {
+        keyedIndex != null -> keyedIndex
+        textMatches.size == 1 -> textMatches.single().first
+        textMatches.isNotEmpty() -> {
+            // Ambiguous: prefer the index-mapped chapter when it is one of the matches, otherwise
+            // the earliest match in reading order (deterministic, never arbitrary).
+            textMatches.firstOrNull { it.first == indexMapped }?.first ?: textMatches.first().first
+        }
+        previousParagraphText == null -> indexMapped
+        else -> null
+    } ?: return null
+
     val targetChapterId = chapterIds[targetIndex]
     val targetParagraphs = paragraphsByChapter[targetChapterId].orEmpty()
-    val matched = previousParagraphText
-        ?.let { text -> targetParagraphs.indexOfFirst { it.text == text } }
-        ?.takeIf { it >= 0 }
-    val position = matched ?: bookmark.position.coerceIn(0, targetParagraphs.lastIndex.coerceAtLeast(0))
+    val position = textMatches.firstOrNull { it.first == targetIndex }?.second
+        ?: bookmark.position.coerceIn(0, targetParagraphs.lastIndex.coerceAtLeast(0))
     return ReparsedBookmark(
         uuid = bookmark.uuid,
         chapterId = targetChapterId,
