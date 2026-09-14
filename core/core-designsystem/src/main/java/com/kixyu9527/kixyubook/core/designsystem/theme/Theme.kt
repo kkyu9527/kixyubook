@@ -122,15 +122,15 @@ private val KixyuTypography = Typography(
     labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp),
 )
 
-// All rounded surfaces share the bottom navigation bar radius so cards, dialogs, sheets, popups,
-// snackbars, fields and search bars stay visually consistent across Material and MIUIX.
-private val KixyuUnifiedShape = RoundedCornerShape(KixyuSize.navigationContainerCornerRadius)
+// One material language, semantic structure: Material's shape slots follow the purpose of the
+// surface (small controls, fields, cards, sheets) instead of every control sharing one radius.
+// Material and MIUIX resolve to the same roles so the two styles stay interchangeable.
 private val KixyuShapes = Shapes(
-    extraSmall = KixyuUnifiedShape,
-    small = KixyuUnifiedShape,
-    medium = KixyuUnifiedShape,
-    large = KixyuUnifiedShape,
-    extraLarge = KixyuUnifiedShape,
+    extraSmall = RoundedCornerShape(KixyuSize.controlCornerRadius),
+    small = RoundedCornerShape(KixyuSize.fieldCornerRadius),
+    medium = RoundedCornerShape(KixyuSize.cardCornerRadius),
+    large = RoundedCornerShape(KixyuSize.sheetCornerRadius),
+    extraLarge = RoundedCornerShape(KixyuSize.sheetCornerRadius),
 )
 
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }

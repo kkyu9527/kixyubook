@@ -121,6 +121,12 @@ object KixyuSize {
     val bottomNavigationInnerPadding = 4.dp
     val bottomNavigationBottomGap = 12.dp
     val floatingSurfaceBottomGap = 24.dp
+    // Semantic corner roles: one material language, but each surface keeps a radius that matches
+    // its task instead of every control sharing the navigation capsule.
+    val controlCornerRadius = 12.dp
+    val fieldCornerRadius = 16.dp
+    val cardCornerRadius = 20.dp
+    val sheetCornerRadius = 28.dp
     val navigationContainerCornerRadius = 32.dp
     val bottomNavigationContentHeight = 76.dp
     val bottomNavigationDefaultWidth = bottomNavigationItemWidth * 3 + bottomNavigationInnerPadding * 2
@@ -185,7 +191,7 @@ fun KixyuSection(
         if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
             MiuixCard(
                 modifier = Modifier.fillMaxWidth(),
-                cornerRadius = KixyuSize.navigationContainerCornerRadius,
+                cornerRadius = KixyuSize.cardCornerRadius,
                 insideMargin = PaddingValues(0.dp),
             ) {
                 // MIUIX owns its own content-color local. Material Text/Icon used by feature
