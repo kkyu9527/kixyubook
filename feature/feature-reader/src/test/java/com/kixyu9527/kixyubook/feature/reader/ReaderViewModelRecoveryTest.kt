@@ -416,7 +416,7 @@ class ReaderViewModelRecoveryTest {
     }
 }
 
-private class ReaderRecoveryHarness(
+internal class ReaderRecoveryHarness(
     private val factory: () -> ReaderViewModel,
     val globalSettings: MutableStateFlow<ReaderSettings>,
     val durable: MutableStateFlow<ReadingProgress?>,
@@ -437,12 +437,16 @@ private class ReaderRecoveryHarness(
     }
 }
 
-private fun readerRecoveryHarness(
+internal fun readerRecoveryHarness(
     format: BookFormat = BookFormat.EPUB,
     bookSettingsEnabled: Boolean = false,
+    paragraphCount: Int = 20,
+    paragraphText: (Int) -> String = { index -> "第 $index 段正文" },
+    initialProgress: ReadingProgress? = null,
+    initialSettings: ReaderSettings = ReaderSettings(fontSize = 19f),
 ): ReaderRecoveryHarness {
-    val globalSettings = MutableStateFlow(ReaderSettings(fontSize = 19f))
-    val durable = MutableStateFlow<ReadingProgress?>(null)
+    val globalSettings = MutableStateFlow(initialSettings)
+    val durable = MutableStateFlow<ReadingProgress?>(initialProgress)
     val chapters = listOf(Chapter(1, "book", "第一章", 0, chapterKey = "first"))
     val repository = object : BookRepository by fake<BookRepository>({ method, _ ->
         when (method) {
@@ -461,7 +465,7 @@ private fun readerRecoveryHarness(
             priority: ChapterLoadPriority,
         ): ChapterContent {
             val chapter = chapters[chapterIndex]
-            return ChapterContent(chapter, List(20) { index -> Paragraph(index.toLong(), chapter.id, index, "第 $index 段正文") })
+            return ChapterContent(chapter, List(paragraphCount) { index -> Paragraph(index.toLong(), chapter.id, index, paragraphText(index)) })
         }
 
         override suspend fun saveProgress(progress: ReadingProgress) {
