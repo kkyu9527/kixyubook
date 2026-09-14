@@ -105,7 +105,6 @@ object KixyuSize {
     val accountAvatar = 56.dp
     val progressHeight = 4.dp
     val compactButtonIconGap = 6.dp
-    val searchCorner = 16.dp
     val libraryCoverWidth = 62.dp
     val libraryCoverHeight = 88.dp
     val libraryDetailCoverWidth = 128.dp
@@ -186,6 +185,7 @@ fun KixyuSection(
         if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
             MiuixCard(
                 modifier = Modifier.fillMaxWidth(),
+                cornerRadius = KixyuSize.navigationContainerCornerRadius,
                 insideMargin = PaddingValues(0.dp),
             ) {
                 // MIUIX owns its own content-color local. Material Text/Icon used by feature

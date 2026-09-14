@@ -20,7 +20,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
@@ -28,6 +27,7 @@ import com.kixyu9527.kixyubook.core.common.model.DEFAULT_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -122,20 +122,15 @@ private val KixyuTypography = Typography(
     labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp),
 )
 
+// All rounded surfaces share the bottom navigation bar radius so cards, dialogs, sheets, popups,
+// snackbars, fields and search bars stay visually consistent across Material and MIUIX.
+private val KixyuUnifiedShape = RoundedCornerShape(KixyuSize.navigationContainerCornerRadius)
 private val KixyuShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(22.dp),
-)
-
-private val KixyuMiuixShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    extraSmall = KixyuUnifiedShape,
+    small = KixyuUnifiedShape,
+    medium = KixyuUnifiedShape,
+    large = KixyuUnifiedShape,
+    extraLarge = KixyuUnifiedShape,
 )
 
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }
@@ -255,7 +250,7 @@ fun KixyuBookTheme(
                     MaterialTheme(
                         colorScheme = miuixMaterialColorScheme(colors),
                         typography = KixyuTypography,
-                        shapes = KixyuMiuixShapes,
+                        shapes = KixyuShapes,
                         content = content,
                     )
                 }
@@ -267,7 +262,7 @@ fun KixyuBookTheme(
     MaterialTheme(
         colorScheme = colors,
         typography = KixyuTypography,
-        shapes = if (uiStyle == AppUiStyle.MIUIX) KixyuMiuixShapes else KixyuShapes,
+        shapes = KixyuShapes,
         content = themedContent,
     )
 }
