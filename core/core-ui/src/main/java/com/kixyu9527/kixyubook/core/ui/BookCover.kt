@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureRegistry
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -114,7 +116,7 @@ fun BookCover(
     val currentBitmap = bitmap
     BoxWithConstraints(
         modifier = modifier
-            .clip(MaterialTheme.shapes.medium)
+            .clip(RoundedCornerShape(KixyuSize.bookCoverCornerRadius))
             .background(
                 Brush.linearGradient(
                     listOf(Color(0xFF35463C), Color(0xFF879487), Color(0xFFD5CDBA)),

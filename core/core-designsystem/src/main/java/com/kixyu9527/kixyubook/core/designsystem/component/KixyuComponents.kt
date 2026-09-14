@@ -128,6 +128,8 @@ object KixyuSize {
     val cardCornerRadius = 20.dp
     val sheetCornerRadius = 28.dp
     val navigationContainerCornerRadius = 32.dp
+    // Physical book covers only have the slight rounding of a printed cover, not a card corner.
+    val bookCoverCornerRadius = 6.dp
     val bottomNavigationContentHeight = 76.dp
     val bottomNavigationDefaultWidth = bottomNavigationItemWidth * 3 + bottomNavigationInnerPadding * 2
     val transientPopupMaxWidth = 560.dp
