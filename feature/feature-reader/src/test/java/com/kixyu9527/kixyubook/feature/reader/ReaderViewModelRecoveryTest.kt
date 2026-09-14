@@ -303,6 +303,103 @@ class ReaderViewModelRecoveryTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test fun changingFontSizeThenReopeningRecoversTheTextPosition() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val globalSettings = MutableStateFlow(ReaderSettings(fontSize = 19f))
+            val durable = MutableStateFlow<ReadingProgress?>(null)
+            val chapters = listOf(Chapter(1, "book", "第一章", 0, chapterKey = "first"))
+            val repository = object : BookRepository by fake<BookRepository>({ method, _ ->
+                when (method) {
+                    "observeChapters" -> MutableStateFlow(chapters)
+                    "observeProgress" -> durable
+                    "observeBookmarks" -> flowOf(emptyList<Bookmark>())
+                    "getBook" -> Book("book", "测试", "", "", null, BookFormat.EPUB, "", "", 0, "hash")
+                    "readEpubNavigation" -> emptyList<EpubNavigationEntry>()
+                    "setReaderSessionActive", "setReaderInteractionActive", "releaseReaderMemory" -> Unit
+                    else -> error("Unexpected book call: $method")
+                }
+            }) {
+                override suspend fun getChapter(
+                    bookUuid: String,
+                    chapterIndex: Int,
+                    priority: ChapterLoadPriority,
+                ): ChapterContent {
+                    val chapter = chapters[chapterIndex]
+                    return ChapterContent(chapter, List(20) { index -> Paragraph(index.toLong(), chapter.id, index, "第 $index 段正文") })
+                }
+
+                override suspend fun saveProgress(progress: ReadingProgress) {
+                    if (progress.updatedTime > (durable.value?.updatedTime ?: Long.MIN_VALUE)) durable.value = progress
+                }
+            }
+            val settings = object : ReaderSettingsRepository {
+                override val settings: Flow<ReaderSettings> = globalSettings
+                override val readingGoalMinutes: Flow<Int> = flowOf(30)
+                override val searchHistory: Flow<List<String>> = flowOf(emptyList())
+                override suspend fun update(transform: (ReaderSettings) -> ReaderSettings) {
+                    globalSettings.value = transform(globalSettings.value)
+                }
+                override suspend fun setReadingGoalMinutes(minutes: Int) = Unit
+                override suspend fun addSearchHistory(query: String) = Unit
+                override suspend fun clearSearchHistory() = Unit
+            }
+            val fonts = fake<FontRepository> { method, _ ->
+                check(method == "observeFonts"); flowOf(emptyList<UserFont>())
+            }
+            val stats = fake<ReadingStatsRepository> { method, _ -> error("Unexpected stats call: $method") }
+            val sync = fake<CloudSyncCoordinator> { method, _ ->
+                when (method) {
+                    "getPriorityBookSync" ->
+                        MutableStateFlow(PriorityBookSyncState("book", PriorityBookSyncPhase.PULLING))
+                    "prioritizeBook", "releaseBook" -> Unit
+                    else -> error("Unexpected sync call: $method")
+                }
+            }
+            val corrections = fake<TextCorrectionRepository> { method, _ ->
+                check(method == "observeBookCorrections"); flowOf(emptyList<TextCorrection>())
+            }
+            val annotations = fake<ReaderAnnotationRepository> { method, _ ->
+                check(method == "observeBookAnnotations"); flowOf(emptyList<ReaderAnnotation>())
+            }
+            val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            fun newReader() = ReaderViewModel(
+                "book", repository, settings, fonts, stats, sync, corrections, annotations, context,
+            )
+
+            val firstStore = ViewModelStore()
+            val first = newReader()
+            firstStore.put("reader", first)
+            advanceUntilIdle()
+
+            first.savePosition(5, 3)
+            advanceUntilIdle()
+            first.updateSettings { it.copy(fontSize = 30f) }
+            advanceUntilIdle()
+            first.checkpointReadingProgress()
+            advanceUntilIdle()
+            firstStore.clear()
+            advanceUntilIdle()
+
+            val saved = requireNotNull(durable.value)
+            assertEquals(5, saved.paragraphIndex)
+            assertEquals(3, saved.charOffset)
+            assertEquals(30f, globalSettings.value.fontSize, 0f)
+
+            // A fresh session restores by text position, not by the previous layout's page number.
+            val secondStore = ViewModelStore()
+            val second = newReader()
+            secondStore.put("reader", second)
+            advanceUntilIdle()
+
+            assertEquals(5, second.uiState.value.restorePosition)
+            assertEquals(3, second.uiState.value.restoreCharOffset)
+            secondStore.clear()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
 }
 
 private class PerBookHarness(

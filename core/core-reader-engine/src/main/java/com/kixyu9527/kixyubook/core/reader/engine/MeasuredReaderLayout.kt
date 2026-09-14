@@ -393,7 +393,7 @@ class ReaderPaginationCoordinator internal constructor(
 
 private fun Long.elapsedMilliseconds(): Long = (System.nanoTime() - this) / 1_000_000L
 
-private class MeasuredReaderPaginator(
+internal class MeasuredReaderPaginator(
     private val measurer: TextMeasurer,
     private val density: androidx.compose.ui.unit.Density,
 ) {
