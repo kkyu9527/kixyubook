@@ -343,6 +343,51 @@ class ReaderEngineTest {
         assertEquals(1, positions.pageFor(pages, 7, "目标词"))
     }
 
+    @Test fun preciseCharacterOffsetWinsOverTheFirstQueryPage() {
+        val positions = ReaderPositionManager()
+        // One long paragraph with the same word on two pages. The second hit's offset must win,
+        // otherwise "next hit" would always return to the first page that contains the word.
+        val pages = listOf(
+            ReaderPage(
+                0,
+                0,
+                "章节",
+                false,
+                listOf(DocumentBlock(7, "目标词很长目标词", "目标词很长", continuation = false, textStart = 0)),
+            ),
+            ReaderPage(
+                1,
+                0,
+                "章节",
+                false,
+                listOf(DocumentBlock(7, "目标词很长目标词", "目标词", continuation = true, textStart = 5)),
+            ),
+        )
+
+        assertEquals(1, positions.pageFor(pages, 7, "目标词", charOffset = 5))
+        // Without a precise offset the compatibility query lookup still picks the first page.
+        assertEquals(0, positions.pageFor(pages, 7, "目标词"))
+    }
+
+    @Test fun characterOffsetSurvivesRepaginationWithDifferentPageBoundaries() {
+        val positions = ReaderPositionManager()
+        val full = "字".repeat(300)
+        val targetOffset = 250
+        val layoutTwoPages = listOf(
+            ReaderPage(0, 0, "章", false, listOf(DocumentBlock(7, full, full.substring(0, 150), continuation = false, textStart = 0))),
+            ReaderPage(1, 0, "章", false, listOf(DocumentBlock(7, full, full.substring(150), continuation = true, textStart = 150))),
+        )
+        // A larger font repaginates into three pages; the saved character must still be visible.
+        val layoutThreePages = listOf(
+            ReaderPage(0, 0, "章", false, listOf(DocumentBlock(7, full, full.substring(0, 100), continuation = false, textStart = 0))),
+            ReaderPage(1, 0, "章", false, listOf(DocumentBlock(7, full, full.substring(100, 200), continuation = true, textStart = 100))),
+            ReaderPage(2, 0, "章", false, listOf(DocumentBlock(7, full, full.substring(200), continuation = true, textStart = 200))),
+        )
+
+        assertEquals(1, positions.pageFor(layoutTwoPages, 7, charOffset = targetOffset))
+        assertEquals(2, positions.pageFor(layoutThreePages, 7, charOffset = targetOffset))
+    }
+
     @Test fun positionUsesCharacterOffsetInsideSplitParagraph() {
         val positions = ReaderPositionManager()
         val pages = listOf(

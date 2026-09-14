@@ -19,7 +19,22 @@ class ReaderPositionManager {
     ): Int {
         if (pages.isEmpty()) return 0
         val normalizedQuery = searchQuery?.trim().orEmpty()
-        if (normalizedQuery.isNotEmpty()) {
+        val safeCharOffset = charOffset.coerceAtLeast(0)
+        val exactTextPage = pages.indexOfFirst { page ->
+            page.blocks.any { block ->
+                block.kind == ParagraphKind.TEXT &&
+                    block.paragraphIndex == paragraphIndex &&
+                    safeCharOffset >= block.textStart &&
+                    safeCharOffset < block.textStart + block.visibleText.length.coerceAtLeast(1)
+            }
+        }
+
+        // An explicit character position is authoritative: two hits in one long paragraph can land
+        // on different pages, and matching the query alone always picks the first of them.
+        if (safeCharOffset > 0 && exactTextPage >= 0) return exactTextPage
+
+        // Compatibility fallback for positions saved without a precise offset.
+        if (safeCharOffset == 0 && normalizedQuery.isNotEmpty()) {
             val matchingTextPage = pages.indexOfFirst { page ->
                 page.blocks.any { block ->
                     block.kind == ParagraphKind.TEXT &&
@@ -43,15 +58,6 @@ class ReaderPositionManager {
                 }
             }
             if (matchingOffsetPage >= 0) return matchingOffsetPage
-        }
-        val safeCharOffset = charOffset.coerceAtLeast(0)
-        val exactTextPage = pages.indexOfFirst { page ->
-            page.blocks.any { block ->
-                block.kind == ParagraphKind.TEXT &&
-                    block.paragraphIndex == paragraphIndex &&
-                    safeCharOffset >= block.textStart &&
-                    safeCharOffset < block.textStart + block.visibleText.length.coerceAtLeast(1)
-            }
         }
         if (exactTextPage >= 0) return exactTextPage
 

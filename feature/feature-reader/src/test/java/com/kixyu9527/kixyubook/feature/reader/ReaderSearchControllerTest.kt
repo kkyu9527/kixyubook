@@ -119,6 +119,44 @@ class ReaderSearchControllerTest {
         }
     }
 
+    @Test fun theSameParagraphFromTheImmediateAndFullPassCountsOnce() = runBlocking {
+        ReaderSearchFixture().use { f ->
+            f.controller.search("黄金", ReaderSearchScope.BOOK)
+            val request = f.repository.requests.single()
+            val immediate = f.state.value.searchResults.single()
+            request.partial(listOf(immediate, immediate))
+            request.result.complete(emptyList())
+
+            assertEquals(1, f.state.value.searchMatchCount)
+            assertEquals(1, f.state.value.searchOccurrenceCount)
+        }
+    }
+
+    @Test fun movingBackFromTheFirstOccurrenceLandsOnThePreviousParagraphsLastHit() = runBlocking {
+        ReaderSearchFixture().use { f ->
+            f.controller.search("黄金", ReaderSearchScope.BOOK)
+            val request = f.repository.requests.single()
+            val earlier = BookSearchResult(
+                chapterId = 10,
+                chapterTitle = "序章",
+                chapterIndex = 2,
+                paragraphIndex = 7,
+                text = "黄金···黄金",
+                matches = listOf(SearchMatch(0, 2), SearchMatch(4, 2)),
+            )
+            request.partial(listOf(earlier))
+            request.result.complete(emptyList())
+            val currentIndex = f.state.value.searchResults.indexOfFirst { it.chapterIndex == 5 }
+            assertTrue(currentIndex >= 0)
+
+            f.controller.select(currentIndex)
+            f.controller.moveMatch(-1)
+
+            // The previous paragraph's final hit, not its first.
+            assertEquals(4, f.jumpOffsets.last())
+        }
+    }
+
     @Test fun clearCancelsWorkAndLeavesNoSelectionOrReturnAction() = runBlocking {
         ReaderSearchFixture().use { f ->
             f.controller.search("黄金", ReaderSearchScope.BOOK)

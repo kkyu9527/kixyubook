@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.feature.reader
 
 import com.kixyu9527.kixyubook.core.common.model.BookSearchResult
+import com.kixyu9527.kixyubook.core.common.model.SearchMatch
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -21,5 +22,20 @@ class SearchResultStoreTest {
             assertTrue(root.listFiles().orEmpty().isNotEmpty())
         }
         assertTrue(root.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test fun spilledParagraphWithMoreMatchesThanPreviewLengthLoadsBack() {
+        val root = folder.newFolder()
+        SearchResultStore(root, spillAt = 1).use { store ->
+            // A long paragraph can match far more often than its truncated preview is long.
+            val matches = List(120) { SearchMatch(it * 3, 1) }
+            store.add(listOf(BookSearchResult(1, "章节", 0, 0, "预览", matches)))
+            // Force the spill to disk.
+            store.add(listOf(BookSearchResult(1, "章节", 0, 1, "x", emptyList())))
+
+            val loaded = store.page(0).rows.first { it.paragraphIndex == 0 }
+            assertEquals(120, loaded.matches.size)
+            assertEquals(120, store.occurrenceCount)
+        }
     }
 }

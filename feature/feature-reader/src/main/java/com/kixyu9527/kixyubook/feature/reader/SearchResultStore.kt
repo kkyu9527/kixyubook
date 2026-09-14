@@ -17,13 +17,20 @@ internal class SearchResultStore(private val directory: File? = null, private va
     private var file: File? = null
     private var disk: RandomAccessFile? = null
     private var closed = false
+    private var occurred = 0
     val count: Int @Synchronized get() = entries.size
+
+    /** Total occurrences across deduplicated paragraphs; the store is the single authority. */
+    val occurrenceCount: Int @Synchronized get() = occurred
 
     @Synchronized fun add(values: List<BookSearchResult>) {
         if (closed) return
         values.forEach { value ->
             val key = Key(value.chapterIndex, value.paragraphIndex, value.chapterId)
             if (key !in entries) {
+                // Count only newly stored paragraphs so a paragraph that arrives from both the
+                // immediate current-chapter pass and the full scan is not counted twice.
+                occurred += value.matches.size
                 val entry = Entry(value)
                 disk?.let { write(entry, value) }
                 entries[key] = entry
@@ -60,7 +67,10 @@ internal class SearchResultStore(private val directory: File? = null, private va
                 val title = readText(source)
                 val text = readText(source)
                 val matchCount = source.readInt()
-                require(matchCount in 0..text.length) { "Invalid match count" }
+                // Bound by the remaining file bytes (8 per match), not by the truncated preview:
+                // a long paragraph can match far more often than its preview is long.
+                val remainingMatches = (source.length() - source.filePointer) / MATCH_BYTES
+                require(matchCount in 0..remainingMatches) { "Invalid match count" }
                 val matches = List(matchCount) { SearchMatch(source.readInt(), source.readInt()) }
                 BookSearchResult(key.id, title, key.chapter, key.paragraph, text, matches)
             }
@@ -95,10 +105,12 @@ internal class SearchResultStore(private val directory: File? = null, private va
         disk?.close(); disk = null
         file?.delete(); file = null
         entries.clear()
+        occurred = 0
     }
 
     companion object {
         const val PAGE_SIZE = 200
+        private const val MATCH_BYTES = 8
         private val initializedDirectories = mutableSetOf<String>()
     }
 }

@@ -40,7 +40,6 @@ internal class ReaderSearchController(
     private var resultStore = SearchResultStore(resultDirectory)
     @Volatile private var generation = 0L
     private var lastPublished = 0L
-    private var occurrenceCount = 0L
     private val storageDispatcher = if (resultDirectory == null) Dispatchers.Unconfined else Dispatchers.IO
 
     fun search(query: String, searchScope: ReaderSearchScope) {
@@ -57,7 +56,6 @@ internal class ReaderSearchController(
             return
         }
         val immediateResults = currentChapterResults(normalized)
-        occurrenceCount = immediateResults.sumOf { it.matches.size }.toLong()
         state.update {
             it.copy(
                 searchQuery = normalized,
@@ -67,7 +65,7 @@ internal class ReaderSearchController(
                 searchResults = immediateResults,
                 searchResultStart = 0,
                 searchMatchCount = immediateResults.size,
-                searchOccurrenceCount = occurrenceCount.toInt(),
+                searchOccurrenceCount = immediateResults.sumOf { it.matches.size },
                 selectedSearchIndex = if (immediateResults.isEmpty()) -1 else 0,
                 selectedSearchMatch = 0,
                 searchReturnAvailable = false,
@@ -165,7 +163,7 @@ internal class ReaderSearchController(
             .toList()
     }
 
-    fun select(index: Int) {
+    fun select(index: Int, selectLastMatch: Boolean = false) {
         val snapshot = state.value
         if (snapshot.searchResults.isEmpty()) return
         val safeIndex = index.coerceIn(0, snapshot.searchResults.lastIndex)
@@ -174,10 +172,12 @@ internal class ReaderSearchController(
             recordOrigin(result.chapterIndex, result.paragraphIndex)
             originRecorded = true
         }
+        // Entering a paragraph backwards must land on its last hit, not its first.
+        val matchIndex = if (selectLastMatch) result.matches.lastIndex.coerceAtLeast(0) else 0
         state.update {
-            it.copy(selectedSearchIndex = safeIndex, selectedSearchMatch = 0, searchReturnAvailable = true)
+            it.copy(selectedSearchIndex = safeIndex, selectedSearchMatch = matchIndex, searchReturnAvailable = true)
         }
-        jumpToMatch(result, 0)
+        jumpToMatch(result, matchIndex)
     }
 
     /** Moves to the previous/next occurrence, crossing into the neighbouring matching paragraph. */
@@ -189,7 +189,9 @@ internal class ReaderSearchController(
             state.update { it.copy(selectedSearchMatch = target) }
             jumpToMatch(result, target)
         } else {
-            move(delta)
+            // Leaving backwards selects the previous paragraph's final hit, including when that
+            // paragraph lives on another result page.
+            move(delta, selectLastMatch = delta < 0)
         }
     }
 
@@ -212,19 +214,19 @@ internal class ReaderSearchController(
         returnToOrigin()
     }
 
-    fun move(delta: Int) {
+    fun move(delta: Int, selectLastMatch: Boolean = false) {
         val snapshot = state.value
         if (snapshot.searchResults.isEmpty()) return
         val current = snapshot.selectedSearchIndex.coerceAtLeast(0)
         val localTarget = current + delta
-        if (localTarget in snapshot.searchResults.indices) select(localTarget)
+        if (localTarget in snapshot.searchResults.indices) select(localTarget, selectLastMatch)
         else {
             val target = (snapshot.searchResultStart + localTarget).coerceIn(0, (snapshot.searchMatchCount - 1).coerceAtLeast(0))
             val token = generation
             val store = resultStore
             launchPageRequest(token) {
                 publishPage(token, store, target)
-                if (token == generation) select(target - state.value.searchResultStart)
+                if (token == generation) select(target - state.value.searchResultStart, selectLastMatch)
             }
         }
     }
@@ -241,7 +243,6 @@ internal class ReaderSearchController(
     }
 
     private fun clearState() {
-        occurrenceCount = 0L
         state.update {
             it.copy(
                 searchQuery = "",
@@ -265,7 +266,6 @@ internal class ReaderSearchController(
     private suspend fun publishResults(token: Long, store: SearchResultStore, candidates: List<BookSearchResult>, force: Boolean = false) {
         if (token != generation) return
         withContext(storageDispatcher) { store.add(candidates) }
-        occurrenceCount += candidates.sumOf { it.matches.size }
         val now = System.nanoTime()
         if (!force && resultDirectory != null && now - lastPublished < 120_000_000L) return
         lastPublished = now
@@ -282,7 +282,7 @@ internal class ReaderSearchController(
                 .copy(
                     searchResultStart = page.start,
                     searchMatchCount = page.total,
-                    searchOccurrenceCount = occurrenceCount.toInt(),
+                    searchOccurrenceCount = store.occurrenceCount,
                 )
         }
     }
