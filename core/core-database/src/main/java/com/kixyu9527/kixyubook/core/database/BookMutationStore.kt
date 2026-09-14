@@ -82,8 +82,12 @@ internal class BookMutationStore(
     }
 
     suspend fun deleteBookmark(bookmarkUuid: String) = database.withTransaction {
+        // A bookmark that a reparse has not relocated yet lives in the pending table; deleting the
+        // uuid must remove it there too, or the next remote snapshot would resurrect it.
         val owner = dao.getBookmarkEntity(bookmarkUuid)?.bookUuid
+            ?: dao.getPendingBookmark(bookmarkUuid)?.bookUuid
         dao.deleteBookmark(bookmarkUuid)
+        dao.deletePendingBookmark(bookmarkUuid)
         owner?.let { syncMutations.record(SyncEntityType.BOOKMARKS, it) }
         Unit
     }

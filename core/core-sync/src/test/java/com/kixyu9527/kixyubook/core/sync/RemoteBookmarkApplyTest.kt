@@ -7,6 +7,7 @@ import com.kixyu9527.kixyubook.core.database.KixyuDatabase
 import com.kixyu9527.kixyubook.core.database.entity.BookEntity
 import com.kixyu9527.kixyubook.core.database.entity.BookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.ChapterEntity
+import com.kixyu9527.kixyubook.core.database.entity.PendingBookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -78,6 +79,52 @@ class RemoteBookmarkApplyTest {
             books.insertBook(BookEntity("book", "书", "", "", null, "EPUB", "", "", 0, "hash", ""))
             books.insertChapter(ChapterEntity(1, "book", "第一章", 0, chapterKey = "k"))
             books.insertBookmark(BookmarkEntity("local", "book", 1, 0, "本地", 1))
+
+            val applied = replaceBookmarksFromRemote(database, books, syncDao, remoteJson("remote"))
+
+            assertTrue(applied)
+            assertEquals(listOf("remote"), books.getAllBookmarkEntities().map { it.uuid })
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test fun remotePendingBookmarksReplaceLocalOnesIncludingDeletions() = runBlocking(Dispatchers.IO) {
+        val database = database()
+        try {
+            val books = database.bookDao()
+            val syncDao = database.syncDao()
+            books.insertBook(BookEntity("book", "书", "", "", null, "EPUB", "", "", 0, "hash", ""))
+            books.insertChapter(ChapterEntity(1, "book", "第一章", 0, chapterKey = "k"))
+            // A local pending record the remote snapshot no longer carries is a remote deletion.
+            books.insertPendingBookmark(PendingBookmarkEntity("gone", "book", "旧锚点", "旧", 1))
+            val json = JSONObject()
+                .put("bookUuid", "book")
+                .put("items", JSONArray().put(
+                    JSONObject()
+                        .put("uuid", "remote-pending")
+                        .put("status", "PENDING")
+                        .put("anchorText", "目标正文")
+                        .put("preview", "远端待恢复")
+                        .put("createdTime", 5),
+                ))
+
+            val applied = replaceBookmarksFromRemote(database, books, syncDao, json)
+
+            assertTrue(applied)
+            assertEquals(listOf("remote-pending"), books.getPendingBookmarks("book").map { it.uuid })
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test fun aStatuslessItemFromAnOlderClientStillAppliesAsLocated() = runBlocking(Dispatchers.IO) {
+        val database = database()
+        try {
+            val books = database.bookDao()
+            val syncDao = database.syncDao()
+            books.insertBook(BookEntity("book", "书", "", "", null, "EPUB", "", "", 0, "hash", ""))
+            books.insertChapter(ChapterEntity(1, "book", "第一章", 0, chapterKey = "k"))
 
             val applied = replaceBookmarksFromRemote(database, books, syncDao, remoteJson("remote"))
 

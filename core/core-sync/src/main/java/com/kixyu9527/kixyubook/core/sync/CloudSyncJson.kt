@@ -20,15 +20,36 @@ internal fun progressJson(progress: ReadingProgressEntity, chapterKey: String) =
     .put("progression", progress.fraction).put("quoteAnchor", progress.quoteAnchor)
     .put("updatedTime", progress.updatedTime)
 
-internal fun bookmarksJson(bookUuid: String, values: List<BookmarkRow>, chapters: Map<Long, ChapterEntity>): JSONObject = JSONObject()
-    .put("schema", 1)
+internal const val BOOKMARK_STATUS_LOCATED = "LOCATED"
+internal const val BOOKMARK_STATUS_PENDING = "PENDING"
+
+/**
+ * A bookmark whose paragraph could not be relocated after a TXT reparse travels with status
+ * PENDING and its anchor text, so other devices keep the data instead of losing it. Located
+ * bookmarks keep the chapter anchor and are inserted directly.
+ */
+internal fun bookmarksJson(
+    bookUuid: String,
+    values: List<BookmarkRow>,
+    pending: List<PendingBookmarkEntity>,
+    chapters: Map<Long, ChapterEntity>,
+): JSONObject = JSONObject()
+    .put("schema", 2)
     .put("bookUuid", bookUuid)
     .put("updatedAt", System.currentTimeMillis())
-    .put("items", JSONArray().apply { values.forEach { value ->
-        put(JSONObject().put("uuid", value.uuid).put("chapterKey", chapters[value.chapterId]?.chapterKey.orEmpty())
-            .put("chapterIndex", value.chapterIndex).put("paragraphIndex", value.position)
-            .put("preview", value.preview).put("createdTime", value.createdTime))
-    } })
+    .put("items", JSONArray().apply {
+        values.forEach { value ->
+            put(JSONObject().put("uuid", value.uuid).put("status", BOOKMARK_STATUS_LOCATED)
+                .put("chapterKey", chapters[value.chapterId]?.chapterKey.orEmpty())
+                .put("chapterIndex", value.chapterIndex).put("paragraphIndex", value.position)
+                .put("preview", value.preview).put("createdTime", value.createdTime))
+        }
+        pending.forEach { value ->
+            put(JSONObject().put("uuid", value.uuid).put("status", BOOKMARK_STATUS_PENDING)
+                .put("anchorText", value.anchorText)
+                .put("preview", value.preview).put("createdTime", value.createdTime))
+        }
+    })
 
 internal fun sessionJson(value: ReadingSessionEntity) = JSONObject()
     .put("schema", 1).put("uuid", value.syncUuid).put("bookUuid", value.bookUuid)

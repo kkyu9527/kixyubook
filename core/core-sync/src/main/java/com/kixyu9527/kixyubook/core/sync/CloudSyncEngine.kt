@@ -852,7 +852,8 @@ class CloudSyncEngine @Inject constructor(
     private suspend fun seedInitialOutbox() {
         books.getAllBooks().forEach { mutations.record(SyncEntityType.BOOK, it.uuid) }
         books.getAllProgress().forEach { mutations.record(SyncEntityType.PROGRESS, it.bookUuid) }
-        books.getAllBookmarkEntities().map(BookMarkOwner::from).map(BookMarkOwner::bookUuid).distinct()
+        (books.getAllBookmarkEntities().map(BookMarkOwner::from).map(BookMarkOwner::bookUuid) +
+            books.getAllPendingBookmarks().map { it.bookUuid }).distinct()
             .forEach { mutations.record(SyncEntityType.BOOKMARKS, it) }
         mutations.record(SyncEntityType.SETTINGS, "global")
         books.getAllSessions().forEach { mutations.record(SyncEntityType.SESSION, it.syncUuid) }

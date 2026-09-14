@@ -59,7 +59,10 @@ internal class CloudSyncPayloadFactory(
         SyncEntityType.BOOKMARKS -> {
             val chapters = books.getChapters(mutation.entityId).associateBy { it.id }
             val values = books.getBookmarks(mutation.entityId)
-            listOf(jsonObject("bookmarks/${mutation.entityId}", bookmarksJson(mutation.entityId, values, chapters)))
+            // Pending bookmarks are part of the bookmark snapshot, not a local-only side table:
+            // otherwise a device that reparsed the book would upload a list missing them.
+            val pending = books.getPendingBookmarks(mutation.entityId)
+            listOf(jsonObject("bookmarks/${mutation.entityId}", bookmarksJson(mutation.entityId, values, pending, chapters)))
         }
         SyncEntityType.SETTINGS -> listOf(jsonObject("settings/global", settingsJson()))
         SyncEntityType.SESSION -> books.getSessionBySyncUuid(mutation.entityId)?.let {
