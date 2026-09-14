@@ -21,10 +21,16 @@ class ReaderLocationRequestTest {
         assertEquals(current, history.goForward(start))
     }
 
-    @Test fun directoryPositionsAreNotConfusedWithSourceIndexesAndEmptyLibraryDoesNotCrash() {
+    @Test fun directoryPositionsAreNotConfusedWithSourceIndexesAndUnknownIndexesStayUnresolved() {
         val request = ReaderLocationRequest(2, source = ReaderLocationSource.DIRECTORY, isChapterPosition = true)
         assertEquals(ReaderLocation(2, 0, 0), request.resolve(chapters))
         assertNull(request.resolve(emptyList()))
-        assertEquals(ReaderLocation(0, 0, 0), ReaderLocationRequest(-1, -8, -4, ReaderLocationSource.RESTORE).resolve(chapters))
+        // Unknown source indexes and out-of-range positions are explicitly unresolved, never a
+        // silently valid but wrong page.
+        assertNull(ReaderLocationRequest(9, source = ReaderLocationSource.DIRECTORY, isChapterPosition = true).resolve(chapters))
+        assertNull(ReaderLocationRequest(-1, -8, -4, ReaderLocationSource.RESTORE).resolve(chapters))
+        assertNull(ReaderLocationRequest(99, 0, 0, ReaderLocationSource.BOOKMARK).resolve(chapters))
+        // A known source index still maps to its directory position with its character anchor.
+        assertEquals(ReaderLocation(1, 8, 42), ReaderLocationRequest(20, 8, 42, ReaderLocationSource.BOOKMARK).resolve(chapters))
     }
 }

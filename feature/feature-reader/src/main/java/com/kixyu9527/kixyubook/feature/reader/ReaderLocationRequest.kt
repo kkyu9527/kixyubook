@@ -13,11 +13,18 @@ internal data class ReaderLocationRequest(
     val isChapterPosition: Boolean = false,
     val rememberOrigin: Boolean = true,
 ) {
+    /**
+     * Resolves a request against the displayed directory, or returns null when it cannot be
+     * located. An unknown source chapter index is deliberately *not* reused as a directory
+     * position: doing so turned an unresolvable location into a legal but wrong page.
+     */
     fun resolve(chapters: List<Chapter>): ReaderLocation? {
         if (chapters.isEmpty()) return null
-        val position = if (isChapterPosition) chapterIndex else {
-            chapters.indexOfFirst { it.index == chapterIndex }.takeIf { it >= 0 } ?: chapterIndex
+        val position = if (isChapterPosition) {
+            chapterIndex.takeIf { it in chapters.indices } ?: return null
+        } else {
+            chapters.indexOfFirst { it.index == chapterIndex }.takeIf { it >= 0 } ?: return null
         }
-        return ReaderLocation(position.coerceIn(chapters.indices), paragraphIndex.coerceAtLeast(0), charOffset.coerceAtLeast(0))
+        return ReaderLocation(position, paragraphIndex.coerceAtLeast(0), charOffset.coerceAtLeast(0))
     }
 }
