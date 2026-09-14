@@ -92,6 +92,33 @@ class ReaderSearchControllerTest {
         }
     }
 
+    @Test fun occurrenceNavigationJumpsToEachCharacterRange() = runBlocking {
+        ReaderSearchFixture().use { f ->
+            f.controller.search("黄金", ReaderSearchScope.BOOK)
+            val request = f.repository.requests.single()
+            val multi = BookSearchResult(
+                chapterId = 10,
+                chapterTitle = "章",
+                chapterIndex = 2,
+                paragraphIndex = 7,
+                text = "黄金···黄金",
+                matches = listOf(SearchMatch(0, 2), SearchMatch(4, 2)),
+            )
+            request.partial(listOf(multi))
+            request.result.complete(listOf(multi))
+            val index = f.state.value.searchResults.indexOfFirst { it.chapterId == 10L }
+            assertTrue(index >= 0)
+
+            f.controller.select(index)
+            assertEquals(0, f.jumpOffsets.last())
+            // One occurrence in the immediate current-chapter hit plus two in the partial result.
+            assertEquals(3, f.state.value.searchOccurrenceCount)
+
+            f.controller.moveMatch(1)
+            assertEquals(4, f.jumpOffsets.last())
+        }
+    }
+
     @Test fun clearCancelsWorkAndLeavesNoSelectionOrReturnAction() = runBlocking {
         ReaderSearchFixture().use { f ->
             f.controller.search("黄金", ReaderSearchScope.BOOK)

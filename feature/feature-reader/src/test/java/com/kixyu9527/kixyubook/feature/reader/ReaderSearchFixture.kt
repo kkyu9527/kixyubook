@@ -25,7 +25,10 @@ internal class ScriptedSearchRepository : BookRepository by unsupportedBookRepos
         check(bookUuid == "book")
         val request = Request(query, onProgress, onResults)
         requests += request
-        return request.result.await()
+        val completed = request.result.await()
+        // Mirror the real contract: a non-retaining search streams through onResults and returns
+        // nothing, so the caller must not count the same hits twice.
+        return if (retainResults) completed else emptyList()
     }
 }
 
@@ -45,11 +48,15 @@ internal class ReaderSearchFixture : AutoCloseable {
     val history = mutableListOf<String>()
     val origins = mutableListOf<Pair<Int, Int>>()
     val jumps = mutableListOf<Pair<Int, Int>>()
+    val jumpOffsets = mutableListOf<Int>()
     var returns = 0
     val controller = ReaderSearchController(
         scope, "book", repository, state, { history += it },
         { chapter, paragraph -> origins += chapter to paragraph },
-        { chapter, paragraph, _ -> jumps += chapter to paragraph }, { returns++ },
+        { chapter, paragraph, offset ->
+            jumps += chapter to paragraph
+            jumpOffsets += offset
+        }, { returns++ },
         { "Search failed" },
     )
     override fun close() { scope.cancel() }
