@@ -337,7 +337,6 @@ class ReaderViewModel @AssistedInject constructor(
                 error = null,
             )
         }
-        session.onPresented(index, lastPosition, lastCharOffset)
         // A reader session owns a real previous/current/next chapter window. Both neighbours start
         // loading with the first visible chapter so opening a book at a saved position can move in
         // either direction immediately; pagination promotes them after the first leaf is visible.
@@ -685,7 +684,6 @@ class ReaderViewModel @AssistedInject constructor(
                 error = null,
             )
         }
-        session.onPresented(index, lastPosition, lastCharOffset)
         // Rotate the same three-chapter window after activation. Cached neighbours are published
         // synchronously, while missing ones are decoded outside the page-turn animation.
         prioritizeAdjacentChapter(index, -1)
@@ -714,7 +712,6 @@ class ReaderViewModel @AssistedInject constructor(
                 settledPageIndex = null,
             )
         }
-        session.onPresented(_uiState.value.chapterIndex, lastPosition, lastCharOffset)
         if (persistProgress) savePosition(lastPosition, lastCharOffset)
     }
 
@@ -754,7 +751,6 @@ class ReaderViewModel @AssistedInject constructor(
                     settledPageIndex = null,
                 )
             }
-            session.onPresented(targetIndex, targetPosition, targetCharOffset)
         } else {
             requestLocation(directoryLocation(targetIndex, targetPosition, targetCharOffset,
                 ReaderLocationSource.RESTORE, rememberOrigin = false))
@@ -986,6 +982,10 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     private fun currentLocation(): ReaderLocation {
+        // The coordinator's presented location is the single authority once a page has rendered.
+        session.presentedLocation?.let { presented ->
+            return ReaderLocation(presented.chapterPosition, presented.paragraphIndex, presented.charOffset)
+        }
         val position = _positionState.value
         return ReaderLocation(
             chapterPosition = _uiState.value.chapterIndex,
@@ -1055,7 +1055,6 @@ class ReaderViewModel @AssistedInject constructor(
         lastPosition = safePosition
         lastCharOffset = safeCharOffset
         _positionState.value = ReaderPositionState(safePosition, safeCharOffset, safeVisibleEnd)
-        session.onPresented(state.chapterIndex, safePosition, safeCharOffset)
         val total = positions.bookFraction(
             chapterIndex = state.chapterIndex,
             chapterCount = state.chapters.size,
@@ -1276,6 +1275,9 @@ class ReaderViewModel @AssistedInject constructor(
     fun chapterRendered(navigationVersion: Int) {
         val rendered = _uiState.value
         if (rendered.navigationVersion != navigationVersion || rendered.chapter == null) return
+        // The page is on screen now, so this is the session's authoritative presented location.
+        val presented = _positionState.value
+        session.onPresented(rendered.chapterIndex, presented.paragraphIndex, presented.charOffset)
         locationJourney.rendered(rendered.chapterIndex, navigationVersion)
         completePageTurn(rendered.chapterIndex, "success")
         if (rendered.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE) {
