@@ -738,6 +738,9 @@ class LocalBookRepository @Inject constructor(
                 }
                 dao.deleteMetadataEdits(bookUuids)
                 dao.deleteBookParagraphFts(bookUuids)
+                // Explicit cleanup in the same transaction as the cascade, so pending bookmarks
+                // (and their excerpt text) never survive a single or batch book deletion.
+                dao.deletePendingBookmarks(bookUuids)
                 dao.deleteBooks(bookUuids)
                 bookUuids.forEach { uuid ->
                     // Progress and bookmarks are independent Drive objects. Deleting only the
@@ -1026,6 +1029,10 @@ class LocalBookRepository @Inject constructor(
                     dao.getParagraphs(chapterId)
                 }
 
+                // Relocate the bookmarks that still point at a paragraph. A target already used by
+                // an earlier bookmark is not free, so the later one becomes pending instead of being
+                // silently dropped by the unique (book, chapter, position) index.
+                val occupied = mutableSetOf<Pair<Long, Int>>()
                 previousBookmarks.forEach { bookmark ->
                     val migrated = migrateReparsedBookmark(
                         bookmark = bookmark,
@@ -1034,19 +1041,49 @@ class LocalBookRepository @Inject constructor(
                         chapterIds = chapterIds,
                         chapterKeys = chapterKeys,
                         paragraphsByChapter = paragraphsByChapter,
-                    ) ?: return@forEach
-                    dao.insertBookmark(
-                        BookmarkEntity(
-                            uuid = migrated.uuid,
-                            bookUuid = bookUuid,
-                            chapterId = migrated.chapterId,
-                            position = migrated.position,
-                            preview = migrated.preview,
-                            createdTime = migrated.createdTime,
-                            chapterKey = migrated.chapterKey,
-                        ),
                     )
+                    var inserted = false
+                    if (migrated != null) {
+                        val id = dao.insertBookmark(
+                            BookmarkEntity(
+                                uuid = migrated.uuid,
+                                bookUuid = bookUuid,
+                                chapterId = migrated.chapterId,
+                                position = migrated.position,
+                                preview = migrated.preview,
+                                createdTime = migrated.createdTime,
+                                chapterKey = migrated.chapterKey,
+                            ),
+                        )
+                        if (id != -1L) {
+                            occupied += migrated.chapterId to migrated.position
+                            inserted = true
+                        }
+                    }
+                    if (!inserted) {
+                        // Keep the uuid, anchor text and preview so a later reparse can place it
+                        // instead of discarding the user's bookmark.
+                        dao.insertPendingBookmark(
+                            PendingBookmarkEntity(
+                                uuid = bookmark.uuid,
+                                bookUuid = bookUuid,
+                                anchorText = previousBookmarkTexts[bookmark].orEmpty(),
+                                preview = bookmark.preview,
+                                createdTime = bookmark.createdTime,
+                            ),
+                        )
+                    }
                 }
+                // Last, try to place bookmarks an earlier reparse could not relocate: only a unique,
+                // still-free anchor is committed; anything ambiguous or already taken stays pending.
+                reconcilePendingBookmarks(
+                    dao = dao,
+                    bookUuid = bookUuid,
+                    chapterIds = chapterIds,
+                    chapterKeys = chapterKeys,
+                    paragraphsByChapter = paragraphsByChapter,
+                    occupied = occupied,
+                )
 
                 previousProgress?.let { progress ->
                     dao.saveProgress(
@@ -1327,4 +1364,83 @@ internal fun migrateReparsedBookmark(
         createdTime = bookmark.createdTime,
         chapterKey = chapterKeys[targetIndex],
     )
+}
+
+internal sealed interface PendingBookmarkResolution {
+    data class Resolved(val bookmark: ReparsedBookmark) : PendingBookmarkResolution
+
+    /** The anchor is absent, ambiguous, or its only position is taken; the record must stay. */
+    data object Unresolved : PendingBookmarkResolution
+}
+
+/**
+ * Tries to place a previously unlocated bookmark into the reparsed chapters by matching its saved
+ * anchor text. Only a unique, still-free paragraph is accepted; an anchor that repeats in the new
+ * text is ambiguous and must not be guessed, so the bookmark stays pending instead of being
+ * committed to the wrong paragraph or dropped by the unique bookmark index.
+ */
+internal fun resolvePendingBookmark(
+    pending: PendingBookmarkEntity,
+    chapterIds: List<Long>,
+    chapterKeys: List<String>,
+    paragraphsByChapter: Map<Long, List<ParagraphEntity>>,
+    occupied: Set<Pair<Long, Int>>,
+): PendingBookmarkResolution {
+    if (chapterIds.isEmpty()) return PendingBookmarkResolution.Unresolved
+    val anchor = pending.anchorText.takeIf { it.isNotBlank() } ?: return PendingBookmarkResolution.Unresolved
+    var match: Pair<Long, Int>? = null
+    chapterIds.forEachIndexed { index, chapterId ->
+        paragraphsByChapter[chapterId].orEmpty().forEachIndexed { position, paragraph ->
+            if (paragraph.text != anchor) return@forEachIndexed
+            if (match != null) return PendingBookmarkResolution.Unresolved
+            match = chapterId to position
+        }
+    }
+    val (chapterId, position) = match ?: return PendingBookmarkResolution.Unresolved
+    if (chapterId to position in occupied) return PendingBookmarkResolution.Unresolved
+    val chapterIndex = chapterIds.indexOf(chapterId)
+    return PendingBookmarkResolution.Resolved(
+        ReparsedBookmark(
+            uuid = pending.uuid,
+            chapterId = chapterId,
+            position = position,
+            preview = pending.preview,
+            createdTime = pending.createdTime,
+            chapterKey = chapterKeys[chapterIndex],
+        ),
+    )
+}
+
+/**
+ * Commits every pending bookmark that now has a unique, free anchor. The insert result is checked
+ * before the pending row is deleted: a conflict must keep the record so the user's bookmark is
+ * never silently lost.
+ */
+internal suspend fun reconcilePendingBookmarks(
+    dao: BookDao,
+    bookUuid: String,
+    chapterIds: List<Long>,
+    chapterKeys: List<String>,
+    paragraphsByChapter: Map<Long, List<ParagraphEntity>>,
+    occupied: MutableSet<Pair<Long, Int>>,
+) {
+    dao.getPendingBookmarks(bookUuid).forEach { pending ->
+        val resolved = resolvePendingBookmark(pending, chapterIds, chapterKeys, paragraphsByChapter, occupied)
+        if (resolved !is PendingBookmarkResolution.Resolved) return@forEach
+        val id = dao.insertBookmark(
+            BookmarkEntity(
+                uuid = resolved.bookmark.uuid,
+                bookUuid = bookUuid,
+                chapterId = resolved.bookmark.chapterId,
+                position = resolved.bookmark.position,
+                preview = resolved.bookmark.preview,
+                createdTime = resolved.bookmark.createdTime,
+                chapterKey = resolved.bookmark.chapterKey,
+            ),
+        )
+        if (id != -1L) {
+            occupied += resolved.bookmark.chapterId to resolved.bookmark.position
+            dao.deletePendingBookmark(pending.uuid)
+        }
+    }
 }

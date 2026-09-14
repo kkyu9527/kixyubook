@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.database
 
 import com.kixyu9527.kixyubook.core.database.entity.BookmarkRow
 import com.kixyu9527.kixyubook.core.database.entity.ParagraphEntity
+import com.kixyu9527.kixyubook.core.database.entity.PendingBookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.ReadingProgressEntity
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -185,5 +186,83 @@ class ReparsedProgressMigrationTest {
         )
 
         assertEquals(null, migrated)
+    }
+
+    private fun pending(anchor: String) = PendingBookmarkEntity(
+        uuid = "pb",
+        bookUuid = "book",
+        anchorText = anchor,
+        preview = "预览",
+        createdTime = 1,
+    )
+
+    @Test
+    fun pendingBookmarkIsPlacedWhenItsAnchorReappears() {
+        val resolved = resolvePendingBookmark(
+            pending = pending("目标正文"),
+            chapterIds = listOf(100L, 200L),
+            chapterKeys = listOf("first", "second"),
+            paragraphsByChapter = mapOf(
+                100L to listOf(ParagraphEntity(chapterId = 100L, paragraphIndex = 0, text = "第一章")),
+                200L to listOf(ParagraphEntity(chapterId = 200L, paragraphIndex = 0, text = "目标正文")),
+            ),
+            occupied = emptySet(),
+        ) as PendingBookmarkResolution.Resolved
+
+        assertEquals(200L, resolved.bookmark.chapterId)
+        assertEquals(0, resolved.bookmark.position)
+        assertEquals("second", resolved.bookmark.chapterKey)
+    }
+
+    @Test
+    fun pendingBookmarkWithoutItsAnchorStaysUnresolved() {
+        val resolved = resolvePendingBookmark(
+            pending = pending("尚不存在的正文"),
+            chapterIds = listOf(100L),
+            chapterKeys = listOf("first"),
+            paragraphsByChapter = mapOf(100L to listOf(ParagraphEntity(chapterId = 100L, paragraphIndex = 0, text = "第一章"))),
+            occupied = emptySet(),
+        )
+
+        assertEquals(PendingBookmarkResolution.Unresolved, resolved)
+    }
+
+    @Test
+    fun aRepeatedAnchorIsAmbiguousAndStaysPending() {
+        val resolved = resolvePendingBookmark(
+            pending = pending("重复正文"),
+            chapterIds = listOf(100L),
+            chapterKeys = listOf("first"),
+            paragraphsByChapter = mapOf(
+                100L to listOf(
+                    ParagraphEntity(chapterId = 100L, paragraphIndex = 0, text = "重复正文"),
+                    ParagraphEntity(chapterId = 100L, paragraphIndex = 1, text = "重复正文"),
+                ),
+            ),
+            occupied = emptySet(),
+        )
+
+        assertEquals(PendingBookmarkResolution.Unresolved, resolved)
+    }
+
+    @Test
+    fun anAnchorWhoseOnlyPositionIsTakenStaysPending() {
+        val resolved = resolvePendingBookmark(
+            pending = pending("已占用正文"),
+            chapterIds = listOf(100L),
+            chapterKeys = listOf("first"),
+            paragraphsByChapter = mapOf(
+                100L to (0..3).map { index ->
+                    ParagraphEntity(
+                        chapterId = 100L,
+                        paragraphIndex = index,
+                        text = if (index == 3) "已占用正文" else "其它段$index",
+                    )
+                },
+            ),
+            occupied = setOf(100L to 3),
+        )
+
+        assertEquals(PendingBookmarkResolution.Unresolved, resolved)
     }
 }

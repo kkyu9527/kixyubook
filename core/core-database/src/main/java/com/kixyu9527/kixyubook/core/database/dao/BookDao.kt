@@ -90,6 +90,12 @@ interface BookDao {
     @Insert suspend fun insertMetadataEdit(edit: MetadataEditEntity)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSession(session: ReadingSessionEntity): Long
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertBookmark(bookmark: BookmarkEntity): Long
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertPendingBookmark(bookmark: PendingBookmarkEntity): Long
+    @Query("SELECT * FROM pending_bookmarks") suspend fun getAllPendingBookmarks(): List<PendingBookmarkEntity>
+    @Query("SELECT * FROM pending_bookmarks WHERE bookUuid = :uuid") suspend fun getPendingBookmarks(uuid: String): List<PendingBookmarkEntity>
+    @Query("SELECT * FROM pending_bookmarks WHERE uuid = :uuid LIMIT 1") suspend fun getPendingBookmark(uuid: String): PendingBookmarkEntity?
+    @Query("DELETE FROM pending_bookmarks WHERE uuid = :uuid") suspend fun deletePendingBookmark(uuid: String)
+    @Query("DELETE FROM pending_bookmarks WHERE bookUuid IN (:uuids)") suspend fun deletePendingBookmarks(uuids: Set<String>)
 
     @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid") suspend fun updateBookMetadata(uuid: String, title: String, author: String, description: String): Int
     @Query("UPDATE books SET category = :category WHERE uuid = :uuid") suspend fun setCategory(uuid: String, category: String)

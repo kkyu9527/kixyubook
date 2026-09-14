@@ -162,6 +162,26 @@ val MIGRATION_14_15 = object : Migration(14, 15) {
     }
 }
 
+/** Holds bookmarks a reparse could not relocate so the user's data is never discarded. */
+val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `pending_bookmarks` (
+                `uuid` TEXT NOT NULL,
+                `bookUuid` TEXT NOT NULL,
+                `anchorText` TEXT NOT NULL,
+                `preview` TEXT NOT NULL,
+                `createdTime` INTEGER NOT NULL,
+                PRIMARY KEY(`uuid`),
+                FOREIGN KEY(`bookUuid`) REFERENCES `books`(`uuid`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_bookmarks_bookUuid` ON `pending_bookmarks` (`bookUuid`)")
+    }
+}
+
 private fun createReaderAnnotationsTable(db: SupportSQLiteDatabase) {
     db.execSQL(
         """

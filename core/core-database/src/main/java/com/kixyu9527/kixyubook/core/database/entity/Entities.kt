@@ -117,6 +117,23 @@ data class BookmarkRow(
     val chapterKey: String = "",
 )
 
+/**
+ * A bookmark whose anchor text could not be relocated after a reparse. Kept (uuid, anchor text and
+ * preview) so a later reparse or repair can place it instead of discarding the user's data.
+ */
+@Entity(
+    tableName = "pending_bookmarks",
+    foreignKeys = [ForeignKey(entity = BookEntity::class, parentColumns = ["uuid"], childColumns = ["bookUuid"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("bookUuid")],
+)
+data class PendingBookmarkEntity(
+    @PrimaryKey val uuid: String,
+    val bookUuid: String,
+    val anchorText: String,
+    val preview: String,
+    val createdTime: Long,
+)
+
 data class BookSearchResultRow(
     val chapterId: Long,
     val chapterTitle: String,
