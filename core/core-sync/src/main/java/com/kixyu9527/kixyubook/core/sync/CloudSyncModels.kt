@@ -7,7 +7,9 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.database.entity.BookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
 
@@ -191,7 +193,14 @@ internal fun shouldApplyRemoteTombstone(localPendingCount: Int): Boolean = local
  * Applies three settings stores with best-effort rollback. DataStore has no cross-store transaction,
  * so if a later store fails the stores already written are restored from their previous values
  * before the error is rethrown; the caller holds SettingsWriteGate, so no local write can
- * interleave. A null apply/rollback pair means the snapshot omitted that store.
+ * interleave. [hasLibrary]/[hasReminder] false means the snapshot omitted that store.
+ *
+ * Every group is marked as applied before its first write, because each apply performs more than
+ * one step (reader settings + reading goal + per-book overrides; reminder config + WorkManager
+ * scheduling). A failure in a later step must roll the whole group back even though the group's
+ * single call never returned. The rollback runs under [NonCancellable] because the failure is often
+ * the cancellation itself, and any rollback failure is attached to the rethrown error instead of
+ * being swallowed.
  */
 internal suspend fun applySettingsWithRollback(
     applyReader: suspend () -> Unit,
@@ -207,20 +216,24 @@ internal suspend fun applySettingsWithRollback(
     var libraryApplied = false
     var reminderApplied = false
     try {
-        applyReader()
         readerApplied = true
+        applyReader()
         if (hasLibrary) {
-            applyLibrary()
             libraryApplied = true
+            applyLibrary()
         }
         if (hasReminder) {
-            applyReminder()
             reminderApplied = true
+            applyReminder()
         }
     } catch (error: Throwable) {
-        if (reminderApplied) runCatching { rollbackReminder() }
-        if (libraryApplied) runCatching { rollbackLibrary() }
-        if (readerApplied) runCatching { rollbackReader() }
+        withContext(NonCancellable) {
+            val rollbackFailures = mutableListOf<Throwable>()
+            if (reminderApplied) runCatching { rollbackReminder() }.onFailure { rollbackFailures += it }
+            if (libraryApplied) runCatching { rollbackLibrary() }.onFailure { rollbackFailures += it }
+            if (readerApplied) runCatching { rollbackReader() }.onFailure { rollbackFailures += it }
+            rollbackFailures.forEach(error::addSuppressed)
+        }
         throw error
     }
 }
