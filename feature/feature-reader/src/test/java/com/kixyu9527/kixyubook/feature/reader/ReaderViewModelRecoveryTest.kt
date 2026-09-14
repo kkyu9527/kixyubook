@@ -132,11 +132,11 @@ class ReaderViewModelRecoveryTest {
                 assertEquals(bookmarkAttempts.first(), bookmarkAttempts.last())
                 assertEquals(33L, bookmarkAttempts.last().chapterId)
                 assertEquals(7, bookmarkAttempts.last().position)
-                first.requestLocation(ReaderLocationRequest(1, 2, 4, ReaderLocationSource.BOOKMARK))
+                first.requestLocation(sourceLocation(1, 2, 4, ReaderLocationSource.BOOKMARK))
                 first.uiState.first { it.chapterIndex == 1 && it.restorePosition == 2 }
             }
             if (exerciseJumps) {
-                first.requestLocation(ReaderLocationRequest(0, 4, 6, ReaderLocationSource.ANNOTATION))
+                first.requestLocation(sourceLocation(0, 4, 6, ReaderLocationSource.ANNOTATION))
                 first.uiState.first { it.chapterIndex == 0 && it.restorePosition == 4 }
                 assertEquals(6, first.uiState.value.restoreCharOffset)
                 first.jumpToChapter(1)
@@ -144,9 +144,9 @@ class ReaderViewModelRecoveryTest {
                 first.navigateHistoryBack()
                 first.uiState.first { it.chapterIndex == 0 && it.restorePosition == 4 }
                 assertEquals(6, first.uiState.value.restoreCharOffset)
-                first.requestLocation(ReaderLocationRequest(1, 3, source = ReaderLocationSource.BOOKMARK))
+                first.requestLocation(sourceLocation(1, 3, source = ReaderLocationSource.BOOKMARK))
                 first.uiState.first { it.chapterIndex == 1 && it.restorePosition == 3 }
-                first.requestLocation(ReaderLocationRequest(1, 2, 4, ReaderLocationSource.SEARCH))
+                first.requestLocation(sourceLocation(1, 2, 4, ReaderLocationSource.SEARCH))
                 assertEquals(4, first.uiState.value.restoreCharOffset)
             }
             run {

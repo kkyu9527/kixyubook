@@ -650,14 +650,14 @@ internal fun ReaderScreen(
                         controls = false
                         menu = false
                         toolsMenu = false
-                        jumpPosition(ReaderLocationRequest(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
+                        jumpPosition(sourceLocation(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
                     },
                     selectAnnotation = { annotation ->
                         sheet = null
                         controls = false
                         menu = false
                         toolsMenu = false
-                        jumpPosition(ReaderLocationRequest(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
+                                jumpPosition(sourceLocation(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
                     },
                     deleteBookmark = deleteBookmark,
                     updateAnnotationNote = updateAnnotationNote,
@@ -747,14 +747,14 @@ internal fun ReaderScreen(
                                 controls = false
                                 menu = false
                                 toolsMenu = false
-                                jumpPosition(ReaderLocationRequest(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
+                                jumpPosition(sourceLocation(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
                             },
                             selectAnnotation = { annotation ->
                                 sheet = null
                                 controls = false
                                 menu = false
                                 toolsMenu = false
-                                jumpPosition(ReaderLocationRequest(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
+                        jumpPosition(sourceLocation(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
                             },
                             deleteBookmark = deleteBookmark,
                             updateAnnotationNote = updateAnnotationNote,

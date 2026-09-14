@@ -12,7 +12,7 @@ class ReaderLocationRequestTest {
         val start = ReaderLocation(0, 5, 23)
         var current = start
         for (source in listOf(ReaderLocationSource.BOOKMARK, ReaderLocationSource.ANNOTATION, ReaderLocationSource.SEARCH, ReaderLocationSource.DOCUMENT_LINK)) {
-            val target = ReaderLocationRequest(20, 8, 42, source).resolve(chapters)!!
+            val target = sourceLocation(20, 8, 42, source).resolve(chapters)!!
             assertEquals(ReaderLocation(1, 8, 42), target)
             history.record(current, target)
             current = target
@@ -22,15 +22,15 @@ class ReaderLocationRequestTest {
     }
 
     @Test fun directoryPositionsAreNotConfusedWithSourceIndexesAndUnknownIndexesStayUnresolved() {
-        val request = ReaderLocationRequest(2, source = ReaderLocationSource.DIRECTORY, isChapterPosition = true)
+        val request = directoryLocation(2, source = ReaderLocationSource.DIRECTORY)
         assertEquals(ReaderLocation(2, 0, 0), request.resolve(chapters))
         assertNull(request.resolve(emptyList()))
         // Unknown source indexes and out-of-range positions are explicitly unresolved, never a
         // silently valid but wrong page.
-        assertNull(ReaderLocationRequest(9, source = ReaderLocationSource.DIRECTORY, isChapterPosition = true).resolve(chapters))
-        assertNull(ReaderLocationRequest(-1, -8, -4, ReaderLocationSource.RESTORE).resolve(chapters))
-        assertNull(ReaderLocationRequest(99, 0, 0, ReaderLocationSource.BOOKMARK).resolve(chapters))
+        assertNull(directoryLocation(9, source = ReaderLocationSource.DIRECTORY).resolve(chapters))
+        assertNull(sourceLocation(-1, -8, -4, ReaderLocationSource.RESTORE).resolve(chapters))
+        assertNull(sourceLocation(99, 0, 0, ReaderLocationSource.BOOKMARK).resolve(chapters))
         // A known source index still maps to its directory position with its character anchor.
-        assertEquals(ReaderLocation(1, 8, 42), ReaderLocationRequest(20, 8, 42, ReaderLocationSource.BOOKMARK).resolve(chapters))
+        assertEquals(ReaderLocation(1, 8, 42), sourceLocation(20, 8, 42, ReaderLocationSource.BOOKMARK).resolve(chapters))
     }
 }
