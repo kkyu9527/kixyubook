@@ -2,8 +2,6 @@ package com.kixyu9527.kixyubook.feature.reader
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost
 
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -30,7 +28,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import kotlinx.coroutines.delay
 
-internal enum class ReaderSheet { DIRECTORY, THEME, LAYOUT, INFORMATION }
+internal enum class ReaderSheet { DIRECTORY, SETTINGS }
 
 /** All floating reader controls share one enter/exit clock and transform. */
 @Composable
@@ -56,6 +54,7 @@ fun ReaderRoute(
     initialSettings: ReaderSettings = ReaderSettings(),
     onExit: () -> Unit,
     onManageCorrections: () -> Unit,
+    onManageFonts: () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var readerDestinationEntered by remember(lifecycleOwner) {
@@ -79,6 +78,7 @@ fun ReaderRoute(
             initialSettings = initialSettings,
             onExit = onExit,
             onManageCorrections = onManageCorrections,
+            onManageFonts = onManageFonts,
         )
     }
 }
@@ -89,6 +89,7 @@ private fun LoadedReaderRoute(
     initialSettings: ReaderSettings,
     onExit: () -> Unit,
     onManageCorrections: () -> Unit,
+    onManageFonts: () -> Unit,
     viewModel: ReaderViewModel = hiltViewModel<ReaderViewModel, ReaderViewModel.Factory>(
         key = bookUuid,
         creationCallback = { factory -> factory.create(bookUuid) },
@@ -110,9 +111,6 @@ private fun LoadedReaderRoute(
     val lifecycleOwner = LocalLifecycleOwner.current
     var readerResumed by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
-    }
-    val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { viewModel.importFont(it.toString()) }
     }
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -176,7 +174,6 @@ private fun LoadedReaderRoute(
             jumpPosition = viewModel::requestLocation,
             savePosition = viewModel::onPageSettled,
             updateSettings = viewModel::updateSettings,
-            setBookSettingsEnabled = viewModel::setBookSettingsEnabled,
             addBookmark = viewModel::addBookmark,
             deleteBookmark = viewModel::deleteBookmark,
             search = viewModel::search,
@@ -191,11 +188,9 @@ private fun LoadedReaderRoute(
             clearSearchHistory = viewModel::clearSearchHistory,
             chapterRendered = viewModel::chapterRendered,
             setPageInteractionActive = viewModel::setPageInteractionActive,
+            onManageFonts = onManageFonts,
+            onResetReadingConfiguration = viewModel::resetReadingConfiguration,
             prioritizeAdjacentChapter = viewModel::prioritizeAdjacentChapter,
-            addFont = {
-                fontPicker.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"))
-            },
-            deleteFont = viewModel::deleteFont,
             saveCorrection = viewModel::saveParagraphCorrection,
             deleteCorrection = viewModel::deleteCorrection,
             saveHighlight = viewModel::saveParagraphHighlight,

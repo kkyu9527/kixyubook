@@ -10,6 +10,7 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
 import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import com.kixyu9527.kixyubook.core.common.diagnostics.toDiagnosticFailure
 import com.kixyu9527.kixyubook.core.common.model.*
+import com.kixyu9527.kixyubook.core.designsystem.component.resetReaderOwnedFields
 import com.kixyu9527.kixyubook.core.common.repository.*
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureLevel
 import com.kixyu9527.kixyubook.core.common.memory.MemoryPressureListener
@@ -51,7 +52,6 @@ class ReaderViewModel @AssistedInject constructor(
     private val textCorrections: TextCorrectionRepository,
     private val annotations: ReaderAnnotationRepository,
     @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
-    private val bookSettings: BookSettingsRepository = NoBookSettings,
 ) : ViewModel(), MemoryPressureListener {
     @AssistedFactory
     interface Factory {
@@ -70,8 +70,8 @@ class ReaderViewModel @AssistedInject constructor(
     private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
     private var lastCharOffset = 0
-    /** True between a layout-setting change and the reflowed layout actually rendering. */
-    private var awaitingReflow = false
+    /** Settles older than this layout version came from a layout that is being replaced. */
+    private var minimumAcceptedLayoutVersion = 0
     private val positions = ReaderPositionManager()
     private val chapterLoads = mutableMapOf<Int, ChapterLoadRequest>()
     private var chapterNavigationJob: Job? = null
@@ -127,9 +127,7 @@ class ReaderViewModel @AssistedInject constructor(
     private val annotationActions = ReaderAnnotationActions(bookUuid, _uiState, annotations, textCorrections, operations)
     private val settingWrites = LatestOperationWriter(viewModelScope, operations)
     private val settingRequests = com.kixyu9527.kixyubook.core.common.configuration.ReaderSettingsRequests()
-    private val effectiveSettings = combine(settingsRepository.settings, bookSettings.overrides) { global, overrides ->
-        applySettingsPatch(global, overrides[bookUuid])
-    }.distinctUntilChanged()
+    private val effectiveSettings = settingsRepository.settings.distinctUntilChanged()
     private val searchController = ReaderSearchController(
         resultDirectory = java.io.File(context.cacheDir, "reader-search-results"),
         scope = viewModelScope,
@@ -145,15 +143,7 @@ class ReaderViewModel @AssistedInject constructor(
 
     // Authoritative in-memory toggle. The DataStore flow only confirms it later, so edits right
     // after enabling per-book settings must not read a stale value and fall back to the global copy.
-    private var bookSettingsEnabled = false
-
     init {
-        viewModelScope.launch {
-            bookSettings.overrides.collect { overrides ->
-                bookSettingsEnabled = bookUuid in overrides
-                _uiState.update { it.copy(bookSettingsEnabled = bookSettingsEnabled) }
-            }
-        }
         MemoryPressureRegistry.register(this)
         cloudSync.prioritizeBook(bookUuid)
         viewModelScope.launch {
@@ -173,7 +163,12 @@ class ReaderViewModel @AssistedInject constructor(
                     // The pre-reflow layout is still on screen until the new spec renders. Only an
                     // actual on-screen location makes this a reflow: the initial settings load has
                     // nothing to protect, and guarding it would drop the first real page settle.
-                    if (_uiState.value.paginationReflowAnchor(settings) != null) awaitingReflow = true
+                    // Settles are identified by layout version, so scroll mode (which has no page
+                    // render callback) can never be blocked by a stale boolean.
+                    val before = _uiState.value
+                    val layoutChanged = before.settings.paginationLayoutDiffers(settings)
+                    val anchor = if (layoutChanged) before.paginationReflowAnchor(settings) else null
+                    if (anchor != null) minimumAcceptedLayoutVersion = before.layoutVersion + 1
                     _uiState.update { current ->
                         if (
                             current.settings == settings && current.fontPath == path &&
@@ -181,15 +176,17 @@ class ReaderViewModel @AssistedInject constructor(
                         ) {
                             current
                         } else {
-                            // A layout change must reflow from the location actually on screen. The
-                            // last explicit restore target can be stale after natural page turns, so
-                            // capture the presented anchor once as this reflow's target.
                             val anchor = current.paginationReflowAnchor(settings)
                             current.copy(
                                 settings = settings,
                                 settingsLoaded = true,
                                 fontPath = path,
                                 availableFonts = available,
+                                layoutVersion = if (layoutChanged) {
+                                    current.layoutVersion + 1
+                                } else {
+                                    current.layoutVersion
+                                },
                                 restorePosition = anchor?.paragraphIndex ?: current.restorePosition,
                                 restoreCharOffset = anchor?.charOffset ?: current.restoreCharOffset,
                                 settledPageIndex = if (anchor != null) null else current.settledPageIndex,
@@ -1074,10 +1071,12 @@ class ReaderViewModel @AssistedInject constructor(
         charOffset: Int,
         chapterComplete: Boolean,
         visibleEndPosition: Int,
+        layoutVersion: Int = _uiState.value.layoutVersion,
     ) {
-        // A settle from the layout that is being replaced is stale: it reflects the old pagination
-        // and would overwrite the reflow anchor with a location the new layout never showed.
-        if (awaitingReflow) return
+        // A settle from a superseded layout reflects pagination the reader no longer shows and
+        // would overwrite the reflow anchor. Callbacks carry the version they rendered with, so
+        // the new layout's first settle is accepted even before any render callback arrives.
+        if (layoutVersion < minimumAcceptedLayoutVersion) return
         session.onPresented(_uiState.value.chapterIndex, position, charOffset)
         savePosition(position, charOffset, chapterComplete, visibleEndPosition)
     }
@@ -1169,35 +1168,21 @@ class ReaderViewModel @AssistedInject constructor(
 
     fun updateSettings(transform: (ReaderSettings) -> ReaderSettings) {
         val current = _uiState.value.settings
-        // Record the scope at submit time. The mode toggle is applied synchronously, so an edit
-        // made while per-book settings are on targets this book even if the user turns the mode
-        // off before the debounced write runs. The write must not be reinterpreted later.
-        val local = bookSettingsEnabled
         settingRequests.changes(current, transform).forEach { (field, patch) ->
             settingWrites.submit("reader:$field") {
-                if (local && field in BOOK_SETTING_KEYS) {
-                    bookSettings.updateField(bookUuid, field, patch)
-                } else {
-                    settingsRepository.update { applySettingsPatch(it, patch) }
-                }
+                settingsRepository.update { applySettingsPatch(it, patch) }
             }
         }
     }
 
-    fun setBookSettingsEnabled(enabled: Boolean) {
-        // Apply in memory before the persisted write so an immediate edit sees the new mode.
-        bookSettingsEnabled = enabled
-        _uiState.update { it.copy(bookSettingsEnabled = enabled) }
+    /** One atomic write so a full reset never triggers several reflows in a row. */
+    fun resetReadingConfiguration() {
         settingRequests.clear()
-        settingWrites.submit("bookProfile") { bookSettings.setEnabled(bookUuid, enabled) }
+        settingWrites.submit("resetReading") {
+            settingsRepository.update { current -> current.resetReaderOwnedFields() }
+        }
     }
 
-    fun importFont(uri: String) = operations.submit { fonts.importFont(uri).getOrThrow() }
-
-    fun deleteFont(font: UserFont) = operations.confirmDelete(font.name) {
-        bookSettings.clearFontReferences(font.uuid)
-        fonts.deleteFont(font.uuid)
-    }
 
     fun addBookmark() {
         val state = _uiState.value
@@ -1321,8 +1306,6 @@ class ReaderViewModel @AssistedInject constructor(
     fun chapterRendered(navigationVersion: Int) {
         val rendered = _uiState.value
         if (rendered.navigationVersion != navigationVersion || rendered.chapter == null) return
-        // The reflowed (or newly navigated) layout is on screen; settles are authoritative again.
-        awaitingReflow = false
         // The page is on screen now, so this is the session's authoritative presented location.
         val presented = _positionState.value
         session.onPresented(rendered.chapterIndex, presented.paragraphIndex, presented.charOffset)

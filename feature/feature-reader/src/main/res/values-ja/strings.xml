@@ -24,9 +24,6 @@
     <string name="reader_add_page_bookmark">このページにしおりを追加</string>
     <string name="reader_remove_page_bookmark">このページのしおりを削除</string>
     <string name="reader_search_book">全文検索</string>
-    <string name="reader_display_and_brightness">表示と明るさ</string>
-    <string name="reader_layout_and_page_turn">組版とページめくり</string>
-    <string name="reader_controls">読書コントロール</string>
     <string name="reader_exit">終了</string>
     <string name="reader_directory">目次</string>
     <string name="reader_previous_chapter">前の章</string>
@@ -96,11 +93,9 @@
     <string name="reader_no_search_result">一致する内容が見つかりません</string>
     <string name="reader_search_query_changed">検索し直すと結果が更新されます</string>
     <string name="reader_display_and_colors">表示と配色</string>
-    <string name="reader_display_mode">表示モード</string>
     <string name="reader_screen_brightness">画面の明るさ</string>
     <string name="reader_layout_and_turning">組版とページめくり</string>
     <string name="reader_page_turn_controls">ページめくりの操作</string>
-    <string name="reader_reading_information">読書情報</string>
     <string name="reader_book_information">書籍情報</string>
     <string name="reader_author">著者</string>
     <string name="reader_description">紹介</string>

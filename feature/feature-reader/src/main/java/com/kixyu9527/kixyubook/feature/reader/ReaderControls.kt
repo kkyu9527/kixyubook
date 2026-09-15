@@ -30,7 +30,6 @@ import com.kixyu9527.kixyubook.core.reader.engine.*
 @Composable
 internal fun ReaderControls(
     visible: Boolean,
-    menuVisible: Boolean,
     toolsMenuVisible: Boolean,
     controlsBackProgress: () -> Float,
     popupBackProgress: () -> Float,
@@ -54,17 +53,7 @@ internal fun ReaderControls(
     canNavigateForward: Boolean,
     onNavigateBack: () -> Unit,
     onNavigateForward: () -> Unit,
-    onSheet: (ReaderSheet) -> Unit,
 ) {
-    val popupVisible = menuVisible || toolsMenuVisible
-    var retainedToolsPopup by remember { mutableStateOf(false) }
-    LaunchedEffect(menuVisible, toolsMenuVisible) {
-        when {
-            toolsMenuVisible -> retainedToolsPopup = true
-            menuVisible -> retainedToolsPopup = false
-        }
-    }
-    val showToolsPopup = if (popupVisible) toolsMenuVisible else retainedToolsPopup
     val controlsBackModifier = Modifier.kixyuPredictivePopupTransform(controlsBackProgress)
     ReaderControlVisibility(
         visible = visible,
@@ -125,9 +114,8 @@ internal fun ReaderControls(
             } else {
                 backgroundColor.highContrastContentColor()
             }
-            val popupItems = if (showToolsPopup) {
-                listOf(
-                    KixyuPopupMenuItem(
+            val popupItems = listOf(
+                KixyuPopupMenuItem(
                         label = stringResource(
                             if (currentPageBookmarked) R.string.reader_remove_page_bookmark
                             else R.string.reader_add_page_bookmark,
@@ -152,22 +140,9 @@ internal fun ReaderControls(
                         enabled = canNavigateForward,
                         onClick = onNavigateForward,
                     ),
-                )
-            } else {
-                listOf(
-                    KixyuPopupMenuItem(stringResource(R.string.reader_display_and_brightness), KixyuSymbols.Palette) {
-                        onSheet(ReaderSheet.THEME)
-                    },
-                    KixyuPopupMenuItem(stringResource(R.string.reader_layout_and_page_turn), KixyuSymbols.ViewCarousel) {
-                        onSheet(ReaderSheet.LAYOUT)
-                    },
-                    KixyuPopupMenuItem(stringResource(R.string.reader_controls), KixyuSymbols.Tune) {
-                        onSheet(ReaderSheet.INFORMATION)
-                    },
-                )
-            }
+            )
             AnimatedVisibility(
-                visible = popupVisible,
+                visible = toolsMenuVisible,
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(bottom = KixyuSize.readerMenuBottomOffset + KixyuSize.readerControlInset),
                 enter = fadeIn() + slideInVertically { it / 5 },

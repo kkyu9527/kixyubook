@@ -973,6 +973,10 @@ fun KixyuActionDialog(
     alternativeEnabled: Boolean = true,
     dismissLabel: String? = stringResource(R.string.kixyu_cancel),
     dismissRequiresConfirmation: Boolean = false,
+    /** Dialogs with dense lists can opt into a brighter surface and full-contrast content. */
+    containerColor: Color? = null,
+    contentColor: Color? = null,
+    backdropEffect: KixyuPopupBackdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
     content: @Composable () -> Unit,
 ) {
     if (!show) return
@@ -998,7 +1002,9 @@ fun KixyuActionDialog(
                     .heightIn(max = surfaceHeight)
                     .kixyuPredictivePopupTransform { predictiveBackState.progress },
                 shadowElevation = KixyuSpacing.small,
-                backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
+                containerColor = containerColor,
+                contentColor = contentColor,
+                backdropEffect = backdropEffect,
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),

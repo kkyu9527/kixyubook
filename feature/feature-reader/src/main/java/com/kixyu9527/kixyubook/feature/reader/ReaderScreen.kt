@@ -66,9 +66,8 @@ internal fun ReaderScreen(
     settlePage: (ReaderPageDestination) -> Unit,
     jumpChapter: (Int) -> Unit,
     jumpPosition: (ReaderLocationRequest) -> Unit,
-    savePosition: (Int, Int, Boolean, Int) -> Unit,
+    savePosition: ReaderPositionSettler,
     updateSettings: ((ReaderSettings) -> ReaderSettings) -> Unit,
-    setBookSettingsEnabled: (Boolean) -> Unit,
     addBookmark: () -> Unit,
     deleteBookmark: (String) -> Unit,
     search: (String, ReaderSearchScope) -> Unit,
@@ -84,8 +83,6 @@ internal fun ReaderScreen(
     chapterRendered: (Int) -> Unit,
     setPageInteractionActive: (Boolean) -> Unit,
     prioritizeAdjacentChapter: (Int, Int) -> Unit,
-    addFont: () -> Unit,
-    deleteFont: (UserFont) -> Unit,
     saveCorrection: (Int, Int, String, String) -> Unit,
     deleteCorrection: (String) -> Unit,
     saveHighlight: (Int, Int, String, Int, Int) -> Unit,
@@ -96,25 +93,32 @@ internal fun ReaderScreen(
     openDocumentLink: (String) -> Unit,
     closeFootnote: () -> Unit,
     onManageCorrections: () -> Unit,
+    onManageFonts: () -> Unit,
+    onResetReadingConfiguration: () -> Unit,
 ) {
     val readerPaneTitle = stringResource(R.string.reader_content_pane)
     var controls by remember { mutableStateOf(false) }
-    var menu by remember { mutableStateOf(false) }
     var toolsMenu by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     var bookInfoVisible by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
-    val returnFromSettingsSheet: () -> Unit = {
-        sheet = null
-        controls = true
-        menu = true
-        toolsMenu = false
-    }
+    val settingsNav = remember { com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsNavState() }
     val predictiveBackState = rememberReaderPredictiveBackState()
     val controlsBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.CONTROLS) }
     val popupBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.POPUP_MENU) }
     val searchBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SEARCH) }
-    val sheetBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET) }
+    // The sheet only fades when it is actually closing; popping an internal level previews the
+    // parent instead, so the surface stays fully opaque.
+    val sheetBackProgress = {
+        if (settingsNav.openGroup == null) {
+            predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET)
+        } else {
+            0f
+        }
+    }
+    val settingsLevelBackProgress = {
+        predictiveBackState.progressFor(ReaderPredictiveBackTarget.SETTINGS_LEVEL)
+    }
     val bookInfoBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.BOOK_INFO) }
     val volumeTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val chapterTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
@@ -156,11 +160,11 @@ internal fun ReaderScreen(
     val readerBackdrop = rememberKixyuNavigationBackdrop(palette.background)
     val chromeState = ReaderChromeState(
         controlsVisible = controls,
-        menuVisible = menu,
         toolsMenuVisible = toolsMenu,
         searchVisible = searchVisible,
         bookInfoVisible = bookInfoVisible,
         sheet = sheet,
+        settingsLevelOpen = settingsNav.openGroup != null,
         directoryPanelComposed = directoryPanelComposed,
         hasSearchResults = state.searchResults.isNotEmpty(),
     )
@@ -172,7 +176,6 @@ internal fun ReaderScreen(
     )
     val overlayMotionKey = listOf(
         controls,
-        menu,
         toolsMenu,
         searchVisible,
         bookInfoVisible,
@@ -201,7 +204,7 @@ internal fun ReaderScreen(
     DisposableEffect(Unit) {
         onDispose { setPageInteractionActive(false) }
     }
-    LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
+    LaunchedEffect(sheet) { sheet?.let { retainedSheet = it }; if (sheet != ReaderSheet.SETTINGS) settingsNav.reset() }
     LaunchedEffect(state.loadStage) {
         showSlowFirstPageStatus = false
         if (state.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE) {
@@ -210,7 +213,7 @@ internal fun ReaderScreen(
         }
     }
     LaunchedEffect(sheet) {
-        if (sheet != ReaderSheet.THEME) brightnessPreview = null
+        if (sheet != ReaderSheet.SETTINGS) brightnessPreview = null
     }
     val systemBarHost = LocalKixyuSystemBarHost.current
     val systemBarOwner = remember { Any() }
@@ -279,21 +282,16 @@ internal fun ReaderScreen(
         onBack = { target ->
             when (target) {
                 ReaderPredictiveBackTarget.BOOK_INFO -> bookInfoVisible = false
-                ReaderPredictiveBackTarget.SHEET -> {
-                    if (sheet.returnsToSettingsMenu()) {
-                        returnFromSettingsSheet()
-                    } else {
-                        sheet = null
-                    }
-                }
+                ReaderPredictiveBackTarget.SETTINGS_LEVEL -> settingsNav.back()
+            ReaderPredictiveBackTarget.SHEET -> {
+                sheet = null
+                settingsNav.reset()
+            }
                 ReaderPredictiveBackTarget.SEARCH -> {
                     searchVisible = false
                     clearSearch()
                 }
-                ReaderPredictiveBackTarget.POPUP_MENU -> {
-                    toolsMenu = false
-                    menu = false
-                }
+                ReaderPredictiveBackTarget.POPUP_MENU -> toolsMenu = false
                 ReaderPredictiveBackTarget.CONTROLS -> controls = false
                 ReaderPredictiveBackTarget.SEARCH_RESULTS -> clearSearch()
             }
@@ -327,7 +325,6 @@ internal fun ReaderScreen(
                     textInteraction.target?.let { target ->
                         correctionEditorTarget = target
                         controls = false
-                        menu = false
                         toolsMenu = false
                     }
                 },
@@ -351,7 +348,6 @@ internal fun ReaderScreen(
                     textInteraction.target?.let { target ->
                         noteEditorTarget = target
                         controls = false
-                        menu = false
                         toolsMenu = false
                     }
                 },
@@ -372,10 +368,10 @@ internal fun ReaderScreen(
                     val handled = when {
                         isSearchShortcut -> true
                         event.key == Key.Escape &&
-                            (searchVisible || sheet != null || bookInfoVisible || controls || menu || toolsMenu) -> true
+                            (searchVisible || sheet != null || bookInfoVisible || controls || toolsMenu) -> true
                         isVolumeKey -> state.settings.volumeKeyPageTurn
                         isPageShortcut -> !searchVisible && sheet == null && !bookInfoVisible &&
-                            !controls && !menu && !toolsMenu
+                            !controls && !toolsMenu
                         else -> false
                     }
                     if (!handled) return@onPreviewKeyEvent false
@@ -385,7 +381,6 @@ internal fun ReaderScreen(
                         isSearchShortcut -> {
                             searchVisible = true
                             controls = false
-                            menu = false
                             toolsMenu = false
                         }
                         event.key == Key.Escape -> {
@@ -397,13 +392,11 @@ internal fun ReaderScreen(
                                 bookInfoVisible -> bookInfoVisible = false
                                 sheet != null -> sheet = null
                                 toolsMenu -> toolsMenu = false
-                                menu -> menu = false
                                 controls -> controls = false
                             }
                         }
                         else -> {
                             controls = false
-                            menu = false
                             toolsMenu = false
                             val direction = when (event.key) {
                                 Key.VolumeUp, Key.DirectionLeft, Key.PageUp -> -1
@@ -444,8 +437,8 @@ internal fun ReaderScreen(
                         savePosition = savePosition,
                         moveChapterFromPage = moveChapterFromPage,
                         settlePage = settlePage,
-                        middleTap = { controls = !controls; if (!controls) { menu = false; toolsMenu = false } },
-                        dismissControls = { controls = false; menu = false; toolsMenu = false },
+                        middleTap = { controls = !controls; if (!controls) { toolsMenu = false } },
+                        dismissControls = { controls = false; toolsMenu = false },
                         volumeTurns = volumeTurns,
                         chapterTurns = chapterTurns,
                         chapterRendered = chapterRendered,
@@ -475,7 +468,6 @@ internal fun ReaderScreen(
             }
             ReaderControls(
                 visible = controls,
-                menuVisible = menu,
                 toolsMenuVisible = toolsMenu,
                 controlsBackProgress = controlsBackProgress,
                 popupBackProgress = popupBackProgress,
@@ -497,13 +489,12 @@ internal fun ReaderScreen(
                 onExit = exitReader,
                 onDirectory = {
                     controls = false
-                    menu = false
                     toolsMenu = false
                     sheet = ReaderSheet.DIRECTORY
                 },
                 onBookInfo = { bookInfoVisible = true },
-                onSettings = { menu = !menu; toolsMenu = false },
-                onTools = { toolsMenu = !toolsMenu; menu = false },
+                onSettings = { toolsMenu = false; sheet = ReaderSheet.SETTINGS },
+                onTools = { toolsMenu = !toolsMenu },
                 onToggleBookmark = {
                     currentPageBookmark?.let { deleteBookmark(it.uuid) } ?: addBookmark()
                     toolsMenu = false
@@ -511,7 +502,6 @@ internal fun ReaderScreen(
                 onSearch = {
                     searchVisible = true
                     controls = false
-                    menu = false
                     toolsMenu = false
                 },
                 canNavigateBack = state.canNavigateBack,
@@ -523,12 +513,6 @@ internal fun ReaderScreen(
                 onNavigateForward = {
                     navigateHistoryForward()
                     toolsMenu = false
-                },
-                onSheet = {
-                    controls = false
-                    menu = false
-                    toolsMenu = false
-                    sheet = it
                 },
             )
             }
@@ -605,7 +589,6 @@ internal fun ReaderScreen(
             onSelect = { index ->
                 selectSearchResult(index)
                 controls = false
-                menu = false
                 toolsMenu = false
             },
         )
@@ -614,13 +597,7 @@ internal fun ReaderScreen(
         ReaderFloatingSheet(
             show = sheet != null && !(directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY),
             progress = sheetBackProgress,
-            onDismissRequest = {
-                if (sheet.returnsToSettingsMenu()) {
-                    returnFromSettingsSheet()
-                } else {
-                    sheet = null
-                }
-            },
+            onDismissRequest = { sheet = null },
             backdrop = readerBackdrop,
             maxContentWidth = if (activeSheet == ReaderSheet.DIRECTORY) {
                 com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize.sheetContentMaxWidth
@@ -634,28 +611,24 @@ internal fun ReaderScreen(
                     selectNavigation = { target ->
                         sheet = null
                         controls = false
-                        menu = false
                         toolsMenu = false
                         openDocumentLink(target)
                     },
                     selectChapter = { index ->
                         sheet = null
                         controls = false
-                        menu = false
                         toolsMenu = false
                         jumpChapter(index)
                     },
                     selectBookmark = { bookmark ->
                         sheet = null
                         controls = false
-                        menu = false
                         toolsMenu = false
                         jumpPosition(sourceLocation(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
                     },
                     selectAnnotation = { annotation ->
                         sheet = null
                         controls = false
-                        menu = false
                         toolsMenu = false
                                 jumpPosition(sourceLocation(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
                     },
@@ -663,24 +636,18 @@ internal fun ReaderScreen(
                     updateAnnotationNote = updateAnnotationNote,
                     deleteAnnotation = deleteAnnotation,
                 )
-                ReaderSheet.THEME -> ThemeSheet(
-                    state.settings,
-                    updateSettings,
+                ReaderSheet.SETTINGS -> ReaderSettingsSheet(
+                    state = state,
+                    update = updateSettings,
+                    nav = settingsNav,
+                    levelBackProgress = settingsLevelBackProgress,
+                    onManageFonts = onManageFonts,
+                    onResetReadingConfiguration = onResetReadingConfiguration,
                     previewBrightness = { brightnessPreview = it },
-                    onBack = returnFromSettingsSheet,
-                )
-                ReaderSheet.LAYOUT -> LayoutSheet(
-                    state,
-                    updateSettings,
-                    setBookSettingsEnabled,
-                    addFont,
-                    deleteFont,
-                    onBack = returnFromSettingsSheet,
-                )
-                ReaderSheet.INFORMATION -> ReaderInformationSheet(
-                    state.settings,
-                    updateSettings,
-                    onBack = returnFromSettingsSheet,
+                    onDismiss = {
+                        sheet = null
+                        settingsNav.reset()
+                    },
                 )
                 null -> Unit
             }
@@ -731,28 +698,24 @@ internal fun ReaderScreen(
                             selectNavigation = { target ->
                                 sheet = null
                                 controls = false
-                                menu = false
                                 toolsMenu = false
                                 openDocumentLink(target)
                             },
                             selectChapter = { index ->
                                 sheet = null
                                 controls = false
-                                menu = false
                                 toolsMenu = false
                                 jumpChapter(index)
                             },
                             selectBookmark = { bookmark ->
                                 sheet = null
                                 controls = false
-                                menu = false
                                 toolsMenu = false
                                 jumpPosition(sourceLocation(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
                             },
                             selectAnnotation = { annotation ->
                                 sheet = null
                                 controls = false
-                                menu = false
                                 toolsMenu = false
                         jumpPosition(sourceLocation(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
                             },

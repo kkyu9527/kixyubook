@@ -24,9 +24,6 @@
     <string name="reader_add_page_bookmark">新增目前頁面書籤</string>
     <string name="reader_remove_page_bookmark">移除目前頁面書籤</string>
     <string name="reader_search_book">全文搜尋</string>
-    <string name="reader_display_and_brightness">顯示與亮度</string>
-    <string name="reader_layout_and_page_turn">排版與翻頁</string>
-    <string name="reader_controls">閱讀控制</string>
     <string name="reader_exit">退出</string>
     <string name="reader_directory">目錄</string>
     <string name="reader_previous_chapter">上一章</string>
@@ -96,11 +93,9 @@
     <string name="reader_no_search_result">沒有找到符合內容</string>
     <string name="reader_search_query_changed">修改後請按搜尋以更新結果</string>
     <string name="reader_display_and_colors">顯示與配色</string>
-    <string name="reader_display_mode">顯示模式</string>
     <string name="reader_screen_brightness">螢幕亮度</string>
     <string name="reader_layout_and_turning">排版與翻頁</string>
     <string name="reader_page_turn_controls">翻頁控制</string>
-    <string name="reader_reading_information">閱讀資訊</string>
     <string name="reader_book_information">書籍資訊</string>
     <string name="reader_author">作者</string>
     <string name="reader_description">簡介</string>

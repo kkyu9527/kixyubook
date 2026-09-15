@@ -2,19 +2,18 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -48,80 +47,14 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.designsystem.R
 
-@Composable
-fun KixyuReaderThemeControls(
-    settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
-    modeTitle: String? = null,
-) {
-    var editingTheme by remember { mutableStateOf<ReaderTheme?>(null) }
-    LaunchedEffect(settings.customThemeEnabled) {
-        if (!settings.customThemeEnabled) editingTheme = null
-    }
-    KixyuThemeModeControl(settings, onSettingsChange, modeTitle)
-    KixyuDivider()
-    KixyuSettingsRow(
-        title = stringResource(R.string.kixyu_custom_colors),
-        onClick = {
-            val enabled = !settings.customThemeEnabled
-            if (!enabled) editingTheme = null
-            onSettingsChange(settings.copy(customThemeEnabled = enabled))
-        },
-        trailing = {
-            KixyuSwitch(
-                checked = settings.customThemeEnabled,
-                onCheckedChange = { enabled ->
-                    if (!enabled) editingTheme = null
-                    onSettingsChange(settings.copy(customThemeEnabled = enabled))
-                },
-            )
-        },
-    )
-    if (settings.customThemeEnabled) {
-        listOf(ReaderTheme.DAY, ReaderTheme.NIGHT).forEach { theme ->
-            KixyuDivider()
-            val expanded = editingTheme == theme
-            KixyuSettingsRow(
-                title = stringResource(R.string.kixyu_theme_colors, theme.displayName()),
-                onClick = { editingTheme = theme.takeUnless { expanded } },
-                trailing = {
-                    Text(
-                        text = stringResource(if (expanded) R.string.kixyu_collapse else R.string.kixyu_edit),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                    )
-                },
-            )
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically(tween(KixyuMotion.ReaderPopupEnterMillis)) +
-                    fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis)),
-                exit = shrinkVertically(tween(KixyuMotion.ReaderPopupExitMillis)) +
-                    fadeOut(tween(KixyuMotion.ReaderPopupExitMillis)),
-            ) {
-                val editingColors = if (theme == ReaderTheme.NIGHT) settings.customNightTheme else settings.customDayTheme
-                CustomThemeEditor(editingColors) { custom ->
-                    onSettingsChange(
-                        if (theme == ReaderTheme.NIGHT) {
-                            settings.copy(customNightTheme = custom)
-                        } else {
-                            settings.copy(customDayTheme = custom)
-                        },
-                    )
-                }
-            }
-        }
-    }
-    KixyuDivider()
-    KixyuGlassEffectControls(settings, onSettingsChange)
-}
+/** Field-level intent: applied to the latest pending settings, never to a stale snapshot. */
+typealias ReaderSettingsUpdate = ((ReaderSettings) -> ReaderSettings) -> Unit
 
 /** Global light/dark mode selector shared by app appearance and the reader shortcut. */
 @Composable
 fun KixyuThemeModeControl(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
     title: String? = null,
 ) {
     KixyuDropdownRow(
@@ -129,14 +62,14 @@ fun KixyuThemeModeControl(
         selected = settings.theme,
         options = listOf(ReaderTheme.SYSTEM, ReaderTheme.DAY, ReaderTheme.NIGHT),
         optionLabel = { it.displayName() },
-        onSelected = { onSettingsChange(settings.copy(theme = it)) },
+        onSelected = { onSettingsChange { current -> current.copy(theme = it) } },
     )
 }
 
 @Composable
 fun KixyuAppColorControl(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
 ) {
     KixyuDropdownRow(
         title = stringResource(R.string.kixyu_theme_color),
@@ -145,14 +78,14 @@ fun KixyuAppColorControl(
             settings.appUiStyle == AppUiStyle.MATERIAL || it != AppColorTheme.WHITE
         },
         optionLabel = { it.displayName() },
-        onSelected = { onSettingsChange(settings.copy(appColorTheme = it)) },
+        onSelected = { onSettingsChange { current -> current.copy(appColorTheme = it) } },
     )
 }
 
 @Composable
 fun KixyuAppUiStyleControl(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
 ) {
     KixyuDropdownRow(
         title = stringResource(R.string.kixyu_ui_style),
@@ -160,14 +93,14 @@ fun KixyuAppUiStyleControl(
         options = AppUiStyle.entries,
         optionLabel = { it.displayName() },
         onSelected = { style ->
-            onSettingsChange(
-                settings.copy(
+            onSettingsChange { current ->
+                current.copy(
                     appUiStyle = style,
                     appColorTheme = settings.appColorTheme.takeUnless {
                         style == AppUiStyle.MIUIX && it == AppColorTheme.WHITE
                     } ?: AppColorTheme.DEFAULT,
-                ),
-            )
+                )
+            }
         },
     )
 }
@@ -176,7 +109,7 @@ fun KixyuAppUiStyleControl(
 @Composable
 fun KixyuGlassEffectControls(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
 ) {
     var previewLevel by remember { mutableFloatStateOf(settings.glassFrostLevel) }
     var dragging by remember { mutableStateOf(false) }
@@ -185,15 +118,16 @@ fun KixyuGlassEffectControls(
     }
     KixyuSettingsRow(
         title = stringResource(R.string.kixyu_glass_effect),
-        supportingText = stringResource(R.string.kixyu_glass_unsupported),
+        supportingText = stringResource(R.string.kixyu_glass_unsupported) + " · " +
+            stringResource(R.string.kixyu_glass_app_wide),
         onClick = {
-            onSettingsChange(settings.copy(glassEffectEnabled = !settings.glassEffectEnabled))
+            onSettingsChange { current -> current.copy(glassEffectEnabled = !settings.glassEffectEnabled) }
         },
     ) {
         KixyuSwitch(
             checked = settings.glassEffectEnabled,
             onCheckedChange = { enabled ->
-                onSettingsChange(settings.copy(glassEffectEnabled = enabled))
+                onSettingsChange { current -> current.copy(glassEffectEnabled = enabled) }
             },
         )
     }
@@ -210,7 +144,7 @@ fun KixyuGlassEffectControls(
             dragging = false
             val snappedLevel = (previewLevel / 5f).roundToInt() * 5f
             previewLevel = snappedLevel.coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
-            onSettingsChange(settings.copy(glassFrostLevel = previewLevel))
+            onSettingsChange { current -> current.copy(glassFrostLevel = previewLevel) }
         },
         valueRange = MIN_GLASS_FROST_LEVEL..MAX_GLASS_FROST_LEVEL,
         steps = 19,
@@ -218,186 +152,121 @@ fun KixyuGlassEffectControls(
     )
 }
 
-private data class KixyuFontOption(
-    val uuid: String?,
-    val label: String,
-    val addFont: Boolean = false,
-)
-
-/** Shared font picker used by both global settings and the in-reader sheet. */
+/** Both surfaces render one font entry that opens the shared font management page. */
 @Composable
 fun KixyuFontControls(
     fonts: List<UserFont>,
     selectedFontUuid: String?,
-    onSelectFont: (String?) -> Unit,
-    onAddFont: () -> Unit,
-    onDeleteFont: (UserFont) -> Unit,
-    onManageFonts: (() -> Unit)? = null,
+    onManageFonts: () -> Unit,
 ) {
-    val addFontLabel = stringResource(R.string.kixyu_add_font)
     val systemDefaultLabel = stringResource(R.string.kixyu_system_default)
-    val options = remember(fonts, addFontLabel, systemDefaultLabel) {
-        buildList {
-            add(KixyuFontOption(uuid = null, label = addFontLabel, addFont = true))
-            add(KixyuFontOption(uuid = null, label = systemDefaultLabel))
-            fonts.forEach { add(KixyuFontOption(uuid = it.uuid, label = it.name)) }
-        }
-    }
-    val selected = options.firstOrNull { !it.addFont && it.uuid == selectedFontUuid } ?: options[1]
     val selectedUserFont = fonts.firstOrNull { it.uuid == selectedFontUuid }
-    if (onManageFonts != null) {
-        KixyuSettingsRow(
-            title = stringResource(R.string.kixyu_reading_font),
-            supportingText = selectedUserFont?.name ?: systemDefaultLabel,
-            icon = KixyuSymbols.FontDownload,
-            onClick = onManageFonts,
-        ) {
-            Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
-        }
-        return
-    }
-    KixyuDropdownRow(
+    KixyuSettingsRow(
         title = stringResource(R.string.kixyu_reading_font),
-        selected = selected,
-        options = options,
-        optionLabel = { it.label },
+        supportingText = selectedUserFont?.name ?: systemDefaultLabel,
         icon = KixyuSymbols.FontDownload,
-        onSelected = { option ->
-            if (option.addFont) onAddFont() else onSelectFont(option.uuid)
-        },
-    )
-    selectedUserFont?.let { font ->
-        KixyuDivider()
-        KixyuSettingsRow(
-            title = stringResource(R.string.kixyu_delete_current_font),
-            supportingText = font.name,
-            icon = KixyuSymbols.DeleteOutline,
-            onClick = { onDeleteFont(font) },
-        ) {
-            Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
-        }
+        onClick = onManageFonts,
+    ) {
+        Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon))
     }
 }
 
 @Composable
-fun KixyuPageModeControl(
+fun KixyuReaderModeControls(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
 ) {
-    val selected = when {
-        settings.pageMode == PageMode.SCROLL -> ReaderReadingMode.VERTICAL_SCROLL
-        settings.pageTurnAnimation == PageTurnAnimation.COVER -> ReaderReadingMode.COVER
-        else -> ReaderReadingMode.HORIZONTAL_SLIDE
-    }
     KixyuDropdownRow(
         title = stringResource(R.string.kixyu_reading_mode),
-        selected = selected,
-        options = ReaderReadingMode.entries,
+        selected = settings.pageMode,
+        options = PageMode.entries,
         optionLabel = { it.displayName() },
-        onSelected = { mode ->
-            onSettingsChange(
-                when (mode) {
-                    ReaderReadingMode.VERTICAL_SCROLL -> settings.copy(pageMode = PageMode.SCROLL)
-                    ReaderReadingMode.HORIZONTAL_SLIDE -> settings.copy(
-                        pageMode = PageMode.PAGED,
-                        pageTurnAnimation = PageTurnAnimation.HORIZONTAL_SLIDE,
-                    )
-                    ReaderReadingMode.COVER -> settings.copy(
-                        pageMode = PageMode.PAGED,
-                        pageTurnAnimation = PageTurnAnimation.COVER,
-                    )
-                },
-            )
-        },
+        onSelected = { mode -> onSettingsChange { current -> current.copy(pageMode = mode) } },
     )
+    KixyuDivider()
+    if (settings.pageMode == PageMode.SCROLL) {
+        // The previous effect is kept in the settings; it applies again when paged reading returns.
+        KixyuSettingsRow(
+            title = stringResource(R.string.kixyu_page_turn_animation),
+            supportingText = stringResource(R.string.kixyu_page_turn_paged_only),
+        )
+    } else {
+        KixyuDropdownRow(
+            title = stringResource(R.string.kixyu_page_turn_animation),
+            selected = settings.pageTurnAnimation,
+            options = PageTurnAnimation.entries,
+            optionLabel = { it.displayName() },
+            onSelected = { animation ->
+                onSettingsChange { current -> current.copy(pageTurnAnimation = animation) }
+            },
+        )
+    }
 }
 
 @Composable
-fun KixyuReaderLayoutControls(
+fun PageTurnAnimation.displayName(): String = stringResource(
+    when (this) {
+        PageTurnAnimation.HORIZONTAL_SLIDE -> R.string.kixyu_mode_slide
+        PageTurnAnimation.COVER -> R.string.kixyu_mode_cover
+    },
+)
+
+@Composable
+fun KixyuReaderTypographyControls(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
 ) {
-    KixyuPageModeControl(settings, onSettingsChange)
-    KixyuDivider()
     ReaderStepper(
         title = stringResource(R.string.kixyu_font_size),
         value = settings.fontSize,
         step = .5f,
         range = 15f..30f,
         suffix = "sp",
-    ) { onSettingsChange(settings.copy(fontSize = it)) }
+    ) { onSettingsChange { current -> current.copy(fontSize = it) } }
     KixyuDivider()
     ReaderStepper(stringResource(R.string.kixyu_line_spacing), settings.lineHeight, .1f, 1.2f..2.2f) {
-        onSettingsChange(settings.copy(lineHeight = it))
+        onSettingsChange { current -> current.copy(lineHeight = it) }
     }
     KixyuDivider()
     ReaderStepper(stringResource(R.string.kixyu_letter_spacing), settings.letterSpacing, .1f, 0f..0.2f, "em") {
-        onSettingsChange(settings.copy(letterSpacing = it))
+        onSettingsChange { current -> current.copy(letterSpacing = it) }
     }
     KixyuDivider()
     ReaderStepper(stringResource(R.string.kixyu_page_margin), settings.margin, .1f, 12f..52f, "dp") {
-        onSettingsChange(settings.copy(margin = it))
+        onSettingsChange { current -> current.copy(margin = it) }
     }
 }
 
 @Composable
 fun KixyuReaderBehaviorControls(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
 ) {
     ReaderSwitch(
         title = stringResource(R.string.kixyu_volume_page_turn),
         supportingText = stringResource(R.string.kixyu_volume_page_turn_hint),
         checked = settings.volumeKeyPageTurn,
-    ) { onSettingsChange(settings.copy(volumeKeyPageTurn = it)) }
+    ) { onSettingsChange { current -> current.copy(volumeKeyPageTurn = it) } }
 }
 
+/** Screen-on stays in the theme/screen group; brightness itself is level-1 only. */
 @Composable
-fun KixyuReaderInformationControls(
+fun KixyuReaderKeepScreenOnControl(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
 ) {
     ReaderSwitch(
-        title = stringResource(R.string.kixyu_show_status_bar),
-        supportingText = stringResource(R.string.kixyu_show_status_bar_hint),
-        checked = settings.showStatusBar,
-    ) { onSettingsChange(settings.copy(showStatusBar = it)) }
-    KixyuDivider()
-    ReaderSwitch(
-        title = stringResource(R.string.kixyu_hide_navigation_bar),
-        supportingText = stringResource(R.string.kixyu_hide_navigation_bar_hint),
-        checked = settings.hideNavigationBar,
-    ) { onSettingsChange(settings.copy(hideNavigationBar = it)) }
-    KixyuDivider()
-    ReaderSwitch(
-        title = stringResource(R.string.kixyu_show_chapter_title),
-        supportingText = stringResource(R.string.kixyu_show_chapter_title_hint),
-        checked = settings.showChapterTitle,
-    ) { onSettingsChange(settings.copy(showChapterTitle = it)) }
-    KixyuDivider()
-    ReaderSwitch(
-        title = stringResource(R.string.kixyu_show_page_number),
-        supportingText = stringResource(R.string.kixyu_show_page_number_hint),
-        checked = settings.showPageNumber,
-    ) { onSettingsChange(settings.copy(showPageNumber = it)) }
-    KixyuDivider()
-    ReaderSwitch(
-        title = stringResource(R.string.kixyu_show_time),
-        supportingText = stringResource(R.string.kixyu_show_time_hint),
-        checked = settings.showReadingTime,
-    ) { onSettingsChange(settings.copy(showReadingTime = it)) }
-    KixyuDivider()
-    ReaderSwitch(
-        title = stringResource(R.string.kixyu_show_battery),
-        supportingText = stringResource(R.string.kixyu_show_battery_hint),
-        checked = settings.showBatteryLevel,
-    ) { onSettingsChange(settings.copy(showBatteryLevel = it)) }
+        title = stringResource(R.string.kixyu_keep_screen_on),
+        supportingText = stringResource(R.string.kixyu_keep_screen_on_hint),
+        checked = settings.keepScreenOn,
+    ) { onSettingsChange { current -> current.copy(keepScreenOn = it) } }
 }
 
+/** Brightness + follow-system only; the quick access row and level-2 group share this. */
 @Composable
-fun KixyuReaderBrightnessControls(
+fun KixyuReaderBrightnessSlider(
     settings: ReaderSettings,
-    onSettingsChange: (ReaderSettings) -> Unit,
+    onSettingsChange: ReaderSettingsUpdate,
     onBrightnessPreview: (Float?) -> Unit = {},
 ) {
     var previewBrightness by remember { mutableFloatStateOf(settings.brightness) }
@@ -444,7 +313,7 @@ fun KixyuReaderBrightnessControls(
                     val mode = if (automatic) ReaderBrightnessMode.MANUAL else ReaderBrightnessMode.SYSTEM
                     dragging = false
                     onBrightnessPreview(previewBrightness.takeIf { mode == ReaderBrightnessMode.MANUAL })
-                    onSettingsChange(settings.copy(brightnessMode = mode))
+                    onSettingsChange { current -> current.copy(brightnessMode = mode) }
                 },
                 modifier = Modifier.size(KixyuSize.stepperButton).semantics { selected = automatic },
                 minSize = KixyuSize.stepperButton,
@@ -469,12 +338,12 @@ fun KixyuReaderBrightnessControls(
                 },
                 onValueChangeFinished = {
                     dragging = false
-                    onSettingsChange(
-                        settings.copy(
+                    onSettingsChange { current ->
+                        current.copy(
                             brightnessMode = ReaderBrightnessMode.MANUAL,
                             brightness = previewBrightness,
-                        ),
-                    )
+                        )
+                    }
                 },
                 modifier = Modifier.weight(1f),
                 enabled = !automatic,
@@ -490,16 +359,10 @@ fun KixyuReaderBrightnessControls(
             )
         }
     }
-    KixyuDivider()
-    ReaderSwitch(
-        title = stringResource(R.string.kixyu_keep_screen_on),
-        supportingText = stringResource(R.string.kixyu_keep_screen_on_hint),
-        checked = settings.keepScreenOn,
-    ) { onSettingsChange(settings.copy(keepScreenOn = it)) }
 }
 
 @Composable
-private fun ReaderSwitch(
+internal fun ReaderSwitch(
     title: String,
     supportingText: String,
     checked: Boolean,
@@ -515,7 +378,7 @@ private fun ReaderSwitch(
 }
 
 @Composable
-private fun ReaderStepper(
+internal fun ReaderStepper(
     title: String,
     value: Float,
     step: Float,
@@ -549,7 +412,7 @@ private fun Float.steppedBy(
 }
 
 @Composable
-private fun CustomThemeEditor(
+internal fun CustomThemeEditor(
     theme: CustomReaderTheme,
     onChanged: (CustomReaderTheme) -> Unit,
 ) {
@@ -568,16 +431,42 @@ private fun CustomThemeEditor(
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun KixyuColorEditorRow(label: String, value: String, onValidValue: (String) -> Unit) {
     var draft by remember(value) { mutableStateOf(value) }
+    var paletteOpen by remember { mutableStateOf(false) }
     val valid = draft.matches(HEX_COLOR_PATTERN)
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
     ) {
-        KixyuColorSwatch(if (valid) draft else value)
+        Box {
+            // Palette first: tapping the swatch offers ready-made colours; the hex field below is
+            // the precise fallback for values outside the palette.
+            KixyuColorSwatch(
+                if (valid) draft else value,
+                modifier = Modifier.clickable { paletteOpen = true },
+            )
+            DropdownMenu(expanded = paletteOpen, onDismissRequest = { paletteOpen = false }) {
+                FlowRow(
+                    modifier = Modifier.width(232.dp).padding(KixyuSpacing.small),
+                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
+                ) {
+                    COLOR_PALETTE.forEach { swatch ->
+                        KixyuColorSwatch(
+                            swatch,
+                            modifier = Modifier.clickable {
+                                draft = swatch
+                                onValidValue(swatch)
+                                paletteOpen = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
         OutlinedTextField(
             value = draft,
             onValueChange = { candidate ->
@@ -608,15 +497,6 @@ fun PageMode.displayName(): String = stringResource(when (this) {
     PageMode.PAGED -> R.string.kixyu_mode_paged
 })
 
-private enum class ReaderReadingMode { VERTICAL_SCROLL, HORIZONTAL_SLIDE, COVER }
-
-@Composable
-private fun ReaderReadingMode.displayName(): String = stringResource(when (this) {
-    ReaderReadingMode.VERTICAL_SCROLL -> R.string.kixyu_mode_scroll
-    ReaderReadingMode.HORIZONTAL_SLIDE -> R.string.kixyu_mode_slide
-    ReaderReadingMode.COVER -> R.string.kixyu_mode_cover
-})
-
 @Composable
 fun AppColorTheme.displayName(): String = stringResource(when (this) {
     AppColorTheme.DEFAULT -> R.string.kixyu_palette_default
@@ -632,3 +512,12 @@ fun AppUiStyle.displayName(): String = when (this) {
     AppUiStyle.MATERIAL -> "Material"
     AppUiStyle.MIUIX -> "MIUIX"
 }
+
+
+/** Curated light/dark reading colours; exact values stay available through the hex field. */
+private val COLOR_PALETTE = listOf(
+    "#F7F4EC", "#FFFFFF", "#EFE7D8", "#E3DAC9", "#D9D9D0",
+    "#B8CCBD", "#A3B8A8", "#8FA98F", "#52655A", "#3E4C43",
+    "#292722", "#171713", "#11120F", "#3A3A34", "#4A4A42",
+    "#8B5E83", "#4A6B8A", "#1F618D", "#B03A2E", "#7A6A53",
+)

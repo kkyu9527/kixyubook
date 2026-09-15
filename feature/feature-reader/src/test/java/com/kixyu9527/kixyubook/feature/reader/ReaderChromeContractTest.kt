@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -11,7 +12,6 @@ class ReaderChromeContractTest {
     fun backAlwaysDismissesTheTopmostReaderSurfaceFirst() {
         val everythingVisible = ReaderChromeState(
             controlsVisible = true,
-            menuVisible = true,
             toolsMenuVisible = true,
             searchVisible = true,
             bookInfoVisible = true,
@@ -45,12 +45,26 @@ class ReaderChromeContractTest {
     }
 
     @Test
-    fun allThreeSettingsSheetsReturnToTheReaderSettingsMenu() {
-        assertTrue(ReaderSheet.THEME.returnsToSettingsMenu())
-        assertTrue(ReaderSheet.LAYOUT.returnsToSettingsMenu())
-        assertTrue(ReaderSheet.INFORMATION.returnsToSettingsMenu())
-        assertFalse(ReaderSheet.DIRECTORY.returnsToSettingsMenu())
-        assertFalse(null.returnsToSettingsMenu())
+    fun theCanonicalReaderSettingsOrderIsSharedByEverySurface() {
+        // The settings page and the in-reader panel both iterate this list; changing the order or
+        // dropping a group must fail here first.
+        assertEquals(
+            listOf("FONT_LAYOUT", "PAGE_TURN", "THEME_SCREEN", "INFORMATION"),
+            KixyuReaderSettingsGroup.entries.map { it.name },
+        )
+    }
+
+    @Test
+    fun theSettingsSheetIsTheOnlySettingsSurfaceAndClosesDirectly() {
+        assertEquals(
+            ReaderPredictiveBackTarget.SHEET,
+            ReaderChromeState(sheet = ReaderSheet.SETTINGS).predictiveBackTarget(),
+        )
+        assertEquals(
+            ReaderPredictiveBackTarget.SHEET,
+            ReaderChromeState(sheet = ReaderSheet.DIRECTORY).predictiveBackTarget(),
+        )
+        assertEquals(listOf("DIRECTORY", "SETTINGS"), ReaderSheet.entries.map { it.name })
     }
 
     @Test

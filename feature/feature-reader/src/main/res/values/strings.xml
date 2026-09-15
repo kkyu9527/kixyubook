@@ -24,9 +24,6 @@
     <string name="reader_add_page_bookmark">Bookmark this page</string>
     <string name="reader_remove_page_bookmark">Remove page bookmark</string>
     <string name="reader_search_book">Search in book</string>
-    <string name="reader_display_and_brightness">Display &amp; brightness</string>
-    <string name="reader_layout_and_page_turn">Layout &amp; page turns</string>
-    <string name="reader_controls">Reading controls</string>
     <string name="reader_exit">Exit</string>
     <string name="reader_directory">Contents</string>
     <string name="reader_previous_chapter">Previous chapter</string>
@@ -100,11 +97,9 @@
     <string name="reader_no_search_result">No matches found</string>
     <string name="reader_search_query_changed">Search again to update results</string>
     <string name="reader_display_and_colors">Display &amp; colors</string>
-    <string name="reader_display_mode">Display mode</string>
     <string name="reader_screen_brightness">Screen brightness</string>
     <string name="reader_layout_and_turning">Layout &amp; page turns</string>
     <string name="reader_page_turn_controls">Page turn controls</string>
-    <string name="reader_reading_information">Reading information</string>
     <string name="reader_book_information">Book information</string>
     <string name="reader_author">Author</string>
     <string name="reader_description">Description</string>
