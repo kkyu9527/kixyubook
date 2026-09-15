@@ -3,6 +3,7 @@ package com.kixyu9527.kixyubook.core.common.repository
 import com.kixyu9527.kixyubook.core.common.model.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
 
 interface BookRepository {
     suspend fun repairBook(bookUuid: String, mode: BookRepairMode, onProgress: suspend (BookRepairProgress) -> Unit): Result<BookRepairOutcome> =
@@ -52,8 +53,13 @@ interface BookRepository {
      * device's recognition result, so local re-recognition may still refresh fields the user here
      * never edited by hand.
      */
-    suspend fun applySyncedBookMetadata(bookUuid: String, title: String, author: String, description: String) =
-        updateBookMetadata(bookUuid, title, author, description)
+    suspend fun applySyncedBookMetadata(
+        bookUuid: String,
+        title: String,
+        author: String,
+        description: String,
+        ownership: BookMetadataOwnership? = null,
+    ) = updateBookMetadata(bookUuid, title, author, description)
     /** A single editor submission: metadata, category and outbound sync must commit together. */
     suspend fun updateBookDetails(bookUuid: String, title: String, author: String, description: String, category: String)
     /** Applies synced imported-name/sort/series metadata without touching reading state. */
@@ -64,6 +70,11 @@ interface BookRepository {
         seriesName: String,
         seriesIndex: Double?,
     ) = Unit
+    /**
+     * DB-only book removal for a cloud tombstone. The caller owns the surrounding transaction and
+     * the storage lock order, so this must not take the library storage mutex itself.
+     */
+    suspend fun deleteBookRemote(bookUuid: String) = deleteBook(bookUuid)
     suspend fun reparseTxt(bookUuid: String): Result<Unit>
     /**
      * Re-reads title/author/description from the source file without touching chapters or reading
@@ -228,6 +239,19 @@ interface FontRepository {
     fun observeFonts(): Flow<List<UserFont>>
     suspend fun importFont(uriString: String): Result<UserFont>
     suspend fun deleteFont(fontUuid: String)
+
+    /**
+     * DB-only font removal for a cloud tombstone. The caller controls the surrounding transaction;
+     * the file is left for the next prune so cleanup always happens after that transaction commits.
+     */
+    suspend fun deleteFontRemote(fontUuid: String) = deleteFont(fontUuid)
+
+    /**
+     * Stores a font downloaded by cloud sync. Implementations must run under the shared
+     * library-storage lock so a concurrent prune cannot delete the file before its row exists.
+     */
+    suspend fun storeSyncedFont(uuid: String, name: String, createdTime: Long, sourceFile: File): UserFont =
+        throw UnsupportedOperationException("Synced fonts are not supported")
     suspend fun getFont(fontUuid: String): UserFont?
 }
 

@@ -8,16 +8,20 @@ import com.kixyu9527.kixyubook.core.common.repository.FontRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderAnnotationRepository
+import com.kixyu9527.kixyubook.core.database.KixyuDatabase
 import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.SyncDao
+import com.kixyu9527.kixyubook.core.database.runWithPostCommitFileCleanup
 import com.kixyu9527.kixyubook.core.database.entity.SyncObjectStateEntity
 import com.kixyu9527.kixyubook.core.database.entity.SyncTombstoneEntity
+import androidx.room.withTransaction
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
 internal class CloudSyncPullPipeline(
     private val context: Context,
+    private val database: KixyuDatabase,
     private val books: BookDao,
     private val syncDao: SyncDao,
     private val bookRepository: BookRepository,
@@ -38,33 +42,36 @@ internal class CloudSyncPullPipeline(
                 val id = json.getString("entityId")
                 // A tombstone must not discard an edit this device has not uploaded yet. Keep the
                 // local change (it will be pushed and re-create the object) instead of deleting it.
-                if (!shouldApplyRemoteTombstone(syncDao.pendingCount(type.name, id))) {
+                val applied = applyRemoteTombstoneAtomically(
+                    database = database,
+                    syncDao = syncDao,
+                    type = type,
+                    id = id,
+                    tombstone = SyncTombstoneEntity(
+                        objectKey = key,
+                        deletedAt = json.optLong("deletedAt"),
+                        deviceId = json.optString("deviceId"),
+                        expiresAt = PERMANENT_TOMBSTONE_EXPIRY,
+                    ),
+                ) {
+                    mutations.withoutRecording {
+                        when (type) {
+                            SyncEntityType.BOOK -> if (books.bookExists(id)) bookRepository.deleteBookRemote(id)
+                            SyncEntityType.FONT -> fontRepository.deleteFontRemote(id)
+                            SyncEntityType.CORRECTION -> textCorrectionRepository.deleteRemote(id)
+                            SyncEntityType.ANNOTATION -> readerAnnotationRepository.deleteRemote(id)
+                            else -> Unit
+                        }
+                    }
+                }
+                if (!applied) {
                     DiagnosticLog.record(
                         Category.SYNC,
                         "tombstone_skipped_local_pending",
                         outcome = "local_wins",
                         details = mapOf("entity" to type.name.lowercase()),
                     )
-                } else {
-                    mutations.withoutRecording {
-                        when (type) {
-                            SyncEntityType.BOOK -> if (books.bookExists(id)) bookRepository.deleteBook(id)
-                            SyncEntityType.FONT -> fontRepository.deleteFont(id)
-                            SyncEntityType.CORRECTION -> textCorrectionRepository.deleteRemote(id)
-                            SyncEntityType.ANNOTATION -> readerAnnotationRepository.deleteRemote(id)
-                            else -> Unit
-                        }
-                    }
-                    syncDao.removeOutbox(type.name, id)
                 }
-                syncDao.upsertTombstone(
-                    SyncTombstoneEntity(
-                        objectKey = key,
-                        deletedAt = json.optLong("deletedAt"),
-                        deviceId = json.optString("deviceId"),
-                        expiresAt = PERMANENT_TOMBSTONE_EXPIRY,
-                    ),
-                )
             } finally {
                 temp.delete()
             }
@@ -237,5 +244,30 @@ internal class CloudSyncPullPipeline(
 
     private companion object {
         const val PERMANENT_TOMBSTONE_EXPIRY = Long.MAX_VALUE
+    }
+}
+
+/**
+ * The pending check, the local deletion and the outbox cleanup share one transaction, so a local
+ * edit racing the tombstone is serialized: it either arrives before the check (and the tombstone
+ * is skipped) or after the commit (and its outbox row survives to be pushed again). File cleanups
+ * the repositories defer only run once the transaction has committed.
+ */
+internal suspend fun applyRemoteTombstoneAtomically(
+    database: KixyuDatabase,
+    syncDao: SyncDao,
+    type: SyncEntityType,
+    id: String,
+    tombstone: SyncTombstoneEntity,
+    deleteLocal: suspend () -> Unit,
+): Boolean = runWithPostCommitFileCleanup {
+    database.withTransaction {
+        val shouldDelete = shouldApplyRemoteTombstone(syncDao.pendingCount(type.name, id))
+        if (shouldDelete) {
+            deleteLocal()
+            syncDao.removeOutbox(type.name, id)
+        }
+        syncDao.upsertTombstone(tombstone)
+        shouldDelete
     }
 }

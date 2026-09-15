@@ -68,6 +68,7 @@ class CloudSyncEngine @Inject constructor(
         fonts = fonts,
         syncDao = syncDao,
         bookRepository = bookRepository,
+        fontRepository = fontRepository,
         settingsRepository = settingsRepository,
         libraryPreferencesRepository = libraryPreferencesRepository,
         textCorrectionRepository = textCorrectionRepository,
@@ -99,6 +100,7 @@ class CloudSyncEngine @Inject constructor(
     )
     private val pullPipeline = CloudSyncPullPipeline(
         context = context,
+        database = database,
         books = books,
         syncDao = syncDao,
         bookRepository = bookRepository,

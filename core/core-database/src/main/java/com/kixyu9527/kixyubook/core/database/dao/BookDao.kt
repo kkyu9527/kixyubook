@@ -125,6 +125,11 @@ interface BookDao {
     )
     suspend fun markMetadataEdited(uuid: String, title: Boolean, author: Boolean, description: Boolean)
     @Query(
+        "UPDATE books SET userEditedTitle = :title, userEditedAuthor = :author, " +
+            "userEditedDescription = :description WHERE uuid = :uuid",
+    )
+    suspend fun setMetadataEdited(uuid: String, title: Boolean, author: Boolean, description: Boolean)
+    @Query(
         "UPDATE books SET " +
             "originalDisplayName = CASE WHEN :originalDisplayName != '' THEN :originalDisplayName ELSE originalDisplayName END, " +
             "titleSort = CASE WHEN :titleSort != '' THEN :titleSort ELSE titleSort END, " +

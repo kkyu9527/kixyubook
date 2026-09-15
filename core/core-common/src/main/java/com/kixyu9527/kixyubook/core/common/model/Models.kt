@@ -136,6 +136,8 @@ data class SyncedBook(
     val titleSort: String = "",
     val seriesName: String = "",
     val seriesIndex: Double? = null,
+    /** null means an old payload without ownership; local flags must be preserved. */
+    val metadataOwnership: BookMetadataOwnership? = null,
 )
 
 data class Bookmark(
@@ -260,6 +262,13 @@ data class CustomReaderTheme(
     val bodyHex: String = "#292722",
     val titleHex: String = "#171713",
     val accentHex: String = "#52655A",
+)
+
+/** Per-field "edited by a person" ownership synced with a book. */
+data class BookMetadataOwnership(
+    val title: Boolean = false,
+    val author: Boolean = false,
+    val description: Boolean = false,
 )
 
 data class ReaderSettings(

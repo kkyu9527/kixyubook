@@ -38,6 +38,7 @@ internal class CloudRemoteStateApplier(
     private val fonts: FontDao,
     private val syncDao: SyncDao,
     private val bookRepository: BookRepository,
+    private val fontRepository: com.kixyu9527.kixyubook.core.common.repository.FontRepository,
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val textCorrectionRepository: TextCorrectionRepository,
@@ -71,7 +72,13 @@ internal class CloudRemoteStateApplier(
                 val book = parseBook(payload)
                 mutations.withoutRecording {
                     applyBookMetadataFromRemote(database, syncDao, book.uuid) {
-                        bookRepository.applySyncedBookMetadata(book.uuid, book.title, book.author, book.description)
+                        bookRepository.applySyncedBookMetadata(
+                            bookUuid = book.uuid,
+                            title = book.title,
+                            author = book.author,
+                            description = book.description,
+                            ownership = book.metadataOwnership,
+                        )
                         // Schema 1 has no sort/series/original-name fields: absent means "unknown",
                         // never "clear what this device already has".
                         if (payload.optInt("schema", 1) >= 2) {
@@ -225,23 +232,21 @@ internal class CloudRemoteStateApplier(
         val uuid = metadata.objectKey.split('/').getOrNull(1) ?: return
         if (fonts.getFont(uuid) != null || !preferences.current().syncFonts) return
         val metaFile = tempFile("font-meta")
-        val sourceFile = File(context.filesDir, "fonts/$uuid.ttf")
+        val sourceFile = tempFile("font-source")
         try {
             drive.download(token, metadata.id, metaFile)
             drive.download(token, source.id, sourceFile)
             val json = JSONObject(metaFile.readText())
-            fonts.insert(
-                UserFontEntity(
-                    uuid,
-                    json.optString("name", "云端字体"),
-                    sourceFile.absolutePath,
-                    json.optLong("createdTime"),
-                ),
+            // The repository stores the font under the shared library-storage lock: a prune from a
+            // user font action cannot delete the file between the download and the row insert.
+            fontRepository.storeSyncedFont(
+                uuid = uuid,
+                name = json.optString("name", "云端字体"),
+                createdTime = json.optLong("createdTime"),
+                sourceFile = sourceFile,
             )
-        } catch (error: Throwable) {
-            sourceFile.delete()
-            throw error
         } finally {
+            sourceFile.delete()
             metaFile.delete()
         }
     }

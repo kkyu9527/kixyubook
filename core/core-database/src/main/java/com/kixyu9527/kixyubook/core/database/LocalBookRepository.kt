@@ -723,6 +723,9 @@ class LocalBookRepository @Inject constructor(
                             // Synced sort/series data wins; a local reparse fills whatever the cloud
                             // payload did not carry.
                             originalDisplayName = book.originalDisplayName,
+                            userEditedTitle = book.metadataOwnership?.title ?: false,
+                            userEditedAuthor = book.metadataOwnership?.author ?: false,
+                            userEditedDescription = book.metadataOwnership?.description ?: false,
                             titleSort = book.titleSort.ifBlank { parsedMetadata.titleSort },
                             seriesName = book.seriesName.ifBlank { parsedMetadata.seriesName },
                             seriesIndex = book.seriesIndex ?: parsedMetadata.seriesIndex,
@@ -749,65 +752,92 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun deleteBooks(bookUuids: Set<String>): Unit = withContext(Dispatchers.IO) {
         if (bookUuids.isEmpty()) return@withContext
-        openedAtOverrides.update { current -> current - bookUuids }
         val startedAt = SystemClock.elapsedRealtime()
         storageMutationMutex.withLock {
-            bookUuids.forEach { uuid -> workManager.cancelUniqueWork(TxtIndexWorker.uniqueName(uuid)) }
-            val books = dao.getBooks(bookUuids)
-            val progressCount = bookUuids.count { uuid -> dao.getProgress(uuid) != null }
-            database.withTransaction {
-                // Read the child ids inside the delete transaction. Reading them first would miss a
-                // correction/annotation inserted in between, which the FK then deletes without a
-                // tombstone, so it could be resurrected from Drive.
-                val correctionUuids = bookUuids.flatMap { uuid ->
-                    textCorrections.getBookCorrections(uuid).map(TextCorrection::uuid)
-                }
-                val annotationUuids = bookUuids.flatMap { uuid ->
-                    annotations.getBookAnnotations(uuid).map(ReaderAnnotation::uuid)
-                }
-                dao.deleteMetadataEdits(bookUuids)
-                dao.deleteBookParagraphFts(bookUuids)
-                // Explicit cleanup in the same transaction as the cascade, so pending bookmarks
-                // (and their excerpt text) never survive a single or batch book deletion.
-                dao.deletePendingBookmarks(bookUuids)
-                dao.deleteBooks(bookUuids)
-                bookUuids.forEach { uuid ->
-                    // Progress and bookmarks are independent Drive objects. Deleting only the
-                    // book metadata leaves both objects available to restore stale state when an
-                    // EPUB with the same dc:identifier is imported again.
-                    syncMutations.record(SyncEntityType.BOOKMARKS, uuid, SyncMutationOperation.DELETE)
-                    syncMutations.record(SyncEntityType.PROGRESS, uuid, SyncMutationOperation.DELETE)
-                    syncMutations.record(SyncEntityType.BOOK, uuid, SyncMutationOperation.DELETE)
-                }
-                correctionUuids.forEach { uuid ->
-                    syncMutations.record(SyncEntityType.CORRECTION, uuid, SyncMutationOperation.DELETE)
-                }
-                annotationUuids.forEach { uuid ->
-                    syncMutations.record(SyncEntityType.ANNOTATION, uuid, SyncMutationOperation.DELETE)
-                }
-            }
-            synchronized(chapterCacheLock) {
-                chapterCache.removeMatching { it.bookUuid in bookUuids }
-            }
-            books.forEach { book ->
-                epubChapterCache.clearBook(book.uuid)
-                ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, book.uuid)
-                File(book.storagePath).delete()
-                book.coverPath?.let(::File)?.delete()
-            }
-            pruneUnreferencedBookFiles()
-            DiagnosticLog.record(
-                Category.LIBRARY,
-                "books_deleted",
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                outcome = "success",
-                details = buildMap {
-                    put("count", books.size)
-                    put("progressRecords", progressCount)
-                    books.singleOrNull()?.let { put("book", it.uuid.shortDiagnosticId()) }
-                },
-            )
+            cleanupDeletedBookFiles(deleteBooksInternal(bookUuids, startedAt))
         }
+    }
+
+    override suspend fun deleteBookRemote(bookUuid: String) {
+        // Runs inside the caller's tombstone transaction: never take the storage lock here, or a
+        // concurrent import (lock first, transaction second) could deadlock with us. Files are
+        // removed by the deferred cleanup after that transaction commits.
+        val books = deleteBooksInternal(setOf(bookUuid), SystemClock.elapsedRealtime())
+        deferFileCleanup {
+            storageMutationMutex.withLock { cleanupDeletedBookFiles(books) }
+        }
+    }
+
+    /** Database side of a book deletion; must run without holding the storage lock. */
+    private suspend fun deleteBooksInternal(
+        bookUuids: Set<String>,
+        startedAt: Long,
+    ): List<BookEntity> {
+        if (bookUuids.isEmpty()) return emptyList()
+        openedAtOverrides.update { current -> current - bookUuids }
+        bookUuids.forEach { uuid -> workManager.cancelUniqueWork(TxtIndexWorker.uniqueName(uuid)) }
+        val books = dao.getBooks(bookUuids)
+        val progressCount = bookUuids.count { uuid -> dao.getProgress(uuid) != null }
+        database.withTransaction {
+            // Read the child ids inside the delete transaction. Reading them first would miss a
+            // correction/annotation inserted in between, which the FK then deletes without a
+            // tombstone, so it could be resurrected from Drive.
+            val correctionUuids = bookUuids.flatMap { uuid ->
+                textCorrections.getBookCorrections(uuid).map(TextCorrection::uuid)
+            }
+            val annotationUuids = bookUuids.flatMap { uuid ->
+                annotations.getBookAnnotations(uuid).map(ReaderAnnotation::uuid)
+            }
+            dao.deleteMetadataEdits(bookUuids)
+            dao.deleteBookParagraphFts(bookUuids)
+            // Explicit cleanup in the same transaction as the cascade, so pending bookmarks
+            // (and their excerpt text) never survive a single or batch book deletion.
+            dao.deletePendingBookmarks(bookUuids)
+            dao.deleteBooks(bookUuids)
+            bookUuids.forEach { uuid ->
+                // Progress and bookmarks are independent Drive objects. Deleting only the
+                // book metadata leaves both objects available to restore stale state when an
+                // EPUB with the same dc:identifier is imported again.
+                syncMutations.record(SyncEntityType.BOOKMARKS, uuid, SyncMutationOperation.DELETE)
+                syncMutations.record(SyncEntityType.PROGRESS, uuid, SyncMutationOperation.DELETE)
+                syncMutations.record(SyncEntityType.BOOK, uuid, SyncMutationOperation.DELETE)
+            }
+            correctionUuids.forEach { uuid ->
+                syncMutations.record(SyncEntityType.CORRECTION, uuid, SyncMutationOperation.DELETE)
+            }
+            annotationUuids.forEach { uuid ->
+                syncMutations.record(SyncEntityType.ANNOTATION, uuid, SyncMutationOperation.DELETE)
+            }
+        }
+        synchronized(chapterCacheLock) {
+            chapterCache.removeMatching { it.bookUuid in bookUuids }
+        }
+        DiagnosticLog.record(
+            Category.LIBRARY,
+            "books_deleted",
+            elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+            outcome = "success",
+            details = buildMap {
+                put("count", books.size)
+                put("progressRecords", progressCount)
+                books.singleOrNull()?.let { put("book", it.uuid.shortDiagnosticId()) }
+            },
+        )
+        return books
+    }
+
+    /** File side of a book deletion. The storage lock must be held by the caller. */
+    private suspend fun cleanupDeletedBookFiles(books: List<BookEntity>) {
+        books.forEach { book ->
+            // A concurrent restore can re-create the same uuid between commit and cleanup; its
+            // fresh files must not be removed by the older deletion.
+            if (dao.getBook(book.uuid) != null) return@forEach
+            epubChapterCache.clearBook(book.uuid)
+            ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, book.uuid)
+            File(book.storagePath).delete()
+            book.coverPath?.let(::File)?.delete()
+        }
+        pruneUnreferencedBookFiles()
     }
 
     override suspend fun getBook(bookUuid: String) = withContext(Dispatchers.IO) { dao.getBook(bookUuid)?.toModel() }
@@ -1010,9 +1040,13 @@ class LocalBookRepository @Inject constructor(
         title: String,
         author: String,
         description: String,
+        ownership: com.kixyu9527.kixyubook.core.common.model.BookMetadataOwnership?,
     ) {
         database.withTransaction {
             dao.updateBookMetadata(bookUuid, title, author, description)
+            // A payload without ownership (schema < 3) keeps the local flags: absence must never
+            // clear "this field was edited by hand".
+            ownership?.let { dao.setMetadataEdited(bookUuid, it.title, it.author, it.description) }
         }
     }
 

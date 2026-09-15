@@ -10,7 +10,8 @@ import java.util.UUID
 
 
 internal fun bookMetadataJson(book: BookEntity) = JSONObject()
-    .put("schema", 2).put("uuid", book.uuid).put("title", book.title).put("author", book.author)
+    .put("schema", BOOK_METADATA_SCHEMA).put("uuid", book.uuid)
+    .put("title", book.title).put("author", book.author)
     .put("description", book.description).put("format", book.format).put("createdTime", book.createdTime)
     .put("contentHash", book.contentHash).put("category", book.category)
     // Imported-name and publisher sorting/series data must survive a cross-device restore.
@@ -18,6 +19,11 @@ internal fun bookMetadataJson(book: BookEntity) = JSONObject()
     .put("titleSort", book.titleSort)
     .put("seriesName", book.seriesName)
     .put("seriesIndex", book.seriesIndex ?: JSONObject.NULL)
+    // Field values travel with their "edited by hand" ownership; a new device must be able to keep
+    // protecting a manual edit after it restores the library.
+    .put("userEditedTitle", book.userEditedTitle)
+    .put("userEditedAuthor", book.userEditedAuthor)
+    .put("userEditedDescription", book.userEditedDescription)
 
 internal fun progressJson(progress: ReadingProgressEntity, chapterKey: String) = JSONObject()
     .put("schema", 1).put("bookUuid", progress.bookUuid).put("chapterKey", chapterKey)
@@ -112,4 +118,15 @@ internal fun parseBook(json: JSONObject) = SyncedBook(
     titleSort = json.optString("titleSort"),
     seriesName = json.optString("seriesName"),
     seriesIndex = if (json.isNull("seriesIndex")) null else json.optDouble("seriesIndex"),
+    metadataOwnership = if (json.optInt("schema", 1) >= BOOK_METADATA_SCHEMA) {
+        BookMetadataOwnership(
+            title = json.optBoolean("userEditedTitle", false),
+            author = json.optBoolean("userEditedAuthor", false),
+            description = json.optBoolean("userEditedDescription", false),
+        )
+    } else {
+        null
+    },
 )
+
+internal const val BOOK_METADATA_SCHEMA = 3
