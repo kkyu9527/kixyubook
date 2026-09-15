@@ -33,7 +33,6 @@ internal fun ReaderPredictiveBackHandler(
 internal enum class ReaderPredictiveBackTarget {
     BOOK_INFO,
     SHEET,
-    SETTINGS_LEVEL,
     SEARCH,
     POPUP_MENU,
     CONTROLS,
@@ -47,7 +46,7 @@ internal data class ReaderChromeState(
     val searchVisible: Boolean = false,
     val bookInfoVisible: Boolean = false,
     val sheet: ReaderSheet? = null,
-    val settingsLevelOpen: Boolean = false,
+    val settingsMenuVisible: Boolean = false,
     val directoryPanelComposed: Boolean = false,
     val hasSearchResults: Boolean = false,
 ) {
@@ -62,10 +61,9 @@ internal data class ReaderChromeState(
  */
 internal fun ReaderChromeState.predictiveBackTarget(): ReaderPredictiveBackTarget? = when {
     bookInfoVisible -> ReaderPredictiveBackTarget.BOOK_INFO
-    sheet != null && settingsLevelOpen -> ReaderPredictiveBackTarget.SETTINGS_LEVEL
     sheet != null -> ReaderPredictiveBackTarget.SHEET
     searchVisible -> ReaderPredictiveBackTarget.SEARCH
-    toolsMenuVisible -> ReaderPredictiveBackTarget.POPUP_MENU
+    settingsMenuVisible || toolsMenuVisible -> ReaderPredictiveBackTarget.POPUP_MENU
     controlsVisible -> ReaderPredictiveBackTarget.CONTROLS
     hasSearchResults -> ReaderPredictiveBackTarget.SEARCH_RESULTS
     else -> null

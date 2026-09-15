@@ -72,7 +72,7 @@
     <string name="kixyu_reader_info_hidden">Hidden</string>
     <string name="kixyu_summary_separator"> · </string>
     <string name="kixyu_done">Done</string>
-    <string name="kixyu_reader_reset_group">Reset this group</string>
+    <string name="kixyu_reader_reset_group">Reset</string>
     <string name="kixyu_page_turn_paged_only">Only applies to paged reading</string>
     <string name="kixyu_show_navigation_bar">Show bottom system navigation bar</string>
     <string name="kixyu_show_navigation_bar_hint">Includes the gesture bar or the three-button navigation bar</string>

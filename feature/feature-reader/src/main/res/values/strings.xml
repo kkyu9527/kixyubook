@@ -46,6 +46,9 @@
     <string name="reader_epub_footnote">Footnote</string>
     <string name="reader_epub_footnote_close">Back to text</string>
     <string name="reader_tools">Reading tools</string>
+<string name="reader_reset_settings">Reset reading settings</string>
+    <string name="reader_reset_settings_warning">Restore every reading setting to its defaults? Font and layout, page turn, theme and on-screen information will be reset. Imported font files are kept.</string>
+    <string name="reader_reset_settings_confirm">Reset</string>
     <string name="reader_settings">Settings</string>
     <string name="reader_back">Back</string>
     <string name="reader_delete_bookmark">Delete bookmark</string>

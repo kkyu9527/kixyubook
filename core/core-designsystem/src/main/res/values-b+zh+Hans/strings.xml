@@ -72,7 +72,7 @@
     <string name="kixyu_reader_info_hidden">已隐藏</string>
     <string name="kixyu_summary_separator"> · </string>
     <string name="kixyu_done">完成</string>
-    <string name="kixyu_reader_reset_group">恢复本组默认值</string>
+    <string name="kixyu_reader_reset_group">恢复默认</string>
     <string name="kixyu_page_turn_paged_only">仅适用于分页阅读</string>
     <string name="kixyu_show_navigation_bar">显示底部系统导航栏</string>
     <string name="kixyu_show_navigation_bar_hint">包含手势条或三键导航栏</string>

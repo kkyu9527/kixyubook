@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import androidx.compose.ui.layout.layout
 import android.content.Context
 import android.view.WindowManager
 import androidx.compose.animation.*
@@ -102,22 +103,29 @@ internal fun ReaderScreen(
     var searchVisible by remember { mutableStateOf(false) }
     var bookInfoVisible by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
-    val settingsNav = remember { com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsNavState() }
+    var settingsMenu by remember { mutableStateOf(false) }
+    var resetConfirmVisible by remember { mutableStateOf(false) }
     val predictiveBackState = rememberReaderPredictiveBackState()
     val controlsBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.CONTROLS) }
     val popupBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.POPUP_MENU) }
     val searchBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SEARCH) }
-    // The sheet only fades when it is actually closing; popping an internal level previews the
-    // parent instead, so the surface stays fully opaque.
-    val sheetBackProgress = {
-        if (settingsNav.openGroup == null) {
-            predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET)
-        } else {
-            0f
+    val sheetBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET) }
+    // Category popups return to the settings menu; the colour editor returns to its theme popup.
+    val dismissSheet: () -> Unit = {
+        val current = sheet
+        when {
+            current == ReaderSheet.COLORS -> sheet = ReaderSheet.THEME_SCREEN
+            current.returnsToSettingsMenu() -> {
+                sheet = null
+                controls = true
+                settingsMenu = true
+                toolsMenu = false
+            }
+            else -> {
+                sheet = null
+                settingsMenu = false
+            }
         }
-    }
-    val settingsLevelBackProgress = {
-        predictiveBackState.progressFor(ReaderPredictiveBackTarget.SETTINGS_LEVEL)
     }
     val bookInfoBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.BOOK_INFO) }
     val volumeTurns = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
@@ -164,7 +172,7 @@ internal fun ReaderScreen(
         searchVisible = searchVisible,
         bookInfoVisible = bookInfoVisible,
         sheet = sheet,
-        settingsLevelOpen = settingsNav.openGroup != null,
+        settingsMenuVisible = settingsMenu,
         directoryPanelComposed = directoryPanelComposed,
         hasSearchResults = state.searchResults.isNotEmpty(),
     )
@@ -180,6 +188,9 @@ internal fun ReaderScreen(
         searchVisible,
         bookInfoVisible,
         sheet,
+        settingsMenu,
+        // Changing a font size and immediately opening another category must not race the reflow
+        // that the change started.
     )
     LaunchedEffect(overlayMotionKey) {
         if (!overlayMotionObserved) {
@@ -204,7 +215,7 @@ internal fun ReaderScreen(
     DisposableEffect(Unit) {
         onDispose { setPageInteractionActive(false) }
     }
-    LaunchedEffect(sheet) { sheet?.let { retainedSheet = it }; if (sheet != ReaderSheet.SETTINGS) settingsNav.reset() }
+    LaunchedEffect(sheet) { sheet?.let { retainedSheet = it } }
     LaunchedEffect(state.loadStage) {
         showSlowFirstPageStatus = false
         if (state.loadStage == ReaderLoadStage.PAGINATING_FIRST_PAGE) {
@@ -213,7 +224,7 @@ internal fun ReaderScreen(
         }
     }
     LaunchedEffect(sheet) {
-        if (sheet != ReaderSheet.SETTINGS) brightnessPreview = null
+        if (sheet !in READER_SETTINGS_SHEETS) brightnessPreview = null
     }
     val systemBarHost = LocalKixyuSystemBarHost.current
     val systemBarOwner = remember { Any() }
@@ -282,16 +293,15 @@ internal fun ReaderScreen(
         onBack = { target ->
             when (target) {
                 ReaderPredictiveBackTarget.BOOK_INFO -> bookInfoVisible = false
-                ReaderPredictiveBackTarget.SETTINGS_LEVEL -> settingsNav.back()
-            ReaderPredictiveBackTarget.SHEET -> {
-                sheet = null
-                settingsNav.reset()
-            }
+                ReaderPredictiveBackTarget.SHEET -> dismissSheet()
                 ReaderPredictiveBackTarget.SEARCH -> {
                     searchVisible = false
                     clearSearch()
                 }
-                ReaderPredictiveBackTarget.POPUP_MENU -> toolsMenu = false
+                ReaderPredictiveBackTarget.POPUP_MENU -> {
+                    toolsMenu = false
+                    settingsMenu = false
+                }
                 ReaderPredictiveBackTarget.CONTROLS -> controls = false
                 ReaderPredictiveBackTarget.SEARCH_RESULTS -> clearSearch()
             }
@@ -469,6 +479,7 @@ internal fun ReaderScreen(
             ReaderControls(
                 visible = controls,
                 toolsMenuVisible = toolsMenu,
+                settingsMenuVisible = settingsMenu,
                 controlsBackProgress = controlsBackProgress,
                 popupBackProgress = popupBackProgress,
                 bookTitle = state.book?.title.orEmpty().takeIf { state.searchResults.isEmpty() }.orEmpty(),
@@ -490,19 +501,38 @@ internal fun ReaderScreen(
                 onDirectory = {
                     controls = false
                     toolsMenu = false
+                    settingsMenu = false
                     sheet = ReaderSheet.DIRECTORY
                 },
                 onBookInfo = { bookInfoVisible = true },
-                onSettings = { toolsMenu = false; sheet = ReaderSheet.SETTINGS },
-                onTools = { toolsMenu = !toolsMenu },
+                onSettings = {
+                    toolsMenu = false
+                    settingsMenu = !settingsMenu
+                },
+                onTools = {
+                    settingsMenu = false
+                    toolsMenu = !toolsMenu
+                },
+                onSheet = { target ->
+                    controls = false
+                    toolsMenu = false
+                    settingsMenu = false
+                    sheet = target
+                },
+                onResetReadingConfiguration = {
+                    settingsMenu = false
+                    resetConfirmVisible = true
+                },
                 onToggleBookmark = {
                     currentPageBookmark?.let { deleteBookmark(it.uuid) } ?: addBookmark()
                     toolsMenu = false
+                    settingsMenu = false
                 },
                 onSearch = {
                     searchVisible = true
                     controls = false
                     toolsMenu = false
+                    settingsMenu = false
                 },
                 canNavigateBack = state.canNavigateBack,
                 canNavigateForward = state.canNavigateForward,
@@ -597,7 +627,7 @@ internal fun ReaderScreen(
         ReaderFloatingSheet(
             show = sheet != null && !(directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY),
             progress = sheetBackProgress,
-            onDismissRequest = { sheet = null },
+            onDismissRequest = dismissSheet,
             backdrop = readerBackdrop,
             maxContentWidth = if (activeSheet == ReaderSheet.DIRECTORY) {
                 com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize.sheetContentMaxWidth
@@ -636,18 +666,23 @@ internal fun ReaderScreen(
                     updateAnnotationNote = updateAnnotationNote,
                     deleteAnnotation = deleteAnnotation,
                 )
-                ReaderSheet.SETTINGS -> ReaderSettingsSheet(
+                ReaderSheet.FONT_LAYOUT,
+                ReaderSheet.PAGE_TURN,
+                ReaderSheet.THEME_SCREEN,
+                ReaderSheet.INFORMATION,
+                -> ReaderGroupSettingsPopup(
+                    group = activeSheet.settingsGroup()!!,
                     state = state,
                     update = updateSettings,
-                    nav = settingsNav,
-                    levelBackProgress = settingsLevelBackProgress,
+                    onBack = dismissSheet,
                     onManageFonts = onManageFonts,
-                    onResetReadingConfiguration = onResetReadingConfiguration,
+                    onEditColors = { sheet = ReaderSheet.COLORS },
                     previewBrightness = { brightnessPreview = it },
-                    onDismiss = {
-                        sheet = null
-                        settingsNav.reset()
-                    },
+                )
+                ReaderSheet.COLORS -> ReaderColorsPopup(
+                    settings = state.settings,
+                    update = updateSettings,
+                    onBack = dismissSheet,
                 )
                 null -> Unit
             }
@@ -734,6 +769,14 @@ internal fun ReaderScreen(
             progress = bookInfoBackProgress,
             backdrop = readerBackdrop,
             dismiss = { bookInfoVisible = false },
+        )
+        ReaderResetReadingSettingsDialog(
+            show = resetConfirmVisible,
+            onDismissRequest = { resetConfirmVisible = false },
+            onConfirm = {
+                resetConfirmVisible = false
+                onResetReadingConfiguration()
+            },
         )
         }
     }

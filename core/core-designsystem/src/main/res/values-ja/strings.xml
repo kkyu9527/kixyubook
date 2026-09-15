@@ -72,7 +72,7 @@
     <string name="kixyu_reader_info_hidden">非表示</string>
     <string name="kixyu_summary_separator"> · </string>
     <string name="kixyu_done">完了</string>
-    <string name="kixyu_reader_reset_group">このグループを初期化</string>
+    <string name="kixyu_reader_reset_group">初期化</string>
     <string name="kixyu_page_turn_paged_only">ページめくりのみに適用されます</string>
     <string name="kixyu_show_navigation_bar">下部システムナビゲーションバーを表示</string>
     <string name="kixyu_show_navigation_bar_hint">ジェスチャーバーまたは3ボタンナビゲーションを含みます</string>

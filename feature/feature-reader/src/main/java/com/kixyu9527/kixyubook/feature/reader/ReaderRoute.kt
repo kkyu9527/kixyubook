@@ -28,7 +28,26 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import kotlinx.coroutines.delay
 
-internal enum class ReaderSheet { DIRECTORY, SETTINGS }
+internal enum class ReaderSheet { DIRECTORY, FONT_LAYOUT, PAGE_TURN, THEME_SCREEN, INFORMATION, COLORS }
+
+/** Settings category popups return to the settings menu when dismissed, exactly like the old flow. */
+internal val READER_SETTINGS_SHEETS = setOf(
+    ReaderSheet.FONT_LAYOUT,
+    ReaderSheet.PAGE_TURN,
+    ReaderSheet.THEME_SCREEN,
+    ReaderSheet.INFORMATION,
+)
+
+internal fun ReaderSheet?.returnsToSettingsMenu(): Boolean = this in READER_SETTINGS_SHEETS
+
+internal fun ReaderSheet.settingsGroup(): com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup? =
+    when (this) {
+        ReaderSheet.FONT_LAYOUT -> com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup.FONT_LAYOUT
+        ReaderSheet.PAGE_TURN -> com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup.PAGE_TURN
+        ReaderSheet.THEME_SCREEN -> com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup.THEME_SCREEN
+        ReaderSheet.INFORMATION -> com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup.INFORMATION
+        else -> null
+    }
 
 /** All floating reader controls share one enter/exit clock and transform. */
 @Composable

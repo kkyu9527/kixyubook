@@ -8,14 +8,6 @@ import androidx.compose.foundation.background
 import androidx.core.graphics.toColorInt
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -72,113 +64,6 @@ fun kixyuReaderLevelKey(group: KixyuReaderSettingsGroup?, colorsOpen: Boolean): 
     group == null -> KIXYU_READER_LEVEL_ROOT
     colorsOpen -> KIXYU_READER_LEVEL_COLORS
     else -> group.name
-}
-
-/** Level depth: root = 0, a group = 1, the colour editor = 2. */
-fun kixyuReaderLevelDepth(levelKey: String): Int = when (levelKey) {
-    KIXYU_READER_LEVEL_ROOT -> 0
-    KIXYU_READER_LEVEL_COLORS -> 2
-    else -> 1
-}
-
-/**
- * Shared level transition (Material shared-axis X): the leaving level fades and shifts out while
- * the entering level fades and shifts in from the opposite edge. The cross-fade keeps the two
- * transparent lists from showing through each other, unlike a pure translate.
- */
-fun AnimatedContentTransitionScope<*>.kixyuReaderSettingsLevelTransition(forward: Boolean): ContentTransform {
-    val enter = slideInHorizontally(
-        animationSpec = tween(KixyuMotion.ReaderPopupEnterMillis, delayMillis = LEVEL_ENTER_DELAY_MILLIS),
-    ) { if (forward) it / 3 else -it / 3 } +
-        fadeIn(tween(KixyuMotion.ReaderPopupEnterMillis, delayMillis = LEVEL_ENTER_DELAY_MILLIS))
-    val exit = slideOutHorizontally(animationSpec = tween(KixyuMotion.ReaderPopupExitMillis)) {
-        if (forward) -it / 3 else it / 3
-    } + fadeOut(tween(KixyuMotion.ReaderPopupExitMillis))
-    return enter togetherWith exit
-}
-
-private const val LEVEL_ENTER_DELAY_MILLIS = 40
-
-/**
- * Pure back-state machine for the reader settings levels.
- *
- * One committed gesture keeps its final frame on the level that left (see
- * [KixyuPredictiveBackState.commit]); the next level must not inherit that stale progress, and a
- * new gesture must take over immediately. Keeping this logic outside the composable makes the
- * "colors -> group -> root" and "reopen the same level" sequences testable.
- */
-class KixyuReaderSettingsLevelBackState {
-    private var lastKey: String? = null
-    private var poppedKey: String? = null
-    private var suppressProgress = false
-
-    data class Frame(
-        val poppedKey: String?,
-        val suppressProgress: Boolean,
-        val showParentPreview: Boolean,
-    )
-
-    fun onFrame(levelKey: String, rawProgress: Float): Frame {
-        val forward = lastKey?.let { kixyuReaderLevelDepth(levelKey) > kixyuReaderLevelDepth(it) } ?: false
-        if (rawProgress < 1f) {
-            suppressProgress = false
-            poppedKey = null
-        }
-        if (forward) suppressProgress = true
-        if (levelKey != lastKey) {
-            poppedKey = if (forward || rawProgress < 1f) null else lastKey
-            lastKey = levelKey
-        }
-        return Frame(
-            poppedKey = poppedKey,
-            suppressProgress = suppressProgress,
-            showParentPreview = rawProgress > 0f && poppedKey == null && !suppressProgress,
-        )
-    }
-}
-
-/** The progress that may be applied to [key]; 0 everywhere that is not the active pop target. */
-fun KixyuReaderSettingsLevelBackState.Frame.progressFor(
-    key: String,
-    levelKey: String,
-    rawProgress: Float,
-): Float = when {
-    suppressProgress -> 0f
-    key == (poppedKey ?: levelKey) -> rawProgress
-    else -> 0f
-}
-
-/** Pure level stack shared by both surfaces: Back always pops exactly one level. */
-class KixyuReaderSettingsNavState {
-    var openGroup by mutableStateOf<KixyuReaderSettingsGroup?>(null)
-        private set
-    var colorsOpen by mutableStateOf(false)
-        private set
-
-    fun open(group: KixyuReaderSettingsGroup) {
-        openGroup = group
-        colorsOpen = false
-    }
-
-    fun openColors() {
-        if (openGroup == KixyuReaderSettingsGroup.THEME_SCREEN) colorsOpen = true
-    }
-
-    /** Returns true when a level was popped; false means the caller should dismiss the surface. */
-    fun back(): Boolean {
-        if (colorsOpen) {
-            colorsOpen = false
-            return true
-        }
-        if (openGroup == null) return false
-        openGroup = null
-        return true
-    }
-
-    fun reset() {
-        openGroup = null
-        colorsOpen = false
-    }
 }
 
 /** Canonical reader-owned reset; app-shared language/style/accent and sync flags stay untouched. */
@@ -365,6 +250,10 @@ fun KixyuReaderSettingsGroupContent(
 /** Design-system title so callers never reference internal string ids. */
 @Composable
 fun kixyuReaderCustomColorsTitle(): String = stringResource(R.string.kixyu_custom_colors)
+
+/** Menu label of the single reset action; callers must not reference the internal string id. */
+@Composable
+fun kixyuReaderResetLabel(): String = stringResource(R.string.kixyu_reader_reset_group)
 
 /** Level-3 colour editor embedded in the same surface: day/night switch plus four colours. */
 @Composable

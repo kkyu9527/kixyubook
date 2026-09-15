@@ -1,5 +1,9 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
 import android.app.Activity
@@ -8,16 +12,18 @@ import android.content.ContextWrapper
 import androidx.core.graphics.toColorInt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,24 +46,18 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderBehaviorControls
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderColorEditorContent
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuReaderCustomColorsTitle
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderResetAllAction
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsLevelBackState
 import com.kixyu9527.kixyubook.core.designsystem.component.KIXYU_READER_LEVEL_COLORS
 import com.kixyu9527.kixyubook.core.designsystem.component.KIXYU_READER_LEVEL_ROOT
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuReaderLevelDepth
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuReaderLevelKey
-import com.kixyu9527.kixyubook.core.designsystem.component.kixyuReaderSettingsLevelTransition
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroupContent
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroupEntry
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsNavState
 import com.kixyu9527.kixyubook.core.designsystem.component.icon
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
-import com.kixyu9527.kixyubook.core.designsystem.component.progressFor
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSearchField
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
@@ -427,171 +427,79 @@ internal fun ReaderSearchOverlay(
 }
 
 @Composable
-internal fun ReaderSettingsSheet(
+internal fun ReaderGroupSettingsPopup(
+    group: KixyuReaderSettingsGroup,
     state: ReaderUiState,
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
-    nav: KixyuReaderSettingsNavState,
-    levelBackProgress: () -> Float,
+    onBack: () -> Unit,
     onManageFonts: () -> Unit,
-    onResetReadingConfiguration: () -> Unit,
+    onEditColors: () -> Unit,
     previewBrightness: (Float?) -> Unit,
-    onDismiss: () -> Unit,
 ) {
-    val levelKey = kixyuReaderLevelKey(nav.openGroup, nav.colorsOpen)
-    val listStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
-    fun listStateFor(key: String) = listStates.getOrPut(key) {
-        androidx.compose.foundation.lazy.LazyListState()
-    }
-    val backState = remember { KixyuReaderSettingsLevelBackState() }
-    val backFrame by remember(backState) {
-        derivedStateOf { backState.onFrame(levelKey, levelBackProgress()) }
-    }
-    val parentKey = if (levelKey != KIXYU_READER_LEVEL_ROOT) parentLevelKey(levelKey) else null
-    val showParentPreview = parentKey != null && backFrame.showParentPreview
-    Box(Modifier.fillMaxWidth()) {
-        if (showParentPreview) {
-            // The parent stays fully opaque behind the fading child, where the user left it; the
-            // snapshot is rebuilt for every gesture so a scroll in between is not shown stale.
-            val activeParentState = listStateFor(parentKey)
-            val previewState = remember(backFrame.showParentPreview) {
-                androidx.compose.foundation.lazy.LazyListState(
-                    activeParentState.firstVisibleItemIndex,
-                    activeParentState.firstVisibleItemScrollOffset,
-                )
-            }
-            ReaderSettingsLevel(
-                levelKey = parentKey,
-                state = state,
-                update = update,
-                nav = nav,
+    ReaderSettingsPopup(title = stringResource(group.titleRes), onBack = onBack) {
+        KixyuSection(title = stringResource(group.titleRes)) {
+            KixyuReaderSettingsGroupContent(
+                group = group,
+                settings = state.settings,
+                fonts = state.availableFonts,
+                onSettingsChange = update,
                 onManageFonts = onManageFonts,
-                onResetReadingConfiguration = onResetReadingConfiguration,
-                previewBrightness = previewBrightness,
-                onDismiss = onDismiss,
-                listState = previewState,
-                modifier = Modifier.fillMaxWidth(),
+                onEditColors = onEditColors,
+                onBrightnessPreview = previewBrightness,
             )
-            // The preview only exists to be seen: it must never take a touch from the child.
-            Box(
-                Modifier.matchParentSize()
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) awaitPointerEvent()
-                        }
-                    },
-            )
-        }
-        androidx.compose.animation.AnimatedContent(
-            targetState = levelKey,
-            transitionSpec = {
-                val forward = kixyuReaderLevelDepth(targetState) >= kixyuReaderLevelDepth(initialState)
-                kixyuReaderSettingsLevelTransition(forward)
-            },
-            label = "reader-settings-level",
-        ) { key ->
-            Box(
-                Modifier.kixyuPredictivePopupTransform {
-                    backFrame.progressFor(key, levelKey, levelBackProgress())
-                },
-            ) {
-                ReaderSettingsLevel(
-                    levelKey = key,
-                    state = state,
-                    update = update,
-                    nav = nav,
-                    onManageFonts = onManageFonts,
-                    onResetReadingConfiguration = onResetReadingConfiguration,
-                    previewBrightness = previewBrightness,
-                    onDismiss = onDismiss,
-                    listState = listStateFor(key),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
         }
     }
-}
-
-private fun parentLevelKey(levelKey: String): String = when (levelKey) {
-    KIXYU_READER_LEVEL_COLORS -> KixyuReaderSettingsGroup.THEME_SCREEN.name
-    else -> KIXYU_READER_LEVEL_ROOT
 }
 
 @Composable
-private fun ReaderSettingsLevel(
-    levelKey: String,
-    state: ReaderUiState,
+internal fun ReaderColorsPopup(
+    settings: ReaderSettings,
     update: ((ReaderSettings) -> ReaderSettings) -> Unit,
-    nav: KixyuReaderSettingsNavState,
-    onManageFonts: () -> Unit,
-    onResetReadingConfiguration: () -> Unit,
-    previewBrightness: (Float?) -> Unit,
-    onDismiss: () -> Unit,
-    listState: androidx.compose.foundation.lazy.LazyListState,
-    modifier: Modifier = Modifier,
+    onBack: () -> Unit,
 ) {
-    val settings = state.settings
-    val colorsOpen = levelKey == KIXYU_READER_LEVEL_COLORS
-    val group = if (colorsOpen || levelKey == KIXYU_READER_LEVEL_ROOT) {
-        null
-    } else {
-        KixyuReaderSettingsGroup.entries.firstOrNull { it.name == levelKey }
+    ReaderSettingsPopup(title = kixyuReaderCustomColorsTitle(), onBack = onBack) {
+        KixyuSection(title = kixyuReaderCustomColorsTitle()) {
+            KixyuReaderColorEditorContent(settings, update)
+        }
     }
-    val title = when {
-        colorsOpen -> kixyuReaderCustomColorsTitle()
-        group != null -> stringResource(group.titleRes)
-        else -> stringResource(R.string.reader_settings)
+}
+
+/** One category per floating popup window; the back arrow returns to the settings menu. */
+/** Second step for the single reset action: the menu item only opens this dialog. */
+@Composable
+internal fun ReaderResetReadingSettingsDialog(
+    show: Boolean,
+    onDismissRequest: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    KixyuActionDialog(
+        show = show,
+        onDismissRequest = onDismissRequest,
+        title = stringResource(R.string.reader_reset_settings),
+        confirmLabel = stringResource(R.string.reader_reset_settings_confirm),
+        onConfirm = onConfirm,
+        dismissLabel = stringResource(com.kixyu9527.kixyubook.core.designsystem.R.string.kixyu_cancel),
+    ) {
+        Text(stringResource(R.string.reader_reset_settings_warning))
     }
+}
+
+@Composable
+private fun ReaderSettingsPopup(
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable () -> Unit,
+) {
     androidx.compose.foundation.lazy.LazyColumn(
-        state = listState,
-        modifier = modifier,
+        Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(
             horizontal = KixyuSpacing.large,
             vertical = KixyuSpacing.large,
         ),
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
     ) {
-        item {
-            ReaderSettingsSheetHeader(
-                title = title,
-                onBack = { if (!nav.back()) onDismiss() },
-                onReset = if (levelKey == KIXYU_READER_LEVEL_ROOT) onResetReadingConfiguration else null,
-            )
-        }
-        when {
-            colorsOpen -> item {
-                KixyuSection(title = kixyuReaderCustomColorsTitle()) {
-                    KixyuReaderColorEditorContent(settings, update)
-                }
-            }
-            group != null -> item {
-                KixyuSection(title = stringResource(group.titleRes)) {
-                    KixyuReaderSettingsGroupContent(
-                        group = group,
-                        settings = settings,
-                        fonts = state.availableFonts,
-                        onSettingsChange = update,
-                        onManageFonts = onManageFonts,
-                        onEditColors = nav::openColors,
-                        onBrightnessPreview = previewBrightness,
-                    )
-                }
-            }
-            else -> {
-                item {
-                    KixyuSection(title = stringResource(R.string.reader_settings)) {
-                        KixyuReaderSettingsGroup.entries.forEachIndexed { index, entry ->
-                            if (index > 0) KixyuDivider()
-                            KixyuReaderSettingsGroupEntry(
-                                group = entry,
-                                settings = settings,
-                                fonts = state.availableFonts,
-                                onClick = { nav.open(entry) },
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        item { ReaderSettingsSheetHeader(title = title, onBack = onBack) }
+        item { content() }
         item { Spacer(Modifier.height(KixyuSpacing.sectionGap)) }
     }
 }
@@ -600,7 +508,6 @@ private fun ReaderSettingsLevel(
 private fun ReaderSettingsSheetHeader(
     title: String,
     onBack: () -> Unit,
-    onReset: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -615,7 +522,6 @@ private fun ReaderSettingsSheetHeader(
             style = MaterialTheme.typography.titleLarge,
             maxLines = 1,
         )
-        onReset?.let { KixyuReaderResetAllAction(onClick = it) }
     }
 }
 

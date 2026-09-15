@@ -46,6 +46,9 @@
     <string name="reader_epub_footnote">註解</string>
     <string name="reader_epub_footnote_close">返回內文</string>
     <string name="reader_tools">閱讀工具</string>
+<string name="reader_reset_settings">恢復預設閱讀設定</string>
+    <string name="reader_reset_settings_warning">將所有閱讀設定恢復為預設值？字型與排版、翻頁、主題以及頁內資訊都會被重設，已匯入的字型檔案不會被刪除。</string>
+    <string name="reader_reset_settings_confirm">恢復預設</string>
     <string name="reader_settings">設定</string>
     <string name="reader_back">返回</string>
     <string name="reader_delete_bookmark">刪除書籤</string>

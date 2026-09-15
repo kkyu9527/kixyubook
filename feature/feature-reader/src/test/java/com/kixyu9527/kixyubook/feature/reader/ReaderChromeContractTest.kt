@@ -55,16 +55,36 @@ class ReaderChromeContractTest {
     }
 
     @Test
-    fun theSettingsSheetIsTheOnlySettingsSurfaceAndClosesDirectly() {
+    fun everySettingsCategoryIsItsOwnPopupWindowAndReturnsToTheMenu() {
         assertEquals(
             ReaderPredictiveBackTarget.SHEET,
-            ReaderChromeState(sheet = ReaderSheet.SETTINGS).predictiveBackTarget(),
+            ReaderChromeState(sheet = ReaderSheet.FONT_LAYOUT).predictiveBackTarget(),
         )
         assertEquals(
             ReaderPredictiveBackTarget.SHEET,
             ReaderChromeState(sheet = ReaderSheet.DIRECTORY).predictiveBackTarget(),
         )
-        assertEquals(listOf("DIRECTORY", "SETTINGS"), ReaderSheet.entries.map { it.name })
+        assertEquals(
+            listOf("DIRECTORY", "FONT_LAYOUT", "PAGE_TURN", "THEME_SCREEN", "INFORMATION", "COLORS"),
+            ReaderSheet.entries.map { it.name },
+        )
+        assertTrue(ReaderSheet.FONT_LAYOUT.returnsToSettingsMenu())
+        assertTrue(ReaderSheet.THEME_SCREEN.returnsToSettingsMenu())
+        assertFalse(ReaderSheet.DIRECTORY.returnsToSettingsMenu())
+        assertFalse(ReaderSheet.COLORS.returnsToSettingsMenu())
+    }
+
+    @Test
+    fun theSettingsMenuOutranksTheReaderControls() {
+        assertEquals(
+            ReaderPredictiveBackTarget.POPUP_MENU,
+            ReaderChromeState(controlsVisible = true, settingsMenuVisible = true).predictiveBackTarget(),
+        )
+        assertEquals(
+            ReaderPredictiveBackTarget.SHEET,
+            ReaderChromeState(sheet = ReaderSheet.PAGE_TURN, settingsMenuVisible = true)
+                .predictiveBackTarget(),
+        )
     }
 
     @Test

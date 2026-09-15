@@ -46,6 +46,9 @@
     <string name="reader_epub_footnote">脚注</string>
     <string name="reader_epub_footnote_close">本文に戻る</string>
     <string name="reader_tools">読書ツール</string>
+<string name="reader_reset_settings">読書設定を初期化</string>
+    <string name="reader_reset_settings_warning">すべての読書設定を初期値に戻しますか？フォントと組版、ページめくり、テーマ、ページ内情報がリセットされます。取り込んだフォントファイルは削除されません。</string>
+    <string name="reader_reset_settings_confirm">初期化</string>
     <string name="reader_settings">設定</string>
     <string name="reader_back">戻る</string>
     <string name="reader_delete_bookmark">しおりを削除</string>

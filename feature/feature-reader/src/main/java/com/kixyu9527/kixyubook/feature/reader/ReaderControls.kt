@@ -1,5 +1,8 @@
 package com.kixyu9527.kixyubook.feature.reader
 
+import com.kixyu9527.kixyubook.core.designsystem.component.icon
+import com.kixyu9527.kixyubook.core.designsystem.component.kixyuReaderResetLabel
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuReaderSettingsGroup
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
 import androidx.compose.animation.*
@@ -31,6 +34,7 @@ import com.kixyu9527.kixyubook.core.reader.engine.*
 internal fun ReaderControls(
     visible: Boolean,
     toolsMenuVisible: Boolean,
+    settingsMenuVisible: Boolean,
     controlsBackProgress: () -> Float,
     popupBackProgress: () -> Float,
     bookTitle: String,
@@ -47,6 +51,8 @@ internal fun ReaderControls(
     onBookInfo: () -> Unit,
     onSettings: () -> Unit,
     onTools: () -> Unit,
+    onSheet: (ReaderSheet) -> Unit,
+    onResetReadingConfiguration: () -> Unit,
     onToggleBookmark: () -> Unit,
     onSearch: () -> Unit,
     canNavigateBack: Boolean,
@@ -114,8 +120,26 @@ internal fun ReaderControls(
             } else {
                 backgroundColor.highContrastContentColor()
             }
-            val popupItems = listOf(
-                KixyuPopupMenuItem(
+            val popupItems = when {
+                settingsMenuVisible -> listOf(
+                    *KixyuReaderSettingsGroup.entries.map { group ->
+                        KixyuPopupMenuItem(stringResource(group.titleRes), group.icon) {
+                            onSheet(
+                                when (group) {
+                                    KixyuReaderSettingsGroup.FONT_LAYOUT -> ReaderSheet.FONT_LAYOUT
+                                    KixyuReaderSettingsGroup.PAGE_TURN -> ReaderSheet.PAGE_TURN
+                                    KixyuReaderSettingsGroup.THEME_SCREEN -> ReaderSheet.THEME_SCREEN
+                                    KixyuReaderSettingsGroup.INFORMATION -> ReaderSheet.INFORMATION
+                                },
+                            )
+                        }
+                    }.toTypedArray(),
+                    KixyuPopupMenuItem(kixyuReaderResetLabel(), KixyuSymbols.Refresh) {
+                        onResetReadingConfiguration()
+                    },
+                )
+                toolsMenuVisible -> listOf(
+                    KixyuPopupMenuItem(
                         label = stringResource(
                             if (currentPageBookmarked) R.string.reader_remove_page_bookmark
                             else R.string.reader_add_page_bookmark,
@@ -140,9 +164,11 @@ internal fun ReaderControls(
                         enabled = canNavigateForward,
                         onClick = onNavigateForward,
                     ),
-            )
+                )
+                else -> emptyList()
+            }
             AnimatedVisibility(
-                visible = toolsMenuVisible,
+                visible = toolsMenuVisible || settingsMenuVisible,
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(bottom = KixyuSize.readerMenuBottomOffset + KixyuSize.readerControlInset),
                 enter = fadeIn() + slideInVertically { it / 5 },
