@@ -25,27 +25,43 @@ class PortableConfigTest {
     }
     @Test fun backupAndCloudRoundTripAllPortableGroupsWithoutCredentials() {
         val reader = ReaderSettings(fontSize = 25f, glassFrostLevel = 71f, appUiStyle = AppUiStyle.MIUIX)
-        val library = LibraryPreferences(customOrder = listOf("b", "a"), hiddenCategories = setOf("private"))
+        val library = LibraryPreferences(
+            customOrder = listOf("b", "a"),
+            hiddenCategories = setOf("private"),
+            filenameRules = listOf("(?<author>.+?)的(?<title>.+)"),
+            filenameRuleSpecs = listOf(
+                FilenameRuleSpec(
+                    id = "spec-1",
+                    sample = "[精校]《三体》 - 刘慈欣（完本）.txt",
+                    separator = "-",
+                    roles = listOf(
+                        FilenameSegmentRole.IGNORE,
+                        FilenameSegmentRole.TITLE,
+                        FilenameSegmentRole.AUTHOR,
+                        FilenameSegmentRole.IGNORE,
+                    ),
+                ),
+            ),
+        )
         val reminder = ReadingReminderSettings(true, 23, 42)
-        val overrides = mapOf("book" to "{\"fontSize\":27}")
-        val serialized = settingsPayloadJson(reader, 50, library, reminder, bookOverrides = overrides)
+        val serialized = settingsPayloadJson(reader, 50, library, reminder)
         val restored = JSONObject(serialized.toString())
         assertEquals(reader, jsonToSettings(restored.getJSONObject("reader")))
         assertEquals(library, jsonToLibraryPreferences(restored.getJSONObject("library")))
         assertEquals(reminder, jsonToReadingReminder(restored.getJSONObject("readingReminder")))
-        assertEquals(overrides, decodeBookSettings(restored.getJSONObject("bookOverrides")))
+        assertFalse("the global payload never carries per-book settings", serialized.has("bookOverrides"))
         assertFalse(serialized.has("token")); assertFalse(serialized.has("account"))
     }
 
-    @Test fun bookPatchInheritsUntouchedFieldsAndSupportsExplicitDefaultFont() {
-        val global = ReaderSettings(fontSize = 19f, fontUuid = "font", glassFrostLevel = 65f)
-        val patch = mergeBookSetting(global, "{}", "fontSize", "{\"fontSize\":25}")
-        val cleared = mergeBookSetting(global, patch, "fontUuid", "{\"fontUuid\":null}")
-        assertNull(applySettingsPatch(global, cleared).fontUuid)
-        val updated = applySettingsPatch(global.copy(lineHeight = 2f, glassFrostLevel = 95f), cleared)
-        assertEquals(25f, updated.fontSize); assertEquals(2f, updated.lineHeight); assertEquals(95f, updated.glassFrostLevel)
-        assertEquals(global, applySettingsPatch(global, null))
-        assertEquals("{}", mergeBookSetting(global, patch, "fontSize", "{\"fontSize\":19}"))
+    @Test fun anOldPayloadWithBookOverridesRestoresItsGlobalSettingsWithoutFailing() {
+        // Backups and cloud snapshots written before per-book settings were removed must stay
+        // restorable: the unknown field is ignored, the global configuration still applies.
+        val script = JSONObject()
+            .put("reader", settingsToJson(ReaderSettings(fontSize = 24f)))
+            .put("readingReminder", readingReminderToJson(ReadingReminderSettings(true, 23, 42)))
+            .put("bookOverrides", JSONObject().put("book", "{\"fontSize\":30}"))
+        assertEquals(24f, jsonToSettings(script.getJSONObject("reader")).fontSize, 0f)
+        assertEquals(true, jsonToReadingReminder(script.getJSONObject("readingReminder")).enabled)
     }
 
     @Test fun hostileReaderPayloadFallsBackForUnknownAnimationAndNonFiniteTypography() {
@@ -64,14 +80,4 @@ class PortableConfigTest {
         assertEquals(24f, reader.margin, 1e-4f)
     }
 
-    @Test fun malformedBookOverrideIsSkippedInsteadOfAbortingTheRestore() {
-        val input = JSONObject().put("bad", "not-json").put("good", "{\"fontSize\":24}")
-        assertEquals(setOf("good"), decodeBookSettings(input).keys)
-    }
-
-    @Test fun restoredBookOverridesCannotChangeGlobalNavigationOrGlass() {
-        val input = JSONObject().put("book", "{\"fontSize\":24,\"predictiveBackEnabled\":true,\"glassFrostLevel\":0}")
-        val patch = decodeBookSettings(input).getValue("book")
-        assertEquals(setOf("fontSize"), JSONObject(patch).keys().asSequence().toSet())
-    }
 }

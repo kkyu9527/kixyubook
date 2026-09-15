@@ -5,14 +5,13 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.configuration.*
-import com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository
 import org.json.JSONObject
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -25,52 +24,16 @@ private val Context.readerSettingsDataStore by preferencesDataStore(name = "read
 class DataStoreReaderSettingsRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val syncMutations: SyncMutationRecorder,
-) : ReaderSettingsRepository, BookSettingsRepository {
+) : ReaderSettingsRepository {
     private val mutations = SettingsMutationJournal(context.readerSettingsDataStore, syncMutations)
     override val settings: Flow<ReaderSettings> = context.readerSettingsDataStore.data.map(::readSettings)
-    override val overrides: Flow<Map<String, String>> = context.readerSettingsDataStore.data.map {
-        decodeBookSettings(JSONObject(it[BOOK_OVERRIDES] ?: "{}"))
-    }
-
-    override suspend fun setEnabled(bookUuid: String, enabled: Boolean) {
-        mutations.edit { values ->
-            val all = JSONObject(values[BOOK_OVERRIDES] ?: "{}")
-            if (enabled) { if (!all.has(bookUuid)) all.put(bookUuid, "{}") } else all.remove(bookUuid)
-            values[BOOK_OVERRIDES] = all.toString()
-        }
-    }
-
-    override suspend fun updateField(bookUuid: String, field: String, encodedValue: String) {
-        // Skip when the book has no per-book profile: entering the journal would record a cloud
-        // mutation for settings that did not change.
-        if (!JSONObject(context.readerSettingsDataStore.data.first()[BOOK_OVERRIDES] ?: "{}").has(bookUuid)) return
-        mutations.edit { values ->
-            val all = JSONObject(values[BOOK_OVERRIDES] ?: "{}")
-            if (all.has(bookUuid)) {
-                all.put(bookUuid, mergeBookSetting(readSettings(values), all.getString(bookUuid), field, encodedValue))
-                values[BOOK_OVERRIDES] = all.toString()
+    init {
+        // One-time upgrade cleanup: the per-book settings chain no longer exists, so its key is
+        // removed instead of lingering in the global settings file.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+            .launch {
+                runCatching { context.readerSettingsDataStore.edit { it.remove(BOOK_OVERRIDES) } }
             }
-        }
-    }
-
-    override suspend fun replaceAll(values: Map<String, String>) {
-        val validated = decodeBookSettings(JSONObject(values))
-        mutations.edit { it[BOOK_OVERRIDES] = JSONObject(validated).toString() }
-    }
-
-    override suspend fun clearFontReferences(fontUuid: String) {
-        mutations.edit { values ->
-            if (values[FONT_UUID] == fontUuid) values.remove(FONT_UUID)
-            val all = JSONObject(values[BOOK_OVERRIDES] ?: "{}")
-            all.keys().asSequence().toList().forEach { book ->
-                val patch = JSONObject(all.getString(book))
-                if (patch.optString("fontUuid") == fontUuid) {
-                    patch.remove("fontUuid")
-                    all.put(book, patch.toString())
-                }
-            }
-            values[BOOK_OVERRIDES] = all.toString()
-        }
     }
 
     private fun readSettings(values: Preferences): ReaderSettings {

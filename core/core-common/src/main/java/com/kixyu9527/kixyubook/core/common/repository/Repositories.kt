@@ -47,9 +47,30 @@ interface BookRepository {
     fun observeProgress(bookUuid: String): Flow<ReadingProgress?>
     suspend fun saveProgress(progress: ReadingProgress)
     suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String)
+    /**
+     * Applies a synced book's metadata without claiming field ownership: remote values are another
+     * device's recognition result, so local re-recognition may still refresh fields the user here
+     * never edited by hand.
+     */
+    suspend fun applySyncedBookMetadata(bookUuid: String, title: String, author: String, description: String) =
+        updateBookMetadata(bookUuid, title, author, description)
     /** A single editor submission: metadata, category and outbound sync must commit together. */
     suspend fun updateBookDetails(bookUuid: String, title: String, author: String, description: String, category: String)
+    /** Applies synced imported-name/sort/series metadata without touching reading state. */
+    suspend fun updateBookImportedMetadata(
+        bookUuid: String,
+        originalDisplayName: String,
+        titleSort: String,
+        seriesName: String,
+        seriesIndex: Double?,
+    ) = Unit
     suspend fun reparseTxt(bookUuid: String): Result<Unit>
+    /**
+     * Re-reads title/author/description from the source file without touching chapters or reading
+     * data. Fields the user edited manually are preserved.
+     */
+    suspend fun refreshMetadata(bookUuid: String): Result<MetadataRefreshResult> =
+        Result.failure(UnsupportedOperationException("Metadata refresh is not supported"))
     suspend fun setCategory(bookUuid: String, category: String)
     suspend fun setCategories(bookUuids: Set<String>, category: String)
     fun observeBookmarks(bookUuid: String): Flow<List<Bookmark>>
@@ -66,6 +87,16 @@ interface BookRepository {
     suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult?
     suspend fun readEpubNavigation(bookUuid: String): List<EpubNavigationEntry> = emptyList()
 }
+
+/** Outcome of [BookRepository.refreshMetadata]; preserved fields keep the user's manual edit. */
+data class MetadataRefreshResult(
+    val title: String,
+    val author: String,
+    val description: String,
+    val preservedTitle: Boolean = false,
+    val preservedAuthor: Boolean = false,
+    val preservedDescription: Boolean = false,
+)
 
 interface TextCorrectionRepository {
     fun observeBookCorrections(bookUuid: String): Flow<List<TextCorrection>>
@@ -140,6 +171,15 @@ interface LibraryPreferencesRepository {
     suspend fun setCustomOrder(bookUuids: List<String>)
     suspend fun setCategoryHidden(category: String, hidden: Boolean)
     suspend fun replace(preferences: LibraryPreferences)
+    suspend fun setFilenameRules(rules: List<String>) = Unit
+    suspend fun setFilenameRuleSpecs(specs: List<FilenameRuleSpec>) = Unit
+    /** Atomic read-modify-write; a caller must not derive the new list from a stale snapshot. */
+    suspend fun addFilenameRule(rule: String) = Unit
+    suspend fun removeFilenameRule(rule: String) = Unit
+    suspend fun addFilenameRuleSpec(spec: FilenameRuleSpec) = Unit
+    suspend fun removeFilenameRuleSpec(id: String) = Unit
+    suspend fun upsertFilenameRuleSpec(spec: FilenameRuleSpec) = Unit
+    suspend fun setFilenameRuleSpecEnabled(id: String, enabled: Boolean) = Unit
 }
 
 data class LibraryCatalog(

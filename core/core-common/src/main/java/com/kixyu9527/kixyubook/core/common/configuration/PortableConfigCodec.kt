@@ -57,17 +57,45 @@ fun jsonToSettings(value: JSONObject) = ReaderSettings(
     brightness = value.optDouble("brightness", .5).toFloat().coerceIn(.05f, 1f),
 )
 
+fun filenameRuleSpecToJson(value: FilenameRuleSpec) = JSONObject()
+    .put("id", value.id)
+    .put("sample", value.sample)
+    .put("separator", value.separator ?: JSONObject.NULL)
+    .put("roles", JSONArray(value.roles.map { it.name }))
+    .put("version", value.version)
+    .put("enabled", value.enabled)
+
+fun jsonToFilenameRuleSpec(value: JSONObject): FilenameRuleSpec? = runCatching {
+    FilenameRuleSpec(
+        id = value.getString("id"),
+        sample = value.getString("sample"),
+        separator = if (value.isNull("separator")) null else value.getString("separator"),
+        roles = value.getJSONArray("roles").toStringList()
+            .map { FilenameSegmentRole.valueOf(it) },
+        version = value.optInt("version", 1),
+        enabled = value.optBoolean("enabled", true),
+    )
+}.getOrNull()
+
 fun libraryPreferencesToJson(value: LibraryPreferences) = JSONObject()
     .put("sortMode", value.sortMode.name)
     .put("layoutMode", value.layoutMode.name)
     .put("customOrder", JSONArray(value.customOrder))
     .put("hiddenCategories", JSONArray(value.hiddenCategories.toList()))
+    .put("filenameRules", JSONArray(value.filenameRules))
+    .put("filenameRuleSpecs", JSONArray().apply {
+        value.filenameRuleSpecs.forEach { put(filenameRuleSpecToJson(it)) }
+    })
 
 fun jsonToLibraryPreferences(value: JSONObject) = LibraryPreferences(
     sortMode = enumValue(value, "sortMode", LibrarySortMode.RECENT),
     layoutMode = enumValue(value, "layoutMode", LibraryLayoutMode.LIST),
     customOrder = value.optJSONArray("customOrder").toStringList(),
     hiddenCategories = value.optJSONArray("hiddenCategories").toStringList().toSet(),
+    filenameRules = value.optJSONArray("filenameRules").toStringList(),
+    filenameRuleSpecs = value.optJSONArray("filenameRuleSpecs")
+        ?.let { array -> (0 until array.length()).mapNotNull { array.optJSONObject(it)?.let(::jsonToFilenameRuleSpec) } }
+        .orEmpty(),
 )
 
 fun readingReminderToJson(value: ReadingReminderSettings) = JSONObject()
@@ -87,7 +115,6 @@ fun settingsPayloadJson(
     library: LibraryPreferences,
     readingReminder: ReadingReminderSettings,
     updatedAt: Long = System.currentTimeMillis(),
-    bookOverrides: Map<String, String> = emptyMap(),
 ) = JSONObject()
     .put("schema", 4)
     .put("updatedAt", updatedAt)
@@ -95,7 +122,6 @@ fun settingsPayloadJson(
     .put("readingGoalMinutes", readingGoalMinutes)
     .put("library", libraryPreferencesToJson(library))
     .put("readingReminder", readingReminderToJson(readingReminder))
-    .put("bookOverrides", JSONObject(bookOverrides))
 
 private fun JSONArray?.toStringList(): List<String> = if (this == null) emptyList() else buildList {
     repeat(length()) { index -> optString(index).takeIf(String::isNotBlank)?.let(::add) }

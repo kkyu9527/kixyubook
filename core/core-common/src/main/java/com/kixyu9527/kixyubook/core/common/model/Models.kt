@@ -18,6 +18,10 @@ data class Book(
     val createdTime: Long,
     val contentHash: String,
     val category: String = "未分类",
+    val originalDisplayName: String = "",
+    val titleSort: String = "",
+    val seriesName: String = "",
+    val seriesIndex: Double? = null,
 )
 
 data class Chapter(
@@ -128,6 +132,10 @@ data class SyncedBook(
     val createdTime: Long,
     val contentHash: String,
     val category: String,
+    val originalDisplayName: String = "",
+    val titleSort: String = "",
+    val seriesName: String = "",
+    val seriesIndex: Double? = null,
 )
 
 data class Bookmark(
@@ -358,11 +366,32 @@ enum class LibrarySortMode {
 
 enum class LibraryLayoutMode { LIST, GRID }
 
+enum class FilenameSegmentRole { TITLE, AUTHOR, STATUS, IGNORE }
+
+/**
+ * A user-confirmed filename rule. The sample and per-segment roles are the source of truth; the
+ * matching pattern is generated from them, so the UI never needs to reverse-engineer regex.
+ */
+data class FilenameRuleSpec(
+    val id: String,
+    val sample: String,
+    val separator: String?,
+    val roles: List<FilenameSegmentRole>,
+    /** Bumped when the structural interpretation changes so old rules stay readable. */
+    val version: Int = 1,
+    /** Disabled rules stay listed but no longer participate in recognition. */
+    val enabled: Boolean = true,
+)
+
 data class LibraryPreferences(
     val sortMode: LibrarySortMode = LibrarySortMode.RECENT,
     val layoutMode: LibraryLayoutMode = LibraryLayoutMode.LIST,
     val customOrder: List<String> = emptyList(),
     val hiddenCategories: Set<String> = emptySet(),
+    /** User regexes with named `title`/`author` groups, applied before the built-in rules. */
+    val filenameRules: List<String> = emptyList(),
+    /** Structured rules created from a real file name and confirmed by the user. */
+    val filenameRuleSpecs: List<FilenameRuleSpec> = emptyList(),
 )
 
 data class UserFont(val uuid: String, val name: String, val filePath: String, val createdTime: Long)
