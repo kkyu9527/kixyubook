@@ -17,7 +17,8 @@ sealed interface AppRoute : NavKey, Parcelable {
     @Parcelize data object HiddenLibrary : AppRoute
     @Parcelize data object Appearance : AppRoute
     @Parcelize data object ReadingSettings : AppRoute
-    @Parcelize data object ReadingInformation : AppRoute
+    @Parcelize data class ReadingSettingsGroup(val group: String) : AppRoute
+    @Parcelize data object ReadingColors : AppRoute
     @Parcelize data object FontManagement : AppRoute
     @Parcelize data object CloudSync : AppRoute
     @Parcelize data object GoogleAccount : AppRoute

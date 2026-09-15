@@ -68,12 +68,12 @@ fun AppearanceRoute(
                     KixyuDivider()
                     KixyuThemeModeControl(
                         settings = state.settings,
-                        onSettingsChange = { updated -> viewModel.update { updated } },
+                        onSettingsChange = viewModel::update,
                     )
                     KixyuDivider()
                     KixyuAppUiStyleControl(
                         settings = state.settings,
-                        onSettingsChange = { updated -> viewModel.update { updated } },
+                        onSettingsChange = viewModel::update,
                     )
                     KixyuDivider()
                     KixyuSettingsRow(
@@ -99,12 +99,12 @@ fun AppearanceRoute(
                     KixyuDivider()
                     KixyuGlassEffectControls(
                         settings = state.settings,
-                        onSettingsChange = { updated -> viewModel.update { updated } },
+                        onSettingsChange = viewModel::update,
                     )
                     KixyuDivider()
                     KixyuAppColorControl(
                         settings = state.settings,
-                        onSettingsChange = { updated -> viewModel.update { updated } },
+                        onSettingsChange = viewModel::update,
                     )
                 }
             }

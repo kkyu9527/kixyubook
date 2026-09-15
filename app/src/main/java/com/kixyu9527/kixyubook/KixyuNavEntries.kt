@@ -31,7 +31,8 @@ import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogCategoryRoute
 import com.kixyu9527.kixyubook.feature.settings.DiagnosticLogRoute
 import com.kixyu9527.kixyubook.feature.settings.FontManagementRoute
 import com.kixyu9527.kixyubook.feature.settings.GoogleAccountRoute
-import com.kixyu9527.kixyubook.feature.settings.ReadingInformationRoute
+import com.kixyu9527.kixyubook.feature.settings.ReadingColorsRoute
+import com.kixyu9527.kixyubook.feature.settings.ReadingGroupSettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.ReadingSettingsRoute
 import com.kixyu9527.kixyubook.feature.settings.SettingsPane
 import com.kixyu9527.kixyubook.feature.settings.SettingsRoute
@@ -136,20 +137,32 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
                 DestinationWithBack(popDestination) { onBack ->
                     ReadingSettingsRoute(
                         onBack = onBack,
-                        onManageFonts = {
+                        onOpenGroup = { group ->
                             prioritizeAnimation()
-                            navigator.push(AppRoute.FontManagement)
-                        },
-                        onReadingInformation = {
-                            prioritizeAnimation()
-                            navigator.push(AppRoute.ReadingInformation)
+                            navigator.push(AppRoute.ReadingSettingsGroup(group.name))
                         },
                     )
                 }
             }
-            entry<AppRoute.ReadingInformation> {
+            entry<AppRoute.ReadingSettingsGroup> { route ->
                 DestinationWithBack(popDestination) { onBack ->
-                    ReadingInformationRoute(onBack = onBack)
+                    ReadingGroupSettingsRoute(
+                        groupName = route.group,
+                        onBack = onBack,
+                        onManageFonts = {
+                            prioritizeAnimation()
+                            navigator.push(AppRoute.FontManagement)
+                        },
+                        onEditColors = {
+                            prioritizeAnimation()
+                            navigator.push(AppRoute.ReadingColors)
+                        },
+                    )
+                }
+            }
+            entry<AppRoute.ReadingColors> {
+                DestinationWithBack(popDestination) { onBack ->
+                    ReadingColorsRoute(onBack = onBack)
                 }
             }
             entry<AppRoute.FontManagement> {
@@ -211,6 +224,10 @@ internal fun kixyuEntryProvider(dependencies: KixyuNavEntryDependencies) =
                         prioritizeAnimation()
                         navigator.push(AppRoute.TextCorrections(route.bookUuid))
                     },
+                    onManageFonts = {
+                        prioritizeAnimation()
+                        navigator.push(AppRoute.FontManagement)
+                    },
                     onExit = onExitReader,
                 )
             }
@@ -249,13 +266,9 @@ private fun EmbeddedSettingsPane(
         )
         SettingsPane.READING -> ReadingSettingsRoute(
             onBack = {},
-            onManageFonts = {
+            onOpenGroup = { group ->
                 prioritizeAnimation()
-                navigator.push(AppRoute.FontManagement)
-            },
-            onReadingInformation = {
-                prioritizeAnimation()
-                navigator.push(AppRoute.ReadingInformation)
+                navigator.push(AppRoute.ReadingSettingsGroup(group.name))
             },
             embedded = true,
         )
