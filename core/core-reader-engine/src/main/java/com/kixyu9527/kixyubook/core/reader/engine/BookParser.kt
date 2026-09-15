@@ -5,7 +5,21 @@ import java.io.File
 
 interface BookParser {
     val format: BookFormat
-    fun readMetadata(file: File, fallbackTitle: String): DocumentMetadata
+
+    /**
+     * @param fallbackTitle used verbatim when the file itself contains no title.
+     * @param sourceName the original display/file name, used only as a metadata source. Callers
+     * that no longer have it must pass an empty string: a book title or an import URI is not a
+     * file name and would otherwise be parsed into a bogus author or a truncated title.
+     */
+    fun readMetadata(
+        file: File,
+        fallbackTitle: String,
+        sourceName: String = fallbackTitle,
+        rules: List<LocalMetadata.FilenameRule> = emptyList(),
+        specs: List<com.kixyu9527.kixyubook.core.common.model.FilenameRuleSpec> = emptyList(),
+    ): DocumentMetadata
+
     suspend fun readChapters(file: File, emit: suspend (DocumentChapter) -> Unit)
 }
 

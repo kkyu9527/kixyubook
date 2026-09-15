@@ -13,6 +13,10 @@ data class DocumentMetadata(
     val description: String = "",
     val coverBytes: ByteArray? = null,
     val coverExtension: String = "jpg",
+    /** Publisher sort title (`calibre:title_sort`); empty keeps the library sorting by title. */
+    val titleSort: String = "",
+    val seriesName: String = "",
+    val seriesIndex: Double? = null,
 ) {
     // ByteArray uses identity equality in a generated data class, so equals/hashCode would disagree
     // with content. Compare the array by reference (cheap, and consistent for identical metadata).
@@ -24,6 +28,9 @@ data class DocumentMetadata(
             author == other.author &&
             description == other.description &&
             coverExtension == other.coverExtension &&
+            titleSort == other.titleSort &&
+            seriesName == other.seriesName &&
+            seriesIndex == other.seriesIndex &&
             coverBytes === other.coverBytes
     }
 
@@ -33,6 +40,9 @@ data class DocumentMetadata(
         result = 31 * result + author.hashCode()
         result = 31 * result + description.hashCode()
         result = 31 * result + coverExtension.hashCode()
+        result = 31 * result + titleSort.hashCode()
+        result = 31 * result + seriesName.hashCode()
+        result = 31 * result + (seriesIndex?.hashCode() ?: 0)
         result = 31 * result + System.identityHashCode(coverBytes)
         return result
     }

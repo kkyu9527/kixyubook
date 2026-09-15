@@ -14,12 +14,17 @@ import kotlinx.coroutines.yield
 class TxtBookParser : BookParser {
     override val format = BookFormat.TXT
 
-    override fun readMetadata(file: File, fallbackTitle: String): DocumentMetadata =
-        inspectFrontMatter(file, fallbackTitle).metadata
+    override fun readMetadata(
+        file: File,
+        fallbackTitle: String,
+        sourceName: String,
+        rules: List<LocalMetadata.FilenameRule>,
+        specs: List<com.kixyu9527.kixyubook.core.common.model.FilenameRuleSpec>,
+    ): DocumentMetadata = inspectFrontMatter(file, fallbackTitle, sourceName, rules, specs).metadata
 
     override suspend fun readChapters(file: File, emit: suspend (DocumentChapter) -> Unit) {
         com.kixyu9527.kixyubook.core.common.cache.CacheDiagnostics.named("txt-body").parsed(listOf(file.absolutePath, file.lastModified()))
-        val frontMatter = inspectFrontMatter(file, file.name)
+        val frontMatter = inspectFrontMatter(file, file.name, "", emptyList(), emptyList())
         file.bufferedReader(frontMatter.charset).use { reader ->
             var title = "正文"
             var volumeTitle: String? = null
@@ -84,7 +89,13 @@ class TxtBookParser : BookParser {
         }
     }
 
-    private fun inspectFrontMatter(file: File, fallbackTitle: String): TxtFrontMatter {
+    private fun inspectFrontMatter(
+        file: File,
+        fallbackTitle: String,
+        sourceName: String,
+        rules: List<LocalMetadata.FilenameRule>,
+        specs: List<com.kixyu9527.kixyubook.core.common.model.FilenameRuleSpec>,
+    ): TxtFrontMatter {
         val charset = detectCharset(file)
         val lines = file.bufferedReader(charset).use { reader ->
             // Bound metadata probing by characters as well as line count. A minified book may
@@ -95,84 +106,32 @@ class TxtBookParser : BookParser {
                 .map { it.text.removePrefix("\uFEFF").trim() }
                 .toList()
         }
-        val excluded = mutableSetOf<Int>()
-        var title = fallbackTitle.substringBeforeLast('.').ifBlank { "未命名书籍" }
-        var author = "未知作者"
-        var description = ""
-        var index = 0
-        while (index < lines.size) {
-            val line = lines[index]
-            if (headingTitleOrNull(line) != null) break
-            val titleMatch = TITLE_PATTERN.matchEntire(line)
-            if (titleMatch != null) {
-                title = titleMatch.groupValues[1].trim().ifBlank { title }
-                excluded += index
-                index++
-                continue
-            }
-            val authorMatch = AUTHOR_PATTERN.matchEntire(line)
-            if (authorMatch != null) {
-                author = authorMatch.groupValues[1].trim().ifBlank { author }
-                excluded += index
-                index++
-                continue
-            }
-            val descriptionMatch = DESCRIPTION_PATTERN.matchEntire(line)
-            if (descriptionMatch != null) {
-                excluded += index
-                val inline = descriptionMatch.groupValues[1].trim()
-                if (inline.isNotEmpty()) {
-                    description = inline
-                    index++
-                } else {
-                    val descriptionLines = mutableListOf<String>()
-                    var cursor = index + 1
-                    while (cursor < lines.size && descriptionLines.size < MAX_DESCRIPTION_LINES) {
-                        val candidate = lines[cursor].trim()
-                        if (candidate.isBlank() || headingTitleOrNull(candidate) != null ||
-                            TITLE_PATTERN.matches(candidate) || AUTHOR_PATTERN.matches(candidate) || DESCRIPTION_PATTERN.matches(candidate)
-                        ) break
-                        descriptionLines += candidate
-                        excluded += cursor
-                        cursor++
-                    }
-                    description = descriptionLines.joinToString("\n")
-                    index = cursor
-                }
-                continue
-            }
-            index++
+        // Sources are collected independently, then merged by confidence. The body scan only
+        // reports the lines it actually used, so a failed recognition cannot remove content.
+        val fromBody = LocalMetadata.extractFrontMatter(lines)
+        // An empty sourceName means the caller no longer has the original file name; parsing the
+        // title or a URI as one would invent an author (e.g. `书名-副标题` -> author `副标题`).
+        val fromFileName = if (sourceName.isBlank()) {
+            LocalMetadata.ExtractedMetadata(emptyList(), emptyList(), emptyList(), emptySet())
+        } else {
+            LocalMetadata.parseFileName(sourceName, rules)
         }
-
-        val decoratedTitle = lines.take(12).mapIndexedNotNull { lineIndex, line ->
-            DECORATED_TITLE_PATTERN.matchEntire(line)?.groupValues?.get(1)?.trim()?.let { lineIndex to it }
-        }.firstOrNull()
-        if (decoratedTitle != null && lines.take(16).any(AUTHOR_PATTERN::matches)) {
-            title = decoratedTitle.second.ifBlank { title }
-            excluded += decoratedTitle.first
-        }
+        val fromSpec = LocalMetadata.specCandidates(specs, sourceName)
+        val title = LocalMetadata.mergeTitles(
+            fromBody.titles + fromSpec.titles + fromFileName.titles,
+            fallbackTitle.ifBlank { "未命名书籍" },
+        )
+        val author = LocalMetadata.mergeAuthors(fromBody.authors + fromSpec.authors + fromFileName.authors)
         return TxtFrontMatter(
             charset = charset,
-            metadata = DocumentMetadata(title = title, author = author, description = description),
-            excludedLines = excluded,
+            metadata = DocumentMetadata(title = title, author = author, description = fromBody.description),
+            excludedLines = fromBody.excludedLines,
         )
     }
 
-    private fun chapterTitleOrNull(raw: String): String? {
-        if (raw.length !in 2..MAX_CHAPTER_TITLE_LENGTH) return null
-        val line = raw.trim().trim(*CHAPTER_DECORATIONS).trim()
-        if (line.length !in 2..MAX_CHAPTER_TITLE_LENGTH) return null
-        return line.takeIf {
-            NUMBERED_CHAPTER.matches(it) || NAMED_CHAPTER.matches(it) || LATIN_CHAPTER.matches(it)
-        }
-    }
+    private fun chapterTitleOrNull(raw: String): String? = LocalMetadata.chapterHeading(raw)
 
-    private fun volumeTitleOrNull(raw: String): String? {
-        if (raw.length !in 2..MAX_CHAPTER_TITLE_LENGTH) return null
-        val line = raw.trim().trim(*CHAPTER_DECORATIONS).trim()
-        if (line.length !in 2..MAX_CHAPTER_TITLE_LENGTH || SENTENCE_END.containsMatchIn(line)) return null
-        return line.takeIf { NUMBERED_VOLUME.matches(it) || REVERSED_VOLUME.matches(it) || LATIN_VOLUME.matches(it) }
-    }
+    private fun volumeTitleOrNull(raw: String): String? = LocalMetadata.volumeHeading(raw)
 
     private fun headingTitleOrNull(raw: String): String? = volumeTitleOrNull(raw) ?: chapterTitleOrNull(raw)
 
@@ -248,8 +207,6 @@ class TxtBookParser : BookParser {
 
     private companion object {
         const val MAX_FRONT_MATTER_LINES = 256
-        const val MAX_DESCRIPTION_LINES = 16
-        const val MAX_CHAPTER_TITLE_LENGTH = 88
         const val CHARSET_SAMPLE_BYTES = 128 * 1024
         // Keep import memory bounded even for a minified file or a book without recognizable TOC
         // headings. Database batching then persists one readable segment before scanning onward.
@@ -258,17 +215,7 @@ class TxtBookParser : BookParser {
         const val TXT_PARSE_YIELD_LINES = 256
         val TITLE_PATTERN = Regex("^\\s*(?:书名|書名|作品名|作品名称|作品名稱|小说名|小說名|小说名称|小說名稱)\\s*[：:]\\s*(.+?)\\s*$", RegexOption.IGNORE_CASE)
         val AUTHOR_PATTERN = Regex("^\\s*(?:作者|著者|作\\s*者)\\s*[：:]\\s*(.+?)\\s*$", RegexOption.IGNORE_CASE)
-        val DESCRIPTION_PATTERN = Regex("^\\s*(?:内容简介|內容簡介|作品简介|作品簡介|小说简介|小說簡介|简介|簡介|文案)\\s*[：:]?\\s*(.*?)\\s*$", RegexOption.IGNORE_CASE)
-        val DECORATED_TITLE_PATTERN = Regex("^\\s*[《〈]([^》〉]{1,80})[》〉]\\s*$")
-        val CHINESE_NUMBER = "0-9０-９零〇一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟IVXLCDMivxlcdm"
-        val NUMBERED_CHAPTER = Regex("^(?:正文\\s+)?第\\s*[$CHINESE_NUMBER]+\\s*[章节回话集幕](?:(?:\\s+|\\s*[-—:：、.．]\\s*).{1,48})?$", RegexOption.IGNORE_CASE)
-        val NUMBERED_VOLUME = Regex("^第\\s*[$CHINESE_NUMBER]+\\s*[卷部篇](?:(?:\\s+|\\s*[-—:：、.．]\\s*)[^。！？!?]{1,48})?$", RegexOption.IGNORE_CASE)
-        val REVERSED_VOLUME = Regex("^[卷部篇]\\s*[$CHINESE_NUMBER]+(?:(?:\\s+|\\s*[-—:：、.．]\\s*)[^。！？!?]{1,48})?$", RegexOption.IGNORE_CASE)
-        val NAMED_CHAPTER = Regex("^(?:序章|楔子|引子|前言|序言|后记|尾声|终章|大结局|番外(?:篇)?)(?:(?:\\s+|\\s*[-—:：、.．]\\s*).{1,48})?$", RegexOption.IGNORE_CASE)
-        val LATIN_CHAPTER = Regex("^chapter\\s+(?:[0-9]+|[ivxlcdm]+)(?:(?:\\s+|\\s*[-—:：.]\\s*).{1,48})?$", RegexOption.IGNORE_CASE)
-        val LATIN_VOLUME = Regex("^(?:part|volume|book)\\s+(?:[0-9]+|[ivxlcdm]+)(?:(?:\\s+|\\s*[-—:：.]\\s*)[^.!?]{1,48})?$", RegexOption.IGNORE_CASE)
-        val SENTENCE_END = Regex("[。！？!?]$")
-        val CHAPTER_DECORATIONS = charArrayOf('=', '-', '*', '#', '_', '~', '—', '－', '【', '】', '[', ']', '「', '」', '『', '』', '　')
+
         val LEGACY_CHARSETS = listOf(
             // Simplified and Traditional Chinese
             "GB18030", "Big5", "Big5-HKSCS", "HZ-GB-2312", "ISO-2022-CN",

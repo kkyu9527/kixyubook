@@ -7,11 +7,19 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 internal data class PackageDocument(
     val identifier: String,
     val title: String,
-    val author: String,
-    val description: String,
+    /** Ordered creator names that actually look like authors; never translators/editors. */
+    val authors: List<String>,
+    /** All usable descriptions in document order, already cleaned text. */
+    val descriptions: List<String>,
     val coverId: String?,
     val manifest: Map<String, ManifestItem>,
     val spine: List<String>,
+    /** Publisher sort title and series metadata; empty/null when the OPF does not declare them. */
+    val titleSort: String = "",
+    val seriesName: String = "",
+    val seriesIndex: Double? = null,
+    /** `guide` references that name an introduction page, resolved against the OPF path. */
+    val guideTitlePages: List<String> = emptyList(),
 )
 
 internal data class PackageCacheKey(

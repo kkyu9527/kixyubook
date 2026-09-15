@@ -26,7 +26,8 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         ReaderCacheBudget.EPUB_PACKAGE_MEMORY_BYTES, PACKAGE_INDEX_CACHE_SIZE,
         diagnosticsName = "epub-package",
     ) { document ->
-        256L + (document.identifier.length + document.title.length + document.author.length + document.description.length) * 2L +
+        256L + (document.identifier.length + document.title.length +
+            document.authors.sumOf { it.length } + document.descriptions.sumOf { it.length }) * 2L +
             document.spine.sumOf { 40L + it.length * 2L } + document.manifest.entries.sumOf { (key, item) ->
                 128L + (key.length + item.path.length + item.mediaType.length) * 2L + item.properties.sumOf { 40L + it.length * 2L }
             }
@@ -124,7 +125,13 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         clearMemoryCaches()
     }
 
-    override fun readMetadata(file: File, fallbackTitle: String): DocumentMetadata = ZipFile(file).use { zip ->
+    override fun readMetadata(
+        file: File,
+        fallbackTitle: String,
+        sourceName: String,
+        rules: List<LocalMetadata.FilenameRule>,
+        specs: List<com.kixyu9527.kixyubook.core.common.model.FilenameRuleSpec>,
+    ): DocumentMetadata = ZipFile(file).use { zip ->
         val pkg = readPackage(file, zip)
         val coverItem = pkg.manifest.values.firstOrNull { "cover-image" in it.properties }
             ?: pkg.coverId?.let(pkg.manifest::get)
@@ -135,13 +142,31 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 runCatching { zip.openBoundedEntry(entry, MAX_COVER_BYTES).use { it.readBytes() } }.getOrNull()
             }
         }
+        // The file name is an independent source: OPF metadata missing an author falls back to
+        // 《书名》作者：某某.txt patterns instead of leaving the book anonymous.
+        val fileCandidates = if (sourceName.isBlank()) {
+            LocalMetadata.ExtractedMetadata(emptyList(), emptyList(), emptyList(), emptySet())
+        } else {
+            LocalMetadata.parseFileName(sourceName, rules)
+        }
+        val descriptions = pkg.descriptions.ifEmpty { readFrontMatterDescriptions(zip, pkg) }
+        val fromSpec = LocalMetadata.specCandidates(specs, sourceName)
         DocumentMetadata(
             identityHint = pkg.identifier.takeIf { it.startsWith("urn:uuid:", true) }?.substringAfterLast(':'),
-            title = pkg.title.ifBlank { fallbackTitle.substringBeforeLast('.') },
-            author = pkg.author.ifBlank { "未知作者" },
-            description = pkg.description,
+            title = pkg.title.ifBlank {
+                LocalMetadata.mergeTitles(fromSpec.titles + fileCandidates.titles, fallbackTitle)
+            },
+            author = LocalMetadata.mergeAuthors(
+                pkg.authors.map { LocalMetadata.MetadataCandidate(it, LocalMetadata.MetadataSource.EPUB_ROLE) } +
+                    fromSpec.authors +
+                    fileCandidates.authors,
+            ),
+            description = LocalMetadata.mergeDescriptions(descriptions),
             coverBytes = cover,
             coverExtension = coverItem?.mediaType?.substringAfter('/')?.substringBefore('+') ?: "jpg",
+            titleSort = pkg.titleSort,
+            seriesName = pkg.seriesName,
+            seriesIndex = pkg.seriesIndex,
         )
     }
 
@@ -527,16 +552,261 @@ class EpubBookParser : BookParser, MemoryPressureListener {
             (0 until nodes.length).mapNotNull { nodes.item(it) as? Element }
                 .firstOrNull { it.getAttribute("name").equals("cover", true) }?.getAttribute("content")
         }
+        val extras = metadata?.packageExtras() ?: PackageExtras()
         return PackageDocument(
             metadata?.firstText("identifier").orEmpty(),
-            metadata?.firstText("title").orEmpty(),
-            metadata?.firstText("creator").orEmpty(),
-            metadata?.firstText("description").orEmpty(),
+            metadata?.mainTitle().orEmpty(),
+            authors = metadata?.let { element -> LocalMetadata.selectEpubAuthors(element.domCreators()) }.orEmpty(),
+            descriptions = metadata?.let { element ->
+                LocalMetadata.selectEpubDescriptions(element.domDescriptions())
+            }.orEmpty(),
             coverId,
             manifest,
             spine,
+            titleSort = extras.titleSort,
+            seriesName = extras.seriesName,
+            seriesIndex = extras.seriesIndex,
+            guideTitlePages = document.guideTitlePages(opfPath),
         )
     }
+
+    private data class PackageExtras(
+        val titleSort: String = "",
+        val seriesName: String = "",
+        val seriesIndex: Double? = null,
+    )
+
+    private fun Element.packageExtras(): PackageExtras {
+        var titleSort = ""
+        var seriesName = ""
+        var seriesIndex: Double? = null
+        val metas = getElementsByTagNameNS("*", "meta")
+        for (index in 0 until metas.length) {
+            val element = metas.item(index) as? Element ?: continue
+            when (element.getAttribute("name").lowercase()) {
+                "calibre:title_sort" -> titleSort = element.getAttribute("content").trim()
+                "calibre:series" -> seriesName = element.getAttribute("content").trim()
+                "calibre:series_index" ->
+                    seriesIndex = element.getAttribute("content").trim().toDoubleOrNull()
+            }
+        }
+        if (seriesName.isBlank()) {
+            // EPUB 3 spells the series as a belongs-to-collection collection.
+            for (index in 0 until metas.length) {
+                val element = metas.item(index) as? Element ?: continue
+                if (element.getAttribute("property").equals("belongs-to-collection", true)) {
+                    seriesName = element.textContent.orEmpty().trim()
+                    break
+                }
+            }
+        }
+        return PackageExtras(titleSort = titleSort, seriesName = seriesName, seriesIndex = seriesIndex)
+    }
+
+    private fun org.w3c.dom.Document.guideTitlePages(opfPath: String): List<String> {
+        val references = getElementsByTagNameNS("*", "reference")
+        val pages = mutableListOf<String>()
+        for (index in 0 until references.length) {
+            val element = references.item(index) as? Element ?: continue
+            val type = element.getAttribute("type").lowercase()
+            if (type != "title-page" && type != "introduction") continue
+            val href = element.getAttribute("href").takeIf(String::isNotBlank) ?: continue
+            pages += resolveArchivePath(opfPath, href)
+        }
+        return pages
+    }
+
+    /**
+     * Reads creators and their roles from the DOM. EPUB 2 puts the role in the `opf:role`
+     * attribute, EPUB 3 refines it with a separate `<meta property="role">`; both are resolved
+     * before selection so translators/editors never masquerade as authors.
+     */
+    private fun Element.domCreators(): List<LocalMetadata.EpubCreator> {
+        val nodes = getElementsByTagNameNS("*", "creator")
+        val creators = (0 until nodes.length).mapNotNull { index ->
+            val element = nodes.item(index) as? Element ?: return@mapNotNull null
+            DomCreator(
+                id = element.getAttribute("id"),
+                role = element.getAttributeNS(OPF_NAMESPACE, "role")
+                    .ifBlank { element.getAttribute("opf:role") },
+                fileAs = element.getAttributeNS(OPF_NAMESPACE, "file-as")
+                    .ifBlank { element.getAttribute("opf:file-as") },
+                name = element.textContent.orEmpty(),
+            )
+        }
+        val refineRoles = mutableMapOf<String, String>()
+        val refineFileAs = mutableMapOf<String, String>()
+        val metas = getElementsByTagNameNS("*", "meta")
+        for (index in 0 until metas.length) {
+            val element = metas.item(index) as? Element ?: continue
+            val id = element.getAttribute("refines").removePrefix("#")
+            if (id.isBlank()) continue
+            when {
+                element.getAttribute("property").equals("role", true) ->
+                    refineRoles[id] = element.textContent.orEmpty()
+                element.getAttribute("property").equals("file-as", true) ->
+                    refineFileAs[id] = element.textContent.orEmpty()
+            }
+        }
+        return creators.map { creator ->
+            LocalMetadata.EpubCreator(
+                name = creator.name,
+                role = creator.role.ifBlank { refineRoles[creator.id].orEmpty() },
+                sortName = creator.fileAs.ifBlank { refineFileAs[creator.id].orEmpty() },
+            )
+        }
+    }
+
+    /** EPUB 3 can declare the main title among subtitles; the first element is not always it. */
+    private fun Element.mainTitle(): String {
+        val titleNodes = getElementsByTagNameNS("*", "title")
+        val candidates = (0 until titleNodes.length).mapNotNull { index ->
+            val element = titleNodes.item(index) as? Element ?: return@mapNotNull null
+            element.getAttribute("id") to element.textContent.orEmpty().trim()
+        }.filter { it.second.isNotEmpty() }
+        if (candidates.isEmpty()) return ""
+        val titleTypes = mutableMapOf<String, String>()
+        val metas = getElementsByTagNameNS("*", "meta")
+        for (index in 0 until metas.length) {
+            val element = metas.item(index) as? Element ?: continue
+            if (!element.getAttribute("property").equals("title-type", true)) continue
+            val id = element.getAttribute("refines").removePrefix("#")
+            if (id.isNotBlank()) titleTypes[id] = element.textContent.orEmpty().trim().lowercase()
+        }
+        val main = candidates.firstOrNull { titleTypes[it.first].orEmpty().contains("main") }
+        return (main ?: candidates.first()).second
+    }
+
+    private fun Element.domDescriptions(): List<String> {
+        val nodes = getElementsByTagNameNS("*", "description")
+        return (0 until nodes.length).map { index -> nodes.item(index)?.textContent.orEmpty() }
+    }
+
+    /**
+     * A missing OPF description is not a reason to use chapter one as a synopsis. Only a page that
+     * a navigation entry or a front-matter heading explicitly names as an introduction is read.
+     */
+    private fun readFrontMatterDescriptions(zip: ZipFile, pkg: PackageDocument): List<String> {
+        val manifest = pkg.manifest.values
+        runCatching { readNavigationEntries(zip, pkg) }.getOrDefault(emptyMap())
+            .entries
+            .filter { LocalMetadata.isDescriptionHeading(it.value.title) }
+            .take(MAX_INTRO_PAGE_DOCS)
+            .forEach { (target, _) ->
+                readDescriptionFromPath(zip, target.substringBefore('#'), target.substringAfter('#', ""), manifest)
+                    ?.let { text -> return listOf(text) }
+            }
+        pkg.guideTitlePages.forEach { path ->
+            readDescriptionFromPath(zip, path, "", manifest)?.let { text -> return listOf(text) }
+        }
+        var scanned = 0
+        for (id in pkg.spine) {
+            if (scanned >= MAX_FRONT_MATTER_DOCS) break
+            val item = pkg.manifest[id] ?: continue
+            if (!item.mediaType.contains("xhtml", ignoreCase = true)) continue
+            scanned++
+            val content = readContent(zip, item.path, manifest) ?: continue
+            val heading = content.heading.orEmpty()
+            if (heading.isNotBlank() && LocalMetadata.isChapterHeading(heading)) break
+            if (heading.isNotBlank() && LocalMetadata.isDescriptionHeading(heading)) {
+                content.descriptionText(heading)?.let { return listOf(it) }
+            }
+        }
+        return emptyList()
+    }
+
+    private fun readDescriptionFromPath(
+        zip: ZipFile,
+        path: String,
+        fragment: String,
+        manifest: Collection<ManifestItem>,
+    ): String? {
+        val entry = zip.findEntry(path) ?: return null
+        val document = parseXhtmlDocument(zip, entry) ?: return null
+        // Keep the element with every text block so a #fragment anchor or the introduction
+        // heading can start the block and the following chapter heading can end it.
+        val textElements = mutableListOf<Pair<Element, String>>()
+        val content = readXhtml(document, zip, path, manifest) { element, text ->
+            textElements += element to text.text
+        }
+        val anchor = fragment.takeIf(String::isNotBlank)?.let { id ->
+            val nodes = document.getElementsByTagNameNS("*", "*")
+            (0 until nodes.length).asSequence()
+                .mapNotNull { nodes.item(it) as? Element }
+                .firstOrNull { it.getAttribute("id") == id || it.getAttribute("xml:id") == id }
+        }
+        val startIndex = when {
+            anchor != null -> textElements.indexOfFirst { (element, _) ->
+                generateSequence(element as org.w3c.dom.Node?) { it.parentNode }.any { it === anchor }
+            }
+            else -> textElements.indexOfFirst { (_, text) -> LocalMetadata.isDescriptionHeading(text) }
+        }
+        if (startIndex < 0) return null
+        val paragraphs = mutableListOf<String>()
+        for (index in startIndex until textElements.size) {
+            val text = textElements[index].second.trim()
+            if (text.isBlank()) continue
+            if (index == startIndex && LocalMetadata.isDescriptionHeading(text)) continue
+            if (LocalMetadata.isChapterHeading(text)) break
+            paragraphs += text
+        }
+        if (paragraphs.isEmpty()) {
+            // The anchor path may still resolve through the block list even when the heading is
+            // absent; fall back to the parsed content rather than returning nothing.
+            content.heading?.takeIf(LocalMetadata::isDescriptionHeading)?.let { heading ->
+                return content.descriptionText(heading)
+            }
+            return null
+        }
+        return LocalMetadata.cleanDescription(paragraphs.joinToString("\n")).takeIf { it.isNotBlank() }
+    }
+
+    private fun readContent(
+        zip: ZipFile,
+        path: String,
+        manifest: Collection<ManifestItem>,
+    ): XhtmlContent? = zip.findEntry(path)?.let { entry ->
+        // Reuse the chapter reader's fallback: a DOCTYPE or an oversized front page must not make
+        // the description silently disappear.
+        runCatching { readXhtmlWithFallback(zip, entry, path, manifest) }.getOrNull()
+    }
+
+    /** Parses a metadata XHTML with the same lenient retry the chapter reader uses. */
+    private fun parseXhtmlDocument(zip: ZipFile, entry: java.util.zip.ZipEntry): org.w3c.dom.Document? {
+        val strict = runCatching {
+            zip.openBoundedEntry(entry, MAX_EPUB_XHTML_BYTES).use { input ->
+                newDocumentBuilder().parse(input).also(::validateXmlDocument)
+            }
+        }
+        if (strict.isSuccess) return strict.getOrNull()
+        if (strict.exceptionOrNull() is EpubDomLimitExceeded) return null
+        return runCatching {
+            zip.openBoundedEntry(entry, MAX_EPUB_XHTML_BYTES).use { input ->
+                newDocumentBuilder(lenient = true).parse(input).also(::validateXmlDocument)
+            }
+        }.getOrNull()
+    }
+
+    private fun XhtmlContent.descriptionText(heading: String): String? {
+        var skippedHeading = heading.isBlank()
+        val paragraphs = mutableListOf<String>()
+        for (block in blocks) {
+            val text = (block as? XhtmlBlock.Text)?.value?.text?.trim().orEmpty()
+            if (text.isBlank()) continue
+            if (!skippedHeading && text.normalizedHeading() == heading.normalizedHeading()) {
+                skippedHeading = true
+                continue
+            }
+            // A synopsis page sometimes contains the first chapter in the same XHTML; stop there
+            // instead of collecting the chapter title and its body.
+            if (LocalMetadata.isChapterHeading(text)) break
+            paragraphs += text
+        }
+        if (paragraphs.isEmpty()) return null
+        return LocalMetadata.cleanDescription(paragraphs.joinToString("\n")).takeIf { it.isNotBlank() }
+    }
+
+    private data class DomCreator(val id: String, val role: String, val fileAs: String, val name: String)
 
     private fun readNavigationEntries(zip: ZipFile, pkg: PackageDocument): Map<String, NavigationEntry> = buildMap {
         val volumeIndices = linkedMapOf<String, Int>()
@@ -894,6 +1164,10 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         const val MAX_XML_ELEMENTS = 100_000
         const val MAX_CHAPTER_BLOCKS = 50_000
         const val MAX_CHAPTER_TEXT_CHARS = 4_000_000
+        /** Synopses are short; scanning more front matter can only misread chapter one. */
+        const val MAX_INTRO_PAGE_DOCS = 2
+        const val MAX_FRONT_MATTER_DOCS = 3
+        const val OPF_NAMESPACE = "http://www.idpf.org/2007/opf"
     }
 
 }

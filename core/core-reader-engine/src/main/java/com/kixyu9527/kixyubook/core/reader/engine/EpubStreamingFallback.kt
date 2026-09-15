@@ -51,7 +51,27 @@ internal fun readPackageStreaming(
     val manifest = linkedMapOf<String, ManifestItem>()
     val spine = mutableListOf<String>()
     val metadata = linkedMapOf<String, StringBuilder>()
+    val creatorNames = mutableListOf<StringBuilder>()
+    val creatorIds = mutableListOf<String>()
+    val creatorInlineRoles = mutableListOf<String>()
+    val rolesByRefineId = mutableMapOf<String, String>()
+    val roleBuilders = mutableMapOf<String, StringBuilder>()
+    val creatorFileAs = mutableListOf<String>()
+    val fileAsByRefineId = mutableMapOf<String, String>()
+    val fileAsBuilders = mutableMapOf<String, StringBuilder>()
+    val titleBuilders = mutableListOf<StringBuilder>()
+    val titleIds = mutableListOf<String>()
+    val titleTypeBuilders = mutableMapOf<String, StringBuilder>()
+    val guideTitlePages = mutableListOf<String>()
+    var titleSort = ""
+    var seriesName = ""
+    var seriesIndex: Double? = null
+    val descriptions = mutableListOf<StringBuilder>()
     var capture: String? = null
+    var captureBuilder: StringBuilder? = null
+    var pendingRoleRefine: String? = null
+    var pendingTitleTypeRefine: String? = null
+    var pendingFileAsRefine: String? = null
     var metadataDepth = 0
     var coverId: String? = null
     parseSax(input, lenient, object : DefaultHandler() {
@@ -59,12 +79,76 @@ internal fun readPackageStreaming(
             val name = elementName(localName, qName)
             when (name) {
                 "metadata" -> metadataDepth++
-                "identifier", "title", "creator", "description" -> if (metadataDepth > 0) {
+                "identifier" -> if (metadataDepth > 0) {
+                    val builder = metadata.getOrPut(name) { StringBuilder() }
                     capture = name
-                    metadata.getOrPut(name) { StringBuilder() }
+                    captureBuilder = builder
                 }
-                "meta" -> if (metadataDepth > 0 && attributes.value("name").equals("cover", true)) {
-                    coverId = attributes.value("content").takeIf(String::isNotBlank)
+                "title" -> if (metadataDepth > 0) {
+                    val builder = StringBuilder()
+                    titleBuilders += builder
+                    titleIds += attributes.value("id")
+                    capture = name
+                    captureBuilder = builder
+                }
+                "creator" -> if (metadataDepth > 0) {
+                    val builder = StringBuilder()
+                    creatorNames += builder
+                    creatorIds += attributes.value("id")
+                    creatorInlineRoles += attributes.value("role").ifBlank { attributes.value("opf:role") }
+                    creatorFileAs += attributes.value("file-as").ifBlank { attributes.value("opf:file-as") }
+                    capture = name
+                    captureBuilder = builder
+                }
+                "description" -> if (metadataDepth > 0) {
+                    val builder = StringBuilder()
+                    descriptions += builder
+                    capture = name
+                    captureBuilder = builder
+                }
+                "meta" -> if (metadataDepth > 0) {
+                    val metaName = attributes.value("name")
+                    if (metaName.equals("cover", true)) {
+                        coverId = attributes.value("content").takeIf(String::isNotBlank)
+                    }
+                    when (metaName.lowercase()) {
+                        "calibre:title_sort" -> titleSort = attributes.value("content").trim()
+                        "calibre:series" -> seriesName = attributes.value("content").trim()
+                        "calibre:series_index" ->
+                            seriesIndex = attributes.value("content").trim().toDoubleOrNull()
+                    }
+                    // EPUB 3 roles/title types are text content of <meta refines="#id" property="…">.
+                    val refine = attributes.value("refines").removePrefix("#")
+                    if (attributes.value("property").equals("role", true) && refine.isNotBlank()) {
+                        val builder = StringBuilder()
+                        rolesByRefineId[refine] = ""
+                        pendingRoleRefine = refine
+                        capture = "meta-role"
+                        captureBuilder = builder
+                        roleBuilders[refine] = builder
+                    }
+                    if (attributes.value("property").equals("title-type", true) && refine.isNotBlank()) {
+                        val builder = StringBuilder()
+                        titleTypeBuilders[refine] = builder
+                        pendingTitleTypeRefine = refine
+                        capture = "meta-title-type"
+                        captureBuilder = builder
+                    }
+                    if (attributes.value("property").equals("file-as", true) && refine.isNotBlank()) {
+                        val builder = StringBuilder()
+                        fileAsBuilders[refine] = builder
+                        fileAsByRefineId[refine] = ""
+                        pendingFileAsRefine = refine
+                        capture = "meta-file-as"
+                        captureBuilder = builder
+                    }
+                }
+                "reference" -> if (metadataDepth == 0) {
+                    val type = attributes.value("type").lowercase()
+                    if (type == "title-page" || type == "introduction") {
+                        val href = attributes.value("href")
+                        if (href.isNotBlank()) guideTitlePages += resolveArchivePath(opfPath, href)
+                    }
                 }
                 "item" -> {
                     val id = attributes.value("id")
@@ -93,7 +177,7 @@ internal fun readPackageStreaming(
         }
 
         override fun characters(ch: CharArray, start: Int, length: Int) {
-            val target = capture?.let(metadata::get) ?: return
+            val target = captureBuilder ?: return
             // Metadata is presentation-only. Do not let a malformed description consume memory
             // that should be reserved for the actual book body.
             if (target.length < MAX_STREAMED_METADATA_CHARS) {
@@ -103,18 +187,56 @@ internal fun readPackageStreaming(
 
         override fun endElement(uri: String?, localName: String?, qName: String?) {
             val name = elementName(localName, qName)
-            if (capture == name) capture = null
+            if (name == "meta" && pendingRoleRefine != null) {
+                rolesByRefineId[pendingRoleRefine!!] = roleBuilders[pendingRoleRefine]?.toString()?.trim().orEmpty()
+                pendingRoleRefine = null
+            }
+            if (name == "meta" && pendingTitleTypeRefine != null) {
+                pendingTitleTypeRefine = null
+            }
+            if (name == "meta" && pendingFileAsRefine != null) {
+                fileAsByRefineId[pendingFileAsRefine!!] = fileAsBuilders[pendingFileAsRefine]?.toString()?.trim().orEmpty()
+                pendingFileAsRefine = null
+            }
+            if (capture == name || ((capture == "meta-role" || capture == "meta-title-type" || capture == "meta-file-as") && name == "meta")) {
+                capture = null
+                captureBuilder = null
+            }
             if (name == "metadata") metadataDepth--
         }
     })
+    val creators = creatorNames.mapIndexed { index, name ->
+        val id = creatorIds.getOrNull(index).orEmpty()
+        LocalMetadata.EpubCreator(
+            name = name.toString(),
+            role = creatorInlineRoles.getOrNull(index).orEmpty().ifBlank {
+                rolesByRefineId[id].orEmpty()
+            },
+            sortName = creatorFileAs.getOrNull(index).orEmpty().ifBlank { fileAsByRefineId[id].orEmpty() },
+        )
+    }
+    val mainTitleIndex = titleBuilders.indices.firstOrNull { index ->
+        titleTypeBuilders[titleIds.getOrNull(index).orEmpty()]?.toString()?.trim()
+            ?.contains("main", ignoreCase = true) == true
+    }
+    val title = (mainTitleIndex ?: titleBuilders.indexOfFirst { it.isNotBlank() })
+        .takeIf { it >= 0 }
+        ?.let { titleBuilders[it].toString() }
+        .orEmpty()
+        .replace(Regex("\\s+"), " ")
+        .trim()
     return PackageDocument(
         identifier = metadata["identifier"].normalizedMetadata(),
-        title = metadata["title"].normalizedMetadata(),
-        author = metadata["creator"].normalizedMetadata(),
-        description = metadata["description"].normalizedMetadata(),
+        title = title,
+        authors = LocalMetadata.selectEpubAuthors(creators),
+        descriptions = LocalMetadata.selectEpubDescriptions(descriptions.map { it.toString() }),
         coverId = coverId,
         manifest = manifest,
         spine = spine,
+        titleSort = titleSort,
+        seriesName = seriesName,
+        seriesIndex = seriesIndex,
+        guideTitlePages = guideTitlePages,
     )
 }
 
