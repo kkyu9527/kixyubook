@@ -33,7 +33,6 @@ data class ReaderUiState(
     val restoreCharOffset: Int = 0,
     val settings: ReaderSettings = ReaderSettings(),
     val settingsLoaded: Boolean = false,
-    val bookSettingsEnabled: Boolean = false,
     val fontPath: String? = null,
     val availableFonts: List<UserFont> = emptyList(),
     val bookmarks: List<Bookmark> = emptyList(),
@@ -62,6 +61,8 @@ data class ReaderUiState(
     val canNavigateForward: Boolean = false,
     val epubFootnote: EpubLinkResult.Footnote? = null,
     val navigationVersion: Int = 0,
+    /** Bumped on every layout-affecting setting change so stale settles can be identified. */
+    val layoutVersion: Int = 0,
     /** An already displayed physical leaf; null means an explicit text-location restore. */
     val settledPageIndex: Int? = null,
     val loading: Boolean = true,
@@ -99,6 +100,7 @@ internal data class ReaderContentState(
     val annotations: List<ReaderAnnotation>,
     val selectedSearchIndex: Int,
     val navigationVersion: Int,
+    val layoutVersion: Int,
     val settledPageIndex: Int? = null,
     val sessionId: String = "",
 )
@@ -140,6 +142,7 @@ internal fun ReaderUiState.toReaderContentState() = ReaderContentState(
     annotations = annotations,
     selectedSearchIndex = selectedSearchIndex,
     navigationVersion = navigationVersion,
+    layoutVersion = layoutVersion,
     settledPageIndex = settledPageIndex,
     sessionId = sessionId,
 )

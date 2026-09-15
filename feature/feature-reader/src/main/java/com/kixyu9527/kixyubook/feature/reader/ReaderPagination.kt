@@ -45,7 +45,7 @@ internal fun PagedReader(
     chapter: ReaderChapter,
     spec: ReaderLayoutSpec,
     palette: ReaderRenderPalette,
-    savePosition: (Int, Int, Boolean, Int) -> Unit,
+    savePosition: ReaderPositionSettler,
     settlePage: (ReaderPageDestination) -> Unit,
     middleTap: () -> Unit,
     dismissControls: () -> Unit,
@@ -355,6 +355,7 @@ internal fun PagedReader(
                             lastVisible.pageCount > 0 &&
                             lastVisible.pageIndex == lastVisible.pageCount - 1,
                         visibleEnd,
+                        readerState.layoutVersion,
                     )
                 }
             }

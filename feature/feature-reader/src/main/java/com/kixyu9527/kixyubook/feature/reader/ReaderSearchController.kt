@@ -41,6 +41,8 @@ internal class ReaderSearchController(
     @Volatile private var generation = 0L
     private var lastPublished = 0L
     private val storageDispatcher = if (resultDirectory == null) Dispatchers.Unconfined else Dispatchers.IO
+    /** Chapter scanning is CPU-bound; it must not occupy the caller or the storage pool. */
+    private val analysisDispatcher = if (resultDirectory == null) Dispatchers.Unconfined else Dispatchers.Default
 
     fun search(query: String, searchScope: ReaderSearchScope) {
         val normalized = query.trim()
@@ -55,18 +57,17 @@ internal class ReaderSearchController(
             clearState()
             return
         }
-        val immediateResults = currentChapterResults(normalized)
         state.update {
             it.copy(
                 searchQuery = normalized,
                 searchScope = searchScope,
                 searchHistory = (listOf(normalized) + it.searchHistory)
                     .distinct().take(MAX_SEARCH_HISTORY),
-                searchResults = immediateResults,
+                searchResults = emptyList(),
                 searchResultStart = 0,
-                searchMatchCount = immediateResults.size,
-                searchOccurrenceCount = immediateResults.sumOf { it.matches.size },
-                selectedSearchIndex = if (immediateResults.isEmpty()) -1 else 0,
+                searchMatchCount = 0,
+                searchOccurrenceCount = 0,
+                selectedSearchIndex = -1,
                 selectedSearchMatch = 0,
                 searchReturnAvailable = false,
                 searchInProgress = searchScope == ReaderSearchScope.BOOK,
@@ -79,6 +80,19 @@ internal class ReaderSearchController(
         }
         searchJob = scope.launch {
             try {
+                // A large chapter must be scanned off the caller thread; the generation token below
+                // still discards this batch if the query changed while it ran.
+                val immediateResults = withContext(analysisDispatcher) { currentChapterResults(normalized) }
+                if (token != generation) return@launch
+                state.update {
+                    it.copy(
+                        searchResults = immediateResults,
+                        searchMatchCount = immediateResults.size,
+                        searchOccurrenceCount = immediateResults.sumOf { result -> result.matches.size },
+                        selectedSearchIndex = if (immediateResults.isEmpty()) -1 else 0,
+                        selectedSearchMatch = 0,
+                    )
+                }
                 withContext(storageDispatcher) { store.add(immediateResults) }
                 try { recordHistory(normalized) }
                 catch (cancelled: CancellationException) { throw cancelled }

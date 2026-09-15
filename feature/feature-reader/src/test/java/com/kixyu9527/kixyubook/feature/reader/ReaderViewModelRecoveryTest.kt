@@ -1,7 +1,6 @@
 package com.kixyu9527.kixyubook.feature.reader
 
 import androidx.lifecycle.ViewModelStore
-import com.kixyu9527.kixyubook.core.common.configuration.mergeBookSetting
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.operation.UserOperationState
 import com.kixyu9527.kixyubook.core.common.repository.*
@@ -41,6 +40,8 @@ class ReaderViewModelRecoveryTest {
     /** [MID_PARAGRAPH_OFFSET] only makes sense inside a paragraph long enough to contain it. */
     private fun longParagraphHarness(): ReaderRecoveryHarness = readerRecoveryHarness(
         paragraphText = { index -> if (index == 5) "很长的正文内容。".repeat(240) else "第 $index 段短正文" },
+        // Explicitly off so a test can toggle it and actually change the layout.
+        initialSettings = ReaderSettings(fontSize = 19f, showChapterTitle = false),
     )
 
     private companion object {
@@ -190,50 +191,6 @@ class ReaderViewModelRecoveryTest {
         }
     } }
 
-    @Test fun perBookProfileRoutesAnEditQueuedRightAfterEnablingToThisBook() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val harness = perBookHarness()
-            advanceUntilIdle()
-            assertFalse(harness.viewModel.uiState.value.bookSettingsEnabled)
-
-            // Toggle and edit within the same frame: the edit must follow the new per-book mode.
-            harness.viewModel.setBookSettingsEnabled(true)
-            harness.viewModel.updateSettings { it.copy(fontSize = 25f) }
-            advanceUntilIdle()
-
-            assertEquals(listOf(true), harness.enabledCalls)
-            assertTrue(
-                "fontSize must be written to the per-book profile",
-                harness.fieldWrites.any { it.first == "fontSize" && it.second.contains("25") },
-            )
-            assertTrue("global fontSize must not change", harness.globalFontWrites.none { it == 25f })
-        } finally {
-            Dispatchers.resetMain()
-        }
-    }
-
-    @Test fun disablingPerBookProfileBeforeTheDebouncedWriteKeepsGlobalUntouched() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val harness = perBookHarness()
-            advanceUntilIdle()
-            harness.viewModel.setBookSettingsEnabled(true)
-            advanceUntilIdle()
-            // The edit is queued for the debounced writer, then the mode is switched off first.
-            harness.viewModel.updateSettings { it.copy(fontSize = 26f) }
-            harness.viewModel.setBookSettingsEnabled(false)
-            advanceUntilIdle()
-
-            assertTrue(
-                "a per-book edit must not be reinterpreted as a global write",
-                harness.globalFontWrites.none { it == 26f },
-            )
-        } finally {
-            Dispatchers.resetMain()
-        }
-    }
-
     @Test fun failedChapterNavigationStartsAFreshLoadWhenRetried() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
@@ -332,18 +289,6 @@ class ReaderViewModelRecoveryTest {
         }
     }
 
-    @Test fun changingPerBookFontSizeThenReopeningRecoversTheTextPosition() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val harness = readerRecoveryHarness(bookSettingsEnabled = true)
-            assertFontChangeThenReopenRecovers(harness) { it.copy(fontSize = 30f) }
-            // The per-book profile must not leak into the global setting.
-            assertEquals(19f, harness.globalSettings.value.fontSize, 0f)
-        } finally {
-            Dispatchers.resetMain()
-        }
-    }
-
     @Test fun rapidFontChangesThenReopeningKeepTheTextPosition() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
@@ -351,13 +296,15 @@ class ReaderViewModelRecoveryTest {
             val first = harness.open()
             advanceUntilIdle()
             first.savePosition(6, 2)
-            advanceUntilIdle()
+            awaitDurable(harness, 2)
             first.updateSettings { it.copy(fontSize = 22f) }
             first.updateSettings { it.copy(fontSize = 26f) }
             first.updateSettings { it.copy(fontSize = 30f) }
             advanceUntilIdle()
             first.checkpointReadingProgress()
-            advanceUntilIdle()
+            awaitCondition("the checkpoint was not persisted") {
+                harness.durable.value?.paragraphIndex == 6
+            }
             harness.closeAll()
             advanceUntilIdle()
 
@@ -369,6 +316,27 @@ class ReaderViewModelRecoveryTest {
             advanceUntilIdle()
             assertEquals(6, second.uiState.value.restorePosition)
             assertEquals(2, second.uiState.value.restoreCharOffset)
+            harness.closeAll()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun twoRapidFieldChangesKeepBothFields() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = readerRecoveryHarness()
+            val reader = harness.open()
+            awaitCondition("the chapter did not load") { reader.uiState.value.chapter != null }
+
+            // The UI submits field-level intent; a stale full snapshot would revert fontSize here.
+            reader.updateSettings { it.copy(fontSize = 25f) }
+            reader.updateSettings { it.copy(lineHeight = 2f) }
+
+            awaitCondition("both writes were not persisted") {
+                harness.globalSettings.value.fontSize == 25f &&
+                    harness.globalSettings.value.lineHeight == 2f
+            }
             harness.closeAll()
         } finally {
             Dispatchers.resetMain()
@@ -408,13 +376,14 @@ class ReaderViewModelRecoveryTest {
             awaitCondition("the chapter did not load") { reader.uiState.value.chapter != null }
             reader.onPageSettled(5, MID_PARAGRAPH_OFFSET, chapterComplete = false, visibleEndPosition = 6)
             awaitDurable(harness, MID_PARAGRAPH_OFFSET)
+            val oldLayoutVersion = reader.uiState.value.layoutVersion
 
             harness.globalSettings.value = harness.globalSettings.value.copy(fontSize = 30f)
             awaitCondition("the font change was not observed") {
                 reader.uiState.value.settings.fontSize == 30f
             }
             // The old layout reports its own first page after the reflow was requested.
-            reader.onPageSettled(0, 0, chapterComplete = false, visibleEndPosition = 0)
+            reader.onPageSettled(0, 0, chapterComplete = false, visibleEndPosition = 0, layoutVersion = oldLayoutVersion)
             advanceUntilIdle()
 
             assertEquals(5, reader.uiState.value.restorePosition)
@@ -426,7 +395,7 @@ class ReaderViewModelRecoveryTest {
         }
     }
 
-    @Test fun newSettlesAreAcceptedAgainOnceTheReflowHasRendered() = runTest {
+    @Test fun theReflowedLayoutSettlesAreAcceptedWithoutARenderCallback() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val harness = longParagraphHarness()
@@ -434,13 +403,18 @@ class ReaderViewModelRecoveryTest {
             awaitCondition("the chapter did not load") { reader.uiState.value.chapter != null }
             reader.onPageSettled(5, MID_PARAGRAPH_OFFSET, chapterComplete = false, visibleEndPosition = 6)
             awaitDurable(harness, MID_PARAGRAPH_OFFSET)
-            harness.globalSettings.value = harness.globalSettings.value.copy(fontSize = 30f)
-            awaitCondition("the font change was not observed") {
-                reader.uiState.value.settings.fontSize == 30f
+            val versionBefore = reader.uiState.value.layoutVersion
+            harness.globalSettings.value = harness.globalSettings.value.copy(showChapterTitle = true)
+            awaitCondition("the setting change was not observed") {
+                reader.uiState.value.settings.showChapterTitle
             }
+            assertTrue(
+                "the layout-affecting change must bump layoutVersion",
+                reader.uiState.value.layoutVersion > versionBefore,
+            )
 
-            // The reflowed layout is on screen; a genuine page turn must still persist.
-            reader.chapterRendered(reader.uiState.value.navigationVersion)
+            // Scroll mode never re-fires chapterRendered on a layout change; a settle carrying the
+            // current layout version must still persist instead of being blocked forever.
             reader.onPageSettled(7, 3, chapterComplete = false, visibleEndPosition = 8)
             awaitDurable(harness, 3)
 
@@ -526,13 +500,16 @@ class ReaderViewModelRecoveryTest {
         transform: (ReaderSettings) -> ReaderSettings,
     ) {
         val first = harness.open()
-        advanceUntilIdle()
+        awaitCondition("the chapter did not load") { first.uiState.value.chapter != null }
         first.savePosition(5, 3)
-        advanceUntilIdle()
+        awaitDurable(harness, 3)
+        val before = first.uiState.value.settings
         first.updateSettings(transform)
-        advanceUntilIdle()
+        awaitCondition("the font change was not observed") { first.uiState.value.settings != before }
         first.checkpointReadingProgress()
-        advanceUntilIdle()
+        awaitCondition("the checkpoint was not persisted") {
+            harness.durable.value?.paragraphIndex == 5
+        }
         harness.closeAll()
         advanceUntilIdle()
 
@@ -542,9 +519,9 @@ class ReaderViewModelRecoveryTest {
 
         // A fresh session restores by text position, not by the previous layout's page number.
         val second = harness.open()
-        advanceUntilIdle()
-        assertEquals(5, second.uiState.value.restorePosition)
-        assertEquals(3, second.uiState.value.restoreCharOffset)
+        awaitCondition("the reopened session did not restore the saved position") {
+            second.uiState.value.restorePosition == 5 && second.uiState.value.restoreCharOffset == 3
+        }
         harness.closeAll()
     }
 }
@@ -572,7 +549,6 @@ internal class ReaderRecoveryHarness(
 
 internal fun readerRecoveryHarness(
     format: BookFormat = BookFormat.EPUB,
-    bookSettingsEnabled: Boolean = false,
     paragraphCount: Int = 20,
     paragraphText: (Int) -> String = { index -> "第 $index 段正文" },
     initialProgress: ReadingProgress? = null,
@@ -616,20 +592,6 @@ internal fun readerRecoveryHarness(
         override suspend fun addSearchHistory(query: String) = Unit
         override suspend fun clearSearchHistory() = Unit
     }
-    val overrides = MutableStateFlow(if (bookSettingsEnabled) mapOf("book" to "{}") else emptyMap())
-    val bookSettings = object : BookSettingsRepository {
-        override val overrides: Flow<Map<String, String>> = overrides
-        override suspend fun setEnabled(bookUuid: String, enabled: Boolean) {
-            overrides.value = if (enabled) overrides.value + (bookUuid to "{}") else overrides.value - bookUuid
-        }
-        override suspend fun updateField(bookUuid: String, field: String, encodedValue: String) {
-            overrides.value = overrides.value + (bookUuid to mergeBookSetting(
-                globalSettings.value, overrides.value[bookUuid] ?: "{}", field, encodedValue,
-            ))
-        }
-        override suspend fun clearFontReferences(fontUuid: String) = Unit
-        override suspend fun replaceAll(values: Map<String, String>) { overrides.value = values }
-    }
     val fonts = fake<FontRepository> { method, _ ->
         check(method == "observeFonts"); flowOf(emptyList<UserFont>())
     }
@@ -652,101 +614,12 @@ internal fun readerRecoveryHarness(
     return ReaderRecoveryHarness(
         factory = {
             ReaderViewModel(
-                "book", repository, settings, fonts, stats, sync, corrections, annotations, context, bookSettings,
+                "book", repository, settings, fonts, stats, sync, corrections, annotations, context,
             )
         },
         globalSettings = globalSettings,
         durable = durable,
     )
-}
-
-private class PerBookHarness(
-    val viewModel: ReaderViewModel,
-    val enabledCalls: MutableList<Boolean>,
-    val fieldWrites: MutableList<Pair<String, String>>,
-    val globalFontWrites: MutableList<Float>,
-)
-
-private fun perBookHarness(): PerBookHarness {
-    val globalSettings = MutableStateFlow(ReaderSettings())
-    val globalFontWrites = mutableListOf<Float>()
-    val settingsRepository = object : ReaderSettingsRepository {
-        override val settings: Flow<ReaderSettings> = globalSettings
-        override val readingGoalMinutes: Flow<Int> = flowOf(30)
-        override val searchHistory: Flow<List<String>> = flowOf(emptyList())
-        override suspend fun update(transform: (ReaderSettings) -> ReaderSettings) {
-            globalSettings.value = transform(globalSettings.value)
-            globalFontWrites += globalSettings.value.fontSize
-        }
-        override suspend fun setReadingGoalMinutes(minutes: Int) = Unit
-        override suspend fun addSearchHistory(query: String) = Unit
-        override suspend fun clearSearchHistory() = Unit
-    }
-    val overrides = MutableStateFlow<Map<String, String>>(emptyMap())
-    val enabledCalls = mutableListOf<Boolean>()
-    val fieldWrites = mutableListOf<Pair<String, String>>()
-    val bookSettings = object : BookSettingsRepository {
-        override val overrides: Flow<Map<String, String>> = overrides
-        override suspend fun setEnabled(bookUuid: String, enabled: Boolean) {
-            enabledCalls += enabled
-            overrides.value = if (enabled) overrides.value + (bookUuid to "{}") else overrides.value - bookUuid
-        }
-        override suspend fun updateField(bookUuid: String, field: String, encodedValue: String) {
-            fieldWrites += field to encodedValue
-            overrides.value = overrides.value + (bookUuid to mergeBookSetting(
-                globalSettings.value, overrides.value[bookUuid] ?: "{}", field, encodedValue,
-            ))
-        }
-        override suspend fun clearFontReferences(fontUuid: String) = Unit
-        override suspend fun replaceAll(values: Map<String, String>) { overrides.value = values }
-    }
-    val chapters = MutableStateFlow(listOf(Chapter(12, "book", "第一章", 0, chapterKey = "first")))
-    val repository = object : BookRepository by fake<BookRepository>({ method, _ ->
-        when (method) {
-            "observeChapters" -> chapters
-            "observeProgress" -> MutableStateFlow<ReadingProgress?>(null)
-            "observeBookmarks" -> flowOf(emptyList<Bookmark>())
-            "getBook" -> Book("book", "测试", "", "", null, BookFormat.EPUB, "", "", 0, "hash")
-            "readEpubNavigation" -> emptyList<EpubNavigationEntry>()
-            "setReaderSessionActive", "setReaderInteractionActive", "releaseReaderMemory" -> Unit
-            else -> error("Unexpected book call: $method")
-        }
-    }) {
-        override suspend fun getChapter(
-            bookUuid: String,
-            chapterIndex: Int,
-            priority: ChapterLoadPriority,
-        ): ChapterContent {
-            val chapter = chapters.value[chapterIndex]
-            return ChapterContent(
-                chapter,
-                List(5) { index -> Paragraph(index.toLong(), chapter.id, index, "正文 $index") },
-            )
-        }
-        override suspend fun saveProgress(progress: ReadingProgress) = Unit
-    }
-    val fonts = fake<FontRepository> { method, _ ->
-        check(method == "observeFonts"); flowOf(emptyList<UserFont>())
-    }
-    val stats = fake<ReadingStatsRepository> { method, _ -> error("Unexpected stats call: $method") }
-    val sync = fake<CloudSyncCoordinator> { method, _ ->
-        when (method) {
-            "getPriorityBookSync" -> MutableStateFlow(PriorityBookSyncState("book", PriorityBookSyncPhase.PULLING))
-            "prioritizeBook", "releaseBook" -> Unit
-            else -> error("Unexpected sync call: $method")
-        }
-    }
-    val corrections = fake<TextCorrectionRepository> { method, _ ->
-        check(method == "observeBookCorrections"); flowOf(emptyList<TextCorrection>())
-    }
-    val annotations = fake<ReaderAnnotationRepository> { method, _ ->
-        check(method == "observeBookAnnotations"); flowOf(emptyList<ReaderAnnotation>())
-    }
-    val viewModel = ReaderViewModel(
-        "book", repository, settingsRepository, fonts, stats, sync, corrections, annotations,
-        androidx.test.core.app.ApplicationProvider.getApplicationContext(), bookSettings,
-    )
-    return PerBookHarness(viewModel, enabledCalls, fieldWrites, globalFontWrites)
 }
 
 private inline fun <reified T> fake(crossinline call: (String, Array<out Any?>?) -> Any?): T =

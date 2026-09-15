@@ -60,7 +60,7 @@ class ReaderPagedContentHandoffTest {
                     PagedReader(
                         state = state.toReaderContentState(), chapter = state.chapter!!,
                         spec = spec, palette = ReaderRenderPalette(Color.White, Color.Black, Color.Black, Color.Blue, Color.Gray),
-                        savePosition = { _, _, _, _ -> },
+                        savePosition = { _, _, _, _, _ -> },
                         settlePage = { destination ->
                             destinations += destination
                             coordinator.onMemoryPressure(MemoryPressureLevel.CRITICAL)

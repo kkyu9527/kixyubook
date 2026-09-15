@@ -43,12 +43,24 @@ private fun rememberReaderFoldingFeature(): FoldingFeature? {
     return foldingFeature
 }
 
+/**
+ * Reports the settled visible range together with the layout version it was measured with, so the
+ * ViewModel can ignore settles from a layout that a setting change has already superseded.
+ */
+internal typealias ReaderPositionSettler = (
+    position: Int,
+    charOffset: Int,
+    chapterComplete: Boolean,
+    visibleEndParagraph: Int,
+    layoutVersion: Int,
+) -> Unit
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ReaderContent(
     state: ReaderContentState,
     palette: ReaderRenderPalette,
-    savePosition: (Int, Int, Boolean, Int) -> Unit,
+    savePosition: ReaderPositionSettler,
     moveChapterFromPage: (Int, Int, Boolean) -> Unit,
     settlePage: (ReaderPageDestination) -> Unit,
     middleTap: () -> Unit,
@@ -64,6 +76,10 @@ internal fun ReaderContent(
 ) {
     val chapter = state.chapter ?: return
     val density = LocalDensity.current
+    // Scroll mode has no page render callback, so its long-lived collector must read the latest
+    // layout version when it reports a position; a captured snapshot would keep reporting an
+    // already-superseded version and every later save would be ignored.
+    val latestLayoutVersion by rememberUpdatedState(state.layoutVersion)
     val foldingFeature = rememberReaderFoldingFeature()
     val paginationCoordinator = rememberReaderPaginationCoordinator()
     val paginationMeasurer = rememberTextMeasurer(cacheSize = READER_TEXT_MEASURE_CACHE_SIZE)
@@ -132,7 +148,7 @@ internal fun ReaderContent(
                         val visibleEnd = contentParagraphs.getOrNull(lastVisibleItem ?: 0)?.index ?: position
                         Triple(position, visibleEnd, chapterComplete)
                     }.filterNotNull().distinctUntilChanged().collect { (position, visibleEnd, complete) ->
-                        savePosition(position, 0, complete, visibleEnd)
+                        savePosition(position, 0, complete, visibleEnd, latestLayoutVersion)
                     }
                 }
                 LaunchedEffect(listState) {
