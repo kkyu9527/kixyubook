@@ -46,7 +46,6 @@ internal class CloudRemoteStateApplier(
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
-    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository = com.kixyu9527.kixyubook.core.common.repository.NoBookSettings,
 ) {
     suspend fun restoreBook(token: String, uuid: String, knownRemote: Map<String, DriveObject>) {
         val key = "books/$uuid/metadata"
@@ -68,10 +67,22 @@ internal class CloudRemoteStateApplier(
             val temp = tempFile("book-meta")
             try {
                 drive.download(token, metadata.id, temp)
-                val book = parseBook(JSONObject(temp.readText()))
+                val payload = JSONObject(temp.readText())
+                val book = parseBook(payload)
                 mutations.withoutRecording {
                     applyBookMetadataFromRemote(database, syncDao, book.uuid) {
-                        bookRepository.updateBookMetadata(book.uuid, book.title, book.author, book.description)
+                        bookRepository.applySyncedBookMetadata(book.uuid, book.title, book.author, book.description)
+                        // Schema 1 has no sort/series/original-name fields: absent means "unknown",
+                        // never "clear what this device already has".
+                        if (payload.optInt("schema", 1) >= 2) {
+                            bookRepository.updateBookImportedMetadata(
+                                bookUuid = book.uuid,
+                                originalDisplayName = book.originalDisplayName,
+                                titleSort = book.titleSort,
+                                seriesName = book.seriesName,
+                                seriesIndex = book.seriesIndex,
+                            )
+                        }
                         bookRepository.setCategory(book.uuid, book.category)
                     }
                 }
@@ -145,9 +156,8 @@ internal class CloudRemoteStateApplier(
         val goal = json.optInt("readingGoalMinutes", 30)
         val library = json.optJSONObject("library")?.let(::jsonToLibraryPreferences)
         val reminder = json.optJSONObject("readingReminder")?.let(::jsonToReadingReminder)
-        val overrides = json.optJSONObject("bookOverrides")?.let(::decodeBookSettings)
         mutations.withoutRecording {
-            applySettingsAcrossStores(remote, goal, library, reminder, overrides)
+            applySettingsAcrossStores(remote, goal, library, reminder)
         }
         return true
     }
@@ -164,19 +174,16 @@ internal class CloudRemoteStateApplier(
         goal: Int,
         library: LibraryPreferences?,
         reminder: ReadingReminderSettings?,
-        overrides: Map<String, String>?,
     ) {
         val previousReader = settingsRepository.settings.first()
         val previousGoal = settingsRepository.readingGoalMinutes.first()
         val previousLibrary = library?.let { libraryPreferencesRepository.preferences.first() }
         val previousReminder = reminder?.let { readingReminders.settings.first() }
-        val previousOverrides = overrides?.let { bookSettings.overrides.first() }
 
         applySettingsWithRollback(
             applyReader = {
                 settingsRepository.update { reader }
                 settingsRepository.setReadingGoalMinutes(goal)
-                overrides?.let { bookSettings.replaceAll(it) }
             },
             applyLibrary = { libraryPreferencesRepository.replace(requireNotNull(library)) },
             applyReminder = { readingReminders.replace(requireNotNull(reminder)) },
@@ -185,7 +192,6 @@ internal class CloudRemoteStateApplier(
             rollbackReader = {
                 settingsRepository.update { previousReader }
                 settingsRepository.setReadingGoalMinutes(previousGoal)
-                previousOverrides?.let { bookSettings.replaceAll(it) }
             },
             rollbackLibrary = { libraryPreferencesRepository.replace(requireNotNull(previousLibrary)) },
             rollbackReminder = { readingReminders.replace(requireNotNull(previousReminder)) },

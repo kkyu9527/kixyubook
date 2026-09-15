@@ -26,7 +26,6 @@ internal class CloudSyncPayloadFactory(
     private val libraryPreferencesRepository: LibraryPreferencesRepository,
     private val readingReminders: ReadingReminderScheduler,
     private val preferences: SyncPreferencesStore,
-    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository = com.kixyu9527.kixyubook.core.common.repository.NoBookSettings,
 ) {
     suspend fun materialize(
         mutation: SyncOutboxEntity,
@@ -57,12 +56,18 @@ internal class CloudSyncPayloadFactory(
             listOf(jsonObject("progress/${progress.bookUuid}", progressJson(progress, chapterKey)))
         }.orEmpty()
         SyncEntityType.BOOKMARKS -> {
-            val chapters = books.getChapters(mutation.entityId).associateBy { it.id }
-            val values = books.getBookmarks(mutation.entityId)
-            // Pending bookmarks are part of the bookmark snapshot, not a local-only side table:
-            // otherwise a device that reparsed the book would upload a list missing them.
-            val pending = books.getPendingBookmarks(mutation.entityId)
-            listOf(jsonObject("bookmarks/${mutation.entityId}", bookmarksJson(mutation.entityId, values, pending, chapters)))
+            // Chapters and both bookmark tables must come from one transaction: a bookmark
+            // relocated from pending to located between reads would otherwise be missing from the
+            // uploaded list, and a remote replace would then delete it everywhere. Pending
+            // bookmarks are part of the snapshot, not a local-only side table.
+            val snapshot = books.bookmarkSnapshot(mutation.entityId)
+            val chapters = snapshot.chapters.associateBy { it.id }
+            listOf(
+                jsonObject(
+                    "bookmarks/${mutation.entityId}",
+                    bookmarksJson(mutation.entityId, snapshot.located, snapshot.pending, chapters),
+                ),
+            )
         }
         SyncEntityType.SETTINGS -> listOf(jsonObject("settings/global", settingsJson()))
         SyncEntityType.SESSION -> books.getSessionBySyncUuid(mutation.entityId)?.let {
@@ -94,7 +99,6 @@ internal class CloudSyncPayloadFactory(
         readingGoalMinutes = settingsRepository.readingGoalMinutes.first(),
         library = libraryPreferencesRepository.preferences.first(),
         readingReminder = readingReminders.settings.first(),
-        bookOverrides = bookSettings.overrides.first(),
     )
 
 

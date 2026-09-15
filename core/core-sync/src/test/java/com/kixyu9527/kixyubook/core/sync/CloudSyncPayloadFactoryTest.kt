@@ -12,6 +12,7 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.database.KixyuDatabase
+import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.entity.BookEntity
 import com.kixyu9527.kixyubook.core.database.entity.BookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.ChapterEntity
@@ -60,6 +61,18 @@ class CloudSyncPayloadFactoryTest {
         override suspend fun replace(preferences: LibraryPreferences) = Unit
     }
 
+    private fun factory(context: Context, database: KixyuDatabase, dao: BookDao) = CloudSyncPayloadFactory(
+        context = context,
+        books = dao,
+        fonts = database.fontDao(),
+        corrections = database.textCorrectionDao(),
+        annotations = database.readerAnnotationDao(),
+        settingsRepository = settingsRepository,
+        libraryPreferencesRepository = libraryPreferences,
+        readingReminders = ReadingReminderScheduler(context, NotificationPreferencesStore(context, recorder)),
+        preferences = SyncPreferencesStore(context),
+    )
+
     @Test
     fun uploadedBookmarkSnapshotIncludesPendingRecords() = runBlocking(Dispatchers.IO) {
         val context = RuntimeEnvironment.getApplication() as Context
@@ -70,22 +83,11 @@ class CloudSyncPayloadFactoryTest {
             dao.insertChapter(ChapterEntity(1, "book", "第一章", 0, chapterKey = "k"))
             dao.insertBookmark(BookmarkEntity("located", "book", 1, 0, "已定位", 1))
             dao.insertPendingBookmark(PendingBookmarkEntity("pending", "book", "锚点正文", "待恢复", 2))
-            val factory = CloudSyncPayloadFactory(
-                context = context,
-                books = dao,
-                fonts = database.fontDao(),
-                corrections = database.textCorrectionDao(),
-                annotations = database.readerAnnotationDao(),
-                settingsRepository = settingsRepository,
-                libraryPreferencesRepository = libraryPreferences,
-                readingReminders = ReadingReminderScheduler(context, NotificationPreferencesStore(context, recorder)),
-                preferences = SyncPreferencesStore(context),
-            )
             val mutation = SyncOutboxEntity(
                 "m1", SyncEntityType.BOOKMARKS.name, "book", "UPSERT", 1, 1, "device",
             )
 
-            val payload = factory.materialize(mutation, includeLargePayload = false).single()
+            val payload = factory(context, database, dao).materialize(mutation, includeLargePayload = false).single()
             val items = JSONObject(payload.file.readText()).getJSONArray("items")
             val byUuid = (0 until items.length()).associate { index ->
                 val item = items.getJSONObject(index)
@@ -100,4 +102,5 @@ class CloudSyncPayloadFactoryTest {
             database.close()
         }
     }
+
 }
