@@ -5,6 +5,8 @@ import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticFailure
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParser
 import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapter
+import com.kixyu9527.kixyubook.core.reader.engine.DocumentMetadata
+import com.kixyu9527.kixyubook.core.reader.engine.LocalMetadata
 import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
@@ -86,7 +88,7 @@ internal fun String.normalizedEpubIdentityTitle(): String =
 
 internal fun String.shortDiagnosticId(): String = take(8)
 
-internal fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category)
+internal fun BookEntity.toModel() = Book(uuid, title, author, description, coverPath, BookFormat.valueOf(format), originalPath, storagePath, createdTime, contentHash, category, originalDisplayName, titleSort, seriesName, seriesIndex)
 internal fun ChapterEntity.toModel() = Chapter(
     id,
     bookUuid,
@@ -100,6 +102,30 @@ internal fun ReadingProgressEntity.toModel() = ReadingProgress(
     bookUuid, chapterId, position, offset, updatedTime, fraction,
     chapterKey, paragraphIndex, charOffset, quoteAnchor,
 )
+
+/** The parent folder name encoded in a SAF document id (`primary:Books/《书名》作者/01.txt`). */
+internal fun folderNameFromDocumentId(documentId: String): String? {
+    val lastSlash = documentId.lastIndexOf('/')
+    if (lastSlash <= 0) return null
+    return documentId.substring(0, lastSlash).substringAfterLast('/').takeIf(String::isNotBlank)
+}
+
+/**
+ * Merges folder-name candidates after the file itself was parsed. The folder only fills fields the
+ * file left unknown, so a real file name never loses to its directory.
+ */
+internal fun DocumentMetadata.withFolderFallback(folderName: String?, fallbackTitle: String): DocumentMetadata {
+    if (folderName.isNullOrBlank()) return this
+    val folder = LocalMetadata.parseFileName(folderName)
+    return copy(
+        author = if (author == LocalMetadata.UNKNOWN_AUTHOR) {
+            LocalMetadata.mergeAuthors(folder.authors)
+        } else {
+            author
+        },
+        title = if (title == fallbackTitle) LocalMetadata.mergeTitles(folder.titles, title) else title,
+    )
+}
 
 internal fun stableChapterKey(bookUuid: String, index: Int, title: String): String {
     val input = "$bookUuid|$index|${title.singleLineBookHeading().lowercase()}"

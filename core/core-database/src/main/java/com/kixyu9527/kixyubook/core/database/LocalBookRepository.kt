@@ -4,6 +4,7 @@ import com.kixyu9527.kixyubook.core.common.cache.WeightedLruCache
 
 import android.content.Context
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import androidx.core.content.edit
@@ -12,9 +13,12 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.kixyu9527.kixyubook.core.common.model.FilenameRuleSpec
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.common.repository.BookRepository
 import com.kixyu9527.kixyubook.core.common.repository.CompleteLibraryRepository
+import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
+import com.kixyu9527.kixyubook.core.common.repository.MetadataRefreshResult
 import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
@@ -31,12 +35,14 @@ import com.kixyu9527.kixyubook.core.database.dao.BookDao
 import com.kixyu9527.kixyubook.core.database.dao.ImportDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 import com.kixyu9527.kixyubook.core.reader.engine.BookParserRegistry
+import com.kixyu9527.kixyubook.core.reader.engine.LocalMetadata
 import com.kixyu9527.kixyubook.core.reader.engine.BookParser
 import com.kixyu9527.kixyubook.core.reader.engine.DocumentChapter
 import com.kixyu9527.kixyubook.core.reader.engine.EpubBookParser
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderPaginationCacheMaintenance
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -74,6 +80,7 @@ class LocalBookRepository @Inject constructor(
     private val textCorrections: TextCorrectionRepository,
     private val annotations: ReaderAnnotationRepository,
     private val importDao: ImportDao,
+    private val libraryPreferences: LibraryPreferencesRepository,
 ) : BookRepository, CompleteLibraryRepository, MemoryPressureListener {
     private val parsers = BookParserRegistry()
     private val bookMutations = BookMutationStore(context, database, dao, syncMutations)
@@ -363,7 +370,12 @@ class LocalBookRepository @Inject constructor(
                 updateImportProgress(importRun, rawUri, ImportStage.READING_METADATA, .36f, ImportItemStatus.RUNNING)
                 val format = detectFormat(displayName, temp)
                 val parser = parsers.parserFor(format)
-                val metadata = parser.readMetadata(temp, displayName)
+                val titleFallback = displayName.substringBeforeLast('.').ifBlank { displayName }
+                // A SAF document id contains the folder path; the folder is a useful lower-confidence
+                // source when the file name itself carries no author (e.g. `01.txt`).
+                val folderName = folderNameFor(rawUri.toUri())
+                val metadata = parser.readMetadata(temp, titleFallback, displayName, filenameRules(), filenameSpecs())
+                    .withFolderFallback(folderName, titleFallback)
                 val identity = metadata.identityHint?.let { runCatching { UUID.fromString(it).toString() }.getOrNull() }
                 val identityMatch = identity?.let { dao.getBook(it) }
                 if (
@@ -404,7 +416,7 @@ class LocalBookRepository @Inject constructor(
                 } else emptyList()
                 database.withTransaction {
                     dao.insertBook(
-                        BookEntity(bookUuid, metadata.title, metadata.author, metadata.description, coverPath, format.name, rawUri, stored.absolutePath, System.currentTimeMillis(), hash, "未分类"),
+                        BookEntity(bookUuid, metadata.title, metadata.author, metadata.description, coverPath, format.name, rawUri, stored.absolutePath, System.currentTimeMillis(), hash, "未分类", originalDisplayName = displayName, originalFolderName = folderName.orEmpty(), titleSort = metadata.titleSort, seriesName = metadata.seriesName, seriesIndex = metadata.seriesIndex),
                     )
                     epubIndex.registerDirectory(bookUuid, outlines)
                     syncMutations.record(SyncEntityType.BOOK, bookUuid)
@@ -566,6 +578,16 @@ class LocalBookRepository @Inject constructor(
         )
     }
 
+    private suspend fun filenameRules(): List<LocalMetadata.FilenameRule> =
+        LocalMetadata.parseFilenameRules(libraryPreferences.preferences.first().filenameRules).rules
+
+    private suspend fun filenameSpecs(): List<FilenameRuleSpec> =
+        libraryPreferences.preferences.first().filenameRuleSpecs
+
+    private fun folderNameFor(uri: android.net.Uri): String? = runCatching {
+        folderNameFromDocumentId(DocumentsContract.getDocumentId(uri))
+    }.getOrNull()
+
     private fun displayNameFor(uri: android.net.Uri): String =
         context.contentResolver.query(
             uri,
@@ -677,7 +699,8 @@ class LocalBookRepository @Inject constructor(
                 source.copyTo(stored, overwrite = true)
                 try {
                     val parser = parsers.parserFor(book.format)
-                    val parsedMetadata = parser.readMetadata(stored, book.title)
+                    // A synced book carries no original file name; its title is not one either.
+                    val parsedMetadata = parser.readMetadata(stored, book.title, sourceName = "")
                     val coverPath = parsedMetadata.coverBytes?.let { bytes ->
                         File(context.filesDir, "covers/${book.uuid}.${parsedMetadata.coverExtension}").also {
                             it.parentFile?.mkdirs()
@@ -697,6 +720,12 @@ class LocalBookRepository @Inject constructor(
                             createdTime = book.createdTime,
                             contentHash = book.contentHash,
                             category = book.category,
+                            // Synced sort/series data wins; a local reparse fills whatever the cloud
+                            // payload did not carry.
+                            originalDisplayName = book.originalDisplayName,
+                            titleSort = book.titleSort.ifBlank { parsedMetadata.titleSort },
+                            seriesName = book.seriesName.ifBlank { parsedMetadata.seriesName },
+                            seriesIndex = book.seriesIndex ?: parsedMetadata.seriesIndex,
                         ),
                     )
                     if (book.format == BookFormat.EPUB) {
@@ -976,8 +1005,31 @@ class LocalBookRepository @Inject constructor(
 
     override suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = bookMutations.updateBookMetadata(bookUuid, title, author, description)
 
+    override suspend fun applySyncedBookMetadata(
+        bookUuid: String,
+        title: String,
+        author: String,
+        description: String,
+    ) {
+        database.withTransaction {
+            dao.updateBookMetadata(bookUuid, title, author, description)
+        }
+    }
+
     override suspend fun updateBookDetails(bookUuid: String, title: String, author: String, description: String, category: String): Unit =
         bookMutations.updateBookDetails(bookUuid, title, author, description, category)
+
+    override suspend fun updateBookImportedMetadata(
+        bookUuid: String,
+        originalDisplayName: String,
+        titleSort: String,
+        seriesName: String,
+        seriesIndex: Double?,
+    ) {
+        database.withTransaction {
+            dao.updateBookImportedMetadata(bookUuid, originalDisplayName, titleSort, seriesName, seriesIndex)
+        }
+    }
 
     override suspend fun reparseTxt(bookUuid: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -986,7 +1038,10 @@ class LocalBookRepository @Inject constructor(
             val source = File(book.storagePath)
             require(source.isFile) { context.getString(R.string.db_txt_missing) }
             val parser = parsers.parserFor(BookFormat.TXT)
-            val metadata = parser.readMetadata(source, book.title)
+            val folderTitleFallback = book.originalDisplayName.substringBeforeLast('.')
+                .ifBlank { book.originalDisplayName }
+            val metadata = parser.readMetadata(source, book.title, book.originalDisplayName, filenameRules(), filenameSpecs())
+                .withFolderFallback(book.originalFolderName.takeIf(String::isNotBlank), folderTitleFallback)
             val previousChapters = dao.getChapters(bookUuid)
             val previousChapterIndex = previousChapters.withIndex().associate { it.value.id to it.index }
             val previousProgress = dao.getProgress(bookUuid)
@@ -1097,13 +1152,30 @@ class LocalBookRepository @Inject constructor(
                         ),
                     )
                 }
-                if (!dao.hasMetadataEdits(bookUuid)) {
-                    dao.updateBookMetadata(
-                        bookUuid,
-                        metadata.title.trim().ifBlank { book.title },
-                        metadata.author.trim().ifBlank { "未知作者" },
-                        metadata.description.trim(),
-                    )
+                // Field ownership is persisted on the book; the pruned edit journal must never
+                // decide whether recognition refreshes a field the user did not touch.
+                val currentMetadata = dao.getBook(bookUuid) ?: book
+                val refreshedTitle = if (currentMetadata.userEditedTitle) {
+                    currentMetadata.title
+                } else {
+                    metadata.title.trim().ifBlank { currentMetadata.title }
+                }
+                val refreshedAuthor = if (currentMetadata.userEditedAuthor) {
+                    currentMetadata.author
+                } else {
+                    recognizedAuthor(metadata.author, currentMetadata.author)
+                }
+                val refreshedDescription = if (currentMetadata.userEditedDescription) {
+                    currentMetadata.description
+                } else {
+                    metadata.description.trim()
+                }
+                if (refreshedTitle != currentMetadata.title ||
+                    refreshedAuthor != currentMetadata.author ||
+                    refreshedDescription != currentMetadata.description
+                ) {
+                    dao.updateBookMetadata(bookUuid, refreshedTitle, refreshedAuthor, refreshedDescription)
+                    syncMutations.record(SyncEntityType.BOOK, bookUuid)
                 }
             }
             synchronized(chapterCacheLock) {
@@ -1140,6 +1212,23 @@ class LocalBookRepository @Inject constructor(
     override suspend fun addBookmark(bookmark: Bookmark): Unit = bookMutations.addBookmark(bookmark)
 
     override suspend fun deleteBookmark(bookmarkUuid: String) = bookMutations.deleteBookmark(bookmarkUuid)
+
+    override suspend fun refreshMetadata(bookUuid: String): Result<MetadataRefreshResult> =
+        withContext(Dispatchers.IO) {
+            try {
+                val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_missing))
+                val parser = parsers.parserFor(BookFormat.valueOf(book.format))
+                Result.success(
+                    refreshBookMetadata(
+                        context, database, dao, parser, syncMutations, bookUuid, filenameRules(), filenameSpecs(),
+                    ),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+        }
 
     override suspend fun searchBook(
         bookUuid: String,

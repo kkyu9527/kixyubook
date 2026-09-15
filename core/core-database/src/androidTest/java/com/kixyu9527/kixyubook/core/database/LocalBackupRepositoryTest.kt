@@ -10,7 +10,6 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
 import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReadingReminderRepository
-import com.kixyu9527.kixyubook.core.common.repository.NoBookSettings
 import com.kixyu9527.kixyubook.core.common.model.LibraryPreferences
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
@@ -78,7 +77,7 @@ class LocalBackupRepositoryTest {
         )
         val library = FakeLibraryPreferences()
         val reminders = FakeReminders()
-        val repository = LocalBackupRepository(context, database, FakeReaderSettingsRepository(), library, reminders, NoBookSettings)
+        val repository = LocalBackupRepository(context, database, FakeReaderSettingsRepository(), library, reminders)
 
         val exported = repository.exportTo(backupFile.toUri().toString()).getOrThrow()
         assertEquals(1, exported.bookCount)

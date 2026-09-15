@@ -39,7 +39,20 @@ internal class BookMutationStore(
     suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = database.withTransaction {
         val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_missing))
         dao.insertMetadataEdit(MetadataEditEntity(UUID.randomUUID().toString(), bookUuid, book.title, book.author, book.description, title.trim(), author.trim(), description.trim(), System.currentTimeMillis()))
-        dao.updateBookMetadata(bookUuid, title.trim().ifBlank { "未命名书籍" }, author.trim().ifBlank { "未知作者" }, description.trim())
+        // The journal only needs to answer "was this field ever edited"; unbounded growth would
+        // bloat every backup and the per-book queries.
+        dao.pruneMetadataEdits(bookUuid, MAX_METADATA_EDITS_PER_BOOK)
+        val resolvedTitle = title.trim().ifBlank { "未命名书籍" }
+        val resolvedAuthor = author.trim().ifBlank { "未知作者" }
+        val resolvedDescription = description.trim()
+        dao.updateBookMetadata(bookUuid, resolvedTitle, resolvedAuthor, resolvedDescription)
+        // Persist ownership per field so protection survives the pruned edit journal.
+        dao.markMetadataEdited(
+            uuid = bookUuid,
+            title = resolvedTitle != book.title,
+            author = resolvedAuthor != book.author,
+            description = resolvedDescription != book.description,
+        )
         syncMutations.record(SyncEntityType.BOOK, bookUuid)
     }
 
@@ -79,6 +92,10 @@ internal class BookMutationStore(
             ),
         )
         syncMutations.record(SyncEntityType.BOOKMARKS, bookmark.bookUuid)
+    }
+
+    private companion object {
+        const val MAX_METADATA_EDITS_PER_BOOK = 50
     }
 
     suspend fun deleteBookmark(bookmarkUuid: String) = database.withTransaction {

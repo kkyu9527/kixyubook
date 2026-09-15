@@ -48,7 +48,6 @@ class LocalBackupRepository @Inject constructor(
     private val settingsRepository: ReaderSettingsRepository,
     private val libraryPreferences: LibraryPreferencesRepository,
     private val readingReminders: ReadingReminderRepository,
-    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository,
 ) : BackupRepository {
     private val operationMutex = Mutex()
 
@@ -129,14 +128,13 @@ class LocalBackupRepository @Inject constructor(
             }
             val settings = settingsRepository.settings.first()
             val goal = settingsRepository.readingGoalMinutes.first()
-            val bookOverrides = bookSettings.overrides.first()
-            val referencedFonts = collectReferencedFonts(settings.fontUuid, bookOverrides)
+            val referencedFonts = collectReferencedFonts(settings.fontUuid)
             val assets = LibraryStorageGate.mutex.withLock {
                 pinReferencedFonts(snapshot, work, snapshotAssets, referencedFonts)
             }
             val portableSettings = settingsPayloadJson(settings, goal,
                 libraryPreferences.preferences.first(), readingReminders.readingReminder.first(),
-                bookOverrides = bookOverrides)
+                )
             val bookCount = countBooks(snapshot)
             val totalBytes = snapshot.length() + assets.sumOf { it.file.length() }
             return PinnedBackup(work, snapshot, assets, bookCount, totalBytes, portableSettings)
@@ -321,7 +319,6 @@ class LocalBackupRepository @Inject constructor(
         val oldGoal = settingsRepository.readingGoalMinutes.first()
         val oldLibrary = libraryPreferences.preferences.first()
         val oldReminder = readingReminders.readingReminder.first()
-        val oldBookSettings = bookSettings.overrides.first()
         context.getSharedPreferences("recovery_ui", Context.MODE_PRIVATE).edit()
             .putString("style", oldSettings.appUiStyle.name).commit()
         val journal = backupRestoreJournal(context)
@@ -367,7 +364,6 @@ class LocalBackupRepository @Inject constructor(
                         settingsRepository.setReadingGoalMinutes(oldGoal)
                         libraryPreferences.replace(oldLibrary)
                         readingReminders.replace(oldReminder)
-                        bookSettings.replaceAll(oldBookSettings)
                     }
                     journal.cleanup()
                 } catch (rollbackFailure: Exception) {
@@ -402,7 +398,6 @@ class LocalBackupRepository @Inject constructor(
             settingsRepository.setReadingGoalMinutes(snapshot.optInt("readingGoalMinutes", 30))
             snapshot.optJSONObject("library")?.let { libraryPreferences.replace(jsonToLibraryPreferences(it)) }
             snapshot.optJSONObject("readingReminder")?.let { readingReminders.replace(jsonToReadingReminder(it)) }
-            bookSettings.replaceAll(decodeBookSettings(snapshot.optJSONObject("bookOverrides")))
             return
         }
         settingsRepository.update { current -> current.copy(
@@ -509,12 +504,8 @@ class LocalBackupRepository @Inject constructor(
         return assets.values.toList()
     }
 
-    private fun collectReferencedFonts(fontUuid: String?, overrides: Map<String, String>): Set<String> = buildSet {
+    private fun collectReferencedFonts(fontUuid: String?): Set<String> = buildSet {
         fontUuid?.takeIf { it.isNotBlank() }?.let(::add)
-        overrides.values.forEach { patch ->
-            val referenced = runCatching { JSONObject(patch).optString("fontUuid") }.getOrNull()
-            if (!referenced.isNullOrBlank()) add(referenced)
-        }
     }
 
     /**
