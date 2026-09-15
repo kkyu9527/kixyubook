@@ -2,12 +2,16 @@ package com.kixyu9527.kixyubook.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kixyu9527.kixyubook.core.common.model.FilenameRuleSpec
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.common.repository.BackupPreview
 import com.kixyu9527.kixyubook.core.common.repository.BackupRepository
 import com.kixyu9527.kixyubook.core.common.repository.FontRepository
+import com.kixyu9527.kixyubook.core.designsystem.component.resetReaderOwnedFields
+import com.kixyu9527.kixyubook.core.common.repository.LibraryPreferencesRepository
 import com.kixyu9527.kixyubook.core.common.repository.ReaderSettingsRepository
+import com.kixyu9527.kixyubook.core.reader.engine.LocalMetadata
 import com.kixyu9527.kixyubook.core.sync.BackupOperationType
 import com.kixyu9527.kixyubook.core.sync.BackupTaskPhase
 import com.kixyu9527.kixyubook.core.sync.BackupWorkScheduler
@@ -37,6 +41,8 @@ data class SettingsUiState(
     val backupOperation: BackupOperationType? = null,
     val cloudSync: CloudSyncState = CloudSyncState(),
     val readingReminder: ReadingReminderSettings = ReadingReminderSettings(),
+    val filenameRules: List<String> = emptyList(),
+    val filenameRuleSpecs: List<FilenameRuleSpec> = emptyList(),
 )
 
 @HiltViewModel
@@ -48,7 +54,7 @@ class SettingsViewModel @Inject constructor(
     private val cloudSync: CloudSyncManager,
     private val readingReminders: ReadingReminderScheduler,
     @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
-    private val bookSettings: com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository,
+    private val libraryPreferences: LibraryPreferencesRepository,
 ) : ViewModel() {
     val operations = UserOperationController(viewModelScope)
     private val settingWrites = LatestOperationWriter(viewModelScope, operations)
@@ -70,7 +76,8 @@ class SettingsViewModel @Inject constructor(
         backups.state,
         cloudSync.state,
         readingReminders.settings,
-    ) { basic, backup, sync, reminder ->
+        libraryPreferences.preferences,
+    ) { basic, backup, sync, reminder, library ->
         SettingsUiState(
             settings = basic.settings,
             fonts = basic.fonts,
@@ -78,6 +85,8 @@ class SettingsViewModel @Inject constructor(
             backupOperation = backup.operation.takeIf { backup.isActive },
             cloudSync = sync,
             readingReminder = reminder,
+            filenameRules = library.filenameRules,
+            filenameRuleSpecs = library.filenameRuleSpecs,
         )
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
@@ -91,6 +100,52 @@ class SettingsViewModel @Inject constructor(
     private val _backupInspectionActive = MutableStateFlow(false)
     val backupInspectionActive = _backupInspectionActive.asStateFlow()
     private val _authorizationRequests = Channel<PendingIntent>(Channel.BUFFERED)
+
+    /** Adds a rule that already passed the builder/advanced validation. */
+    fun addFilenameRule(pattern: String) {
+        val rule = pattern.trim()
+        if (rule.isEmpty() || LocalMetadata.parseFilenameRules(listOf(rule)).rules.isEmpty()) return
+        viewModelScope.launch {
+            runCatching { libraryPreferences.addFilenameRule(rule) }
+                .onSuccess {
+                    val count = libraryPreferences.preferences.first().filenameRules.size
+                    _messages.emit(context.getString(R.string.settings_filename_rules_saved, count))
+                }
+                .onFailure { _messages.emit(context.getString(R.string.settings_filename_rules_save_failed)) }
+        }
+    }
+
+    fun addFilenameRuleSpec(spec: FilenameRuleSpec) {
+        viewModelScope.launch {
+            runCatching { libraryPreferences.upsertFilenameRuleSpec(spec) }
+                .onSuccess {
+                    val count = libraryPreferences.preferences.first().filenameRuleSpecs.size
+                    _messages.emit(context.getString(R.string.settings_filename_rules_saved, count))
+                }
+                .onFailure { _messages.emit(context.getString(R.string.settings_filename_rules_save_failed)) }
+        }
+    }
+
+    fun setFilenameRuleSpecEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching { libraryPreferences.setFilenameRuleSpecEnabled(id, enabled) }
+                .onFailure { _messages.emit(context.getString(R.string.settings_filename_rules_save_failed)) }
+        }
+    }
+
+    fun removeFilenameRuleSpec(id: String) {
+        viewModelScope.launch {
+            runCatching { libraryPreferences.removeFilenameRuleSpec(id) }
+                .onFailure { _messages.emit(context.getString(R.string.settings_filename_rules_save_failed)) }
+        }
+    }
+
+    fun removeFilenameRule(pattern: String) {
+        viewModelScope.launch {
+            runCatching { libraryPreferences.removeFilenameRule(pattern) }
+                .onFailure { _messages.emit(context.getString(R.string.settings_filename_rules_save_failed)) }
+        }
+    }
     val authorizationRequests = _authorizationRequests.receiveAsFlow()
 
     init {
@@ -121,61 +176,14 @@ class SettingsViewModel @Inject constructor(
             settingWrites.submit("reader:$field") { repository.update { applySettingsPatch(it, patch) } }
         }
     }
-    fun resetReaderTheme() = resetSettingsGroup(context.getString(R.string.settings_theme_reset)) { current ->
-        val defaults = ReaderSettings()
-        current.copy(
-            theme = defaults.theme,
-            customThemeEnabled = defaults.customThemeEnabled,
-            customDayTheme = defaults.customDayTheme,
-            customNightTheme = defaults.customNightTheme,
-            brightnessMode = defaults.brightnessMode,
-            brightness = defaults.brightness,
-            keepScreenOn = defaults.keepScreenOn,
-        )
-    }
-    fun resetReaderLayout() = resetSettingsGroup(context.getString(R.string.settings_layout_reset)) { current ->
-        val defaults = ReaderSettings()
-        current.copy(
-            fontSize = defaults.fontSize,
-            lineHeight = defaults.lineHeight,
-            letterSpacing = defaults.letterSpacing,
-            margin = defaults.margin,
-            pageMode = defaults.pageMode,
-            pageTurnAnimation = defaults.pageTurnAnimation,
-            fontUuid = defaults.fontUuid,
-        )
-    }
-    fun resetReaderBehavior() = resetSettingsGroup(context.getString(R.string.settings_controls_reset)) { current ->
-        val defaults = ReaderSettings()
-        current.copy(
-            volumeKeyPageTurn = defaults.volumeKeyPageTurn,
-        )
-    }
-    fun resetReaderInformation() = resetSettingsGroup(context.getString(R.string.settings_information_reset)) { current ->
-        val defaults = ReaderSettings()
-        current.copy(
-            showStatusBar = defaults.showStatusBar,
-            hideNavigationBar = defaults.hideNavigationBar,
-            showChapterTitle = defaults.showChapterTitle,
-            showPageNumber = defaults.showPageNumber,
-            showReadingTime = defaults.showReadingTime,
-            showBatteryLevel = defaults.showBatteryLevel,
-        )
-    }
     fun resetAllReaderSettings() = settingWrites.submit("resetAll") {
         settingRequests.clear()
-        val defaults = ReaderSettings()
         repository.update { current ->
-            defaults.copy(
-                appColorTheme = current.appColorTheme,
-                appUiStyle = current.appUiStyle,
-                glassEffectEnabled = current.glassEffectEnabled,
-                glassFrostLevel = current.glassFrostLevel,
-                predictiveBackEnabled = current.predictiveBackEnabled,
-            )
+            // Resets every reader-owned field through the canonical group mapping (including the
+            // app-shared light/dark mode and glass effect) while keeping language, UI style,
+            // accent colour, sync and reading habits untouched.
+            current.resetReaderOwnedFields()
         }
-        repository.setReadingGoalMinutes(30)
-        readingReminders.setEnabled(false)
         _messages.emit(context.getString(R.string.settings_reading_reset))
     }
     fun setGoal(minutes: Int) = settingWrites.submit("goal") { repository.setReadingGoalMinutes(minutes) }
@@ -187,7 +195,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
     fun deleteFont(font: UserFont) { operations.confirmDelete(font.name) {
-        bookSettings.clearFontReferences(font.uuid)
         fonts.deleteFont(font.uuid)
     } }
 
@@ -247,12 +254,4 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun resetSettingsGroup(
-        message: String,
-        transform: (ReaderSettings) -> ReaderSettings,
-    ) = settingWrites.submit("reset:$message") {
-        settingRequests.clear()
-        repository.update(transform)
-        _messages.emit(message)
-    }
 }

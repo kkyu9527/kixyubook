@@ -8,18 +8,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -71,6 +77,14 @@ fun SettingsRoute(
     val requestNotificationPermission = rememberNotificationPermissionAction()
     var restored by rememberSaveable { mutableStateOf(false) }
     var restoreFailure by rememberSaveable { mutableStateOf<String?>(null) }
+    var rulesManagerVisible by rememberSaveable { mutableStateOf(false) }
+    var ruleEditorVisible by rememberSaveable { mutableStateOf(false) }
+    var advancedEditorVisible by rememberSaveable { mutableStateOf(false) }
+    var pickedSample by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingSpec by remember { mutableStateOf<com.kixyu9527.kixyubook.core.common.model.FilenameRuleSpec?>(null) }
+    val samplePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { pickedSample = context.documentDisplayName(it) }
+    }
     val backupCreator = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
@@ -155,6 +169,33 @@ fun SettingsRoute(
             ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
+    val metadataSection: @Composable () -> Unit = {
+        KixyuSection(title = stringResource(R.string.settings_metadata_section)) {
+            KixyuSettingsRow(
+                title = stringResource(R.string.settings_filename_rules),
+                supportingText = if (state.filenameRules.isEmpty() && state.filenameRuleSpecs.isEmpty()) {
+                    stringResource(R.string.settings_filename_rules_empty)
+                } else {
+                    stringResource(
+                        R.string.settings_filename_rules_summary,
+                        state.filenameRules.size + state.filenameRuleSpecs.size,
+                    )
+                },
+                icon = KixyuSymbols.Edit,
+                onClick = { rulesManagerVisible = true },
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+        }
+    }
+    val habitsSection: @Composable () -> Unit = {
+        ReadingHabitsSection(
+            state = state,
+            onSetGoal = viewModel::setGoal,
+            onRequestReminderEnabled = { enabled ->
+                requestNotificationPermission(enabled) { viewModel.setReadingReminderEnabled(enabled) }
+            },
+            onSetReminderTime = viewModel::setReadingReminderTime,
+        )
+    }
     val dataSection: @Composable () -> Unit = {
         SettingsBackupSection(
             operation = state.backupOperation,
@@ -210,6 +251,8 @@ fun SettingsRoute(
                 ) {
                     item { accountSection() }
                     item { preferenceSection() }
+                    item { metadataSection() }
+                    item { habitsSection() }
                     item { dataSection() }
                     item { aboutSection() }
                     item { KixyuBottomContentSpacer() }
@@ -236,11 +279,64 @@ fun SettingsRoute(
             ) {
                 item { accountSection() }
                 item { preferenceSection() }
+                item { metadataSection() }
+                item { habitsSection() }
                 item { dataSection() }
                 item { aboutSection() }
                 item { KixyuBottomContentSpacer() }
             }
         }
+    }
+
+    if (rulesManagerVisible) {
+        FilenameRulesManagerDialog(
+            specs = state.filenameRuleSpecs,
+            advancedRules = state.filenameRules,
+            onAdd = {
+                pickedSample = null
+                editingSpec = null
+                ruleEditorVisible = true
+            },
+            onEditSpec = { spec ->
+                editingSpec = spec
+                pickedSample = null
+                ruleEditorVisible = true
+            },
+            onSetSpecEnabled = viewModel::setFilenameRuleSpecEnabled,
+            onDeleteSpec = viewModel::removeFilenameRuleSpec,
+            onAddAdvanced = { advancedEditorVisible = true },
+            onDeleteAdvanced = viewModel::removeFilenameRule,
+            onDismiss = { rulesManagerVisible = false },
+        )
+    }
+    if (ruleEditorVisible) {
+        FilenameRuleEditorDialog(
+            pickedSample = pickedSample,
+            initialSpec = editingSpec,
+            onPickFile = {
+                samplePicker.launch(arrayOf("text/plain", "application/epub+zip", "application/octet-stream"))
+            },
+            onSave = { spec ->
+                viewModel.addFilenameRuleSpec(spec)
+                ruleEditorVisible = false
+                pickedSample = null
+                editingSpec = null
+            },
+            onDismiss = {
+                ruleEditorVisible = false
+                pickedSample = null
+                editingSpec = null
+            },
+        )
+    }
+    if (advancedEditorVisible) {
+        AdvancedRegexRuleDialog(
+            onSave = { pattern ->
+                viewModel.addFilenameRule(pattern)
+                advancedEditorVisible = false
+            },
+            onDismiss = { advancedEditorVisible = false },
+        )
     }
 
     SettingsBackupDialogs(

@@ -1,10 +1,6 @@
 <resources>
     <string name="settings_backup_saved">バックアップを保存しました · %1$d 冊</string>
     <string name="settings_backup_failed">バックアップ処理に失敗しました</string>
-    <string name="settings_theme_reset">読書画面の外観をリセットしました</string>
-    <string name="settings_layout_reset">組版とページめくりをリセットしました</string>
-    <string name="settings_controls_reset">読書コントロールをリセットしました</string>
-    <string name="settings_information_reset">読書情報をリセットしました</string>
     <string name="settings_reading_reset">すべての読書設定をリセットしました</string>
     <string name="settings_font_applied">%1$s をインポートして適用しました</string>
     <string name="settings_font_import_failed">フォントのインポートに失敗しました</string>

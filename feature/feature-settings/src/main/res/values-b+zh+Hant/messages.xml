@@ -1,10 +1,6 @@
 <resources>
     <string name="settings_backup_saved">完整備份已儲存：%1$d 本書</string>
     <string name="settings_backup_failed">完整備份工作失敗</string>
-    <string name="settings_theme_reset">閱讀外觀已還原預設</string>
-    <string name="settings_layout_reset">排版與翻頁已還原預設</string>
-    <string name="settings_controls_reset">閱讀控制已還原預設</string>
-    <string name="settings_information_reset">閱讀資訊已還原預設</string>
     <string name="settings_reading_reset">閱讀設定已全部還原預設</string>
     <string name="settings_font_applied">已匯入並使用 %1$s</string>
     <string name="settings_font_import_failed">字型匯入失敗</string>
