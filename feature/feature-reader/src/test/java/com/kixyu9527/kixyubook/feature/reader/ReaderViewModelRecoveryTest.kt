@@ -473,6 +473,31 @@ class ReaderViewModelRecoveryTest {
         }
     }
 
+    @Test fun aFontFileArrivingAfterTheUuidChangeProtectsTheVisibleLocation() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = readerRecoveryHarness(
+                paragraphText = { index -> if (index == 5) "很长的正文内容。".repeat(240) else "第 $index 段短正文" },
+                initialSettings = ReaderSettings(fontSize = 19f, showChapterTitle = false, fontUuid = "font-1"),
+            )
+            val reader = harness.open()
+            awaitCondition("the chapter did not load") { reader.uiState.value.chapter != null }
+            reader.onPageSettled(5, MID_PARAGRAPH_OFFSET, chapterComplete = false, visibleEndPosition = 6)
+            val versionBefore = reader.uiState.value.layoutVersion
+
+            // The uuid was selected first; the actual font resource arrives later.
+            harness.fonts.value = listOf(UserFont("font-1", "字体", "/fonts/font-1.ttf", 0))
+            awaitCondition("the font resource change did not protect the visible location") {
+                reader.uiState.value.layoutVersion > versionBefore &&
+                    reader.uiState.value.restorePosition == 5 &&
+                    reader.uiState.value.restoreCharOffset == MID_PARAGRAPH_OFFSET
+            }
+            harness.closeAll()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test fun aSettledPageTurnIsWhatNavigationHistoryReturnsTo() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
@@ -530,6 +555,7 @@ internal class ReaderRecoveryHarness(
     private val factory: () -> ReaderViewModel,
     val globalSettings: MutableStateFlow<ReaderSettings>,
     val durable: MutableStateFlow<ReadingProgress?>,
+    val fonts: MutableStateFlow<List<UserFont>> = MutableStateFlow(emptyList()),
 ) {
     private val stores = mutableListOf<ViewModelStore>()
 
@@ -592,8 +618,9 @@ internal fun readerRecoveryHarness(
         override suspend fun addSearchHistory(query: String) = Unit
         override suspend fun clearSearchHistory() = Unit
     }
+    val fontsFlow = MutableStateFlow<List<UserFont>>(emptyList())
     val fonts = fake<FontRepository> { method, _ ->
-        check(method == "observeFonts"); flowOf(emptyList<UserFont>())
+        check(method == "observeFonts"); fontsFlow
     }
     val stats = fake<ReadingStatsRepository> { method, _ -> error("Unexpected stats call: $method") }
     val sync = fake<CloudSyncCoordinator> { method, _ ->
@@ -619,6 +646,7 @@ internal fun readerRecoveryHarness(
         },
         globalSettings = globalSettings,
         durable = durable,
+        fonts = fontsFlow,
     )
 }
 

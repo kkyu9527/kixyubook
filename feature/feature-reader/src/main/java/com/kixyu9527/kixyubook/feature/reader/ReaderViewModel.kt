@@ -166,8 +166,12 @@ class ReaderViewModel @AssistedInject constructor(
                     // Settles are identified by layout version, so scroll mode (which has no page
                     // render callback) can never be blocked by a stale boolean.
                     val before = _uiState.value
-                    val layoutChanged = before.settings.paginationLayoutDiffers(settings)
-                    val anchor = if (layoutChanged) before.paginationReflowAnchor(settings) else null
+                    // The resolved font resource is part of the layout identity: a font that
+                    // arrives after its uuid was selected, or disappears, re-paginates exactly
+                    // like a fontUuid change and must protect the visible character too.
+                    val layoutChanged = before.settings.paginationLayoutDiffers(settings) ||
+                        before.fontPath != path
+                    val anchor = if (layoutChanged) before.paginationReflowAnchor(layoutChanged = true) else null
                     if (anchor != null) minimumAcceptedLayoutVersion = before.layoutVersion + 1
                     _uiState.update { current ->
                         if (
@@ -176,7 +180,7 @@ class ReaderViewModel @AssistedInject constructor(
                         ) {
                             current
                         } else {
-                            val anchor = current.paginationReflowAnchor(settings)
+                            val anchor = current.paginationReflowAnchor(layoutChanged)
                             current.copy(
                                 settings = settings,
                                 settingsLoaded = true,
@@ -1055,8 +1059,10 @@ class ReaderViewModel @AssistedInject constructor(
      * currently on screen, but only while the presented chapter is still the visible one. Returns
      * null when the change does not affect layout or nothing has been presented yet.
      */
-    private fun ReaderUiState.paginationReflowAnchor(next: ReaderSettings): PresentedLocation? {
-        if (!settings.paginationLayoutDiffers(next)) return null
+    private fun ReaderUiState.paginationReflowAnchor(layoutChanged: Boolean): PresentedLocation? {
+        // The caller decides what counts as a layout change (settings or the resolved font
+        // resource); this only filters for a visible location that can be anchored.
+        if (!layoutChanged) return null
         val presented = session.presentedLocation ?: return null
         return presented.takeIf { it.chapterPosition == chapterIndex }
     }
