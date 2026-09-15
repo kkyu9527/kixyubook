@@ -34,7 +34,11 @@ interface BookDao {
     @Query("SELECT DISTINCT b.uuid FROM books b JOIN chapters c ON c.bookUuid = b.uuid WHERE b.format = 'EPUB' AND c.indexed = 0") suspend fun getBooksPendingEpubIndex(): List<String>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId ORDER BY paragraphIndex") suspend fun getParagraphs(chapterId: Long): List<ParagraphEntity>
     @Query("SELECT * FROM paragraphs WHERE chapterId = :chapterId AND paragraphIndex = :index") suspend fun getParagraph(chapterId: Long, index: Int): ParagraphEntity?
-    @Query("SELECT EXISTS(SELECT 1 FROM metadata_edits WHERE bookUuid = :uuid)") suspend fun hasMetadataEdits(uuid: String): Boolean
+    @Query("SELECT * FROM metadata_edits WHERE bookUuid = :uuid") suspend fun getMetadataEdits(uuid: String): List<MetadataEditEntity>
+    // rowid, not createdTime, decides the survivors: several edits can share one millisecond and
+    // createdTime alone would then keep an arbitrary subset.
+    @Query("DELETE FROM metadata_edits WHERE bookUuid = :uuid AND uuid NOT IN (SELECT uuid FROM metadata_edits WHERE bookUuid = :uuid ORDER BY rowid DESC LIMIT :keep)")
+    suspend fun pruneMetadataEdits(uuid: String, keep: Int)
     @Query("""SELECT b.uuid, b.bookUuid, b.chapterId, c.title AS chapterTitle, c.chapterIndex, b.position, b.preview, b.createdTime, b.chapterKey
         FROM bookmarks b JOIN chapters c ON c.id = b.chapterId
         WHERE b.bookUuid = :uuid ORDER BY c.chapterIndex, b.position""")
@@ -92,12 +96,42 @@ interface BookDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertBookmark(bookmark: BookmarkEntity): Long
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertPendingBookmark(bookmark: PendingBookmarkEntity): Long
     @Query("SELECT * FROM pending_bookmarks") suspend fun getAllPendingBookmarks(): List<PendingBookmarkEntity>
+
+    /**
+     * One consistent read for sync snapshots. Reading chapters, located and pending bookmarks in
+     * separate queries can miss a bookmark that is relocated between the two reads.
+     */
+    @Transaction
+    suspend fun bookmarkSnapshot(uuid: String): BookmarkSnapshot =
+        BookmarkSnapshot(getChapters(uuid), getBookmarks(uuid), getPendingBookmarks(uuid))
     @Query("SELECT * FROM pending_bookmarks WHERE bookUuid = :uuid") suspend fun getPendingBookmarks(uuid: String): List<PendingBookmarkEntity>
     @Query("SELECT * FROM pending_bookmarks WHERE uuid = :uuid LIMIT 1") suspend fun getPendingBookmark(uuid: String): PendingBookmarkEntity?
     @Query("DELETE FROM pending_bookmarks WHERE uuid = :uuid") suspend fun deletePendingBookmark(uuid: String)
     @Query("DELETE FROM pending_bookmarks WHERE bookUuid IN (:uuids)") suspend fun deletePendingBookmarks(uuids: Set<String>)
 
     @Query("UPDATE books SET title = :title, author = :author, description = :description WHERE uuid = :uuid") suspend fun updateBookMetadata(uuid: String, title: String, author: String, description: String): Int
+    @Query(
+        "UPDATE books SET titleSort = CASE WHEN :titleSort != '' THEN :titleSort ELSE titleSort END, " +
+            "seriesName = CASE WHEN :seriesName != '' THEN :seriesName ELSE seriesName END, " +
+            "seriesIndex = COALESCE(:seriesIndex, seriesIndex) WHERE uuid = :uuid",
+    )
+    suspend fun updateBookSortMetadata(uuid: String, titleSort: String, seriesName: String, seriesIndex: Double?)
+    @Query("UPDATE books SET coverPath = :coverPath WHERE uuid = :uuid") suspend fun updateBookCover(uuid: String, coverPath: String?)
+    @Query(
+        "UPDATE books SET userEditedTitle = CASE WHEN :title THEN 1 ELSE userEditedTitle END, " +
+            "userEditedAuthor = CASE WHEN :author THEN 1 ELSE userEditedAuthor END, " +
+            "userEditedDescription = CASE WHEN :description THEN 1 ELSE userEditedDescription END " +
+            "WHERE uuid = :uuid",
+    )
+    suspend fun markMetadataEdited(uuid: String, title: Boolean, author: Boolean, description: Boolean)
+    @Query(
+        "UPDATE books SET " +
+            "originalDisplayName = CASE WHEN :originalDisplayName != '' THEN :originalDisplayName ELSE originalDisplayName END, " +
+            "titleSort = CASE WHEN :titleSort != '' THEN :titleSort ELSE titleSort END, " +
+            "seriesName = CASE WHEN :seriesName != '' THEN :seriesName ELSE seriesName END, " +
+            "seriesIndex = COALESCE(:seriesIndex, seriesIndex) WHERE uuid = :uuid",
+    )
+    suspend fun updateBookImportedMetadata(uuid: String, originalDisplayName: String, titleSort: String, seriesName: String, seriesIndex: Double?)
     @Query("UPDATE books SET category = :category WHERE uuid = :uuid") suspend fun setCategory(uuid: String, category: String)
     @Query("UPDATE books SET category = :category WHERE uuid IN (:uuids)")
     suspend fun setCategories(uuids: Set<String>, category: String)

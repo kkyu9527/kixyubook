@@ -18,6 +18,65 @@ class DatabaseMigrationTest {
     )
 
     @Test
+    fun migrate18To19_backfillsFieldLevelProtectionFromTheEditJournal() {
+        helper.createDatabase(TEST_DATABASE, 18).use { database ->
+            database.execSQL(
+                "INSERT INTO books (uuid, title, author, description, coverPath, format, originalPath, " +
+                    "storagePath, createdTime, contentHash, category, lastOpenedTime, originalDisplayName, " +
+                    "titleSort, seriesName, seriesIndex) VALUES ('b1', '书', '作者', '简介', NULL, 'TXT', " +
+                    "'/tmp/a.txt', '/tmp/a.txt', 0, 'hash', '未分类', 0, 'a.txt', '', '', NULL)",
+            )
+            database.execSQL(
+                "INSERT INTO metadata_edits (uuid, bookUuid, previousTitle, previousAuthor, " +
+                    "previousDescription, newTitle, newAuthor, newDescription, createdTime) " +
+                    "VALUES ('e1', 'b1', '书', '作者', '简介', '新标题', '作者', '简介', 0)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            KIXYU_DATABASE_VERSION,
+            true,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+        ).use { database ->
+            database.query(
+                "SELECT userEditedTitle, userEditedAuthor, userEditedDescription FROM books WHERE uuid = 'b1'",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
+                assertEquals(0, cursor.getInt(1))
+                assertEquals(0, cursor.getInt(2))
+            }
+        }
+    }
+
+    @Test
+    fun migrate19To20_addsTheFolderHintColumn() {
+        helper.createDatabase(TEST_DATABASE, 19).use { database ->
+            database.execSQL(
+                "INSERT INTO books (uuid, title, author, description, coverPath, format, originalPath, " +
+                    "storagePath, createdTime, contentHash, category, lastOpenedTime, originalDisplayName, " +
+                    "userEditedTitle, userEditedAuthor, userEditedDescription, titleSort, seriesName, seriesIndex) " +
+                    "VALUES ('b1', '书', '作者', '简介', NULL, 'TXT', '/tmp/a.txt', '/tmp/a.txt', 0, " +
+                    "'hash', '未分类', 0, 'a.txt', 0, 0, 0, '', '', NULL)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            20,
+            true,
+            MIGRATION_19_20,
+        ).use { database ->
+            database.query("SELECT originalFolderName FROM books WHERE uuid = 'b1'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test
     fun migrate6To14_keepsPublishedLibraryAndReadingState() {
         helper.createDatabase(TEST_DATABASE, 6).use { database ->
             database.insertLegacyBook()
@@ -35,6 +94,10 @@ class DatabaseMigrationTest {
             MIGRATION_12_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             assertPublishedLibraryStateWasPreserved(database)
             assertEquals(0L, database.bookLastOpenedTime())
@@ -61,6 +124,10 @@ class DatabaseMigrationTest {
             MIGRATION_12_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             assertPublishedLibraryStateWasPreserved(database)
             assertEquals(0L, database.bookLastOpenedTime())
@@ -86,6 +153,10 @@ class DatabaseMigrationTest {
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             database.insertCorrection()
@@ -111,6 +182,10 @@ class DatabaseMigrationTest {
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             assertEquals(1, database.correctionCount())
@@ -132,6 +207,10 @@ class DatabaseMigrationTest {
             MIGRATION_12_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             assertEquals("第一章", database.chapterTitle())
@@ -164,6 +243,10 @@ class DatabaseMigrationTest {
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             assertEquals(
                 1,
@@ -201,6 +284,10 @@ class DatabaseMigrationTest {
             true,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             assertEquals(
                 "chapter-0",
@@ -221,6 +308,10 @@ class DatabaseMigrationTest {
             KIXYU_DATABASE_VERSION,
             true,
             MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
         ).use { database ->
             database.execSQL(
                 "INSERT INTO pending_bookmarks(uuid, bookUuid, anchorText, preview, createdTime) " +
@@ -231,6 +322,59 @@ class DatabaseMigrationTest {
                 database.query("SELECT COUNT(*) FROM pending_bookmarks").use { cursor ->
                     check(cursor.moveToFirst()); cursor.getInt(0)
                 },
+            )
+        }
+    }
+
+    @Test
+    fun migrate17To18_addsSortAndSeriesMetadata() {
+        helper.createDatabase(TEST_DATABASE, 17).use { database ->
+            database.insertBook()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            KIXYU_DATABASE_VERSION,
+            true,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+        ).use { database ->
+            database.query("SELECT titleSort, seriesName, seriesIndex FROM books WHERE uuid = 'migration-book'")
+                .use { cursor ->
+                    check(cursor.moveToFirst())
+                    assertEquals("", cursor.getString(0))
+                    assertEquals("", cursor.getString(1))
+                    assertEquals(true, cursor.isNull(2))
+                }
+        }
+    }
+
+    @Test
+    fun migrate16To17_addsOriginalDisplayName() {
+        helper.createDatabase(TEST_DATABASE, 16).use { database ->
+            database.insertBook()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            KIXYU_DATABASE_VERSION,
+            true,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+        ).use { database ->
+            assertEquals(
+                "",
+                database.query("SELECT originalDisplayName FROM books WHERE uuid = 'migration-book'")
+                    .use { cursor -> check(cursor.moveToFirst()); cursor.getString(0) },
+            )
+            database.execSQL("UPDATE books SET originalDisplayName = '《书名》作者：某某.txt' WHERE uuid = 'migration-book'")
+            assertEquals(
+                "《书名》作者：某某.txt",
+                database.query("SELECT originalDisplayName FROM books WHERE uuid = 'migration-book'")
+                    .use { cursor -> check(cursor.moveToFirst()); cursor.getString(0) },
             )
         }
     }

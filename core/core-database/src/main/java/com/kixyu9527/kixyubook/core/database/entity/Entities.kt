@@ -16,6 +16,16 @@ data class BookEntity(
     val contentHash: String,
     val category: String,
     @ColumnInfo(defaultValue = "0") val lastOpenedTime: Long = 0,
+    /** The display name the file was imported under; import URIs are not file names. */
+    @ColumnInfo(defaultValue = "''") val originalDisplayName: String = "",
+    /** The SAF folder name at import time, kept as a lower-confidence metadata source. */
+    @ColumnInfo(defaultValue = "''") val originalFolderName: String = "",
+    @ColumnInfo(defaultValue = "0") val userEditedTitle: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val userEditedAuthor: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val userEditedDescription: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val titleSort: String = "",
+    @ColumnInfo(defaultValue = "''") val seriesName: String = "",
+    val seriesIndex: Double? = null,
 )
 
 @Entity(
@@ -115,6 +125,16 @@ data class BookmarkRow(
     val preview: String,
     val createdTime: Long,
     val chapterKey: String = "",
+)
+
+/**
+ * Chapters and both bookmark tables read in one database transaction. A bookmark being relocated
+ * from pending to located between two separate reads could otherwise vanish from the snapshot.
+ */
+data class BookmarkSnapshot(
+    val chapters: List<ChapterEntity>,
+    val located: List<BookmarkRow>,
+    val pending: List<PendingBookmarkEntity>,
 )
 
 /**

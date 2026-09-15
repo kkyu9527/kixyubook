@@ -304,7 +304,7 @@ internal fun sortLibraryBooks(
 ): List<LibraryBook> = when (preferences.sortMode) {
     LibrarySortMode.RECENT -> books
     LibrarySortMode.IMPORTED -> books.sortedByDescending { it.book.createdTime }
-    LibrarySortMode.TITLE -> books.sortedWith(libraryTextComparator { it.book.title })
+    LibrarySortMode.TITLE -> books.sortedWith(libraryTextComparator { it.book.titleSort.ifBlank { it.book.title } })
     LibrarySortMode.AUTHOR -> books.sortedWith(libraryTextComparator { it.book.author })
     LibrarySortMode.PROGRESS -> books.sortedByDescending { it.progress?.fraction ?: 0f }
     LibrarySortMode.CUSTOM -> {

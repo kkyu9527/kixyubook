@@ -182,6 +182,52 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
     }
 }
 
+/**
+ * Stores the display name a file was imported under. `originalPath` holds the import URI, whose
+ * last segment (e.g. a document id) is not a file name and must never feed metadata recognition.
+ * Existing rows keep an empty value and fall back to their current title.
+ */
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `originalDisplayName` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/** Stores publisher sort/series metadata so a future shelf can use it without reparsing. */
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `titleSort` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `seriesName` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `seriesIndex` REAL")
+    }
+}
+
+/**
+ * Field-level protection for manual metadata edits. The edit journal is pruned for size, so
+ * "this field was edited by the user" must be persisted on the book itself.
+ */
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `userEditedTitle` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `userEditedAuthor` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `userEditedDescription` INTEGER NOT NULL DEFAULT 0")
+        // Existing manual edits were recorded in the journal; carry their protection over.
+        db.execSQL(
+            "UPDATE `books` SET " +
+                "userEditedTitle = EXISTS(SELECT 1 FROM metadata_edits e WHERE e.bookUuid = books.uuid AND e.newTitle != e.previousTitle), " +
+                "userEditedAuthor = EXISTS(SELECT 1 FROM metadata_edits e WHERE e.bookUuid = books.uuid AND e.newAuthor != e.previousAuthor), " +
+                "userEditedDescription = EXISTS(SELECT 1 FROM metadata_edits e WHERE e.bookUuid = books.uuid AND e.newDescription != e.previousDescription)",
+        )
+    }
+}
+
+/** Folder names are a recognition fallback for files like `01.txt`; they must survive a refresh. */
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `books` ADD COLUMN `originalFolderName` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 private fun createReaderAnnotationsTable(db: SupportSQLiteDatabase) {
     db.execSQL(
         """

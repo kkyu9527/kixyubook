@@ -41,6 +41,23 @@ class LibrarySortingTest {
         assertEquals(listOf("done", "half", "unread"), result.map { it.book.uuid })
     }
 
+    @Test
+    fun titleSortTakesPrecedenceOverTheDisplayTitle() {
+        val aaaDisplay = book("aaa-display").let {
+            it.copy(book = it.book.copy(title = "Aaa display", titleSort = "Zzz sort"))
+        }
+        val zzzDisplay = book("zzz-display").let {
+            it.copy(book = it.book.copy(title = "Zzz display", titleSort = "Aaa sort"))
+        }
+
+        val result = sortLibraryBooks(
+            listOf(aaaDisplay, zzzDisplay),
+            LibraryPreferences(LibrarySortMode.TITLE),
+        )
+
+        assertEquals(listOf("zzz-display", "aaa-display"), result.map { it.book.uuid })
+    }
+
     private fun book(uuid: String, createdTime: Long = 0, progress: Float? = null): LibraryBook = LibraryBook(
         book = Book(
             uuid = uuid,

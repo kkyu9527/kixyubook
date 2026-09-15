@@ -33,6 +33,10 @@ import com.kixyu9527.kixyubook.core.database.MIGRATION_12_14
 import com.kixyu9527.kixyubook.core.database.MIGRATION_13_14
 import com.kixyu9527.kixyubook.core.database.MIGRATION_14_15
 import com.kixyu9527.kixyubook.core.database.MIGRATION_15_16
+import com.kixyu9527.kixyubook.core.database.MIGRATION_16_17
+import com.kixyu9527.kixyubook.core.database.MIGRATION_17_18
+import com.kixyu9527.kixyubook.core.database.MIGRATION_18_19
+import com.kixyu9527.kixyubook.core.database.MIGRATION_19_20
 import com.kixyu9527.kixyubook.core.database.LocalTextCorrectionRepository
 import com.kixyu9527.kixyubook.core.database.LocalReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
@@ -69,6 +73,10 @@ object DatabaseModule {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
+                MIGRATION_17_18,
+                MIGRATION_18_19,
+                    MIGRATION_19_20,
             )
             .build()
     }
@@ -91,7 +99,6 @@ object DatabaseModule {
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
-    @Binds abstract fun bindBookSettings(implementation: DataStoreReaderSettingsRepository): com.kixyu9527.kixyubook.core.common.repository.BookSettingsRepository
     @Binds abstract fun bindReadingReminders(implementation: com.kixyu9527.kixyubook.core.sync.NotificationPreferencesStore): com.kixyu9527.kixyubook.core.common.repository.ReadingReminderRepository
     @Binds abstract fun bindBookRepository(implementation: LocalBookRepository): BookRepository
     @Binds abstract fun bindCompleteLibraryRepository(implementation: LocalBookRepository): CompleteLibraryRepository
