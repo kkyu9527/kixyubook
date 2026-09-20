@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** Lets the feedback host label long operations without coupling it to a feature module. */
-enum class UserOperationKind { GENERIC, DELETE }
+enum class UserOperationKind { GENERIC, DELETE, REPAIR }
 
 /**
  * Mutually exclusive operation phase. A single sealed state makes impossible combinations (for

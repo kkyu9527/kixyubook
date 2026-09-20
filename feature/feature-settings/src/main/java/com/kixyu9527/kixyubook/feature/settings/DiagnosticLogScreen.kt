@@ -1,5 +1,6 @@
 package com.kixyu9527.kixyubook.feature.settings
 
+import androidx.lifecycle.repeatOnLifecycle
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
 import android.content.Intent
@@ -77,12 +78,27 @@ fun DiagnosticLogCategoryRoute(
     onBack: () -> Unit,
     onlyFailures: Boolean,
     onOnlyFailuresChanged: (Boolean) -> Unit,
-) = DiagnosticLogScreen(
-    onBack = onBack,
-    categoryKey = categoryKey,
-    onlyFailures = onlyFailures,
-    onOnlyFailuresChanged = onOnlyFailuresChanged,
-)
+) {
+    val known = remember(categoryKey) {
+        runCatching { DiagnosticLog.Category.valueOf(categoryKey) }.isSuccess
+    }
+    if (!known) {
+        // A stale saved route must not strand the user on an empty list.
+        val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        LaunchedEffect(categoryKey, lifecycleOwner) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                onBack()
+            }
+        }
+        return
+    }
+    DiagnosticLogScreen(
+        onBack = onBack,
+        categoryKey = categoryKey,
+        onlyFailures = onlyFailures,
+        onOnlyFailuresChanged = onOnlyFailuresChanged,
+    )
+}
 
 @Composable
 private fun DiagnosticLogScreen(

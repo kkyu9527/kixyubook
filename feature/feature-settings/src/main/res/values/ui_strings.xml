@@ -8,17 +8,10 @@
     <string name="settings_default_font_hint">Uses the device font, with no extra storage</string>
     <string name="settings_imported_font_hint">Imported · TTF / OTF</string>
     <string name="settings_remove_named_font">Delete %1$s</string>
-    <string name="settings_reset">Reset</string>
     <string name="settings_reset_defaults">Restore defaults</string>
     <string name="settings_ok">OK</string>
     <string name="settings_delete">Delete</string>
     <string name="settings_cancel">Cancel</string>
-    <string name="settings_info_chapter">Chapter title</string>
-    <string name="settings_info_page">Page number</string>
-    <string name="settings_info_time">Time</string>
-    <string name="settings_info_battery">Battery</string>
-    <string name="settings_info_hidden">All hidden</string>
-    <string name="settings_info_separator">,\u0020</string>
     <string name="settings_goal_minutes">%1$d min</string>
     <string name="settings_reminder_enabled">Remind at %1$s if the goal is not met</string>
     <string name="settings_reminder_disabled">Off · Reminders are sent only when enabled</string>

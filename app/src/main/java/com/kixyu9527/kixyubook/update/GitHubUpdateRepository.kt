@@ -276,16 +276,16 @@ class GitHubUpdateRepository @Inject constructor(
         }
     }
 
-    private fun isTrustedApkUrl(url: String): Boolean =
-        url.startsWith(APK_DOWNLOAD_URL_PREFIX) && url.substringBefore('?').endsWith(".apk", ignoreCase = true)
-
     private fun Throwable.toUserMessage(): String = when (this) {
         is java.net.SocketTimeoutException -> context.getString(R.string.update_network_timeout)
         is java.net.UnknownHostException -> context.getString(R.string.update_no_network)
         else -> message?.takeIf { it.isNotBlank() } ?: context.getString(R.string.update_check_failed)
     }
 
-    private companion object {
+    internal companion object {
+        internal fun isTrustedApkUrl(url: String): Boolean =
+            url.startsWith(APK_DOWNLOAD_URL_PREFIX) && url.substringBefore('?').endsWith(".apk", ignoreCase = true)
+
         const val LATEST_RELEASE_API = "https://api.github.com/repos/kkyu9527/kixyubook/releases/latest"
         const val RELEASE_BY_TAG_API = "https://api.github.com/repos/kkyu9527/kixyubook/releases/tags/"
         const val LATEST_RELEASE_PAGE = "https://github.com/kkyu9527/kixyubook/releases/latest"

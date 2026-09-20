@@ -143,6 +143,11 @@ private val credentialPattern = Regex(
 )
 private val emailPattern = Regex("(?i)[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
 
+private val absolutePathPattern = Regex(
+    "(?:/data|/storage|/sdcard|/mnt|/system|/Users|/private|/var|/tmp)[^\\s,;\"']*",
+)
+
 private fun String.redactSensitiveValues(): String =
     replace(credentialPattern) { match -> "${match.groupValues[1]}=<已隐藏>" }
         .replace(emailPattern, "<账号已隐藏>")
+        .replace(absolutePathPattern, "<路径已隐藏>")

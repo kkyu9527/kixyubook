@@ -178,7 +178,7 @@ class AppUpdateDownloader @Inject constructor(
             prefs.edit { clear() }
         }
 
-        private fun isTrustedDownloadUrl(url: String): Boolean =
+        internal fun isTrustedDownloadUrl(url: String): Boolean =
             url.startsWith(TRUSTED_DOWNLOAD_PREFIX) &&
                 url.substringBefore('?').endsWith(".apk", ignoreCase = true)
 

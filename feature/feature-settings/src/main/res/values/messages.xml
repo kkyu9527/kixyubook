@@ -3,7 +3,6 @@
     <string name="settings_backup_failed">Backup task failed</string>
     <string name="settings_reading_reset">All reading settings reset</string>
     <string name="settings_font_applied">Imported and applied %1$s</string>
-    <string name="settings_font_import_failed">Font import failed</string>
     <string name="settings_backup_read_failed">Cannot read backup information</string>
     <string name="settings_conflict_failed">Could not resolve sync conflicts</string>
     <string name="settings_cloud_deleted">Google Drive sync data deleted</string>

@@ -29,4 +29,15 @@ class DiagnosticFailureTest {
         assertFalse(failure.reason.contains("user@example.com"))
         assertTrue(failure.reason.contains("已隐藏"))
     }
+
+    @Test
+    fun diagnosticReasonRedactsInternalFilePaths() {
+        val failure = java.io.FileNotFoundException(
+            "/data/user/0/com.kixyu9527.kixyubook/files/books/9f1f0f3e.epub (No such file or directory)",
+        ).toDiagnosticFailure()
+
+        assertEquals("missing_file", failure.outcome)
+        assertFalse("internal paths must not leak into shared diagnostics", failure.reason.contains("/data/user/0"))
+        assertTrue(failure.reason.contains("<路径已隐藏>"))
+    }
 }

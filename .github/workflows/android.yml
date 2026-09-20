@@ -40,7 +40,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Verify device-free regressions
-        run: ./gradlew verifyHostTests --continue --stacktrace
+        run: ./gradlew verifyHostTests --continue --stacktrace :app:assembleRelease
 
       - name: Verify Compose performance budget
         run: >-

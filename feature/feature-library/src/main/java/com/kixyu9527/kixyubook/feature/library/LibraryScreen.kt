@@ -1,4 +1,5 @@
 package com.kixyu9527.kixyubook.feature.library
+import com.kixyu9527.kixyubook.core.common.operation.UserOperationKind
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuTextButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost
 
@@ -290,6 +291,16 @@ fun LibraryRoute(
         onRepair = { viewModel.clearRepairOutcome(); repairTarget = it },
         onSetCategories = viewModel::setCategories,
         onDropDocuments = { uris, releasePermission ->
+            // The drag grant is transient; persist what the provider allows so a failed import can
+            // be retried from history. Releasing the drag permission does not revoke these.
+            uris.forEach { value ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        android.net.Uri.parse(value),
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                }
+            }
             viewModel.import(uris) { releasePermission?.invoke() }
         },
         onClearImportProgress = viewModel::clearFinishedImportProgress,
@@ -300,7 +311,7 @@ fun LibraryRoute(
         repairTarget?.let { uuid ->
             LibraryBookRepairDialog(
                 title = state.books.firstOrNull { it.book.uuid == uuid }?.book?.title.orEmpty(),
-                running = operation is UserOperationState.Running,
+                running = operation.let { it is UserOperationState.Running && it.kind == UserOperationKind.REPAIR },
                 progress = repairProgress,
                 outcome = repairOutcome,
                 onDismiss = { repairTarget = null },

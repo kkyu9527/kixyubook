@@ -7,5 +7,4 @@
     <string name="library_clear_history_failed">无法清空导入记录</string>
     <string name="library_export_failed">书籍导出失败</string>
     <string name="library_batch_export_failed">批量导出失败</string>
-    <string name="library_edit_failed">修改失败</string>
 </resources>

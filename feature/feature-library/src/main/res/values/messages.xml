@@ -7,5 +7,4 @@
     <string name="library_clear_history_failed">Cannot clear import history</string>
     <string name="library_export_failed">Book export failed</string>
     <string name="library_batch_export_failed">Batch export failed</string>
-    <string name="library_edit_failed">Update failed</string>
 </resources>

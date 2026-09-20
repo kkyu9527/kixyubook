@@ -8,17 +8,10 @@
     <string name="settings_default_font_hint">跟隨裝置字型，不佔額外空間</string>
     <string name="settings_imported_font_hint">使用者匯入 · TTF / OTF</string>
     <string name="settings_remove_named_font">刪除 %1$s</string>
-    <string name="settings_reset">重置</string>
     <string name="settings_reset_defaults">還原預設</string>
     <string name="settings_ok">確定</string>
     <string name="settings_delete">刪除</string>
     <string name="settings_cancel">取消</string>
-    <string name="settings_info_chapter">章節名</string>
-    <string name="settings_info_page">頁碼</string>
-    <string name="settings_info_time">時間</string>
-    <string name="settings_info_battery">電量</string>
-    <string name="settings_info_hidden">均不顯示</string>
-    <string name="settings_info_separator">、</string>
     <string name="settings_goal_minutes">%1$d 分鐘</string>
     <string name="settings_reminder_enabled">目標未完成時，在 %1$s 提醒</string>
     <string name="settings_reminder_disabled">關閉 · 僅在主動開啟後傳送</string>

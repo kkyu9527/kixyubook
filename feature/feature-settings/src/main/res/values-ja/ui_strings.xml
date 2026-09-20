@@ -8,17 +8,10 @@
     <string name="settings_default_font_hint">端末のフォントを使用し、追加の容量を使いません</string>
     <string name="settings_imported_font_hint">インポート済み · TTF / OTF</string>
     <string name="settings_remove_named_font">%1$s を削除</string>
-    <string name="settings_reset">リセット</string>
     <string name="settings_reset_defaults">初期設定に戻す</string>
     <string name="settings_ok">OK</string>
     <string name="settings_delete">削除</string>
     <string name="settings_cancel">キャンセル</string>
-    <string name="settings_info_chapter">章名</string>
-    <string name="settings_info_page">ページ番号</string>
-    <string name="settings_info_time">時刻</string>
-    <string name="settings_info_battery">バッテリー</string>
-    <string name="settings_info_hidden">すべて非表示</string>
-    <string name="settings_info_separator">、</string>
     <string name="settings_goal_minutes">%1$d 分</string>
     <string name="settings_reminder_enabled">目標未達成の場合 %1$s に通知</string>
     <string name="settings_reminder_disabled">オフ · 有効にした場合のみ通知</string>

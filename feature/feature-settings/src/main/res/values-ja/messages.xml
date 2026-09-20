@@ -3,7 +3,6 @@
     <string name="settings_backup_failed">バックアップ処理に失敗しました</string>
     <string name="settings_reading_reset">すべての読書設定をリセットしました</string>
     <string name="settings_font_applied">%1$s をインポートして適用しました</string>
-    <string name="settings_font_import_failed">フォントのインポートに失敗しました</string>
     <string name="settings_backup_read_failed">バックアップ情報を読み込めません</string>
     <string name="settings_conflict_failed">同期の競合を解決できませんでした</string>
     <string name="settings_cloud_deleted">Google Drive の同期データを削除しました</string>

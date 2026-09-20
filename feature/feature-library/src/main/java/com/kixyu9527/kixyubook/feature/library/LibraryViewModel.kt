@@ -19,6 +19,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -63,6 +64,17 @@ class LibraryViewModel @Inject constructor(
     private val query = MutableStateFlow("")
     private val category = MutableStateFlow(ALL_LIBRARY_CATEGORIES)
     private val catalog = catalogRepository.catalog
+        .catch { error ->
+            // A failed database open (for example an upgrade that Room rejects) used to be
+            // indistinguishable from an empty library; record it so it can be diagnosed.
+            com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.record(
+                com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category.LIBRARY,
+                "library_catalog_failed",
+                outcome = "failure",
+                details = mapOf("error" to (error.message ?: error::class.java.simpleName)),
+            )
+            emit(LibraryCatalog())
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryCatalog())
     private val preferences = preferencesRepository.preferences
         .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryPreferences())
@@ -81,7 +93,7 @@ class LibraryViewModel @Inject constructor(
     val repairOutcome = _repairOutcome.asStateFlow()
     fun clearRepairOutcome() { _repairOutcome.value = null }
 
-    fun repairBook(uuid: String, mode: com.kixyu9527.kixyubook.core.common.model.BookRepairMode) = operations.submit {
+    fun repairBook(uuid: String, mode: com.kixyu9527.kixyubook.core.common.model.BookRepairMode) = operations.submit(kind = UserOperationKind.REPAIR) {
         _repairOutcome.value = null
         _repairProgress.value = com.kixyu9527.kixyubook.core.common.model.BookRepairProgress(0, 0)
         try { _repairOutcome.value = repository.repairBook(uuid, mode) { _repairProgress.value = it }.getOrThrow() }

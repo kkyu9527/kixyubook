@@ -22,8 +22,16 @@ class LatestOperationWriter(private val scope: CoroutineScope, private val contr
     private val pending = linkedMapOf<String, suspend () -> Unit>()
     private var worker: Job? = null
     private var failedKey: String? = null
+    private val ownerThread = java.util.concurrent.atomic.AtomicReference<Thread?>()
 
     fun submit(key: String, action: suspend () -> Unit) {
+        val currentThread = Thread.currentThread()
+        val owner = ownerThread.compareAndSet(null, currentThread).let {
+            if (it) currentThread else ownerThread.get()
+        }
+        check(owner === currentThread) {
+            "LatestOperationWriter is thread-affine; use one single-threaded scope"
+        }
         if (failedKey == key) controller.dismissFailure(controller.state.value.attempt)
         pending[key] = action
         if (worker?.isActive == true) return
