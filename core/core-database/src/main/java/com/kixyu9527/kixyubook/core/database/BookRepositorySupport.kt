@@ -81,7 +81,9 @@ internal const val IMPORT_PROGRESS_PUBLISH_BYTES = 512L * 1024L
 internal const val IMPORT_INDEX_CONCURRENCY = 2
 internal const val DERIVED_DATA_VERSION_PREFERENCES = "derived_data_versions"
 internal const val KEY_TXT_PARSER_VERSION = "txt_parser_version"
-internal const val TXT_PARSER_VERSION = 1
+internal const val TXT_PARSER_VERSION = 2
+internal const val KEY_EPUB_METADATA_VERSION = "epub_metadata_version"
+internal const val EPUB_METADATA_VERSION = 1
 
 internal fun String.normalizedEpubIdentityTitle(): String =
     trim().replace(Regex("[\\s　]+"), " ").lowercase(Locale.ROOT)
@@ -143,14 +145,6 @@ internal fun BookmarkRow.toModel() = Bookmark(
     createdTime,
     chapterKey,
 )
-internal fun BookSearchResultRow.toModel() = BookSearchResult(
-    chapterId,
-    chapterTitle.singleLineBookHeading(),
-    chapterIndex,
-    paragraphIndex,
-    text,
-)
-
 /**
  * EPUB image nodes are rehydrated from the immutable source archive when a
  * chapter is opened. Text keeps its persisted indices, so existing progress,

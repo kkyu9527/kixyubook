@@ -11,10 +11,14 @@ import com.kixyu9527.kixyubook.core.common.repository.SyncEntityType
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationOperation
 import com.kixyu9527.kixyubook.core.common.repository.SyncMutationRecorder
 import com.kixyu9527.kixyubook.core.database.dao.FontDao
+import com.kixyu9527.kixyubook.core.database.dao.RepairDao
+import com.kixyu9527.kixyubook.core.database.entity.PendingRepairEntity
 import com.kixyu9527.kixyubook.core.database.entity.UserFontEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,11 +35,28 @@ class LocalFontRepository @Inject constructor(
     private val dao: FontDao,
     private val syncMutations: SyncMutationRecorder,
     private val database: KixyuDatabase,
+    private val repairDao: RepairDao,
     private val settingsRepository: ReaderSettingsRepository,
 ) : FontRepository {
     private val mutationMutex = LibraryStorageGate.mutex
 
-    override fun observeFonts() = dao.observeFonts().map { list -> list.map { UserFont(it.uuid, it.name, it.filePath, it.createdTime) } }
+    override fun observeFonts(): kotlinx.coroutines.flow.Flow<List<UserFont>> = flow {
+        // Self-heal backstop: a required repair that failed earlier is retried whenever fonts are
+        // observed (reader and settings both collect this), so a dangling reference cannot survive.
+        try {
+            processPendingRepairs()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.record(
+                com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category.LIBRARY,
+                "font_reference_repair_retried",
+                outcome = "failure",
+                details = mapOf("error" to (error.message ?: error::class.java.simpleName)),
+            )
+        }
+        emitAll(dao.observeFonts().map { list -> list.map { UserFont(it.uuid, it.name, it.filePath, it.createdTime) } })
+    }
 
     override suspend fun importFont(uriString: String): Result<UserFont> = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
@@ -73,44 +94,69 @@ class LocalFontRepository @Inject constructor(
 
     override suspend fun deleteFont(fontUuid: String) = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
-            val file = deleteFontRow(fontUuid)
-            clearFontReference(fontUuid)
+            val file = fontFile(fontUuid)
+            deleteFontTransaction(fontUuid)
+            // The reference repair follows the committed delete: a rollback leaves the settings
+            // untouched, and a failed repair stays queued for a retry.
+            processPendingRepairs()
             file?.delete()
             pruneUnreferencedFonts()
         }
     }
 
     override suspend fun deleteFontRemote(fontUuid: String): Unit = withContext(Dispatchers.IO) {
-        // Runs inside the caller's tombstone transaction: only the row delete participates, so the
-        // storage lock is never taken while that transaction is open (imports take it first).
-        val file = deleteFontRow(fontUuid)
+        // Runs inside the caller's tombstone transaction: only the row delete and the repair
+        // intent participate, so the storage lock is never taken while that transaction is open.
+        val file = fontFile(fontUuid)
+        deleteFontTransaction(fontUuid)
+        deferRequiredRepair { processPendingRepairs() }
         deferFileCleanup {
             mutationMutex.withLock {
-                clearFontReference(fontUuid)
                 file?.delete()
                 pruneUnreferencedFonts()
             }
         }
     }
 
-    /**
-     * Clears a global font reference. It runs after the row removal commits, so a rolled-back
-     * deletion never leaves the configuration pointing at a missing font.
-     */
-    private suspend fun clearFontReference(fontUuid: String) {
-        val current = settingsRepository.settings.first()
-        if (current.fontUuid == fontUuid) {
-            settingsRepository.update { it.copy(fontUuid = null) }
+    override suspend fun repairPendingReferences() = withContext(Dispatchers.IO) {
+        mutationMutex.withLock { processPendingRepairs() }
+    }
+
+    /** Retries every queued cross-store repair; a failure keeps its row for the next attempt. */
+    private suspend fun processPendingRepairs() {
+        repairDao.getAll().forEach { repair ->
+            when (repair.kind) {
+                REPAIR_FONT_REFERENCE -> {
+                    settingsRepository.update { current ->
+                        if (current.fontUuid == repair.target) {
+                            current.copy(fontUuid = null)
+                        } else {
+                            current
+                        }
+                    }
+                    repairDao.delete(repair.id)
+                }
+                else -> repairDao.delete(repair.id)
+            }
         }
     }
 
-    private suspend fun deleteFontRow(fontUuid: String): File? {
-        val file = dao.getFont(fontUuid)?.filePath?.let(::File)
+    private suspend fun fontFile(fontUuid: String): File? =
+        dao.getFont(fontUuid)?.filePath?.let(::File)
+
+    private suspend fun deleteFontTransaction(fontUuid: String) {
         database.withTransaction {
             dao.delete(fontUuid)
+            // The repair intent lives in the same transaction as the delete: a rollback keeps both.
+            repairDao.insertIgnoring(
+                PendingRepairEntity(
+                    kind = REPAIR_FONT_REFERENCE,
+                    target = fontUuid,
+                    createdTime = System.currentTimeMillis(),
+                ),
+            )
             syncMutations.record(SyncEntityType.FONT, fontUuid, SyncMutationOperation.DELETE)
         }
-        return file
     }
 
     override suspend fun storeSyncedFont(
@@ -147,5 +193,8 @@ class LocalFontRepository @Inject constructor(
             if (!entry.isFile || entry.absolutePath !in retained) entry.deleteRecursively()
         }
         directory.delete()
+    }
+    private companion object {
+        const val REPAIR_FONT_REFERENCE = "font_reference"
     }
 }

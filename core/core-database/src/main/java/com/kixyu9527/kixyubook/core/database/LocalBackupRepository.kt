@@ -339,6 +339,7 @@ class LocalBackupRepository @Inject constructor(
             // Once switching starts, coroutine cancellation must not strand an open process in
             // the middle. Actual process death is handled by the on-disk journal at startup.
             withContext(NonCancellable) {
+                LibraryStorageGate.restoreInProgress = true
                 withoutRecordingSyncMutations {
                     settingsTouched = true
                     restoreSettings(properties)
@@ -350,6 +351,12 @@ class LocalBackupRepository @Inject constructor(
                 committed = true
             }
             runCatching { File(context.noBackupFilesDir, EPUB_CACHE_DIRECTORY).deleteRecursively() }
+            // The restored database may predate the current parsers; derived-data version marks
+            // belong to the replaced library, so they must reset together with it.
+            runCatching {
+                context.getSharedPreferences(DERIVED_DATA_VERSION_PREFERENCES, Context.MODE_PRIVATE)
+                    .edit().clear().commit()
+            }
         } catch (failure: Exception) {
             // Returning from NonCancellable can deliver a pending cancellation after commit.
             // The restored database and settings must remain a pair in that case.
@@ -374,6 +381,8 @@ class LocalBackupRepository @Inject constructor(
             if (databaseClosed) throw BackupRecoveryException(context.getString(R.string.backup_restart_recovery), failure)
             if (failure is CancellationException) throw failure
             throw failure
+        } finally {
+            LibraryStorageGate.restoreInProgress = false
         }
         Unit
     }

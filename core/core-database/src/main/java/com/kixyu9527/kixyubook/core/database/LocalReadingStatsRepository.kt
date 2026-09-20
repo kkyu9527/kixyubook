@@ -46,6 +46,7 @@ class LocalReadingStatsRepository @Inject constructor(
     }
 
     override suspend fun recordSession(bookUuid: String, durationMillis: Long) = database.withTransaction {
+        LibraryStorageGate.requireWritable()
         if (durationMillis >= 1_000) {
             val syncUuid = UUID.randomUUID().toString()
             dao.insertSession(ReadingSessionEntity(

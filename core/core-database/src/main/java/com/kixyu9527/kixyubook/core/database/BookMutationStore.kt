@@ -18,6 +18,7 @@ internal class BookMutationStore(
     private val syncMutations: SyncMutationRecorder,
 ) {
     suspend fun saveProgress(progress: ReadingProgress) = database.withTransaction {
+        LibraryStorageGate.requireWritable()
         val chapter = dao.getChapters(progress.bookUuid).firstOrNull { it.id == progress.chapterId }
         val saved = dao.saveProgressIfNewer(
             ReadingProgressEntity(
@@ -37,6 +38,7 @@ internal class BookMutationStore(
     }
 
     suspend fun updateBookMetadata(bookUuid: String, title: String, author: String, description: String): Unit = database.withTransaction {
+        LibraryStorageGate.requireWritable()
         val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_missing))
         dao.insertMetadataEdit(MetadataEditEntity(UUID.randomUUID().toString(), bookUuid, book.title, book.author, book.description, title.trim(), author.trim(), description.trim(), System.currentTimeMillis()))
         // The journal only needs to answer "was this field ever edited"; unbounded growth would
@@ -77,6 +79,7 @@ internal class BookMutationStore(
     }
 
     suspend fun addBookmark(bookmark: Bookmark): Unit = database.withTransaction {
+        LibraryStorageGate.requireWritable()
         // Persist the stable chapter key alongside the mutable row id so the bookmark can be
         // re-anchored after a reparse. Callers may supply it; otherwise derive it from the chapter.
         val chapterKey = bookmark.chapterKey.ifBlank { dao.getChapterKey(bookmark.chapterId).orEmpty() }

@@ -43,6 +43,8 @@ import com.kixyu9527.kixyubook.core.reader.engine.ReaderPaginationCacheMaintenan
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -96,7 +98,11 @@ class LocalBookRepository @Inject constructor(
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
     private val canceledImportRuns = ConcurrentHashMap.newKeySet<String>()
-    override val importProgress = importDao.observeLatestRun()
+    override val importProgress = flow {
+        // A process death mid-import leaves RUNNING rows forever; recover them before publishing.
+        importDao.failInterrupted("")
+        emitAll(importDao.observeLatestRun())
+    }
         .map { items ->
             items.toImportRuns().firstOrNull()
         }
@@ -136,6 +142,7 @@ class LocalBookRepository @Inject constructor(
         MemoryPressureRegistry.register(this)
         importScope.launch {
             upgradeTxtParserDataIfNeeded()
+            upgradeEpubMetadataIfNeeded()
             epubIndex.upgradeDirectoryDataIfNeeded()
         }
     }
@@ -513,7 +520,6 @@ class LocalBookRepository @Inject constructor(
             // A worker can be stopped after any committed batch. Restart from the immutable TXT
             // source so retries never leave duplicate or half-indexed chapters.
             database.withTransaction {
-                dao.deleteBookParagraphFts(setOf(bookUuid))
                 dao.deleteChapters(bookUuid)
             }
             val chapterCount = importStreamingChapters(bookUuid, source, parsers.parserFor(BookFormat.TXT))
@@ -789,7 +795,6 @@ class LocalBookRepository @Inject constructor(
                 annotations.getBookAnnotations(uuid).map(ReaderAnnotation::uuid)
             }
             dao.deleteMetadataEdits(bookUuids)
-            dao.deleteBookParagraphFts(bookUuids)
             // Explicit cleanup in the same transaction as the cascade, so pending bookmarks
             // (and their excerpt text) never survive a single or batch book deletion.
             dao.deletePendingBookmarks(bookUuids)
@@ -1090,7 +1095,6 @@ class LocalBookRepository @Inject constructor(
             }
             database.withTransaction {
                 dao.deleteProgress(bookUuid)
-                dao.deleteBookParagraphFts(setOf(bookUuid))
                 dao.deleteChapters(bookUuid)
                 var chapterIndex = 0
                 val chapterIds = mutableListOf<Long>()
@@ -1236,6 +1240,46 @@ class LocalBookRepository @Inject constructor(
         }
     }
 
+    /**
+     * EPUB metadata improvements are applies once per parser version. The version is advanced only
+     * when every book refreshed, so a transient read failure is retried on the next launch.
+     */
+    private suspend fun upgradeEpubMetadataIfNeeded() {
+        if (derivedDataVersions.getInt(KEY_EPUB_METADATA_VERSION, 0) >= EPUB_METADATA_VERSION) return
+        storageMutationMutex.withLock {
+            if (derivedDataVersions.getInt(KEY_EPUB_METADATA_VERSION, 0) >= EPUB_METADATA_VERSION) {
+                return@withLock
+            }
+            val parser = parsers.parserFor(BookFormat.EPUB)
+            var failures = 0
+            dao.getAllBooks()
+                .asSequence()
+                .filter { it.format == BookFormat.EPUB.name && File(it.storagePath).isFile }
+                .forEach { book ->
+                    runCatching {
+                        refreshBookMetadata(
+                            context, database, dao, parser, syncMutations, book.uuid,
+                            filenameRules(), filenameSpecs(),
+                        )
+                    }.onFailure { error ->
+                        failures++
+                        DiagnosticLog.record(
+                            Category.LIBRARY,
+                            "epub_metadata_upgrade_failed",
+                            outcome = "retry",
+                            details = mapOf(
+                                "book" to book.uuid.take(8),
+                                "error" to (error.message ?: error::class.java.simpleName),
+                            ),
+                        )
+                    }
+                }
+            if (failures == 0) {
+                derivedDataVersions.edit { putInt(KEY_EPUB_METADATA_VERSION, EPUB_METADATA_VERSION) }
+            }
+        }
+    }
+
     override suspend fun setCategory(bookUuid: String, category: String) = bookMutations.setCategory(bookUuid, category)
 
     override suspend fun setCategories(bookUuids: Set<String>, category: String) = bookMutations.setCategories(bookUuids, category)
@@ -1346,7 +1390,6 @@ class LocalBookRepository @Inject constructor(
         val book = dao.getBook(bookUuid) ?: return
         database.withTransaction {
             dao.deleteMetadataEdits(setOf(bookUuid))
-            dao.deleteBookParagraphFts(setOf(bookUuid))
             dao.deleteBook(bookUuid)
             syncMutations.record(SyncEntityType.BOOK, bookUuid, SyncMutationOperation.DELETE)
         }

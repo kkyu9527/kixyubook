@@ -58,6 +58,20 @@ class PostCommitFileCleanupTest {
     }
 
     @Test
+    fun aRequiredRepairFailurePropagatesInsteadOfDisappearing() = runBlocking(Dispatchers.IO) {
+        var cleanupRan = false
+        val failure = runCatching {
+            runWithPostCommitFileCleanup {
+                deferRequiredRepair { error("repair failed") }
+                deferFileCleanup { cleanupRan = true }
+            }
+        }
+
+        assertTrue("a failed cross-store repair must surface to the caller", failure.isFailure)
+        assertFalse(cleanupRan)
+    }
+
+    @Test
     fun cleanupWithoutABatchRunsImmediately() = runBlocking(Dispatchers.IO) {
         var cleaned = false
         deferFileCleanup { cleaned = true }

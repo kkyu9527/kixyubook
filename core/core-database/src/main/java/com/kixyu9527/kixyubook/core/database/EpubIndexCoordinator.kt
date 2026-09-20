@@ -149,6 +149,7 @@ internal class EpubIndexCoordinator(
 
     /** Durable WorkManager entry point. Every completed chapter is an independent checkpoint. */
     suspend fun continueIndex(bookUuid: String) = withContext(Dispatchers.IO) {
+        LibraryStorageGate.requireWritable()
         val startedAt = SystemClock.elapsedRealtime()
         val initialBook = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name }
             ?: return@withContext

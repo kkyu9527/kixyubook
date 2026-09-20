@@ -246,6 +246,9 @@ interface FontRepository {
      */
     suspend fun deleteFontRemote(fontUuid: String) = deleteFont(fontUuid)
 
+    /** Retries a queued font-reference repair; exporters call this before validating assets. */
+    suspend fun repairPendingReferences() = Unit
+
     /**
      * Stores a font downloaded by cloud sync. Implementations must run under the shared
      * library-storage lock so a concurrent prune cannot delete the file before its row exists.

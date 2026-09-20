@@ -35,6 +35,8 @@ import com.kixyu9527.kixyubook.core.common.configuration.ReaderSettingsRequests
 import com.kixyu9527.kixyubook.core.common.configuration.applySettingsPatch
 
 data class SettingsUiState(
+    /** False until the first persisted snapshot arrives; updates must not use default values. */
+    val loaded: Boolean = false,
     val settings: ReaderSettings = ReaderSettings(),
     val fonts: List<UserFont> = emptyList(),
     val goalMinutes: Int = 30,
@@ -79,6 +81,7 @@ class SettingsViewModel @Inject constructor(
         libraryPreferences.preferences,
     ) { basic, backup, sync, reminder, library ->
         SettingsUiState(
+            loaded = true,
             settings = basic.settings,
             fonts = basic.fonts,
             goalMinutes = basic.goalMinutes,
@@ -172,6 +175,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun update(transform: (ReaderSettings) -> ReaderSettings) {
+        // A tap before the persisted snapshot loads would otherwise be computed against defaults
+        // and written back over the real value.
+        if (!uiState.value.loaded) return
         settingRequests.changes(uiState.value.settings, transform).forEach { (field, patch) ->
             settingWrites.submit("reader:$field") { repository.update { applySettingsPatch(it, patch) } }
         }
@@ -198,7 +204,12 @@ class SettingsViewModel @Inject constructor(
         fonts.deleteFont(font.uuid)
     } }
 
-    fun exportBackup(uri: String) = backups.enqueue(BackupOperationType.EXPORT, uri)
+    fun exportBackup(uri: String) = viewModelScope.launch {
+        // A queued cross-store repair (a deleted font still referenced) would fail the export's
+        // resource check; retry it first. Failure is recorded and the export surfaces it.
+        runCatching { fonts.repairPendingReferences() }
+        backups.enqueue(BackupOperationType.EXPORT, uri)
+    }
 
     fun restoreBackup(uri: String) = backups.enqueue(BackupOperationType.RESTORE, uri)
 
