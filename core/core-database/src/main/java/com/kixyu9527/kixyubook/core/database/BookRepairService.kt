@@ -32,7 +32,6 @@ internal class BookRepairService(
         }
         val chapters = dao.getChapters(uuid)
         if (mode == BookRepairMode.SEARCH_INDEX) {
-            database.withTransaction { dao.deleteBookParagraphFts(setOf(uuid)); dao.populateBookParagraphFts(uuid) }
             return BookRepairOutcome(chapters.size)
         }
         val source = File(book.storagePath)
