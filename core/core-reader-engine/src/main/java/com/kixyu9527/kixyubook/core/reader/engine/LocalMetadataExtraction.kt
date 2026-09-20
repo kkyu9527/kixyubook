@@ -157,6 +157,46 @@ object LocalMetadata {
 
     // ---------------------------------------------------------------- structured rules
 
+    /** Bracketed text is dropped only when it looks like an edition/marker, never a subtitle. */
+    private fun String.stripEditionTags(): String = EDITION_TAG_PATTERN.replace(this) { match ->
+        val inner = match.groupValues[1].trim()
+        if (TAG_WORD.matches(inner) || EDITION_WORD.containsMatchIn(inner)) " " else match.value
+    }
+
+    /**
+     * Filename segments after extension/tag stripping, for callers that need to disambiguate a
+     * name whose first and last segments are both plausible (author-first file names).
+     */
+    fun filenameSegments(sample: String): List<String> {
+        val base = sampleBaseName(sample) ?: return emptyList()
+        val chosen = SAMPLE_SEPARATORS.firstOrNull { it in base }
+            ?: if (WHITESPACE.containsMatchIn(base)) " " else return listOf(base)
+        val raw = if (chosen == " ") base.split(WHITESPACE) else base.split(chosen)
+        return raw.map { it.trim().trim('-', '_', '—', '·') }.filter { it.isNotBlank() }
+    }
+
+    /**
+     * Author-first file names (`辰东-遮天.txt`) make the author look like the title because the
+     * loose rule assumes the last segment is the author. When the body already identified the
+     * author, the remaining segment is the real title.
+     */
+    fun resolveFilenameTitleAgainstBody(
+        titles: List<MetadataCandidate>,
+        authors: List<MetadataCandidate>,
+        sample: String,
+    ): List<MetadataCandidate> {
+        if (titles.isEmpty()) return titles
+        val bodyAuthor = mergeAuthors(authors)
+        if (bodyAuthor.isBlank() || bodyAuthor == UNKNOWN_AUTHOR) return titles
+        if (titles.any { it.value != bodyAuthor }) return titles
+        val alternative = filenameSegments(sample)
+            .filterNot { it == bodyAuthor }
+            .maxByOrNull(String::length)
+            ?.takeIf { it.isNotBlank() }
+            ?: return titles
+        return listOf(MetadataCandidate(alternative, MetadataSource.FILENAME_TITLE))
+    }
+
     /** One token of the sample: bracketed markers, 《》 titles, or bare text between separators. */
     data class FilenameToken(
         val text: String,
@@ -485,15 +525,33 @@ object LocalMetadata {
                 }
             }
         }
-        if (authors.isEmpty()) {
-            BRACKET_AUTHOR_PREFIX.find(base)?.groupValues?.get(1)?.trim()
-                ?.takeIf(::isPlausibleLooseAuthor)
-                ?.let { authors += MetadataCandidate(it, MetadataSource.FILENAME_AUTHOR_LABELED) }
+        // Brackets carry the author in `[作者]书名` / `书名（作者）`, but the title in bare
+        // `【书名】` / `（书名）`; the surrounding text decides which.
+        BRACKET_AUTHOR_PREFIX.find(base)?.let { match ->
+            val content = match.groupValues[1].trim()
+            val tail = base.substring(match.range.last + 1).trim()
+            when {
+                content.isBlank() -> Unit
+                tail.isEmpty() ->
+                    titleCandidates += MetadataCandidate(content, MetadataSource.FILENAME_TITLE)
+                LABELED_AUTHOR_PATTERN.containsMatchIn(base) ->
+                    titleCandidates += MetadataCandidate(content, MetadataSource.FILENAME_TITLE)
+                isPlausibleLooseAuthor(content) ->
+                    authors += MetadataCandidate(content, MetadataSource.FILENAME_AUTHOR_LABELED)
+            }
         }
         if (authors.isEmpty()) {
-            BRACKETED_AUTHOR_SUFFIX.find(base)?.groupValues?.get(1)?.trim()
-                ?.takeIf { isPlausibleLooseAuthor(it) && !TAG_WORD.matches(it) }
-                ?.let { authors += MetadataCandidate(it, MetadataSource.FILENAME_AUTHOR_LABELED) }
+            BRACKETED_AUTHOR_SUFFIX.find(base)?.let { match ->
+                val content = match.groupValues[1].trim()
+                val head = base.substring(0, match.range.first).trim()
+                when {
+                    content.isBlank() -> Unit
+                    head.isEmpty() ->
+                        titleCandidates += MetadataCandidate(content, MetadataSource.FILENAME_TITLE)
+                    isPlausibleLooseAuthor(content) && !TAG_WORD.matches(content) ->
+                        authors += MetadataCandidate(content, MetadataSource.FILENAME_AUTHOR_LABELED)
+                }
+            }
         }
         LABELED_AUTHOR_PATTERN.findAll(remainder).forEach { match ->
             splitAuthorList(match.groupValues[1]).forEach {
@@ -515,16 +573,26 @@ object LocalMetadata {
 
         if (titleCandidates.isEmpty()) {
             // Remove the author markers before deriving a title; `书名 by 作者` must not become
-            // the title. A loose `书名-某某` still falls back to its first segment.
+            // the title. The longest segment that is neither a detected author nor a bare index
+            // wins, so `001_遮天_辰东` and `辰东-遮天` both resolve to the book name.
             val titleBase = remainder
                 .replace(LABELED_AUTHOR_PATTERN, " ")
                 .replace(BY_AUTHOR_PATTERN, " ")
                 .replace(Regex("\\s+"), " ")
                 .trim()
-            val cleaned = titleBase.split(LOOSE_AUTHOR_SEPARATOR).first()
-                .trim('-', '_', '—')
+                .stripEditionTags()
+                .replace(LEADING_INDEX, "")
                 .trim()
-            if (cleaned.isNotBlank()) {
+            val detectedAuthors = authors.mapTo(hashSetOf()) { it.value }
+            val segments = titleBase.split(LOOSE_AUTHOR_SEPARATOR)
+                .map { it.trim().trim('-', '_', '—', '·', '「', '」', '『', '』', '"', '\'', '“', '”') }
+                .filter { it.isNotBlank() }
+            val cleaned = segments
+                .filterNot { it in detectedAuthors }
+                .filterNot { NUMERIC_ONLY.matches(it) }
+                .maxByOrNull(String::length)
+                ?: segments.firstOrNull()
+            if (!cleaned.isNullOrBlank()) {
                 titleCandidates += MetadataCandidate(cleaned, MetadataSource.FILENAME_TITLE)
             }
         }
@@ -592,6 +660,7 @@ object LocalMetadata {
         val excluded = linkedSetOf<Int>()
         var description = ""
         var descriptionHeadingIndex = -1
+        var bareTitle: Pair<Int, String>? = null
         var index = 0
         while (index < lines.size && index < scanLimit) {
             val line = lines[index]
@@ -619,6 +688,17 @@ object LocalMetadata {
                 index++
                 continue
             }
+            // A plain title line (`遮天`) is only trusted when a labeled author line proves the
+            // file starts with a header rather than the first sentence of the story.
+            if (
+                bareTitle == null &&
+                authors.isEmpty() &&
+                line.length in 2..MAX_HEADING_LENGTH &&
+                !SENTENCE_END.containsMatchIn(line) &&
+                !isChapterHeading(line)
+            ) {
+                bareTitle = index to line.trim(*HEADING_DECORATIONS).trim()
+            }
             if (descriptionHeadingIndex < 0 && DESCRIPTION_HEADING_PATTERN.matchEntire(line) != null) {
                 descriptionHeadingIndex = index
                 excluded += index
@@ -626,6 +706,15 @@ object LocalMetadata {
                 continue
             }
             index++
+        }
+
+        if (titles.none { it.source == MetadataSource.TXT_TITLE_LABEL } && authors.isNotEmpty()) {
+            bareTitle?.let { (lineIndex, value) ->
+                if (value.isNotBlank()) {
+                    titles += MetadataCandidate(value, MetadataSource.TXT_TITLE_BARE)
+                    excluded += lineIndex
+                }
+            }
         }
 
         if (descriptionHeadingIndex >= 0) {
@@ -685,6 +774,13 @@ object LocalMetadata {
     fun isDescriptionHeading(line: String): Boolean =
         DESCRIPTION_HEADING_PATTERN.matchEntire(line.trim()) != null
 
+    /**
+     * EPUB-only: a synopsis may live on a front-matter page titled like a preface instead of a
+     * labelled description. Projects such as calibre and Legado treat these pages as intros too.
+     */
+    fun isIntroHeading(line: String): Boolean =
+        isDescriptionHeading(line) || INTRO_HEADING_PATTERN.matchEntire(line.trim()) != null
+
     /** Shared chapter/volume judgment so metadata boundaries match the body parser exactly. */
     fun isChapterHeading(line: String): Boolean = chapterHeading(line) != null || volumeHeading(line) != null
 
@@ -693,7 +789,10 @@ object LocalMetadata {
         val line = raw.trim().trim(*HEADING_DECORATIONS).trim()
         if (line.length !in 2..MAX_HEADING_LENGTH) return null
         return line.takeIf {
-            CHAPTER_PATTERN.matches(it) || NAMED_CHAPTER_PATTERN.matches(it) || LATIN_CHAPTER_PATTERN.matches(it)
+            CHAPTER_PATTERN.matches(it) ||
+                NAMED_CHAPTER_PATTERN.matches(it) ||
+                LATIN_CHAPTER_PATTERN.matches(it) ||
+                PARENTHESIZED_CHAPTER_PATTERN.matches(it)
         }
     }
 
@@ -838,6 +937,7 @@ object LocalMetadata {
 
     enum class MetadataSource(val confidence: Int) {
         EPUB_ROLE(100),
+        TXT_TITLE_BARE(90),
         TXT_TITLE_LABEL(95),
         TXT_AUTHOR_LABEL(95),
         TXT_DECORATED_TITLE(80),
@@ -892,8 +992,16 @@ object LocalMetadata {
     )
     private val DESCRIPTION_HEADING_PATTERN = Regex(
         "^\\s*(?:内容简介|內容簡介|作品简介|作品簡介|小说简介|小說簡介|故事简介|故事簡介|图书简介|圖書簡介|" +
-            "内容介绍|內容介紹|内容提要|內容提要|故事梗概|简介|簡介|文案|导读|導讀|" +
+            "内容介绍|內容介紹|内容提要|內容提要|故事梗概|故事梗概|内容梗概|內容梗概|摘要|梗概|" +
+            "本书简介|本書簡介|书籍简介|書籍簡介|简介|簡介|文案|导读|導讀|" +
             "synopsis|summary|description|あらすじ|前書き)(?:\\s*[：:]\\s*(.*))?\\s*$",
+        RegexOption.IGNORE_CASE,
+    )
+    /** Anchored to the line start: a synopsis may legitimately mention 版权 or 字数 mid-sentence. */
+    private val INTRO_HEADING_PATTERN = Regex(
+        "^\\s*(?:前言|序言|序|引子|引言|楔子|卷首语|卷首語|作品相关|作品相關|书籍信息|書籍資訊|" +
+            "本书信息|本書資訊|关于本书|關於本書|作者的话|作者的話|编者按|編者按|编辑推荐|編輯推薦|" +
+            "preface|foreword|prologue|about this book|introduction)(?:\\s*[：:]\\s*(.*))?\\s*$",
         RegexOption.IGNORE_CASE,
     )
     /** Anchored to the line start: a synopsis may legitimately mention 版权 or 字数 mid-sentence. */
@@ -909,8 +1017,12 @@ object LocalMetadata {
     private val TAG_WORD = Regex("^(?:完本|完结|全本|全集|精校|校对|连载|出版|番外|重置|补番|合集|套装|全\\d+[卷册部]?|第?\\d+[卷册部]?)$")
     private val WHITESPACE = Regex("[\\s　]+")
     private const val WHITESPACE_PATTERN = "[\\s　]+"
-    private val BRACKET_AUTHOR_PREFIX = Regex("^\\s*[\\[【]([^\\]】]{2,20})[\\]】]")
-    private val BRACKETED_AUTHOR_SUFFIX = Regex("[（(]([^）)]{2,20})[）)]\\s*$")
+    private val BRACKET_AUTHOR_PREFIX = Regex("^\\s*[\\[【{｛]([^\\]】}｝]{2,20})[\\]】}｝]")
+    private val BRACKETED_AUTHOR_SUFFIX = Regex("[（(【{｛]([^）)】}｝]{2,20})[）)】}｝]\\s*$")
+    private val EDITION_TAG_PATTERN = Regex("[（(【\\[]([^）)】\\]]{1,12})[）)】\\]]")
+    private val EDITION_WORD = Regex("版|篇|季|全集|全本|完结|完本|精校|校对|未删|新修|修订|修訂|增補|增补|出版|首发|獨家|独家")
+    private val LEADING_INDEX = Regex("^\\s*(?:第\\s*)?[0-9０-９]{1,4}\\s*[、.．:：]?\\s*")
+    private val NUMERIC_ONLY = Regex("^[0-9０-９]+$")
     private val TRAILING_AUTHOR_MARKER = Regex("\\s+(?:著者|编著|編著|著)$")
     private val ENTITY_PATTERN = Regex("&(#?[A-Za-z0-9]+);")
     private val CHAPTER_PATTERN = Regex(
@@ -937,6 +1049,16 @@ object LocalMetadata {
     private val LATIN_CHAPTER_PATTERN = Regex(
         "^(?:chapter|part|volume|book)\\s+(?:[0-9]+|[ivxlcdm]+)(?:(?:\\s+|\\s*[-—:：.]\\s*).{1,48})?$",
         RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * Some novels mark chapters only with a bracketed number on its own line: `（1）`, `(12)`,
+     * `（一）`, optionally followed by the title. The tail excludes sentence punctuation so an
+     * in-paragraph aside like `（1）他说。` is not mistaken for a heading.
+     */
+    private val PARENTHESIZED_CHAPTER_PATTERN = Regex(
+        "^[（(]\\s*(?:[0-9０-９]{1,6}|[零〇一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟]{1,12})" +
+            "\\s*[）)]\\s*[^。！？!?]{0,48}$",
     )
     private val HEADING_DECORATIONS = charArrayOf('=', '-', '*', '#', '_', '~', '—', '－', '【', '】', '[', ']', '「', '」', '『', '』', '　')
 }

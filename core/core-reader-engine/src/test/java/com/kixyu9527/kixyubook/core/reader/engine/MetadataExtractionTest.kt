@@ -544,6 +544,38 @@ class MetadataExtractionTest {
         assertEquals("简介一 & 内容\n\n简介二", metadata.description)
     }
 
+    @Test fun epubReadsAnIntroChapterAsTheDescriptionWhenTheOpfHasNone() {
+        val epub = folder.newFile("intro.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            zip.textEntry("mimetype", "application/epub+zip")
+            zip.textEntry(
+                "META-INF/container.xml",
+                """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""",
+            )
+            zip.textEntry(
+                "OPS/book.opf",
+                """<package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>作品相关测试</dc:title>
+                </metadata><manifest>
+                    <item id="intro" href="intro.xhtml" media-type="application/xhtml+xml"/>
+                    <item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>
+                </manifest><spine><itemref idref="intro"/><itemref idref="c1"/></spine></package>""",
+            )
+            zip.textEntry(
+                "OPS/intro.xhtml",
+                """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>作品相关</h1><p>这是放在正文前的简介。</p></body></html>""",
+            )
+            zip.textEntry(
+                "OPS/c1.xhtml",
+                """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章 开始</h1><p>正文，不能被当成简介。</p></body></html>""",
+            )
+        }
+
+        val metadata = EpubBookParser().readMetadata(epub, epub.name)
+
+        assertEquals("这是放在正文前的简介。", metadata.description)
+    }
+
     @Test fun epubUsesTheMainTitleTypeInsteadOfTheFirstTitleElement() {
         val epub = folder.newFile("title-type.epub")
         ZipOutputStream(epub.outputStream()).use { zip ->
@@ -804,6 +836,46 @@ class MetadataExtractionTest {
         val metadata = EpubBookParser().readMetadata(epub, epub.name)
 
         assertEquals("guide 指向的简介。", metadata.description)
+    }
+
+    @Test fun aBracketedWholeNameIsTheTitleNotAnAuthor() {
+        val fullWidth = LocalMetadata.parseFileName("（遮天）.txt")
+        assertEquals("遮天", LocalMetadata.mergeTitles(fullWidth.titles, "fallback"))
+        assertEquals("未知作者", LocalMetadata.mergeAuthors(fullWidth.authors))
+
+        val corner = LocalMetadata.parseFileName("【遮天】.txt")
+        assertEquals("遮天", LocalMetadata.mergeTitles(corner.titles, "fallback"))
+        assertEquals("未知作者", LocalMetadata.mergeAuthors(corner.authors))
+
+        // With an explicit author label the bracket is the title even when text follows it.
+        val labelled = LocalMetadata.parseFileName("【遮天】作者：辰东.txt")
+        assertEquals("遮天", LocalMetadata.mergeTitles(labelled.titles, "fallback"))
+        assertEquals("辰东", LocalMetadata.mergeAuthors(labelled.authors))
+    }
+
+    @Test fun bracketedNumberLinesAreChapterHeadings() {
+        assertEquals("（1）", LocalMetadata.chapterHeading("（1）"))
+        assertEquals("（一）", LocalMetadata.chapterHeading("（一）"))
+        assertEquals("(12)", LocalMetadata.chapterHeading("(12)"))
+        assertEquals("（3）初入江湖", LocalMetadata.chapterHeading("（3）初入江湖"))
+        assertNull(LocalMetadata.chapterHeading("（一）这是正文里的一句括号。"))
+        assertNull(LocalMetadata.chapterHeading("（笑）"))
+        assertNull(LocalMetadata.chapterHeading("（1）他说。"))
+    }
+
+    @Test fun filenameTitleIgnoresALeadingIndexAndTheAuthorOrder() {
+        val indexed = LocalMetadata.parseFileName("001_遮天_辰东.txt")
+        assertEquals("遮天", LocalMetadata.mergeTitles(indexed.titles, "fallback"))
+
+        // `辰东-遮天` reads the last segment as the author; the scanned body resolves the order.
+        val body = LocalMetadata.extractFrontMatter(listOf("作者：辰东", "第一章 开始"))
+        val authorFirst = LocalMetadata.parseFileName("辰东-遮天.txt")
+        val resolved = LocalMetadata.resolveFilenameTitleAgainstBody(
+            titles = authorFirst.titles,
+            authors = body.authors,
+            sample = "辰东-遮天.txt",
+        )
+        assertEquals("遮天", LocalMetadata.mergeTitles(resolved, "fallback"))
     }
 
     @Test fun aPathInputResolvesTheFileNameNotTheDirectory() {

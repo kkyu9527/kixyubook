@@ -690,7 +690,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         val manifest = pkg.manifest.values
         runCatching { readNavigationEntries(zip, pkg) }.getOrDefault(emptyMap())
             .entries
-            .filter { LocalMetadata.isDescriptionHeading(it.value.title) }
+            .filter { LocalMetadata.isIntroHeading(it.value.title) }
             .take(MAX_INTRO_PAGE_DOCS)
             .forEach { (target, _) ->
                 readDescriptionFromPath(zip, target.substringBefore('#'), target.substringAfter('#', ""), manifest)
@@ -707,10 +707,12 @@ class EpubBookParser : BookParser, MemoryPressureListener {
             scanned++
             val content = readContent(zip, item.path, manifest) ?: continue
             val heading = content.heading.orEmpty()
-            if (heading.isNotBlank() && LocalMetadata.isChapterHeading(heading)) break
-            if (heading.isNotBlank() && LocalMetadata.isDescriptionHeading(heading)) {
+            // An intro page that is also named like a preface (`前言`) must be read before the
+            // chapter-heading break treats it as the start of the story.
+            if (heading.isNotBlank() && LocalMetadata.isIntroHeading(heading)) {
                 content.descriptionText(heading)?.let { return listOf(it) }
             }
+            if (heading.isNotBlank() && LocalMetadata.isChapterHeading(heading)) break
         }
         return emptyList()
     }
@@ -739,21 +741,21 @@ class EpubBookParser : BookParser, MemoryPressureListener {
             anchor != null -> textElements.indexOfFirst { (element, _) ->
                 generateSequence(element as org.w3c.dom.Node?) { it.parentNode }.any { it === anchor }
             }
-            else -> textElements.indexOfFirst { (_, text) -> LocalMetadata.isDescriptionHeading(text) }
+            else -> textElements.indexOfFirst { (_, text) -> LocalMetadata.isIntroHeading(text) }
         }
         if (startIndex < 0) return null
         val paragraphs = mutableListOf<String>()
         for (index in startIndex until textElements.size) {
             val text = textElements[index].second.trim()
             if (text.isBlank()) continue
-            if (index == startIndex && LocalMetadata.isDescriptionHeading(text)) continue
+            if (index == startIndex && LocalMetadata.isIntroHeading(text)) continue
             if (LocalMetadata.isChapterHeading(text)) break
             paragraphs += text
         }
         if (paragraphs.isEmpty()) {
             // The anchor path may still resolve through the block list even when the heading is
             // absent; fall back to the parsed content rather than returning nothing.
-            content.heading?.takeIf(LocalMetadata::isDescriptionHeading)?.let { heading ->
+            content.heading?.takeIf(LocalMetadata::isIntroHeading)?.let { heading ->
                 return content.descriptionText(heading)
             }
             return null

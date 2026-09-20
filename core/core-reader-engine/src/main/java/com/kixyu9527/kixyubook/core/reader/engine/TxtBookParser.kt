@@ -117,8 +117,13 @@ class TxtBookParser : BookParser {
             LocalMetadata.parseFileName(sourceName, rules)
         }
         val fromSpec = LocalMetadata.specCandidates(specs, sourceName)
+        val fileTitles = LocalMetadata.resolveFilenameTitleAgainstBody(
+            titles = fromFileName.titles,
+            authors = fromBody.authors,
+            sample = sourceName,
+        )
         val title = LocalMetadata.mergeTitles(
-            fromBody.titles + fromSpec.titles + fromFileName.titles,
+            fromBody.titles + fromSpec.titles + fileTitles,
             fallbackTitle.ifBlank { "未命名书籍" },
         )
         val author = LocalMetadata.mergeAuthors(fromBody.authors + fromSpec.authors + fromFileName.authors)

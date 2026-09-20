@@ -24,6 +24,53 @@ class ReaderEngineTest {
         assertEquals(listOf("正文", "第一章 开始", "第二章 继续"), chapters.map { it.title })
     }
 
+    @Test fun txtParserRecognizesBracketedNumberChapters() = runBlocking {
+        val file = folder.newFile("brackets.txt").apply {
+            writeText("（1）初入江湖\n第一段正文\n（一）\n第二段正文\n（2）风起\n第三段正文")
+        }
+        val chapters = mutableListOf<DocumentChapter>()
+
+        TxtBookParser().readChapters(file, chapters::add)
+
+        assertEquals(listOf("（1）初入江湖", "（一）", "（2）风起"), chapters.map { it.title })
+        assertEquals(
+            listOf(listOf("第一段正文"), listOf("第二段正文"), listOf("第三段正文")),
+            chapters.map { it.paragraphs },
+        )
+    }
+
+    @Test fun txtParserUsesABareTitleLineWhenAnAuthorLabelFollows() = runBlocking {
+        // The import passed `book.txt` as the display name; the title must come from the header
+        // instead of the uninformative file name.
+        val file = folder.newFile("book.txt").apply {
+            writeText("遮天\n作者：辰东\n第一章 开始\n正文。")
+        }
+
+        val metadata = TxtBookParser().readMetadata(
+            file = file,
+            fallbackTitle = "book",
+            sourceName = "book.txt",
+        )
+
+        assertEquals("遮天", metadata.title)
+        assertEquals("辰东", metadata.author)
+    }
+
+    @Test fun txtParserPrefersTheRealTitleForAuthorFirstFileNames() = runBlocking {
+        val file = folder.newFile("辰东-遮天.txt").apply {
+            writeText("作者：辰东\n第一章 开始\n正文。")
+        }
+
+        val metadata = TxtBookParser().readMetadata(
+            file = file,
+            fallbackTitle = "辰东-遮天",
+            sourceName = "辰东-遮天.txt",
+        )
+
+        assertEquals("遮天", metadata.title)
+        assertEquals("辰东", metadata.author)
+    }
+
     @Test fun txtParserBoundsBooksWithoutARecognizableToc() = runBlocking {
         val paragraph = "这是一段没有目录的正文。".repeat(12_000)
         val file = folder.newFile("no-toc-large.txt").apply {
