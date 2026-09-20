@@ -8,17 +8,18 @@ import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
 import com.kixyu9527.kixyubook.core.database.dao.ReaderAnnotationDao
 import com.kixyu9527.kixyubook.core.database.dao.ImportDao
+import com.kixyu9527.kixyubook.core.database.dao.RepairDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 
-const val KIXYU_DATABASE_VERSION = 20
+const val KIXYU_DATABASE_VERSION = 22
 
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, ParagraphEntity::class, ReadingProgressEntity::class,
         MetadataEditEntity::class, ReadingSessionEntity::class, UserFontEntity::class, BookmarkEntity::class,
         PendingBookmarkEntity::class,
         SyncOutboxEntity::class, SyncObjectStateEntity::class, SyncTombstoneEntity::class,
-        TextCorrectionEntity::class, ReaderAnnotationEntity::class, ParagraphFtsEntity::class,
-        ImportItemEntity::class],
+        TextCorrectionEntity::class, ReaderAnnotationEntity::class,
+        ImportItemEntity::class, PendingRepairEntity::class],
     version = KIXYU_DATABASE_VERSION,
     exportSchema = true,
 )
@@ -29,4 +30,5 @@ abstract class KixyuDatabase : RoomDatabase() {
     abstract fun textCorrectionDao(): TextCorrectionDao
     abstract fun readerAnnotationDao(): ReaderAnnotationDao
     abstract fun importDao(): ImportDao
+    abstract fun repairDao(): RepairDao
 }

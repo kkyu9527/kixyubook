@@ -52,10 +52,9 @@ class BookRepairServiceTest {
             val originalRows = dao.getParagraphs(12)
             var cleared = 0
             val service = BookRepairService(context, db, dao, notes, edits, Mutex()) { cleared++ }
-            dao.deleteBookParagraphFts(setOf("book"))
-            assertTrue(dao.searchBook("book", "searchable").isEmpty())
             service.repair("book", BookRepairMode.SEARCH_INDEX) {}
-            assertEquals(1, dao.searchBook("book", "searchable").size)
+            // The paragraph scanner reads rows directly; a repair must keep the indexed text intact.
+            assertTrue(dao.getParagraphs(12).any { it.text.contains("searchable") })
             if (changeSource) source.writeText(source.readText().replace("searchable", "changed"))
             val outcome = service.repair("book", BookRepairMode.REPARSE) {}
             assertEquals(changeSource, outcome.originalPreserved)

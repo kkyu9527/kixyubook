@@ -228,6 +228,32 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
     }
 }
 
+/**
+ * Sync retries gain a backoff stamp, and the never-read FTS mirror is dropped: production search
+ * uses the paragraph scanner, so the table only cost write amplification and repair work.
+ */
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `sync_outbox` ADD COLUMN `lastAttemptAt` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("DROP TABLE IF EXISTS `paragraphs_fts`")
+    }
+}
+
+/** Cross-store repairs (font reference cleanup) are retried until they succeed. */
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pending_repairs` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`kind` TEXT NOT NULL, `target` TEXT NOT NULL, `createdTime` INTEGER NOT NULL)",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_pending_repairs_kind_target` " +
+                "ON `pending_repairs` (`kind`, `target`)",
+        )
+    }
+}
+
 private fun createReaderAnnotationsTable(db: SupportSQLiteDatabase) {
     db.execSQL(
         """

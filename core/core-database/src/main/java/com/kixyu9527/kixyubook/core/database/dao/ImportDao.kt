@@ -33,6 +33,10 @@ interface ImportDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: ImportItemEntity)
 
+    /** A run that was RUNNING/PENDING when the process died never reaches a terminal state. */
+    @Query("UPDATE import_items SET status = 'FAILED', message = :message WHERE status IN ('RUNNING', 'PENDING')")
+    suspend fun failInterrupted(message: String)
+
     @Query("DELETE FROM import_items WHERE runId = :runId")
     suspend fun deleteRun(runId: String)
 

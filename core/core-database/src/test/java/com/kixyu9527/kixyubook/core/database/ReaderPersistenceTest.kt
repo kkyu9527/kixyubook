@@ -52,10 +52,7 @@ class ReaderPersistenceTest {
             assertEquals(listOf(bookmark), reopened.getAllBookmarkEntities())
             val repository = LocalReaderAnnotationRepository(context, db.readerAnnotationDao(), reopened, recorder, db)
             assertEquals(listOf(highlight, note), repository.getBookAnnotations("book"))
-            val result = reopened.searchBook("book", "searchable").single()
-            assertEquals(12L, result.chapterId)
-            assertEquals(0, result.paragraphIndex)
-            assertEquals(result, reopened.searchBookLiteralChapters("book", "黄金", listOf(4), 10).single())
+            assertEquals(paragraphs, reopened.getParagraphs(12))
             assertFalse(reopened.saveProgressIfNewer(progress.copy(position = 1, updatedTime = 100)))
             assertEquals(progress, reopened.getProgress("book"))
             reopened.deleteBookmark("mark")
@@ -84,7 +81,7 @@ class ReaderPersistenceTest {
             assertTrue(repository.getBookAnnotations("book").isEmpty())
             assertEquals(SyncMutationOperation.DELETE, mutations.last().third)
             assertEquals(paragraphs, dao.getParagraphs(12))
-            assertEquals(1, dao.searchBook("book", "searchable").size)
+            assertTrue(dao.getParagraphs(12).any { it.text.contains("searchable") })
             assertNotNull(dao.getBook("book"))
         } finally { db.close() }
     }

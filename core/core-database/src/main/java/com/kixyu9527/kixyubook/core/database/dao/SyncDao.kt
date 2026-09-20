@@ -37,8 +37,8 @@ interface SyncDao {
     @Query("DELETE FROM sync_outbox WHERE entityType = :type AND entityId = :entityId")
     suspend fun removeOutbox(type: String, entityId: String)
 
-    @Query("UPDATE sync_outbox SET attemptCount = attemptCount + 1 WHERE uuid IN (:uuids)")
-    suspend fun markAttempts(uuids: List<String>)
+    @Query("UPDATE sync_outbox SET attemptCount = attemptCount + 1, lastAttemptAt = :now WHERE uuid IN (:uuids)")
+    suspend fun markAttempts(uuids: List<String>, now: Long = System.currentTimeMillis())
 
     @Query("SELECT * FROM sync_object_state")
     suspend fun allObjectStates(): List<SyncObjectStateEntity>
@@ -60,6 +60,12 @@ interface SyncDao {
 
     @Query("DELETE FROM sync_object_state")
     suspend fun clearObjectStates()
+
+    @Query("SELECT * FROM sync_tombstones WHERE objectKey = :key LIMIT 1")
+    suspend fun tombstone(key: String): SyncTombstoneEntity?
+
+    @Query("DELETE FROM sync_tombstones WHERE objectKey = :key")
+    suspend fun deleteTombstone(key: String)
 
     @Query("DELETE FROM sync_tombstones")
     suspend fun clearTombstones()

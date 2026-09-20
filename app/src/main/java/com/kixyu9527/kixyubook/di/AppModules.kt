@@ -22,6 +22,7 @@ import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.dao.TextCorrectionDao
 import com.kixyu9527.kixyubook.core.database.dao.ReaderAnnotationDao
 import com.kixyu9527.kixyubook.core.database.dao.ImportDao
+import com.kixyu9527.kixyubook.core.database.dao.RepairDao
 import com.kixyu9527.kixyubook.core.database.MIGRATION_6_7
 import com.kixyu9527.kixyubook.core.database.MIGRATION_7_8
 import com.kixyu9527.kixyubook.core.database.MIGRATION_8_9
@@ -37,6 +38,8 @@ import com.kixyu9527.kixyubook.core.database.MIGRATION_16_17
 import com.kixyu9527.kixyubook.core.database.MIGRATION_17_18
 import com.kixyu9527.kixyubook.core.database.MIGRATION_18_19
 import com.kixyu9527.kixyubook.core.database.MIGRATION_19_20
+import com.kixyu9527.kixyubook.core.database.MIGRATION_20_21
+import com.kixyu9527.kixyubook.core.database.MIGRATION_21_22
 import com.kixyu9527.kixyubook.core.database.LocalTextCorrectionRepository
 import com.kixyu9527.kixyubook.core.database.LocalReaderAnnotationRepository
 import com.kixyu9527.kixyubook.core.common.repository.TextCorrectionRepository
@@ -77,6 +80,8 @@ object DatabaseModule {
                 MIGRATION_17_18,
                 MIGRATION_18_19,
                     MIGRATION_19_20,
+                    MIGRATION_20_21,
+                    MIGRATION_21_22,
             )
             .build()
     }
@@ -93,6 +98,8 @@ object DatabaseModule {
     @Provides fun provideReaderAnnotationDao(database: KixyuDatabase): ReaderAnnotationDao = database.readerAnnotationDao()
 
     @Provides fun provideImportDao(database: KixyuDatabase): ImportDao = database.importDao()
+
+    @Provides fun provideRepairDao(database: KixyuDatabase): RepairDao = database.repairDao()
 
 }
 

@@ -51,14 +51,6 @@ data class ChapterEntity(
 )
 data class ParagraphEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val chapterId: Long, val paragraphIndex: Int, val text: String)
 
-/** Full-text projection kept in the same DAO transaction as [ParagraphEntity]. */
-@Fts4
-@Entity(tableName = "paragraphs_fts")
-data class ParagraphFtsEntity(
-    @PrimaryKey @ColumnInfo(name = "rowid") val rowId: Long,
-    val text: String,
-)
-
 @Entity(
     tableName = "import_items",
     primaryKeys = ["runId", "sourceId"],
@@ -154,14 +146,6 @@ data class PendingBookmarkEntity(
     val createdTime: Long,
 )
 
-data class BookSearchResultRow(
-    val chapterId: Long,
-    val chapterTitle: String,
-    val chapterIndex: Int,
-    val paragraphIndex: Int,
-    val text: String,
-)
-
 @Entity(tableName = "metadata_edits", indices = [Index("bookUuid")])
 data class MetadataEditEntity(
     @PrimaryKey val uuid: String,
@@ -172,6 +156,19 @@ data class MetadataEditEntity(
     val newTitle: String,
     val newAuthor: String,
     val newDescription: String,
+    val createdTime: Long,
+)
+
+
+/** A cross-store repair (Room committed, DataStore not yet) that is retried until it succeeds. */
+@Entity(
+    tableName = "pending_repairs",
+    indices = [Index(value = ["kind", "target"], unique = true)],
+)
+data class PendingRepairEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val kind: String,
+    val target: String,
     val createdTime: Long,
 )
 
@@ -201,6 +198,7 @@ data class SyncOutboxEntity(
     val logicalCounter: Long,
     val deviceId: String,
     val attemptCount: Int = 0,
+    @ColumnInfo(defaultValue = "0") val lastAttemptAt: Long = 0,
 )
 
 @Entity(tableName = "sync_object_state")
