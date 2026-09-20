@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.feature.reader
 
 import android.content.Context
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -125,6 +126,28 @@ class ReaderSettingsPopupTest {
             .performClick()
         compose.waitForIdle()
         assertTrue("only the confirmation resets", confirmed)
+    }
+
+    @Test
+    fun theResetConfirmationStaysUsableWithLargeFonts() {
+        org.robolectric.RuntimeEnvironment.setFontScale(2f)
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        compose.setContent {
+            KixyuBookTheme {
+                ReaderResetReadingSettingsDialog(
+                    show = true,
+                    onDismissRequest = {},
+                    onConfirm = {},
+                )
+            }
+        }
+
+        compose.onAllNodesWithText(context.getString(R.string.reader_reset_settings))
+            .onFirst()
+            .assertIsDisplayed()
+        compose.onAllNodesWithText(context.getString(R.string.reader_reset_settings_confirm))
+            .onFirst()
+            .assertIsDisplayed()
     }
 
     @Test

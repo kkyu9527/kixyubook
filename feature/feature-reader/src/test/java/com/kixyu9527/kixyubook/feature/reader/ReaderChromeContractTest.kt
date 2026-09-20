@@ -16,7 +16,6 @@ class ReaderChromeContractTest {
             searchVisible = true,
             bookInfoVisible = true,
             sheet = ReaderSheet.DIRECTORY,
-            hasSearchResults = true,
         )
 
         assertEquals(ReaderPredictiveBackTarget.BOOK_INFO, everythingVisible.predictiveBackTarget())
@@ -35,11 +34,7 @@ class ReaderChromeContractTest {
         )
         assertEquals(
             ReaderPredictiveBackTarget.CONTROLS,
-            ReaderChromeState(controlsVisible = true, hasSearchResults = true).predictiveBackTarget(),
-        )
-        assertEquals(
-            ReaderPredictiveBackTarget.SEARCH_RESULTS,
-            ReaderChromeState(hasSearchResults = true).predictiveBackTarget(),
+            ReaderChromeState(controlsVisible = true).predictiveBackTarget(),
         )
         assertNull(ReaderChromeState().predictiveBackTarget())
     }
@@ -120,10 +115,11 @@ class ReaderChromeContractTest {
     }
 
     @Test
-    fun searchResultsAloneDoNotForceSystemBarsVisible() {
-        val state = ReaderChromeState(hasSearchResults = true)
+    fun keptSearchResultsAloneDoNotOwnBackOrSystemBars() {
+        // Hidden results live only while the search surface is closing; the close path clears them.
+        val state = ReaderChromeState()
 
         assertFalse(state.overlayVisible)
-        assertEquals(ReaderPredictiveBackTarget.SEARCH_RESULTS, state.predictiveBackTarget())
+        assertNull(state.predictiveBackTarget())
     }
 }

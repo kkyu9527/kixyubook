@@ -49,6 +49,27 @@ internal fun ReaderSheet.settingsGroup(): com.kixyu9527.kixyubook.core.designsys
         else -> null
     }
 
+/**
+ * A popup replaced by another popup (colour editor -> theme) must start settled: the shared SHEET
+ * dissolve belongs to the surface that left and must not fade the surface that enters.
+ */
+@androidx.compose.runtime.Stable
+internal class ReaderSheetReplacementState {
+    private var active by androidx.compose.runtime.mutableStateOf(false)
+
+    val replacing: Boolean get() = active
+
+    fun begin() {
+        active = true
+    }
+
+    fun settle() {
+        active = false
+    }
+
+    fun progress(read: () -> Float): Float = if (active) 0f else read()
+}
+
 /** All floating reader controls share one enter/exit clock and transform. */
 @Composable
 internal fun ReaderControlVisibility(

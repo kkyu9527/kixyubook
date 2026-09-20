@@ -64,6 +64,14 @@ class KixyuPredictiveBackState<T> {
         animationFor(target).snapTo(value.coerceIn(0f, 1f))
     }
 
+    /**
+     * Snaps a surface back to rest without animating. Used when an overlay is replaced by another
+     * rather than closed, so the entering surface does not inherit the leaving one's final frame.
+     */
+    suspend fun resetProgress(target: T) {
+        animationFor(target).snapTo(0f)
+    }
+
     internal suspend fun commit(target: T, animate: Boolean = true) {
         activeTarget = target
         val animation = animationFor(target)

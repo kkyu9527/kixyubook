@@ -70,6 +70,9 @@ internal fun PagedReader(
         state.fontPath,
         state.settings.showChapterTitle,
     ) { mutableStateOf<RetainedReaderPage?>(null) }
+    // Survives the spec change itself: the page that was on screen stays visible while the new
+    // layout is measured instead of leaving an empty background for the reflow window.
+    var reflowPlaceholder by remember { mutableStateOf<RetainedReaderPage?>(null) }
     var textSelectionActive by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
@@ -104,9 +107,15 @@ internal fun PagedReader(
     // Opening the reader is content-first: the themed reading surface remains stable until the
     // first measured page arrives. A transient spinner made every cached book feel like a cold
     // start and competed visually with the navigation animation.
-    if (pages.isEmpty() && retainedPage == null) {
+    if (pages.isEmpty() && retainedPage == null && reflowPlaceholder == null) {
         Box(Modifier.fillMaxSize().background(palette.background))
         return
+    }
+    SideEffect {
+        retainedPage?.let { reflowPlaceholder = it }
+    }
+    LaunchedEffect(pages) {
+        if (pages.isNotEmpty()) reflowPlaceholder = null
     }
     LaunchedEffect(chapter.id, state.navigationVersion, pages) {
         if (pages.isEmpty()) return@LaunchedEffect
@@ -250,6 +259,9 @@ internal fun PagedReader(
     var pendingDirectChapterTurn by remember { mutableStateOf<Int?>(null) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
     val latestReaderState by rememberUpdatedState(state)
+    // The version that measured the currently displayed window. A late settle from that window
+    // must report its own version, not the one the state has already moved on to.
+    val pagerLayoutVersion = remember(pagerWindow) { latestReaderState.layoutVersion }
     val latestPaginationComplete by rememberUpdatedState(pagination.isComplete)
     val prefetchDensity = LocalDensity.current.density
     val epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath
@@ -318,7 +330,7 @@ internal fun PagedReader(
                 item.chapterIndex != readerState.chapterIndex && item.page != null -> {
                     val anchor = item.page.blocks.firstOrNull { it.kind == ParagraphKind.TEXT }
                     retainedPage = RetainedReaderPage(
-                        item.page, readerPageNumber(readerState, item.pageIndex, item.pageCount),
+                        item.page, readerPageNumber(readerState, item.pageIndex, item.pageCount), spec,
                     )
                     settlePage(
                         ReaderPageDestination(
@@ -334,6 +346,7 @@ internal fun PagedReader(
                     retainedPage = RetainedReaderPage(
                         page = item.page,
                         pageNumber = readerPageNumber(readerState, item.pageIndex, item.pageCount),
+                        spec = spec,
                     )
                     val lastVisible = spread.items.lastOrNull { visible ->
                         visible.chapterIndex == item.chapterIndex && visible.page != null
@@ -355,7 +368,7 @@ internal fun PagedReader(
                             lastVisible.pageCount > 0 &&
                             lastVisible.pageIndex == lastVisible.pageCount - 1,
                         visibleEnd,
-                        readerState.layoutVersion,
+                        pagerLayoutVersion,
                     )
                 }
             }
@@ -448,6 +461,7 @@ internal fun PagedReader(
         retainedPage = RetainedReaderPage(
             page = pages[initialActual],
             pageNumber = readerPageNumber(state, initialActual, pages.size),
+            spec = spec,
         )
     }
     val pagerTap by rememberUpdatedState<(Float) -> Unit> { fraction ->
@@ -538,11 +552,11 @@ internal fun PagedReader(
             }
         }
         if (pages.isEmpty()) {
-            retainedPage?.let { retained ->
+            (retainedPage ?: reflowPlaceholder)?.let { retained ->
                 Box(Modifier.fillMaxSize().background(palette.background)) {
                     ReaderPageRenderer(
                         page = retained.page,
-                        spec = spec,
+                        spec = retained.spec,
                         palette = palette,
                         fontPath = state.fontPath,
                         onTapFraction = { fraction ->
@@ -899,6 +913,8 @@ internal fun chapterTransitionOpensAtEnd(direction: Int, directChapterTurn: Bool
 internal data class RetainedReaderPage(
     val page: ReaderPage,
     val pageNumber: String?,
+    /** The layout that produced [page]; a placeholder must keep rendering its own layout. */
+    val spec: ReaderLayoutSpec,
 )
 
 internal fun readerPageNumber(state: ReaderContentState, pageIndex: Int, pageCount: Int): String? =

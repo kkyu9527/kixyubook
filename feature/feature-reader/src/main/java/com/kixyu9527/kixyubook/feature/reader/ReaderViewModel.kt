@@ -528,6 +528,12 @@ class ReaderViewModel @AssistedInject constructor(
         val currentPosition = _uiState.value.chapterIndex
         if (currentPosition in affectedPositions) {
             reloadCorrectedChapter(currentPosition)
+            if (!pageInteractionActive) {
+                // The reload narrows the in-memory window to the current chapter; restore the
+                // neighbours so crossing a chapter boundary stays as fast as before.
+                val state = _uiState.value
+                if (state.chapter != null) prefetchNearbyChapters(state.chapterIndex, state.chapters)
+            }
         } else if (!pageInteractionActive) {
             val state = _uiState.value
             if (state.chapter != null) prefetchNearbyChapters(state.chapterIndex, state.chapters)

@@ -36,7 +36,6 @@ internal enum class ReaderPredictiveBackTarget {
     SEARCH,
     POPUP_MENU,
     CONTROLS,
-    SEARCH_RESULTS,
 }
 
 /** Snapshot of reader-owned chrome used by both system-bar and Back priority decisions. */
@@ -48,7 +47,6 @@ internal data class ReaderChromeState(
     val sheet: ReaderSheet? = null,
     val settingsMenuVisible: Boolean = false,
     val directoryPanelComposed: Boolean = false,
-    val hasSearchResults: Boolean = false,
 ) {
     val overlayVisible: Boolean
         get() = controlsVisible || toolsMenuVisible || searchVisible ||
@@ -65,7 +63,6 @@ internal fun ReaderChromeState.predictiveBackTarget(): ReaderPredictiveBackTarge
     searchVisible -> ReaderPredictiveBackTarget.SEARCH
     settingsMenuVisible || toolsMenuVisible -> ReaderPredictiveBackTarget.POPUP_MENU
     controlsVisible -> ReaderPredictiveBackTarget.CONTROLS
-    hasSearchResults -> ReaderPredictiveBackTarget.SEARCH_RESULTS
     else -> null
 }
 

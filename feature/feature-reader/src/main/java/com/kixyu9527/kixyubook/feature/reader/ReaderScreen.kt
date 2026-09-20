@@ -109,12 +109,26 @@ internal fun ReaderScreen(
     val controlsBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.CONTROLS) }
     val popupBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.POPUP_MENU) }
     val searchBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SEARCH) }
-    val sheetBackProgress = { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET) }
+    val sheetReplacement = remember { ReaderSheetReplacementState() }
+    val sheetBackProgress = {
+        sheetReplacement.progress { predictiveBackState.progressFor(ReaderPredictiveBackTarget.SHEET) }
+    }
+    LaunchedEffect(sheetReplacement.replacing) {
+        if (sheetReplacement.replacing) {
+            // The animator keeps the committed frame of the popup that left; snap it back before
+            // the replacement starts accepting gestures again.
+            predictiveBackState.resetProgress(ReaderPredictiveBackTarget.SHEET)
+            sheetReplacement.settle()
+        }
+    }
     // Category popups return to the settings menu; the colour editor returns to its theme popup.
     val dismissSheet: () -> Unit = {
         val current = sheet
         when {
-            current == ReaderSheet.COLORS -> sheet = ReaderSheet.THEME_SCREEN
+            current == ReaderSheet.COLORS -> {
+                sheetReplacement.begin()
+                sheet = ReaderSheet.THEME_SCREEN
+            }
             current.returnsToSettingsMenu() -> {
                 sheet = null
                 controls = true
@@ -174,7 +188,6 @@ internal fun ReaderScreen(
         sheet = sheet,
         settingsMenuVisible = settingsMenu,
         directoryPanelComposed = directoryPanelComposed,
-        hasSearchResults = state.searchResults.isNotEmpty(),
     )
     val overlayVisible = chromeState.overlayVisible
     val systemBars = readerSystemBarVisibility(
@@ -303,7 +316,6 @@ internal fun ReaderScreen(
                     settingsMenu = false
                 }
                 ReaderPredictiveBackTarget.CONTROLS -> controls = false
-                ReaderPredictiveBackTarget.SEARCH_RESULTS -> clearSearch()
             }
         },
     )
@@ -400,8 +412,9 @@ internal fun ReaderScreen(
                                     clearSearch()
                                 }
                                 bookInfoVisible -> bookInfoVisible = false
-                                sheet != null -> sheet = null
+                                sheet != null -> dismissSheet()
                                 toolsMenu -> toolsMenu = false
+                                settingsMenu -> settingsMenu = false
                                 controls -> controls = false
                             }
                         }

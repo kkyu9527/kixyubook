@@ -44,7 +44,7 @@ internal class ReaderSearchController(
     /** Chapter scanning is CPU-bound; it must not occupy the caller or the storage pool. */
     private val analysisDispatcher = if (resultDirectory == null) Dispatchers.Unconfined else Dispatchers.Default
 
-    fun search(query: String, searchScope: ReaderSearchScope) {
+    fun search(query: String, searchScope: ReaderSearchScope, preserveOrigin: Boolean = false) {
         val normalized = query.trim()
         searchJob?.cancel()
         val token = ++generation
@@ -52,7 +52,7 @@ internal class ReaderSearchController(
         val store = SearchResultStore(resultDirectory).also { resultStore = it }
         dispose(oldStore)
         lastPublished = 0L
-        originRecorded = false
+        if (!preserveOrigin) originRecorded = false
         if (normalized.isBlank()) {
             clearState()
             return
@@ -69,7 +69,7 @@ internal class ReaderSearchController(
                 searchOccurrenceCount = 0,
                 selectedSearchIndex = -1,
                 selectedSearchMatch = 0,
-                searchReturnAvailable = false,
+                searchReturnAvailable = if (preserveOrigin) it.searchReturnAvailable else false,
                 searchInProgress = searchScope == ReaderSearchScope.BOOK,
                 searchProgress = if (searchScope == ReaderSearchScope.BOOK) 0f else 1f,
                 searchStage = BookSearchStage.INDEXING,
@@ -213,7 +213,8 @@ internal class ReaderSearchController(
     fun invalidate() {
         val query = state.value.searchQuery
         if (query.isBlank()) return
-        search(query, state.value.searchScope)
+        // Corrected text invalidates the hits, not the reading position the search started from.
+        search(query, state.value.searchScope, preserveOrigin = true)
     }
 
     private fun jumpToMatch(result: BookSearchResult, matchIndex: Int) {
