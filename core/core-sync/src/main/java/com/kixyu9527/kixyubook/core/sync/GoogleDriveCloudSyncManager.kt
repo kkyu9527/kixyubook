@@ -134,7 +134,10 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         preferences.markAuthorizing()
         return accounts.switchAccount(activity).also { result ->
             handleAuthorizationResult(result, preserveAccountOnFailure = true)
-            if (result !is GoogleConnectResult.NeedsAuthorization) accountSwitchPending = false
+            if (result !is GoogleConnectResult.NeedsAuthorization) {
+                accountSwitchPending = false
+                engine.resetRemoteLedger()
+            }
         }
     }
 
@@ -149,6 +152,8 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override suspend fun disconnect() {
         scheduler.cancel()
+        // Account-scoped cursors/outbox must go with the account.
+        engine.resetRemoteLedger()
         // A priority sync may already be past its account check; stop it so it cannot keep
         // downloading/uploading after the account is cleared.
         priorityBookJob?.cancel()
@@ -178,6 +183,10 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override suspend fun setSyncFonts(enabled: Boolean) {
         preferences.setSyncFonts(enabled)
+        if (enabled) {
+            // Fonts that changed while the switch was off are no longer in the change stream.
+            runCatching { engine.reconcileCloudFonts() }
+        }
         if (enabled) engine.enqueueAllCurrentState()
         scheduler.requestDebounced()
     }

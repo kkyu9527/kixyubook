@@ -30,7 +30,16 @@ internal class CloudSyncPushPipeline(
     ): List<Pair<String, DriveObject>> = try {
         val deferredLargePayload = shouldDeferLargePayload(mutation)
         val uploadedObjects = mutableListOf<Pair<String, DriveObject>>()
-        payloads.materialize(mutation, includeLargePayload = !deferredLargePayload).forEach { local ->
+        val localObjects = payloads.materialize(mutation, includeLargePayload = !deferredLargePayload)
+        if (localObjects.isEmpty() && mutation.entityType == SyncEntityType.FONT.name) {
+            com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.record(
+                com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category.SYNC,
+                "sync_font_source_missing",
+                outcome = "skipped",
+                details = mapOf("font" to mutation.entityId.take(8)),
+            )
+        }
+        localObjects.forEach { local ->
             try {
                 val hash = local.file.sha256()
                 val known = knownRemote[local.key]
@@ -60,6 +69,9 @@ internal class CloudSyncPushPipeline(
                             remoteVersion = uploaded.version,
                         ),
                     )
+                    // Local wins: the uploaded change is newer than a remote deletion of the same
+                    // object, so the stale tombstone must go or other devices would delete it again.
+                    clearStaleTombstone(token, local.key, mutation.changedAt)
                 }
             } finally {
                 if (local.temporary) local.file.delete()
@@ -70,6 +82,14 @@ internal class CloudSyncPushPipeline(
     } catch (error: Throwable) {
         if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
         throw error
+    }
+
+    private suspend fun clearStaleTombstone(token: String, objectKey: String, changedAt: Long) {
+        val tombstoneKey = tombstoneKeyForObjectKey(objectKey) ?: return
+        val tombstone = syncDao.tombstone(tombstoneKey) ?: return
+        if (tombstone.deletedAt >= changedAt) return
+        drive.findByObjectKey(token, tombstoneKey)?.let { remote -> drive.delete(token, remote.id) }
+        syncDao.deleteTombstone(tombstoneKey)
     }
 
     suspend fun pushDeletion(

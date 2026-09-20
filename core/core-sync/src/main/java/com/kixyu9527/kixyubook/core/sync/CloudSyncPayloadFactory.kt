@@ -75,13 +75,16 @@ internal class CloudSyncPayloadFactory(
         }.orEmpty()
         SyncEntityType.FONT -> if (preferences.current().syncFonts && includeLargePayload) {
             fonts.getFont(mutation.entityId)?.let { font ->
-                listOf(
+                val source = File(font.filePath)
+                // A missing file must never be uploaded as a 0-byte font or crash the push queue;
+                // the mutation is consumed with a diagnostic and the row is left for the user.
+                if (!source.isFile) emptyList() else listOf(
                     jsonObject("fonts/${font.uuid}/metadata", fontJson(font)),
                     LocalCloudObject(
                         key = "fonts/${font.uuid}/source",
-                        name = "font-${font.uuid}.${File(font.filePath).extension.ifBlank { "ttf" }}",
+                        name = "font-${font.uuid}.${source.extension.ifBlank { "ttf" }}",
                         mimeType = "application/octet-stream",
-                        file = File(font.filePath),
+                        file = source,
                     ),
                 )
             }.orEmpty()

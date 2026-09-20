@@ -100,6 +100,13 @@ class SyncPreferencesStore @Inject constructor(
     suspend fun setSyncFonts(value: Boolean) = setBoolean(SYNC_FONTS, value)
     suspend fun setWifiOnly(value: Boolean) = setBoolean(WIFI_ONLY, value)
 
+    /** Account-scoped bookkeeping must not survive an account switch: cursors are per account. */
+    suspend fun resetRemoteLedger() = context.cloudSyncDataStore.edit {
+        it.remove(PAGE_TOKEN)
+        it[INITIAL_MERGE] = false
+        it.remove(SYNC_CONFLICTS)
+    }
+
     suspend fun approveInitialSync() = context.cloudSyncDataStore.edit {
         it[INITIAL_SYNC_APPROVED] = true
         it[ENABLED] = true

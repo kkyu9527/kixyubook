@@ -187,7 +187,51 @@ internal fun isRemoteNewer(remote: DriveObject, localModifiedAt: Long, localVers
     else remote.modifiedAt > localModifiedAt
 
 /** A remote deletion must not discard an edit this device has not uploaded yet. */
+internal enum class CloudFontApplyResult { IMPORTED, ALREADY_PRESENT, SKIPPED_DISABLED, MISSING_SOURCE, INVALID }
+
 internal fun shouldApplyRemoteTombstone(localPendingCount: Int): Boolean = localPendingCount == 0
+
+/** Exponential retry backoff: 5s, 10s, 20s ... capped at one hour. */
+internal fun syncRetryBackoffMillis(attemptCount: Int): Long {
+    if (attemptCount <= 0) return 0
+    val shift = (attemptCount - 1).coerceAtMost(10)
+    return (5_000L shl shift).coerceAtMost(3_600_000L)
+}
+
+/** Mutations that already failed and whose backoff window has not elapsed are not retried yet. */
+internal fun List<SyncOutboxEntity>.readyForRetry(now: Long = System.currentTimeMillis()): List<SyncOutboxEntity> =
+    filter { now - it.lastAttemptAt >= syncRetryBackoffMillis(it.attemptCount) }
+
+/**
+ * Remote identifiers become local file names and outbox keys. Only a canonical lowercase UUID may
+ * cross that boundary; anything else (including `../`) is rejected instead of sanitized.
+ */
+internal fun requireCanonicalSyncUuid(value: String, field: String): String {
+    val canonical = runCatching { java.util.UUID.fromString(value).toString() }.getOrNull()
+    require(canonical == value) { "invalid $field" }
+    return value
+}
+
+internal fun canonicalSyncUuidOrNull(value: String): String? =
+    runCatching { java.util.UUID.fromString(value).toString() }.getOrNull()?.takeIf { it == value }
+
+/** The tombstone object that guards a mutable Drive object, matching the push deletion key. */
+internal fun tombstoneKeyForObjectKey(objectKey: String): String? {
+    val parts = objectKey.split('/')
+    val type = when (parts.firstOrNull()) {
+        "books" -> SyncEntityType.BOOK
+        "fonts" -> SyncEntityType.FONT
+        "progress" -> SyncEntityType.PROGRESS
+        "bookmarks" -> SyncEntityType.BOOKMARKS
+        "sessions" -> SyncEntityType.SESSION
+        "corrections" -> SyncEntityType.CORRECTION
+        "annotations" -> SyncEntityType.ANNOTATION
+        "settings" -> SyncEntityType.SETTINGS
+        else -> return null
+    }
+    val id = if (type == SyncEntityType.SETTINGS) "global" else parts.getOrNull(1) ?: return null
+    return "tombstones/${type.name.lowercase()}/$id"
+}
 
 /**
  * Applies three settings stores with best-effort rollback. DataStore has no cross-store transaction,

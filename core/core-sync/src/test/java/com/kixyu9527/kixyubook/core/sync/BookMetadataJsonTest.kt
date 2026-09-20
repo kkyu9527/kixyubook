@@ -7,10 +7,12 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class BookMetadataJsonTest {
+    private val bookUuid = "9f1f0f3e-1f7a-4b1e-9b3a-2f0f9a6c1d2e"
+
     @Test
     fun importedNameSortAndSeriesSurviveTheCloudRoundTrip() {
         val entity = BookEntity(
-            uuid = "book",
+            uuid = bookUuid,
             title = "三体",
             author = "刘慈欣",
             description = "简介",
@@ -38,7 +40,7 @@ class BookMetadataJsonTest {
     @Test
     fun manualEditOwnershipTravelsWithTheValues() {
         val entity = BookEntity(
-            uuid = "book",
+            uuid = bookUuid,
             title = "三体",
             author = "刘慈欣",
             description = "简介",
@@ -65,7 +67,7 @@ class BookMetadataJsonTest {
     fun anOldPayloadWithoutOwnershipKeepsTheLocalFlags() {
         val legacy = JSONObject()
             .put("schema", 2)
-            .put("uuid", "book")
+            .put("uuid", bookUuid)
             .put("title", "三体")
             .put("contentHash", "hash")
 

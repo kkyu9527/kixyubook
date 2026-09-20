@@ -194,6 +194,8 @@ class CloudSyncEngine @Inject constructor(
         onProgress: suspend (CloudSyncProgress) -> Unit = {},
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val syncStartedAt = SystemClock.elapsedRealtime()
+        // Cursors and conflict state belong to the account that started this run.
+        val syncAccountSubject = preferences.current().account?.subject
         val syncRun = syncStartedAt.toString(36)
         var syncStage = FullSyncStage.PREPARING
         DiagnosticLog.record(
@@ -280,7 +282,17 @@ class CloudSyncEngine @Inject constructor(
             if (!persisted.initialMergeComplete) seedInitialOutbox()
             // Drain the whole outbox: the paged read would leave a large backlog for later runs
             // while still advancing the page token as if the run had synced everything.
-            val pending = syncDao.allPending().sortedWith(
+            val allPending = syncDao.allPending()
+            val waitingForRetry = allPending.size - allPending.readyForRetry().size
+            if (waitingForRetry > 0) {
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "sync_retries_backing_off",
+                    outcome = "deferred",
+                    details = mapOf("count" to waitingForRetry),
+                )
+            }
+            val pending = allPending.readyForRetry().sortedWith(
                 compareBy<SyncOutboxEntity> {
                     when {
                         it.entityType == SyncEntityType.SETTINGS.name -> 0
@@ -345,7 +357,15 @@ class CloudSyncEngine @Inject constructor(
                             ),
                         )
                     } catch (error: Throwable) {
-                        if (error !is CancellationException) syncDao.markAttempts(listOf(mutation.uuid))
+                        if (error !is CancellationException) {
+                            syncDao.markAttempts(listOf(mutation.uuid))
+                            DiagnosticLog.record(
+                                Category.SYNC,
+                                "sync_upload_failed",
+                                outcome = "retry",
+                                details = mapOf("entity" to mutation.entityType.lowercase()),
+                            )
+                        }
                         throw error
                     }
                 } else {
@@ -355,7 +375,18 @@ class CloudSyncEngine @Inject constructor(
             }
             flushUploadBatch()
             syncStage = FullSyncStage.FINALIZING
-            preferences.markSuccess(snapshot.nextPageToken ?: persisted.pageToken)
+            if (preferences.current().account?.subject == syncAccountSubject) {
+                preferences.markSuccess(snapshot.nextPageToken ?: persisted.pageToken)
+            } else {
+                // The account changed while this run was in flight: its cursor and merge flag must
+                // not be written into the new account's ledger.
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "sync_run_discarded_account_changed",
+                    outcome = "discarded",
+                    details = mapOf("run" to syncRun),
+                )
+            }
             notifications.clearAuthorizationFailure()
             DiagnosticLog.record(
                 Category.SYNC,
@@ -512,6 +543,7 @@ class CloudSyncEngine @Inject constructor(
                         val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
                         if (cloudTime > localTime && remoteState.applyProgressJson(json)) {
                             mutationBeforePull?.let { syncDao.removeOutbox(listOf(it.uuid)) }
+                            rememberRemote(key, requireNotNull(remote))
                         }
                     }
                 } catch (error: DriveHttpException) {
@@ -524,12 +556,10 @@ class CloudSyncEngine @Inject constructor(
                             val localTime = books.getProgress(bookUuid)?.updatedTime ?: Long.MIN_VALUE
                             if (cloudTime > localTime && remoteState.applyProgressJson(json)) {
                                 mutationBeforePull?.let { syncDao.removeOutbox(listOf(it.uuid)) }
+                                rememberRemote(key, refreshed)
                             }
                         }
                     }
-                }
-                remote?.let { currentRemote ->
-                    rememberRemote(key, currentRemote)
                 }
             }
 
@@ -782,6 +812,36 @@ class CloudSyncEngine @Inject constructor(
             )
         }
 
+    /**
+     * Drops every account-scoped sync row. Called when the user switches accounts or disconnects,
+     * so a removal queued for account A can never be pushed to account B and a stale cursor can
+     * never be replayed against a different Drive.
+     */
+    suspend fun resetRemoteLedger() = withContext(Dispatchers.IO) {
+        syncMutex.withLock {
+            syncDao.clearOutbox()
+            syncDao.clearObjectStates()
+            syncDao.clearTombstones()
+            synchronized(preparedSnapshotLock) { preparedInitialSnapshot = null }
+            preferences.resetRemoteLedger()
+        }
+    }
+
+    /**
+     * Reconciles fonts that changed while font sync was disabled: those objects are missing from
+     * the incremental change stream, so enabling the switch lists them once and imports the pair.
+     */
+    suspend fun reconcileCloudFonts() = withContext(Dispatchers.IO) {
+        syncMutex.withLock {
+            val persisted = preferences.current()
+            if (!persisted.enabled || !persisted.syncFonts) return@withLock
+            val token = accountClient.accessToken()
+                ?: throw AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
+            val remote = drive.listAll(token).associateBy(DriveObject::objectKey)
+            pullPipeline.applyRemoteFonts(token, remote)
+        }
+    }
+
     suspend fun deleteAllCloudData(token: String) = withContext(Dispatchers.IO) {
         // Serialize with a running sync, otherwise it can re-upload objects listed after the wipe
         // started or recreate object states the wipe just cleared.
@@ -790,6 +850,8 @@ class CloudSyncEngine @Inject constructor(
             syncDao.clearObjectStates()
             syncDao.clearOutbox()
             syncDao.clearTombstones()
+            synchronized(preparedSnapshotLock) { preparedInitialSnapshot = null }
+            preferences.resetRemoteLedger()
         }
     }
 
@@ -830,7 +892,10 @@ class CloudSyncEngine @Inject constructor(
                     applied = remoteState.applyProgressJson(json)
                 }
             }
-            if (applied) syncDao.removeOutbox(listOf(mutation.uuid))
+            if (applied) {
+                syncDao.removeOutbox(listOf(mutation.uuid))
+                rememberRemote("progress/${mutation.entityId}", cloud)
+            }
         }
     }
 

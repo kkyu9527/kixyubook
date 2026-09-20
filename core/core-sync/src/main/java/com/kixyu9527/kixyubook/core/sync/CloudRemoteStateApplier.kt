@@ -48,11 +48,12 @@ internal class CloudRemoteStateApplier(
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
 ) {
-    suspend fun restoreBook(token: String, uuid: String, knownRemote: Map<String, DriveObject>) {
+    /** Returns true only when the book (and, for a new one, its source) is actually present. */
+    suspend fun restoreBook(token: String, uuid: String, knownRemote: Map<String, DriveObject>): Boolean {
         val key = "books/$uuid/metadata"
-        val metadata = knownRemote[key] ?: return
-        val sourceInfo = knownRemote["books/$uuid/source"] ?: return
-        if (!books.bookExists(uuid)) {
+        val metadata = knownRemote[key] ?: return false
+        val sourceInfo = knownRemote["books/$uuid/source"] ?: return false
+        val imported = if (!books.bookExists(uuid)) {
             val metaFile = tempFile("book-meta")
             val sourceFile = tempFile("book-source")
             try {
@@ -96,9 +97,12 @@ internal class CloudRemoteStateApplier(
             } finally {
                 temp.delete()
             }
+            true
         }
+        if (!imported) return false
         rememberRemote(key, metadata)
         rememberRemote("books/$uuid/source", sourceInfo)
+        return true
     }
 
     suspend fun applyProgress(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
@@ -106,7 +110,7 @@ internal class CloudRemoteStateApplier(
     }
 
     suspend fun applyProgressJson(json: JSONObject): Boolean {
-        val bookUuid = json.getString("bookUuid")
+        val bookUuid = canonicalSyncUuidOrNull(json.optString("bookUuid")) ?: return false
         if (!books.bookExists(bookUuid)) return false
         val chapterKey = json.optString("chapterKey")
         val chapter = books.getChapterByKey(bookUuid, chapterKey)
@@ -205,35 +209,49 @@ internal class CloudRemoteStateApplier(
         )
     }
 
-    suspend fun applySession(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        val uuid = json.getString("uuid")
-        if (books.getSessionBySyncUuid(uuid) == null) {
-            books.insertSession(
-                ReadingSessionEntity(
-                    bookUuid = json.getString("bookUuid"),
-                    startedTime = json.optLong("startedTime"),
-                    durationMillis = json.optLong("durationMillis"),
-                    epochDay = json.optLong("epochDay"),
-                    syncUuid = uuid,
-                ),
-            )
+    suspend fun applySession(token: String, info: DriveObject): Boolean =
+        withJsonDownload(token, info) { json ->
+            val uuid = canonicalSyncUuidOrNull(json.optString("uuid")) ?: return@withJsonDownload false
+            val bookUuid = canonicalSyncUuidOrNull(json.optString("bookUuid")) ?: return@withJsonDownload false
+            if (!books.bookExists(bookUuid)) return@withJsonDownload false
+            if (books.getSessionBySyncUuid(uuid) == null) {
+                books.insertSession(
+                    ReadingSessionEntity(
+                        bookUuid = bookUuid,
+                        startedTime = json.optLong("startedTime"),
+                        durationMillis = json.optLong("durationMillis"),
+                        epochDay = json.optLong("epochDay"),
+                        syncUuid = uuid,
+                    ),
+                )
+            }
+            true
         }
-    }
 
-    suspend fun applyCorrection(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        textCorrectionRepository.applyRemote(parseCorrection(json))
-    }
+    suspend fun applyCorrection(token: String, info: DriveObject): Boolean =
+        withJsonDownload(token, info) { json ->
+            if (canonicalSyncUuidOrNull(json.optString("uuid")) == null) return@withJsonDownload false
+            textCorrectionRepository.applyRemote(parseCorrection(json))
+            true
+        }
 
-    suspend fun applyAnnotation(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
-        readerAnnotationRepository.applyRemote(parseAnnotation(json))
-    }
+    suspend fun applyAnnotation(token: String, info: DriveObject): Boolean =
+        withJsonDownload(token, info) { json ->
+            if (canonicalSyncUuidOrNull(json.optString("uuid")) == null) return@withJsonDownload false
+            readerAnnotationRepository.applyRemote(parseAnnotation(json))
+            true
+        }
 
-    suspend fun applyFont(token: String, metadata: DriveObject, source: DriveObject) {
-        val uuid = metadata.objectKey.split('/').getOrNull(1) ?: return
-        if (fonts.getFont(uuid) != null || !preferences.current().syncFonts) return
+    suspend fun applyFont(token: String, metadata: DriveObject, source: DriveObject): CloudFontApplyResult {
+        val rawUuid = metadata.objectKey.split('/').getOrNull(1) ?: return CloudFontApplyResult.INVALID
+        val uuid = canonicalSyncUuidOrNull(rawUuid) ?: return CloudFontApplyResult.INVALID
+        if (fonts.getFont(uuid) != null) return CloudFontApplyResult.ALREADY_PRESENT
+        // A skipped font must not advance its baseline, otherwise enabling font sync later would
+        // never see the object again: the change stream only reports it once.
+        if (!preferences.current().syncFonts) return CloudFontApplyResult.SKIPPED_DISABLED
         val metaFile = tempFile("font-meta")
         val sourceFile = tempFile("font-source")
-        try {
+        return try {
             drive.download(token, metadata.id, metaFile)
             drive.download(token, source.id, sourceFile)
             val json = JSONObject(metaFile.readText())
@@ -245,6 +263,9 @@ internal class CloudRemoteStateApplier(
                 createdTime = json.optLong("createdTime"),
                 sourceFile = sourceFile,
             )
+            CloudFontApplyResult.IMPORTED
+        } catch (error: DriveHttpException) {
+            if (error.statusCode == 404) CloudFontApplyResult.MISSING_SOURCE else throw error
         } finally {
             sourceFile.delete()
             metaFile.delete()

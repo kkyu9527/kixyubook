@@ -79,7 +79,8 @@ internal fun correctionJson(value: TextCorrectionEntity) = JSONObject()
     .put("createdTime", value.createdTime).put("updatedTime", value.updatedTime).put("deviceId", value.deviceId)
 
 internal fun parseCorrection(json: JSONObject) = TextCorrection(
-    uuid = json.getString("uuid"), bookUuid = json.getString("bookUuid"),
+    uuid = requireCanonicalSyncUuid(json.getString("uuid"), "correction uuid"),
+    bookUuid = requireCanonicalSyncUuid(json.getString("bookUuid"), "correction book uuid"),
     sourceContentHash = json.optString("sourceContentHash"), chapterKey = json.optString("chapterKey"),
     chapterIndex = json.optInt("chapterIndex"), paragraphIndex = json.optInt("paragraphIndex"),
     startOffset = json.optInt("startOffset"), endOffset = json.optInt("endOffset"),
@@ -99,7 +100,8 @@ internal fun annotationJson(value: ReaderAnnotationEntity) = JSONObject()
     .put("createdTime", value.createdTime).put("updatedTime", value.updatedTime).put("deviceId", value.deviceId)
 
 internal fun parseAnnotation(json: JSONObject) = ReaderAnnotation(
-    uuid = json.getString("uuid"), bookUuid = json.getString("bookUuid"),
+    uuid = requireCanonicalSyncUuid(json.getString("uuid"), "annotation uuid"),
+    bookUuid = requireCanonicalSyncUuid(json.getString("bookUuid"), "annotation book uuid"),
     sourceContentHash = json.optString("sourceContentHash"), chapterKey = json.optString("chapterKey"),
     chapterIndex = json.optInt("chapterIndex"), paragraphIndex = json.optInt("paragraphIndex"),
     startOffset = json.optInt("startOffset"), endOffset = json.optInt("endOffset"),
@@ -110,7 +112,8 @@ internal fun parseAnnotation(json: JSONObject) = ReaderAnnotation(
 )
 
 internal fun parseBook(json: JSONObject) = SyncedBook(
-    uuid = json.getString("uuid"), title = json.optString("title", "未命名书籍"),
+    uuid = requireCanonicalSyncUuid(json.getString("uuid"), "book uuid"),
+    title = json.optString("title", "未命名书籍"),
     author = json.optString("author", "未知作者"), description = json.optString("description"),
     format = enumValue(json, "format", BookFormat.TXT), createdTime = json.optLong("createdTime"),
     contentHash = json.getString("contentHash"), category = json.optString("category", "未分类"),

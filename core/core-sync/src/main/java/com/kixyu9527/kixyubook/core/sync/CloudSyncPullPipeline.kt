@@ -40,6 +40,25 @@ internal class CloudSyncPullPipeline(
                 val json = JSONObject(temp.readText())
                 val type = runCatching { SyncEntityType.valueOf(json.getString("type")) }.getOrNull() ?: return@forEach
                 val id = json.getString("entityId")
+                val deletedAt = json.optLong("deletedAt")
+                val tombstone = SyncTombstoneEntity(
+                    objectKey = key,
+                    deletedAt = deletedAt,
+                    deviceId = json.optString("deviceId"),
+                    expiresAt = PERMANENT_TOMBSTONE_EXPIRY,
+                )
+                // A tombstone older than a local re-upload of the same object is stale: the object
+                // was restored on this device after the remote deletion and must not be removed.
+                if (tombstoneSupersededByLocalUpload(syncDao, type, id, deletedAt)) {
+                    syncDao.upsertTombstone(tombstone)
+                    DiagnosticLog.record(
+                        Category.SYNC,
+                        "tombstone_superseded_by_local_upload",
+                        outcome = "local_wins",
+                        details = mapOf("entity" to type.name.lowercase()),
+                    )
+                    return@forEach
+                }
                 // A tombstone must not discard an edit this device has not uploaded yet. Keep the
                 // local change (it will be pushed and re-create the object) instead of deleting it.
                 val applied = applyRemoteTombstoneAtomically(
@@ -47,12 +66,21 @@ internal class CloudSyncPullPipeline(
                     syncDao = syncDao,
                     type = type,
                     id = id,
-                    tombstone = SyncTombstoneEntity(
-                        objectKey = key,
-                        deletedAt = json.optLong("deletedAt"),
-                        deviceId = json.optString("deviceId"),
-                        expiresAt = PERMANENT_TOMBSTONE_EXPIRY,
-                    ),
+                    onConflict = { if (type == SyncEntityType.BOOK) reenqueueBookObjectsForSync(id) },
+                    hasLocalConflict = {
+                        hasRemoteTombstoneConflict(
+                            type = type,
+                            id = id,
+                            syncDao = syncDao,
+                            annotationUuidsForBook = { uuid ->
+                                readerAnnotationRepository.getBookAnnotations(uuid).map { it.uuid }
+                            },
+                            correctionUuidsForBook = { uuid ->
+                                textCorrectionRepository.getBookCorrections(uuid).map { it.uuid }
+                            },
+                        )
+                    },
+                    tombstone = tombstone,
                 ) {
                     mutations.withoutRecording {
                         when (type) {
@@ -134,7 +162,8 @@ internal class CloudSyncPullPipeline(
             .mapNotNull { it.split('/').getOrNull(1) }
             .distinct()
             .filter { uuid ->
-                "books/$uuid/metadata" !in dirty && "books/$uuid/source" !in dirty
+                canonicalSyncUuidOrNull(uuid) != null &&
+                    "books/$uuid/metadata" !in dirty && "books/$uuid/source" !in dirty
             }
             .toList()
 
@@ -149,8 +178,44 @@ internal class CloudSyncPullPipeline(
                 ),
             )
         }
-        suspend fun restoreBook(uuid: String) {
-            remoteState.restoreBook(token, uuid, knownRemote)
+        suspend fun applyKnownChildObjects(
+            uuid: String,
+            knownRemote: Map<String, DriveObject>,
+            handledKeys: MutableSet<String>,
+        ) {
+            val progressKey = "progress/$uuid"
+            val bookmarksKey = "bookmarks/$uuid"
+            if (progressKey !in handledKeys) {
+                knownRemote[progressKey]?.let { info ->
+                    if (!stillDirty(progressKey) && remoteState.applyProgress(token, info)) {
+                        rememberRemote(progressKey, info)
+                        handledKeys += progressKey
+                    }
+                }
+            }
+            if (bookmarksKey !in handledKeys) {
+                knownRemote[bookmarksKey]?.let { info ->
+                    if (!stillDirty(bookmarksKey) && remoteState.applyBookmarks(token, info)) {
+                        rememberRemote(bookmarksKey, info)
+                        handledKeys += bookmarksKey
+                    }
+                }
+            }
+        }
+
+        suspend fun restoreBook(uuid: String): Boolean {
+            val restored = remoteState.restoreBook(token, uuid, knownRemote)
+            if (!restored) {
+                // A metadata-only book (source not uploaded yet) must not consume its keys, and its
+                // progress/bookmarks stay unconsumed so a later run can still apply them.
+                DiagnosticLog.record(
+                    Category.SYNC,
+                    "book_restore_incomplete",
+                    outcome = "retry",
+                    details = mapOf("book" to uuid.take(8)),
+                )
+                return false
+            }
             handledKeys += "books/$uuid/metadata"
             handledKeys += "books/$uuid/source"
             restoredBooks++
@@ -162,6 +227,10 @@ internal class CloudSyncPullPipeline(
                     total = changedBookUuids.size,
                 ),
             )
+            // The book may land in a run where its child objects are no longer part of the change
+            // stream; apply them now from the known remote snapshot.
+            applyKnownChildObjects(uuid, knownRemote, handledKeys)
+            return true
         }
 
         suspend fun bookIsDirty(uuid: String): Boolean =
@@ -169,21 +238,25 @@ internal class CloudSyncPullPipeline(
 
         if (initialMergeComplete) {
             changedBookUuids.forEach { if (!bookIsDirty(it)) restoreBook(it) }
+            // A book restored without its child objects in this page still needs them; the helper
+            // already ran per restore, so nothing else is required here.
         } else {
             val restorePlan = planInitialRestore(changedBookUuids, knownRemote)
             restorePlan.priorityBookUuids.forEach { uuid ->
                 if (!bookIsDirty(uuid)) restoreBook(uuid)
                 candidates["progress/$uuid"]?.let { info ->
                     if (stillDirty("progress/$uuid")) return@let
-                    remoteState.applyProgress(token, info)
-                    rememberRemote("progress/$uuid", info)
-                    handledKeys += "progress/$uuid"
+                    if (remoteState.applyProgress(token, info)) {
+                        rememberRemote("progress/$uuid", info)
+                        handledKeys += "progress/$uuid"
+                    }
                 }
                 candidates["bookmarks/$uuid"]?.let { info ->
                     if (stillDirty("bookmarks/$uuid")) return@let
-                    remoteState.applyBookmarks(token, info)
-                    rememberRemote("bookmarks/$uuid", info)
-                    handledKeys += "bookmarks/$uuid"
+                    if (remoteState.applyBookmarks(token, info)) {
+                        rememberRemote("bookmarks/$uuid", info)
+                        handledKeys += "bookmarks/$uuid"
+                    }
                 }
             }
 
@@ -202,25 +275,79 @@ internal class CloudSyncPullPipeline(
                 val sourceKey = "fonts/$uuid/source"
                 val metadata = knownRemote[metadataKey] ?: return@forEach
                 val source = knownRemote[sourceKey] ?: return@forEach
-                remoteState.applyFont(token, metadata, source)
-                rememberRemote(metadataKey, metadata)
-                rememberRemote(sourceKey, source)
-                handledKeys += metadataKey
-                handledKeys += sourceKey
+                when (remoteState.applyFont(token, metadata, source)) {
+                    CloudFontApplyResult.IMPORTED,
+                    CloudFontApplyResult.ALREADY_PRESENT,
+                    -> {
+                        rememberRemote(metadataKey, metadata)
+                        rememberRemote(sourceKey, source)
+                        handledKeys += metadataKey
+                        handledKeys += sourceKey
+                    }
+                    // Skipped or invalid objects keep their old baseline so a later run (or the
+                    // font-sync enable reconciliation) can still apply them.
+                    else -> Unit
+                }
             }
 
         candidates.forEach { (key, info) ->
             if (key in handledKeys || stillDirty(key)) return@forEach
-            when {
+            val applied = when {
                 key.startsWith("progress/") -> remoteState.applyProgress(token, info)
                 key.startsWith("bookmarks/") -> remoteState.applyBookmarks(token, info)
-                key == "settings/global" -> remoteState.applySettings(token, info)
+                key == "settings/global" -> {
+                    remoteState.applySettings(token, info)
+                    true
+                }
                 key.startsWith("sessions/") -> remoteState.applySession(token, info)
                 key.startsWith("corrections/") -> remoteState.applyCorrection(token, info)
                 key.startsWith("annotations/") -> remoteState.applyAnnotation(token, info)
+                else -> true
             }
-            rememberRemote(key, info)
+            // A failed apply (for example a book that is not restored yet) must not advance the
+            // baseline, otherwise the change stream never offers the object again.
+            if (applied) rememberRemote(key, info)
         }
+    }
+
+    /**
+     * Local wins: the cloud copy was deleted while this device still had unsynced changes, so the
+     * whole logical book is queued again and the next push re-creates every remote object. Without
+     * this the pending rows would eventually be uploaded, cleared and then deleted by a re-read
+     * tombstone, losing the local work silently.
+     */
+    private suspend fun reenqueueBookObjectsForSync(bookUuid: String) {
+        suspend fun recordIfIdle(type: SyncEntityType, id: String) {
+            if (syncDao.pendingCount(type.name, id) == 0) mutations.record(type, id)
+        }
+        recordIfIdle(SyncEntityType.BOOK, bookUuid)
+        recordIfIdle(SyncEntityType.BOOKMARKS, bookUuid)
+        recordIfIdle(SyncEntityType.PROGRESS, bookUuid)
+        readerAnnotationRepository.getBookAnnotations(bookUuid).forEach { recordIfIdle(SyncEntityType.ANNOTATION, it.uuid) }
+        textCorrectionRepository.getBookCorrections(bookUuid).forEach { recordIfIdle(SyncEntityType.CORRECTION, it.uuid) }
+    }
+
+    /** Imports every known remote font pair; used when font sync is enabled after being off. */
+    suspend fun applyRemoteFonts(token: String, knownRemote: Map<String, DriveObject>) {
+        knownRemote.keys.asSequence()
+            .filter { it.startsWith("fonts/") }
+            .mapNotNull { it.split('/').getOrNull(1) }
+            .distinct()
+            .forEach { uuid ->
+                val metadataKey = "fonts/$uuid/metadata"
+                val sourceKey = "fonts/$uuid/source"
+                val metadata = knownRemote[metadataKey] ?: return@forEach
+                val source = knownRemote[sourceKey] ?: return@forEach
+                when (remoteState.applyFont(token, metadata, source)) {
+                    CloudFontApplyResult.IMPORTED,
+                    CloudFontApplyResult.ALREADY_PRESENT,
+                    -> {
+                        rememberRemote(metadataKey, metadata)
+                        rememberRemote(sourceKey, source)
+                    }
+                    else -> Unit
+                }
+            }
     }
 
     private suspend fun rememberRemote(key: String, value: DriveObject) {
@@ -259,15 +386,73 @@ internal suspend fun applyRemoteTombstoneAtomically(
     type: SyncEntityType,
     id: String,
     tombstone: SyncTombstoneEntity,
+    hasLocalConflict: suspend () -> Boolean = {
+        !shouldApplyRemoteTombstone(syncDao.pendingCount(type.name, id))
+    },
+    onConflict: suspend () -> Unit = {},
     deleteLocal: suspend () -> Unit,
 ): Boolean = runWithPostCommitFileCleanup {
     database.withTransaction {
-        val shouldDelete = shouldApplyRemoteTombstone(syncDao.pendingCount(type.name, id))
+        val shouldDelete = !hasLocalConflict()
         if (shouldDelete) {
             deleteLocal()
             syncDao.removeOutbox(type.name, id)
+        } else {
+            // The conflict resolution must run in the same transaction as the skip, otherwise a
+            // re-read tombstone could still delete the data after the edit was pushed and cleared.
+            onConflict()
         }
         syncDao.upsertTombstone(tombstone)
         shouldDelete
     }
+}
+
+/** Drive object key that carries the entity a tombstone refers to. */
+internal fun mutableTombstoneObjectKey(type: SyncEntityType, id: String): String? = when (type) {
+    SyncEntityType.BOOK -> "books/$id/metadata"
+    SyncEntityType.FONT -> "fonts/$id/metadata"
+    SyncEntityType.BOOKMARKS -> "bookmarks/$id"
+    SyncEntityType.PROGRESS -> "progress/$id"
+    SyncEntityType.SETTINGS -> "settings/global"
+    SyncEntityType.SESSION -> "sessions/$id"
+    SyncEntityType.CORRECTION -> "corrections/$id"
+    SyncEntityType.ANNOTATION -> "annotations/$id"
+}
+
+/** True when the local device re-uploaded the object after the remote deletion, making it stale. */
+internal suspend fun tombstoneSupersededByLocalUpload(
+    syncDao: SyncDao,
+    type: SyncEntityType,
+    id: String,
+    deletedAt: Long,
+): Boolean {
+    if (deletedAt <= 0) return false
+    val key = mutableTombstoneObjectKey(type, id) ?: return false
+    val state = syncDao.objectState(key) ?: return false
+    return state.remoteModifiedAt > deletedAt
+}
+
+/**
+ * A book tombstone cascades into its bookmarks, progress, notes and corrections, so any pending
+ * local change on those children must block the deletion exactly like a pending change on the book
+ * itself: the child would otherwise be deleted and its own outbox row cleaned up with it.
+ */
+internal suspend fun hasRemoteTombstoneConflict(
+    type: SyncEntityType,
+    id: String,
+    syncDao: SyncDao,
+    annotationUuidsForBook: suspend (String) -> List<String>,
+    correctionUuidsForBook: suspend (String) -> List<String>,
+): Boolean {
+    if (!shouldApplyRemoteTombstone(syncDao.pendingCount(type.name, id))) return true
+    if (type != SyncEntityType.BOOK) return false
+    if (!shouldApplyRemoteTombstone(syncDao.pendingCount(SyncEntityType.BOOKMARKS.name, id))) return true
+    if (!shouldApplyRemoteTombstone(syncDao.pendingCount(SyncEntityType.PROGRESS.name, id))) return true
+    if (annotationUuidsForBook(id).any { syncDao.pendingCount(SyncEntityType.ANNOTATION.name, it) > 0 }) {
+        return true
+    }
+    if (correctionUuidsForBook(id).any { syncDao.pendingCount(SyncEntityType.CORRECTION.name, it) > 0 }) {
+        return true
+    }
+    return false
 }
