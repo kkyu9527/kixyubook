@@ -28,6 +28,20 @@ class KixyuAdaptiveLayoutTest {
     }
 
     @Test
+    fun expandedLandscapeTabletKeepsTwoPaneAndRail() {
+        val window = classifyKixyuWindowSize(1280.dp, 800.dp)
+        assertTrue(window.usesNavigationRail)
+        assertTrue(window.supportsTwoPane)
+    }
+
+    @Test
+    fun mediumLandscapeStillSupportsTwoPane() {
+        val window = classifyKixyuWindowSize(800.dp, 500.dp)
+        assertTrue(window.usesNavigationRail)
+        assertTrue(window.supportsTwoPane)
+    }
+
+    @Test
     fun navigationLabelsCollapseBeforeLargeTextCanClipActions() {
         assertTrue(kixyuNavigationShowsLabels(1f))
         assertTrue(kixyuNavigationShowsLabels(1.3f))

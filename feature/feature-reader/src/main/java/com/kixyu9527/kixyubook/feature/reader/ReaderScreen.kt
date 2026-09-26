@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
@@ -637,6 +638,37 @@ internal fun ReaderScreen(
         )
 
         val activeSheet = sheet ?: retainedSheet
+        // Phone sheet and tablet side panel must not drift apart: both render this one directory.
+        fun closeDirectoryOverlays() {
+            sheet = null
+            controls = false
+            toolsMenu = false
+        }
+        val directoryContent: @Composable (Boolean) -> Unit = { fillsHeight ->
+            DirectorySheet(
+                state = state,
+                selectNavigation = { target ->
+                    closeDirectoryOverlays()
+                    openDocumentLink(target)
+                },
+                selectChapter = { index ->
+                    closeDirectoryOverlays()
+                    jumpChapter(index)
+                },
+                selectBookmark = { bookmark ->
+                    closeDirectoryOverlays()
+                    jumpPosition(sourceLocation(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
+                },
+                selectAnnotation = { annotation ->
+                    closeDirectoryOverlays()
+                    jumpPosition(sourceLocation(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
+                },
+                deleteBookmark = deleteBookmark,
+                updateAnnotationNote = updateAnnotationNote,
+                deleteAnnotation = deleteAnnotation,
+                expandedLayout = fillsHeight,
+            )
+        }
         ReaderFloatingSheet(
             show = sheet != null && !(directoryAsSidePanel && sheet == ReaderSheet.DIRECTORY),
             progress = sheetBackProgress,
@@ -649,36 +681,7 @@ internal fun ReaderScreen(
             },
         ) {
             when (activeSheet) {
-                ReaderSheet.DIRECTORY -> DirectorySheet(
-                    state = state,
-                    selectNavigation = { target ->
-                        sheet = null
-                        controls = false
-                        toolsMenu = false
-                        openDocumentLink(target)
-                    },
-                    selectChapter = { index ->
-                        sheet = null
-                        controls = false
-                        toolsMenu = false
-                        jumpChapter(index)
-                    },
-                    selectBookmark = { bookmark ->
-                        sheet = null
-                        controls = false
-                        toolsMenu = false
-                        jumpPosition(sourceLocation(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
-                    },
-                    selectAnnotation = { annotation ->
-                        sheet = null
-                        controls = false
-                        toolsMenu = false
-                                jumpPosition(sourceLocation(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
-                    },
-                    deleteBookmark = deleteBookmark,
-                    updateAnnotationNote = updateAnnotationNote,
-                    deleteAnnotation = deleteAnnotation,
-                )
+                ReaderSheet.DIRECTORY -> directoryContent(false)
                 ReaderSheet.FONT_LAYOUT,
                 ReaderSheet.PAGE_TURN,
                 ReaderSheet.THEME_SCREEN,
@@ -701,79 +704,14 @@ internal fun ReaderScreen(
             }
         }
         if (directoryPanelVisible || directoryPanelComposed) {
-            val panelProgress = directoryPanelProgress.value
-            Box(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier.fillMaxSize()
-                        .graphicsLayer { alpha = 1f - sheetBackProgress() }
-                        .background(
-                            Color.Black.copy(
-                                alpha = .28f * panelProgress,
-                            ),
-                        )
-                        .clickable(
-                            enabled = directoryPanelVisible,
-                            onClick = { sheet = null },
-                        ),
-                )
-                Box(
-                    Modifier.align(Alignment.CenterStart)
-                        .windowInsetsPadding(WindowInsets.safeDrawing)
-                        .padding(KixyuSpacing.medium),
-                ) {
-                    KixyuGlassSurface(
-                        backdrop = readerBackdrop,
-                        modifier = Modifier
-                            .widthIn(min = 360.dp, max = 480.dp)
-                            .fillMaxHeight()
-                            .pointerInput(Unit) {
-                                awaitPointerEventScope {
-                                    while (true) awaitPointerEvent()
-                                }
-                            }
-                            .graphicsLayer {
-                                // MIUIX bottom sheets translate by their complete measured height.
-                                // Apply the same progress horizontally and preserve predictive back.
-                                translationX = -size.width * (
-                                    (1f - panelProgress) + sheetBackProgress() * panelProgress
-                                )
-                                alpha = 1f - sheetBackProgress() * .35f
-                            },
-                        fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ) {
-                        DirectorySheet(
-                            state = state,
-                            selectNavigation = { target ->
-                                sheet = null
-                                controls = false
-                                toolsMenu = false
-                                openDocumentLink(target)
-                            },
-                            selectChapter = { index ->
-                                sheet = null
-                                controls = false
-                                toolsMenu = false
-                                jumpChapter(index)
-                            },
-                            selectBookmark = { bookmark ->
-                                sheet = null
-                                controls = false
-                                toolsMenu = false
-                                jumpPosition(sourceLocation(bookmark.chapterIndex, bookmark.position, source = ReaderLocationSource.BOOKMARK))
-                            },
-                            selectAnnotation = { annotation ->
-                                sheet = null
-                                controls = false
-                                toolsMenu = false
-                        jumpPosition(sourceLocation(annotation.chapterIndex, annotation.paragraphIndex, annotation.startOffset, ReaderLocationSource.ANNOTATION))
-                            },
-                            deleteBookmark = deleteBookmark,
-                            updateAnnotationNote = updateAnnotationNote,
-                            deleteAnnotation = deleteAnnotation,
-                            expandedLayout = true,
-                        )
-                    }
-                }
+            ReaderDirectorySidePanel(
+                backdrop = readerBackdrop,
+                panelProgress = directoryPanelProgress.value,
+                backProgress = sheetBackProgress,
+                visible = directoryPanelVisible,
+                onDismiss = { sheet = null },
+            ) {
+                directoryContent(true)
             }
         }
         BookInfoDialog(
@@ -802,4 +740,62 @@ internal fun currentVisiblePageBookmark(
 ): Bookmark? = bookmarks.firstOrNull { bookmark ->
     bookmark.chapterId == chapterId &&
         bookmark.position in position.paragraphIndex..position.visibleEndParagraphIndex
+}
+
+/**
+ * The directory side panel is product-anchored to the start edge in every window size. Landscape
+ * tablets must keep the directory on the same side as portrait instead of re-centering it.
+ */
+@Composable
+internal fun ReaderDirectorySidePanel(
+    backdrop: KixyuNavigationBackdrop,
+    panelProgress: Float,
+    backProgress: () -> Float,
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier.fillMaxSize()
+                .graphicsLayer { alpha = 1f - backProgress() }
+                .background(
+                    Color.Black.copy(
+                        alpha = .28f * panelProgress,
+                    ),
+                )
+                .clickable(
+                    enabled = visible,
+                    onClick = onDismiss,
+                ),
+        )
+        Box(
+            Modifier.align(Alignment.CenterStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(KixyuSpacing.medium),
+        ) {
+            KixyuGlassSurface(
+                backdrop = backdrop,
+                modifier = Modifier
+                    .widthIn(min = 360.dp, max = 480.dp)
+                    .fillMaxHeight()
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent()
+                        }
+                    }
+                    .graphicsLayer {
+                        // MIUIX bottom sheets translate by their complete measured height.
+                        // Apply the same progress horizontally and preserve predictive back.
+                        translationX = -size.width * (
+                            (1f - panelProgress) + backProgress() * panelProgress
+                        )
+                        alpha = 1f - backProgress() * .35f
+                    },
+                fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                content()
+            }
+        }
+    }
 }
