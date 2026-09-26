@@ -358,9 +358,17 @@ private fun parseSax(input: InputStream, lenient: Boolean, handler: DefaultHandl
         if (!lenient) runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
         runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
         runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+        runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
         runCatching { setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true) }
     }
-    factory.newSAXParser().parse(input, handler)
+    factory.newSAXParser().run {
+        runCatching { setProperty("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
+        // A DOCTYPE is common in EPUB 2 XHTML; never fetch its DTD, just parse the tree.
+        xmlReader.entityResolver = org.xml.sax.EntityResolver { _, _ ->
+            org.xml.sax.InputSource(java.io.StringReader(""))
+        }
+        parse(input, handler)
+    }
 }
 
 private fun elementName(localName: String?, qName: String?) =

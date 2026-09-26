@@ -764,6 +764,61 @@ class ReaderEngineTest {
         assertEquals("第一卷 风起", EpubBookParser().readChapter(epub, 2, "第一卷 风起")?.title)
     }
 
+    @Test fun epubNavigationAndChaptersParseLegacyExternalDoctype() = runBlocking {
+        // EPUB 2 publishes an NCX and XHTML bodies with an external DTD. The DTD must never be
+        // fetched, but the DOCTYPE itself must not defeat parsing either.
+        val epub = folder.newFile("doctype.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>DTD 目录</dc:title></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="c1" href="text/c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="c1"/></spine></package>""")
+            entry("OPS/toc.ncx", """<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><navMap><navPoint id="n1"><navLabel><text>第一章 开始</text></navLabel><content src="text/c1.xhtml"/></navPoint></navMap></ncx>""")
+            entry("OPS/text/c1.xhtml", """<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>正文。</p></body></html>""")
+        }
+
+        assertEquals(listOf("第一章 开始"), EpubBookParser().readNavigation(epub).map { it.title })
+        val chapters = mutableListOf<DocumentChapter>()
+        EpubBookParser().readChapters(epub, chapters::add)
+        assertEquals(listOf("正文。"), chapters.single().paragraphs)
+    }
+
+    @Test fun epubChapterOutlinesAdoptUnlistedVolumeOpeningProse() = runBlocking {
+        // The publisher lists a volume plate and its first chapter but omits the volume's opening
+        // prose page. That page must inherit the volume label so the directory never shows a
+        // generated "第 N 章" row above the volume.
+        val epub = folder.newFile("unlisted-volume-opening.epub")
+        ZipOutputStream(epub.outputStream()).use { zip ->
+            fun entry(path: String, value: String) {
+                zip.putNextEntry(ZipEntry(path)); zip.write(value.toByteArray()); zip.closeEntry()
+            }
+            entry("mimetype", "application/epub+zip")
+            entry("META-INF/container.xml", """<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>""")
+            entry("OPS/book.opf", """<package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>卷首正文</dc:title></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="plate" href="Section0001.xhtml" media-type="application/xhtml+xml"/><item id="opener" href="Section0002.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="Section0003.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="plate"/><itemref idref="opener"/><itemref idref="c1"/></spine></package>""")
+            entry("OPS/toc.ncx", """<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><navMap><navPoint id="v1"><navLabel><text>第一卷 肢体雪人</text></navLabel><content src="Section0001.xhtml"/><navPoint id="c1"><navLabel><text>第一章 特案小组</text></navLabel><content src="Section0003.xhtml"/></navPoint></navPoint></navMap></ncx>""")
+            entry("OPS/Section0001.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="plate.png"/></body></html>""")
+            entry("OPS/Section0002.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><p>人不能两次踏入同一条河流。</p><p>正文开始。</p></body></html>""")
+            entry("OPS/Section0003.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章 特案小组</h1><p>第一章正文。</p></body></html>""")
+            zip.putNextEntry(ZipEntry("OPS/plate.png")); zip.write(ByteArray(16)); zip.closeEntry()
+        }
+
+        assertEquals(
+            listOf(
+                DocumentChapterOutline(0, "第一卷 肢体雪人"),
+                DocumentChapterOutline(1, "第一卷 肢体雪人"),
+                DocumentChapterOutline(2, "第一章 特案小组", "第一卷 肢体雪人", 0),
+            ),
+            EpubBookParser().readChapterOutlines(epub),
+        )
+        assertEquals("第一卷 肢体雪人", EpubBookParser().readChapter(epub, 1, "第一卷 肢体雪人")?.title)
+    }
+
     @Test fun epubParserNormalizesSemanticInlineStylesAndExternalCss() = runBlocking {
         val epub = folder.newFile("styled.epub")
         ZipOutputStream(epub.outputStream()).use { zip ->

@@ -185,7 +185,7 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 putIfAbsent(target.normalizedArchivePath(), entry)
             }
         }
-        val rawCandidates = pkg.spine.mapIndexedNotNull { sourceIndex, id ->
+        val rawEntries = pkg.spine.mapIndexedNotNull { sourceIndex, id ->
             val item = pkg.manifest[id] ?: return@mapIndexedNotNull null
             val navigation = navigationEntries[item.path.normalizedArchivePath()]
             DocumentChapterOutline(
@@ -193,28 +193,33 @@ class EpubBookParser : BookParser, MemoryPressureListener {
                 title = navigation?.title ?: item.path.fallbackChapterTitle(sourceIndex),
                 volumeTitle = navigation?.volumeTitle,
                 volumeIndex = navigation?.volumeIndex,
-            )
+            ) to (navigation != null)
         }
-        val candidates = rawCandidates.mapIndexed { position, outline ->
+        val rawCandidates = rawEntries.map { it.first }
+        val candidates = rawEntries.mapIndexed { position, (outline, listed) ->
             val item = pkg.manifest[pkg.spine[outline.sourceIndex]] ?: return@mapIndexed outline
             val semanticTitle = outline.title.semanticEpubSectionTitle()
                 ?: item.path.substringAfterLast('/').substringBeforeLast('.').semanticEpubSectionTitle()
             if (semanticTitle != null) return@mapIndexed outline.copy(title = semanticTitle)
-            if (!outline.title.isGenericEpubChapterTitle()) return@mapIndexed outline
 
             val nextOutline = rawCandidates.getOrNull(position + 1)
             val previousVolume = rawCandidates.getOrNull(position - 1)?.volumeTitle
             val nextVolume = nextOutline?.volumeTitle?.takeIf { volume ->
                 volume.isNotBlank() && volume != previousVolume
             }
-            val shouldInspectBody = outline.sourceIndex < FRONT_MATTER_INSPECTION_LIMIT || nextVolume != null
-            val inspection = if (shouldInspectBody) {
+            // A publisher TOC often lists only a volume plate and its first chapter, leaving the
+            // volume's opening prose page unlisted right before that chapter. It is the volume's
+            // own opening content, so adopt the publisher's volume label; otherwise it would
+            // surface as a generated "第 N 章" row above the volume.
+            if (!listed && nextVolume != null) return@mapIndexed outline.copy(title = nextVolume)
+            if (!outline.title.isGenericEpubChapterTitle()) return@mapIndexed outline
+
+            val inspection = if (outline.sourceIndex < FRONT_MATTER_INSPECTION_LIMIT) {
                 runCatching { inspectSpineOutline(zip, pkg, outline.sourceIndex) }.getOrNull()
             } else {
                 null
             }
-            val inferredVolumeTitle = nextVolume?.takeIf { inspection?.isImageOnly == true }
-            outline.copy(title = inspection?.title ?: inferredVolumeTitle ?: item.path.fallbackChapterTitle(outline.sourceIndex))
+            outline.copy(title = inspection?.title ?: item.path.fallbackChapterTitle(outline.sourceIndex))
         }
         // The publisher's TOC is navigation, not a whitelist of readable spine resources.
         // Keep every source index so unlisted prologues/interludes remain readable and searchable.
@@ -821,7 +826,8 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         navigationItems.forEach { item ->
             // EPUB 3 TOC takes precedence; NCX is a fallback, not a second directory to merge.
             if (isNotEmpty()) return@forEach
-            val document = runCatching { parseXml(zip, item.path) }.getOrNull() ?: return@forEach
+            val document = runCatching { parseXml(zip, item.path, lenient = true) }.getOrNull()
+                ?: return@forEach
             if (item.mediaType.equals(NCX_MEDIA_TYPE, ignoreCase = true)) {
                 val points = document.getElementsByTagNameNS("*", "navPoint")
                 for (index in 0 until points.length) {
@@ -920,8 +926,14 @@ class EpubBookParser : BookParser, MemoryPressureListener {
         if (!lenient) runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
         runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
         runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+        runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
+        runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
+        runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "") }
         runCatching { setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true) }
-        newDocumentBuilder()
+        newDocumentBuilder().also { builder ->
+            // A DOCTYPE is common in EPUB 2 NCX/XHTML; never fetch its DTD, just parse the tree.
+            builder.setEntityResolver { _, _ -> org.xml.sax.InputSource(java.io.StringReader("")) }
+        }
     }
 
     private fun Element.firstText(name: String) =
