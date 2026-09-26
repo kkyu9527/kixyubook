@@ -322,7 +322,9 @@ internal class EpubIndexCoordinator(
 private const val KEY_EPUB_DIRECTORY_VERSION = "epub_directory_version"
 // v5 reapplies outline titles in place, repairing books whose volume-opening pages had the body
 // heading ("序") written back over the adopted volume title by the previous parser.
-private const val EPUB_DIRECTORY_VERSION = 5
+// v6 re-reads EPUB 2 NCX files that carry an external DTD and adopts unlisted volume opening
+// prose pages, so publisher volume grouping and titles appear without re-importing the book.
+private const val EPUB_DIRECTORY_VERSION = 6
 private fun String.shortIndexDiagnosticId(): String = take(8)
 
 private fun stableIndexChapterKey(bookUuid: String, index: Int, title: String): String {

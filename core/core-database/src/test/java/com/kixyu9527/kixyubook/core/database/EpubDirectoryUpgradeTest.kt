@@ -83,6 +83,61 @@ class EpubDirectoryUpgradeTest {
         }
     }
 
+    @Test fun directoryUpgradeParsesLegacyNcxDoctypeAndAdoptsUnlistedVolumeOpening() = runBlocking(Dispatchers.IO) {
+        val source = folder.newFile("legacy-ncx-upgrade.epub")
+        ZipOutputStream(source.outputStream()).use { zip ->
+            fun entry(path: String, text: String) {
+                zip.putNextEntry(ZipEntry(path))
+                zip.write(text.toByteArray())
+                zip.closeEntry()
+            }
+            entry("META-INF/container.xml", """<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>""")
+            entry("book.opf", """<package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>旧版 NCX</dc:title></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="plate" href="Section0001.xhtml" media-type="application/xhtml+xml"/><item id="opener" href="Section0002.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="Section0003.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="plate"/><itemref idref="opener"/><itemref idref="c1"/></spine></package>""")
+            entry("toc.ncx", """<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><navMap><navPoint id="v1"><navLabel><text>第一卷 肢体雪人</text></navLabel><content src="Section0001.xhtml"/><navPoint id="c1"><navLabel><text>第一章 特案小组</text></navLabel><content src="Section0003.xhtml"/></navPoint></navPoint></navMap></ncx>""")
+            entry("Section0001.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="plate.png"/></body></html>""")
+            entry("Section0002.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><p>人不能两次踏入同一条河流。</p></body></html>""")
+            entry("Section0003.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章 特案小组</h1><p>第一章正文。</p></body></html>""")
+            zip.putNextEntry(ZipEntry("plate.png")); zip.write(ByteArray(16)); zip.closeEntry()
+        }
+        val context = RuntimeEnvironment.getApplication() as Context
+        val preferences = context.getSharedPreferences("legacy-ncx-upgrade-test", Context.MODE_PRIVATE)
+        // The old parser could not read the NCX at all, so the directory kept generated titles.
+        preferences.edit().clear().putInt("epub_directory_version", 5).commit()
+        val database = Room.inMemoryDatabaseBuilder(context, KixyuDatabase::class.java).build()
+        try {
+            val dao = database.bookDao()
+            dao.insertBook(BookEntity("book", "旧版 NCX", "", "", null, "EPUB", "", source.path, 1, "hash", ""))
+            dao.insertChapter(ChapterEntity(30, "book", "第 1 章", 0, chapterKey = "k0"))
+            dao.insertChapter(ChapterEntity(31, "book", "第 2 章", 1, chapterKey = "k1"))
+            dao.insertChapter(ChapterEntity(32, "book", "第 3 章", 2, chapterKey = "k2"))
+            dao.insertParagraphsChunked(32, listOf("第一章正文。"))
+            val bookmark = BookmarkEntity("bookmark", "book", 32, 0, "第一章正文。", 1)
+            dao.insertBookmark(bookmark)
+
+            val coordinator = EpubIndexCoordinator(
+                database, dao, EpubParseCoordinator(), EpubChapterCache(folder.newFolder("legacy-ncx-cache")),
+                Mutex(), Mutex(), preferences, { },
+            )
+            coordinator.upgradeDirectoryDataIfNeeded()
+
+            assertEquals(
+                listOf("第一卷 肢体雪人", "第一卷 肢体雪人", "第一章 特案小组"),
+                dao.getChapters("book").sortedBy { it.chapterIndex }.map { it.title },
+            )
+            val chapter = dao.getChapter("book", 2)!!
+            assertEquals("第一章 特案小组", chapter.title)
+            assertEquals("第一卷 肢体雪人", chapter.volumeTitle)
+            assertEquals(0, chapter.volumeIndex)
+            assertEquals(32L, chapter.id)
+            assertEquals(listOf(bookmark), dao.getAllBookmarkEntities())
+        } finally {
+            database.close()
+            preferences.edit().clear().commit()
+        }
+    }
+
     @Test fun directoryUpgradeRestoresAdoptedVolumeTitleAndKeepsReadingData() = runBlocking(Dispatchers.IO) {
         val source = folder.newFile("foreword-upgrade.epub")
         ZipOutputStream(source.outputStream()).use { zip ->
