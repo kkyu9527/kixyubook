@@ -453,6 +453,13 @@ internal fun exportFileName(item: LibraryBook): String {
     return correctedExportFileName(item.book.title, item.book.format.name)
 }
 
+internal fun originalExportFileName(item: LibraryBook): String {
+    return com.kixyu9527.kixyubook.core.common.model.originalExportFileName(
+        item.book.title,
+        item.book.format.name,
+    )
+}
+
 internal fun openExportLocation(context: Context, uriString: String): Boolean {
     val uri = uriString.toUri()
     if (DocumentsContract.isTreeUri(uri)) {

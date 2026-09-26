@@ -317,6 +317,9 @@ class LocalBookRepository @Inject constructor(
     override suspend fun exportAnnotations(bookUuid: String, uriString: String, format: AnnotationExportFormat) =
         exporter.exportAnnotations(bookUuid, uriString, format)
 
+    override suspend fun exportBookFile(bookUuid: String, uriString: String): Result<Unit> =
+        exporter.exportOriginalFile(bookUuid, uriString)
+
     override suspend fun repairBook(bookUuid: String, mode: BookRepairMode, onProgress: suspend (BookRepairProgress) -> Unit): Result<BookRepairOutcome> = withContext(Dispatchers.IO) {
         try {
             val result = storageMutationMutex.withLock {

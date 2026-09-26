@@ -18,6 +18,22 @@ class BookExportFileNameTest {
     }
 
     @Test
+    fun `original export keeps the source extension`() {
+        assertEquals("正确的书名.epub", originalExportFileName(book("正确的书名", BookFormat.EPUB)))
+        assertEquals("小说.txt", originalExportFileName(book("小说", BookFormat.TXT)))
+    }
+
+    @Test
+    fun `original export does not duplicate an existing extension`() {
+        assertEquals("小说.epub", originalExportFileName(book("小说.EPUB", BookFormat.EPUB)))
+    }
+
+    @Test
+    fun `original export replaces characters forbidden by document providers`() {
+        assertEquals("卷一_开始_.epub", originalExportFileName(book("卷一/开始?", BookFormat.EPUB)))
+    }
+
+    @Test
     fun `replaces characters forbidden by document providers`() {
         assertEquals("卷一_开始_-纠错版.txt", exportFileName(book("卷一/开始?", BookFormat.TXT)))
     }

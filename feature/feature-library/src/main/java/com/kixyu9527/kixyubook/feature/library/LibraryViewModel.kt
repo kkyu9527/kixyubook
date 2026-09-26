@@ -276,6 +276,12 @@ class LibraryViewModel @Inject constructor(
             .onFailure { messages.send(it.message ?: context.getString(R.string.library_export_failed)) }
     }
 
+    fun exportOriginal(bookUuid: String, uriString: String) = viewModelScope.launch {
+        repository.exportBookFile(bookUuid, uriString)
+            .onSuccess { exports.send(BookExportEvent(uriString)) }
+            .onFailure { messages.send(it.message ?: context.getString(R.string.library_export_failed)) }
+    }
+
     fun exportAnnotations(bookUuid: String, uriString: String, format: com.kixyu9527.kixyubook.core.common.model.AnnotationExportFormat) = operations.submit {
         repository.exportAnnotations(bookUuid, uriString, format).getOrThrow()
         exports.send(BookExportEvent(uriString))

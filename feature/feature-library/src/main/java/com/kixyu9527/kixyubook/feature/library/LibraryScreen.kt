@@ -168,6 +168,7 @@ fun LibraryRoute(
         viewModel.import(uris.map { it.toString() })
     }
     var pendingExportBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingExportOriginalUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var exportChoiceUuid by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingAnnotationBookUuid by rememberSaveable { mutableStateOf<String?>(null) }
     val exportNotes = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -193,6 +194,14 @@ fun LibraryRoute(
         pendingExportBookUuid = null
         if (uri != null && bookUuid != null) viewModel.export(bookUuid, uri.toString())
     }
+    // The provider decides the final MIME; the suggested name keeps the original extension.
+    val exportOriginal = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        val bookUuid = pendingExportOriginalUuid
+        pendingExportOriginalUuid = null
+        if (uri != null && bookUuid != null) viewModel.exportOriginal(bookUuid, uri.toString())
+    }
     val beginExport: (LibraryBook) -> Unit = { item ->
         exportChoiceUuid = item.book.uuid
     }
@@ -206,6 +215,11 @@ fun LibraryRoute(
             dismissLabel = null,
         ) {
             Column {
+                KixyuTextButton(text = stringResource(R.string.library_export_original), onClick = {
+                    exportChoiceUuid = null
+                    pendingExportOriginalUuid = item.book.uuid
+                    exportOriginal.launch(originalExportFileName(item))
+                })
                 KixyuTextButton(text = stringResource(R.string.library_export_body), onClick = {
                     exportChoiceUuid = null
                     pendingExportBookUuid = item.book.uuid

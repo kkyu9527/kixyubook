@@ -22,6 +22,8 @@ interface BookRepository {
     suspend fun importDocuments(uriStrings: List<String>): ImportSummary
     /** Exports a UTF-8 reading copy with every valid personal correction applied. */
     suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit>
+    /** Copies the stored source file byte-for-byte; a text export must never replace this. */
+    suspend fun exportBookFile(bookUuid: String, uriString: String): Result<Unit>
     /** Exports multiple corrected reading copies into one user-selected document tree. */
     suspend fun exportBooks(bookUuids: Set<String>, directoryUriString: String): BookExportSummary
     /** Restores an immutable source blob while preserving its permanent book UUID. */

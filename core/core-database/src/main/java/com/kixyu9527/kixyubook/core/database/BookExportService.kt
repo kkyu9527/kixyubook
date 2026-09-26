@@ -30,8 +30,51 @@ internal class BookExportService(
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) { Result.failure(error) }
     }
+    private fun cleanupDestination(uri: android.net.Uri) {
+        if (uri.scheme == "file") {
+            runCatching { uri.path?.let { java.io.File(it).delete() } }
+            return
+        }
+        if (runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }.isSuccess) return
+        runCatching { context.contentResolver.delete(uri, null, null) }
+    }
+
+    /** Copies the source file as-is so an EPUB export stays an EPUB. */
+    suspend fun exportOriginalFile(bookUuid: String, uriString: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val startedAt = SystemClock.elapsedRealtime()
+        val uri = uriString.toUri()
+        runCatching {
+            val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_removed))
+            val source = java.io.File(book.storagePath)
+            require(source.isFile) { context.getString(R.string.db_read_failed) }
+            context.contentResolver.openOutputStream(uri, "w")?.use { output ->
+                source.inputStream().use { input -> input.copyTo(output) }
+            } ?: error(context.getString(R.string.db_write_location_failed))
+            Unit
+        }.onSuccess {
+            DiagnosticLog.record(
+                Category.LIBRARY,
+                "book_file_exported",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                details = mapOf("book" to bookUuid.shortDiagnosticId()),
+            )
+        }.onFailure { error ->
+            // A SAF document created before the write failed must not be left as a 0-byte file.
+            cleanupDestination(uri)
+            val failure = error.toDiagnosticFailure()
+            DiagnosticLog.record(
+                Category.LIBRARY,
+                "book_file_export_failed",
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                outcome = failure.outcome,
+                details = mapOf("book" to bookUuid.shortDiagnosticId(), "reason" to failure.reason),
+            )
+        }
+    }
+
     suspend fun exportBook(bookUuid: String, uriString: String): Result<Unit> = withContext(Dispatchers.IO) {
         val startedAt = SystemClock.elapsedRealtime()
+        val uri = uriString.toUri()
         runCatching {
             val book = dao.getBook(bookUuid) ?: error(context.getString(R.string.db_book_removed))
             val destination = uriString.toUri()
@@ -60,6 +103,7 @@ internal class BookExportService(
                 details = mapOf("book" to bookUuid.shortDiagnosticId()),
             )
         }.onFailure { error ->
+            cleanupDestination(uri)
             val failure = error.toDiagnosticFailure()
             DiagnosticLog.record(
                 Category.LIBRARY,
@@ -96,14 +140,14 @@ internal class BookExportService(
                 DocumentsContract.createDocument(
                     context.contentResolver,
                     parent,
-                    "text/plain",
-                    correctedExportFileName(book.title, book.format),
+                    exportMimeType(book.format),
+                    originalExportFileName(book.title, book.format),
                 ) ?: error(context.getString(R.string.db_create_export_failed))
             }.getOrElse {
                 failedTitles += book.title
                 return@forEach
             }
-            exportBook(uuid, destination.toString())
+            exportOriginalFile(uuid, destination.toString())
                 .onSuccess { exportedCount++ }
                 .onFailure {
                     failedTitles += book.title
