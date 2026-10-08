@@ -28,7 +28,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Mutex
+import androidx.room.withTransaction
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -58,8 +58,9 @@ class CloudSyncEngine @Inject constructor(
     private val drive: DriveAppDataClient,
     private val accountClient: GoogleAccountClient,
     private val notifications: LocalNotificationManager,
+    private val accountGate: CloudSyncAccountGate,
 ) {
-    private val syncMutex = Mutex()
+    private val syncMutex get() = accountGate.mutex
 
     private val remoteState = CloudRemoteStateApplier(
         context = context,
@@ -114,7 +115,8 @@ class CloudSyncEngine @Inject constructor(
     private val preparedSnapshotLock = Any()
     private var preparedInitialSnapshot: PreparedInitialSnapshot? = null
 
-    suspend fun inspectInitialSync(): InitialSyncDecision = withContext(Dispatchers.IO) {
+    suspend fun inspectInitialSync(): InitialSyncDecision = withContext(Dispatchers.IO) { syncMutex.withLock {
+        accountGate.finishPendingReset()
         val token = accountClient.accessToken()
             ?: throw AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
         // Capture the page token before listing: anything committed during the listing is then
@@ -146,7 +148,7 @@ class CloudSyncEngine @Inject constructor(
             cloudBookCount = restorableBooks,
             conflicts = findProvenConflicts(remote),
         )
-    }
+    } }
 
     suspend fun discardLocalChanges(conflicts: List<InitialSyncConflict>) = withContext(Dispatchers.IO) {
         conflicts.forEach { conflict ->
@@ -182,12 +184,18 @@ class CloudSyncEngine @Inject constructor(
         }
     }
 
-    suspend fun prepareCloudRestore() = withContext(Dispatchers.IO) {
+    suspend fun prepareCloudRestore(expectedAccountSubject: String): Boolean = withContext(Dispatchers.IO) { syncMutex.withLock {
+        accountGate.finishPendingReset()
+        if (preferences.current().account?.subject != expectedAccountSubject) return@withLock false
         // A disconnected device may still contain queued deletions. Once the user explicitly
         // chooses cloud restore, those local mutations must not hide or delete remote books.
-        syncDao.clearOutbox()
-        syncDao.clearObjectStates()
-    }
+        database.withTransaction {
+            syncDao.clearOutbox()
+            syncDao.clearObjectStates()
+            syncDao.clearRemoteInbox()
+        }
+        true
+    } }
 
     suspend fun synchronize(
         preferredBookUuid: String? = null,
@@ -195,7 +203,7 @@ class CloudSyncEngine @Inject constructor(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val syncStartedAt = SystemClock.elapsedRealtime()
         // Cursors and conflict state belong to the account that started this run.
-        val syncAccountSubject = preferences.current().account?.subject
+        var syncAccountSubject: String? = null
         val syncRun = syncStartedAt.toString(36)
         var syncStage = FullSyncStage.PREPARING
         DiagnosticLog.record(
@@ -204,7 +212,9 @@ class CloudSyncEngine @Inject constructor(
             details = mapOf("run" to syncRun, "preferredBook" to (preferredBookUuid != null)),
         )
         syncMutex.withLock { runCatching {
+            accountGate.finishPendingReset()
             val persisted = preferences.current()
+            syncAccountSubject = persisted.account?.subject
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
                 DiagnosticLog.record(
                     Category.SYNC,
@@ -503,6 +513,7 @@ class CloudSyncEngine @Inject constructor(
         var priorityStage = "preparing"
         var diagnosticBookUuid = preferredBookUuid
         syncMutex.withLock { runCatching {
+            accountGate.finishPendingReset()
             val persisted = preferences.current()
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) {
                 return@runCatching
@@ -847,6 +858,7 @@ class CloudSyncEngine @Inject constructor(
      */
     suspend fun reconcileCloudFonts() = withContext(Dispatchers.IO) {
         syncMutex.withLock {
+            accountGate.finishPendingReset()
             val persisted = preferences.current()
             if (!persisted.enabled || !persisted.syncFonts) return@withLock
             val token = accountClient.accessToken()

@@ -30,6 +30,7 @@ data class PersistedSyncState(
     val initialSyncApproved: Boolean = false,
     val conflicts: List<InitialSyncConflict> = emptyList(),
     val preferLocalConflictsUntil: Long = 0,
+    val accountLedgerResetPending: Boolean = false,
 )
 
 @Singleton
@@ -61,18 +62,23 @@ class SyncPreferencesStore @Inject constructor(
                 ?: (values[INITIAL_MERGE] ?: false),
             conflicts = decodeConflicts(values[SYNC_CONFLICTS]),
             preferLocalConflictsUntil = values[PREFER_LOCAL_CONFLICTS_UNTIL] ?: 0,
+            accountLedgerResetPending = values[ACCOUNT_LEDGER_RESET_PENDING] ?: false,
         )
     }
 
     suspend fun current() = state.first()
 
     suspend fun saveAccount(account: SyncAccount) = context.cloudSyncDataStore.edit {
-        val sameAccount = it[ACCOUNT_SUBJECT] == account.subject
+        val previousSubject = it[ACCOUNT_SUBJECT]
+        val sameAccount = previousSubject == account.subject
         it[ACCOUNT_SUBJECT] = account.subject
         it[ACCOUNT_EMAIL] = account.email
         it[ACCOUNT_NAME] = account.displayName
         account.avatarUrl?.let { value -> it[ACCOUNT_AVATAR] = value } ?: it.remove(ACCOUNT_AVATAR)
         if (!sameAccount) {
+            // Persist intent before replacing the Room ledger. If the process dies in between,
+            // the next sync finishes the reset before reading/uploading any account-scoped row.
+            if (previousSubject != null) it[ACCOUNT_LEDGER_RESET_PENDING] = true
             it[ENABLED] = false
             it[INITIAL_SYNC_APPROVED] = false
             it[INITIAL_MERGE] = false
@@ -86,6 +92,7 @@ class SyncPreferencesStore @Inject constructor(
     }
 
     suspend fun clearAccount() = context.cloudSyncDataStore.edit {
+        it.remove(ACCOUNT_LEDGER_RESET_PENDING)
         it.remove(ACCOUNT_SUBJECT); it.remove(ACCOUNT_EMAIL); it.remove(ACCOUNT_NAME); it.remove(ACCOUNT_AVATAR)
         it.remove(PAGE_TOKEN); it.remove(LAST_SYNC); it.remove(ERROR); it.remove(INITIAL_MERGE)
         it.remove(INITIAL_SYNC_APPROVED)
@@ -107,12 +114,20 @@ class SyncPreferencesStore @Inject constructor(
         it.remove(SYNC_CONFLICTS)
     }
 
-    suspend fun approveInitialSync() = context.cloudSyncDataStore.edit {
-        it[INITIAL_SYNC_APPROVED] = true
-        it[ENABLED] = true
-        it[PHASE] = CloudSyncPhase.IDLE.name
-        it.remove(ERROR)
-        it.remove(SYNC_CONFLICTS)
+    suspend fun completeAccountLedgerReset() = setBoolean(ACCOUNT_LEDGER_RESET_PENDING, false)
+
+    suspend fun approveInitialSync(expectedAccountSubject: String? = null): Boolean {
+        var approved = false
+        context.cloudSyncDataStore.edit {
+            if (expectedAccountSubject != null && it[ACCOUNT_SUBJECT] != expectedAccountSubject) return@edit
+            it[INITIAL_SYNC_APPROVED] = true
+            it[ENABLED] = true
+            it[PHASE] = CloudSyncPhase.IDLE.name
+            it.remove(ERROR)
+            it.remove(SYNC_CONFLICTS)
+            approved = true
+        }
+        return approved
     }
 
     suspend fun setConflicts(conflicts: List<InitialSyncConflict>) = context.cloudSyncDataStore.edit {
@@ -206,6 +221,7 @@ class SyncPreferencesStore @Inject constructor(
 
     private companion object {
         val ACCOUNT_SUBJECT = stringPreferencesKey("account_subject")
+        val ACCOUNT_LEDGER_RESET_PENDING = booleanPreferencesKey("account_ledger_reset_pending")
         val ACCOUNT_EMAIL = stringPreferencesKey("account_email")
         val ACCOUNT_NAME = stringPreferencesKey("account_name")
         val ACCOUNT_AVATAR = stringPreferencesKey("account_avatar")

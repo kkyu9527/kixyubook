@@ -30,9 +30,10 @@ import kotlin.coroutines.resumeWithException
 class GoogleAccountClient @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val preferences: SyncPreferencesStore,
+    private val accountGate: CloudSyncAccountGate,
 ) {
     private val tokenMutex = Mutex()
-    @Volatile private var cachedToken: CachedAccessToken? = null
+    @Volatile private var cachedToken: AccountAccessToken? = null
 
     suspend fun connect(activity: Activity): GoogleConnectResult = authorize(activity)
 
@@ -59,18 +60,20 @@ class GoogleAccountClient @Inject constructor(
     }.getOrElse { GoogleConnectResult.Failed(it.authorizationMessage()) }
 
     suspend fun accessToken(): String? {
-        cachedToken?.takeIf(CachedAccessToken::isUsable)?.let { return it.value }
+        val account = preferences.current().account ?: return null
+        cachedToken?.takeIf { it.isUsable(account.subject) }?.let { return it.value }
         return tokenMutex.withLock {
-            cachedToken?.takeIf(CachedAccessToken::isUsable)?.value ?: run {
+            val currentAccount = preferences.current().account ?: return@withLock null
+            cachedToken?.takeIf { it.isUsable(currentAccount.subject) }?.value ?: run {
                 val result = Identity.getAuthorizationClient(context)
-                    .authorize(authorizationRequest())
+                    .authorize(authorizationRequest(accountEmail = currentAccount.email))
                     .await()
                 if (result.hasResolution()) return@run null
                 result.accessToken?.takeIf(String::isNotBlank)?.also { token ->
                     // AuthorizationResult does not expose expiry. Google access tokens normally
                     // live for an hour, so use a conservative process-local window and let a 401
                     // clear both this value and Google Play services' token cache.
-                    cachedToken = CachedAccessToken(token, System.currentTimeMillis() + TOKEN_CACHE_MILLIS)
+                    cachedToken = AccountAccessToken(token, System.currentTimeMillis() + TOKEN_CACHE_MILLIS, currentAccount.subject)
                 }
             }
         }
@@ -107,11 +110,12 @@ class GoogleAccountClient @Inject constructor(
         preferences.clearAccount()
     }
 
-    private fun authorizationRequest(selectAccount: Boolean = false) =
+    private fun authorizationRequest(selectAccount: Boolean = false, accountEmail: String? = null) =
         AuthorizationRequest.builder()
             .setRequestedScopes(requestedScopes())
             .apply {
                 if (selectAccount) setPrompt(AuthorizationRequest.Prompt.SELECT_ACCOUNT)
+                else if (!accountEmail.isNullOrBlank()) setAccount(Account(accountEmail, GOOGLE_ACCOUNT_TYPE))
             }
             .build()
 
@@ -135,10 +139,10 @@ class GoogleAccountClient @Inject constructor(
         val connectResult = result.toConnectResult()
             ?: return GoogleConnectResult.Failed(context.getString(R.string.sync_authorization_unavailable))
         if (connectResult is GoogleConnectResult.Connected) {
-            result.accessToken?.takeIf(String::isNotBlank)?.let { token ->
-                cachedToken = CachedAccessToken(token, System.currentTimeMillis() + TOKEN_CACHE_MILLIS)
+            val token = result.accessToken.orEmpty()
+            accountGate.commitVerifiedAuthorization({ readAuthorizedAccount(token) }) { account ->
+                cachedToken = AccountAccessToken(token, System.currentTimeMillis() + TOKEN_CACHE_MILLIS, account.subject)
             }
-            saveAuthorizedAccount(result.accessToken.orEmpty())
         }
         return connectResult
     }
@@ -152,7 +156,7 @@ class GoogleAccountClient @Inject constructor(
         else -> message ?: context.getString(R.string.sync_authorization_failed)
     }
 
-    private suspend fun saveAuthorizedAccount(accessToken: String) = withContext(Dispatchers.IO) {
+    private suspend fun readAuthorizedAccount(accessToken: String): SyncAccount = withContext(Dispatchers.IO) {
         val connection = (URL(USER_INFO_ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
@@ -166,15 +170,13 @@ class GoogleAccountClient @Inject constructor(
             val subject = json.optString("sub").ifBlank { json.optString("email") }
             val email = json.optString("email")
             check(subject.isNotBlank()) { context.getString(R.string.sync_account_incomplete) }
-            preferences.saveAccount(
-                SyncAccount(
-                    subject = subject,
-                    email = email,
-                    displayName = json.optString("name").ifBlank {
-                        email.substringBefore('@').ifBlank { "Google 账号" }
-                    },
-                    avatarUrl = json.optString("picture").takeIf(String::isNotBlank),
-                ),
+            SyncAccount(
+                subject = subject,
+                email = email,
+                displayName = json.optString("name").ifBlank {
+                    email.substringBefore('@').ifBlank { "Google 账号" }
+                },
+                avatarUrl = json.optString("picture").takeIf(String::isNotBlank),
             )
         } finally {
             connection.disconnect()
@@ -190,10 +192,11 @@ class GoogleAccountClient @Inject constructor(
         private const val GOOGLE_ACCOUNT_TYPE = "com.google"
         private const val TOKEN_CACHE_MILLIS = 45 * 60 * 1_000L
     }
+}
 
-    private data class CachedAccessToken(val value: String, val expiresAt: Long) {
-        fun isUsable(): Boolean = value.isNotBlank() && System.currentTimeMillis() < expiresAt
-    }
+internal data class AccountAccessToken(val value: String, val expiresAt: Long, val accountSubject: String) {
+    fun isUsable(subject: String, now: Long = System.currentTimeMillis()): Boolean =
+        subject == accountSubject && value.isNotBlank() && now < expiresAt
 }
 
 private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { continuation ->

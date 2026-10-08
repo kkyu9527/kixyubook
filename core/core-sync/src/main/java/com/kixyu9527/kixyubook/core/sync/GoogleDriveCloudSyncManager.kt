@@ -136,7 +136,6 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             handleAuthorizationResult(result, preserveAccountOnFailure = true)
             if (result !is GoogleConnectResult.NeedsAuthorization) {
                 accountSwitchPending = false
-                engine.resetRemoteLedger()
             }
         }
     }
@@ -152,12 +151,12 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override suspend fun disconnect() {
         scheduler.cancel()
-        // Account-scoped cursors/outbox must go with the account.
-        engine.resetRemoteLedger()
         // A priority sync may already be past its account check; stop it so it cannot keep
         // downloading/uploading after the account is cleared.
         priorityBookJob?.cancel()
         priorityBookJob = null
+        // Stop priority work first; ledger replacement shares the engine/account mutex.
+        engine.resetRemoteLedger()
         activeBookUuid = null
         initialSyncDecision.value = null
         inspectingInitialSync.value = false
@@ -417,6 +416,7 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     ) {
         when (result) {
             GoogleConnectResult.Connected -> {
+                initialSyncDecision.value = null
                 notifications.clearAuthorizationFailure()
                 refreshStorageQuota(force = true)
                 val persisted = preferences.current()
@@ -461,15 +461,14 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             // library automatically; an empty client must never offer to erase cloud data.
             when {
                 snapshot.shouldRestoreFromCloud() -> {
-                    engine.prepareCloudRestore()
-                    approveAndSchedule()
+                    if (engine.prepareCloudRestore(accountSubject)) approveAndSchedule(accountSubject)
                 }
                 snapshot.requiresUserDecision() -> {
                     preferences.setConflicts(snapshot.conflicts)
                     initialSyncDecision.value = snapshot
                     notifications.showSyncConflict(snapshot.conflicts.size, snapshot.conflicts.fingerprint())
                 }
-                else -> approveAndSchedule()
+                else -> approveAndSchedule(accountSubject)
             }
         } catch (error: CancellationException) {
             throw error
@@ -489,8 +488,8 @@ class GoogleDriveCloudSyncManager @Inject constructor(
         }
     }
 
-    private suspend fun approveAndSchedule() {
-        preferences.approveInitialSync()
+    private suspend fun approveAndSchedule(expectedAccountSubject: String? = null) {
+        if (!preferences.approveInitialSync(expectedAccountSubject)) return
         initialSyncDecision.value = null
         scheduler.ensurePeriodic()
         scheduler.requestImmediate()
