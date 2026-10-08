@@ -30,7 +30,7 @@ internal class CloudSyncPullPipeline(
     private val readerAnnotationRepository: ReaderAnnotationRepository,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
-    private val remoteState: CloudRemoteStateApplier,
+    private val remoteState: CloudRemoteObjectApplier,
 ) {
     suspend fun applyRemoteTombstones(token: String, remote: MutableMap<String, DriveObject>) {
         remote.filterKeys { it.startsWith("tombstones/") }.forEach { (key, objectInfo) ->
@@ -51,6 +51,7 @@ internal class CloudSyncPullPipeline(
                 // was restored on this device after the remote deletion and must not be removed.
                 if (tombstoneSupersededByLocalUpload(syncDao, type, id, deletedAt)) {
                     syncDao.upsertTombstone(tombstone)
+                    syncDao.consumeRemoteChange(key)
                     DiagnosticLog.record(
                         Category.SYNC,
                         "tombstone_superseded_by_local_upload",
@@ -100,6 +101,7 @@ internal class CloudSyncPullPipeline(
                         details = mapOf("entity" to type.name.lowercase()),
                     )
                 }
+                syncDao.consumeRemoteChange(key)
             } finally {
                 temp.delete()
             }
@@ -119,11 +121,17 @@ internal class CloudSyncPullPipeline(
         val dirty = syncDao.allPending().flatMap(::keysForMutationOrEmpty).toSet()
         val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
         val handledKeys = mutableSetOf<String>()
-        val candidates = changedRemote.filter { (key, value) ->
+        // Receipt is durable even if the book/source arrives in a later change batch. Baselines
+        // remain applied-only; pending entries are offered again after every cursor advancement.
+        val received = CloudRemoteInbox(database, syncDao).receive(changedRemote.filterKeys { !it.startsWith("tombstones/") })
+        val availableRemote = knownRemote + received
+        val candidates = received.filter { (key, value) ->
             if (key.startsWith("tombstones/") || key in dirty) return@filter false
             if (!initialMergeComplete) return@filter true
             val state = localStates[key] ?: return@filter true
-            isRemoteNewer(value, state.remoteModifiedAt, state.remoteVersion)
+            isRemoteNewer(value, state.remoteModifiedAt, state.remoteVersion).also { newer ->
+                if (!newer) syncDao.consumeRemoteChange(key)
+            }
         }
         // Re-read the outbox right before applying. A local edit made while this pull is running
         // must win until it is pushed; the skipped remote snapshot is reconciled on the next run.
@@ -135,9 +143,10 @@ internal class CloudSyncPullPipeline(
         // synchronization, not only during the first shelf rebuild.
         candidates["settings/global"]?.let { info ->
             if (!stillDirty("settings/global")) {
-                remoteState.applySettings(token, info)
-                rememberRemote("settings/global", info)
-                handledKeys += "settings/global"
+                if (remoteState.applySettings(token, info)) {
+                    rememberRemote("settings/global", info)
+                    handledKeys += "settings/global"
+                }
             }
         }
 
@@ -149,9 +158,10 @@ internal class CloudSyncPullPipeline(
                     key.substringAfter("progress/") == preferredBookUuid
             }.forEach { (key, info) ->
                 if (stillDirty(key)) return@forEach
-                remoteState.applyProgress(token, info)
-                rememberRemote(key, info)
-                handledKeys += key
+                if (remoteState.applyProgress(token, info)) {
+                    rememberRemote(key, info)
+                    handledKeys += key
+                }
             }
         }
 
@@ -204,7 +214,7 @@ internal class CloudSyncPullPipeline(
         }
 
         suspend fun restoreBook(uuid: String): Boolean {
-            val restored = remoteState.restoreBook(token, uuid, knownRemote)
+            val restored = remoteState.restoreBook(token, uuid, availableRemote)
             if (!restored) {
                 // A metadata-only book (source not uploaded yet) must not consume its keys, and its
                 // progress/bookmarks stay unconsumed so a later run can still apply them.
@@ -218,6 +228,8 @@ internal class CloudSyncPullPipeline(
             }
             handledKeys += "books/$uuid/metadata"
             handledKeys += "books/$uuid/source"
+            availableRemote["books/$uuid/metadata"]?.let { rememberRemote(it.objectKey, it) }
+            availableRemote["books/$uuid/source"]?.let { rememberRemote(it.objectKey, it) }
             restoredBooks++
             onProgress(
                 CloudSyncProgress(
@@ -229,7 +241,7 @@ internal class CloudSyncPullPipeline(
             )
             // The book may land in a run where its child objects are no longer part of the change
             // stream; apply them now from the known remote snapshot.
-            applyKnownChildObjects(uuid, knownRemote, handledKeys)
+            applyKnownChildObjects(uuid, availableRemote, handledKeys)
             return true
         }
 
@@ -241,7 +253,7 @@ internal class CloudSyncPullPipeline(
             // A book restored without its child objects in this page still needs them; the helper
             // already ran per restore, so nothing else is required here.
         } else {
-            val restorePlan = planInitialRestore(changedBookUuids, knownRemote)
+            val restorePlan = planInitialRestore(changedBookUuids, availableRemote)
             restorePlan.priorityBookUuids.forEach { uuid ->
                 if (!bookIsDirty(uuid)) restoreBook(uuid)
                 candidates["progress/$uuid"]?.let { info ->
@@ -273,8 +285,8 @@ internal class CloudSyncPullPipeline(
             .forEach { uuid ->
                 val metadataKey = "fonts/$uuid/metadata"
                 val sourceKey = "fonts/$uuid/source"
-                val metadata = knownRemote[metadataKey] ?: return@forEach
-                val source = knownRemote[sourceKey] ?: return@forEach
+                val metadata = availableRemote[metadataKey] ?: return@forEach
+                val source = availableRemote[sourceKey] ?: return@forEach
                 when (remoteState.applyFont(token, metadata, source)) {
                     CloudFontApplyResult.IMPORTED,
                     CloudFontApplyResult.ALREADY_PRESENT,
@@ -295,13 +307,12 @@ internal class CloudSyncPullPipeline(
             val applied = when {
                 key.startsWith("progress/") -> remoteState.applyProgress(token, info)
                 key.startsWith("bookmarks/") -> remoteState.applyBookmarks(token, info)
-                key == "settings/global" -> {
-                    remoteState.applySettings(token, info)
-                    true
-                }
+                key == "settings/global" -> remoteState.applySettings(token, info)
                 key.startsWith("sessions/") -> remoteState.applySession(token, info)
                 key.startsWith("corrections/") -> remoteState.applyCorrection(token, info)
                 key.startsWith("annotations/") -> remoteState.applyAnnotation(token, info)
+                // Books/fonts are consumed only by the successful pair apply above.
+                key.startsWith("books/") || key.startsWith("fonts/") -> false
                 else -> true
             }
             // A failed apply (for example a book that is not restored yet) must not advance the
@@ -351,17 +362,14 @@ internal class CloudSyncPullPipeline(
     }
 
     private suspend fun rememberRemote(key: String, value: DriveObject) {
-        val previous = syncDao.objectState(key)
-        syncDao.upsertObjectState(
-            SyncObjectStateEntity(
-                key,
-                value.id,
-                previous?.localHash,
-                previous?.localChangedAt ?: 0,
-                value.modifiedAt,
-                value.version,
-            ),
-        )
+        database.withTransaction {
+            val previous = syncDao.objectState(key)
+            syncDao.upsertObjectState(
+                SyncObjectStateEntity(key, value.id, previous?.localHash,
+                    previous?.localChangedAt ?: 0, value.modifiedAt, value.version),
+            )
+            syncDao.consumeRemoteChange(key)
+        }
     }
 
     private fun tempFile(prefix: String) = File(

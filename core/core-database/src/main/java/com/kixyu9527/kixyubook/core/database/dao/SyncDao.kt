@@ -7,10 +7,26 @@ import androidx.room.Query
 import com.kixyu9527.kixyubook.core.database.entity.SyncObjectStateEntity
 import com.kixyu9527.kixyubook.core.database.entity.SyncOutboxEntity
 import com.kixyu9527.kixyubook.core.database.entity.SyncTombstoneEntity
+import com.kixyu9527.kixyubook.core.database.entity.SyncRemoteInboxEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SyncDao {
+    @Query("SELECT * FROM sync_remote_inbox")
+    suspend fun remoteInbox(): List<SyncRemoteInboxEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun retainRemoteChanges(values: List<SyncRemoteInboxEntity>)
+
+    @Query("DELETE FROM sync_remote_inbox WHERE objectKey = :key")
+    suspend fun consumeRemoteChange(key: String)
+
+    @Query("DELETE FROM sync_remote_inbox WHERE driveFileId = :fileId")
+    suspend fun removeRemoteFile(fileId: String)
+
+    @Query("DELETE FROM sync_remote_inbox")
+    suspend fun clearRemoteInbox()
+
     /** Room emits only committed outbox snapshots, never intermediate transaction writes. */
     @Query("SELECT * FROM sync_outbox ORDER BY changedAt, logicalCounter")
     fun observePendingMutations(): Flow<List<SyncOutboxEntity>>

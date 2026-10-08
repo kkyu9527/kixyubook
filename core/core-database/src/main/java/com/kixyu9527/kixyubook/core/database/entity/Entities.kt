@@ -219,6 +219,19 @@ data class SyncTombstoneEntity(
     val expiresAt: Long,
 )
 
+/** Received Drive changes survive cursor advancement until their dependencies can be applied. */
+@Entity(tableName = "sync_remote_inbox", indices = [Index("driveFileId")])
+data class SyncRemoteInboxEntity(
+    @PrimaryKey val objectKey: String,
+    val driveFileId: String,
+    val name: String,
+    val mimeType: String,
+    val modifiedAt: Long,
+    val version: Long,
+    val size: Long,
+    val md5: String?,
+)
+
 @Entity(
     tableName = "text_corrections",
     foreignKeys = [

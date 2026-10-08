@@ -23,7 +23,6 @@ import com.kixyu9527.kixyubook.core.database.dao.SyncDao
 import com.kixyu9527.kixyubook.core.database.entity.BookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.PendingBookmarkEntity
 import com.kixyu9527.kixyubook.core.database.entity.ReadingSessionEntity
-import com.kixyu9527.kixyubook.core.database.entity.SyncObjectStateEntity
 import com.kixyu9527.kixyubook.core.database.entity.UserFontEntity
 import org.json.JSONArray
 import org.json.JSONObject
@@ -47,30 +46,31 @@ internal class CloudRemoteStateApplier(
     private val preferences: SyncPreferencesStore,
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
-) {
+    private val jsonDownload: (suspend (String, DriveObject) -> JSONObject)? = null,
+) : CloudRemoteObjectApplier {
     /** Returns true only when the book (and, for a new one, its source) is actually present. */
-    suspend fun restoreBook(token: String, uuid: String, knownRemote: Map<String, DriveObject>): Boolean {
+    override suspend fun restoreBook(token: String, uuid: String, knownRemote: Map<String, DriveObject>): Boolean {
         val key = "books/$uuid/metadata"
         val metadata = knownRemote[key] ?: return false
-        val sourceInfo = knownRemote["books/$uuid/source"] ?: return false
+        val sourceInfo = knownRemote["books/$uuid/source"]
         val imported = if (!books.bookExists(uuid)) {
+            if (sourceInfo == null) return false
             val metaFile = tempFile("book-meta")
             val sourceFile = tempFile("book-source")
             try {
                 drive.download(token, metadata.id, metaFile)
                 drive.download(token, sourceInfo.id, sourceFile)
                 val book = parseBook(JSONObject(metaFile.readText()))
+                require(book.uuid == uuid) { "book identity does not match its Drive object key" }
                 mutations.withoutRecording { bookRepository.restoreSyncedBook(book, sourceFile.absolutePath) }
             } finally {
                 metaFile.delete()
                 sourceFile.delete()
             }
         } else {
-            val temp = tempFile("book-meta")
-            try {
-                drive.download(token, metadata.id, temp)
-                val payload = JSONObject(temp.readText())
+            withJsonDownload(token, metadata) { payload ->
                 val book = parseBook(payload)
+                require(book.uuid == uuid) { "book identity does not match its Drive object key" }
                 mutations.withoutRecording {
                     applyBookMetadataFromRemote(database, syncDao, book.uuid) {
                         bookRepository.applySyncedBookMetadata(
@@ -94,18 +94,13 @@ internal class CloudRemoteStateApplier(
                         bookRepository.setCategory(book.uuid, book.category)
                     }
                 }
-            } finally {
-                temp.delete()
             }
-            true
         }
         if (!imported) return false
-        rememberRemote(key, metadata)
-        rememberRemote("books/$uuid/source", sourceInfo)
         return true
     }
 
-    suspend fun applyProgress(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
+    override suspend fun applyProgress(token: String, info: DriveObject) = withJsonDownload(token, info) { json ->
         applyProgressJson(json)
     }
 
@@ -142,7 +137,7 @@ internal class CloudRemoteStateApplier(
         return true
     }
 
-    suspend fun applyBookmarks(token: String, info: DriveObject): Boolean = withJsonDownload(token, info) { json ->
+    override suspend fun applyBookmarks(token: String, info: DriveObject): Boolean = withJsonDownload(token, info) { json ->
         applyBookmarksJson(json)
     }
 
@@ -150,10 +145,10 @@ internal class CloudRemoteStateApplier(
     suspend fun applyBookmarksJson(json: JSONObject): Boolean =
         mutations.withoutRecording { replaceBookmarksFromRemote(database, books, syncDao, json) }
 
-    suspend fun applySettings(token: String, info: DriveObject) {
+    override suspend fun applySettings(token: String, info: DriveObject): Boolean {
         // Capture before the network read so a local edit made while the file downloads wins.
         val startGeneration = SettingsWriteGate.currentGeneration()
-        withJsonDownload(token, info) { json ->
+        return withJsonDownload(token, info) { json ->
             withSettingsWriteGuard(
                 startGeneration,
                 isLocallyPending = { syncDao.pendingCount(SyncEntityType.SETTINGS.name, "global") > 0 },
@@ -209,7 +204,7 @@ internal class CloudRemoteStateApplier(
         )
     }
 
-    suspend fun applySession(token: String, info: DriveObject): Boolean =
+    override suspend fun applySession(token: String, info: DriveObject): Boolean =
         withJsonDownload(token, info) { json ->
             val uuid = canonicalSyncUuidOrNull(json.optString("uuid")) ?: return@withJsonDownload false
             val bookUuid = canonicalSyncUuidOrNull(json.optString("bookUuid")) ?: return@withJsonDownload false
@@ -228,21 +223,29 @@ internal class CloudRemoteStateApplier(
             true
         }
 
-    suspend fun applyCorrection(token: String, info: DriveObject): Boolean =
+    override suspend fun applyCorrection(token: String, info: DriveObject): Boolean =
         withJsonDownload(token, info) { json ->
             if (canonicalSyncUuidOrNull(json.optString("uuid")) == null) return@withJsonDownload false
-            textCorrectionRepository.applyRemote(parseCorrection(json))
-            true
+            val correction = parseCorrection(json)
+            database.withTransaction {
+                if (!books.bookExists(correction.bookUuid) || syncDao.pendingCount(SyncEntityType.CORRECTION.name, correction.uuid) > 0) return@withTransaction false
+                textCorrectionRepository.applyRemote(correction)
+                true
+            }
         }
 
-    suspend fun applyAnnotation(token: String, info: DriveObject): Boolean =
+    override suspend fun applyAnnotation(token: String, info: DriveObject): Boolean =
         withJsonDownload(token, info) { json ->
             if (canonicalSyncUuidOrNull(json.optString("uuid")) == null) return@withJsonDownload false
-            readerAnnotationRepository.applyRemote(parseAnnotation(json))
-            true
+            val annotation = parseAnnotation(json)
+            database.withTransaction {
+                if (!books.bookExists(annotation.bookUuid) || syncDao.pendingCount(SyncEntityType.ANNOTATION.name, annotation.uuid) > 0) return@withTransaction false
+                readerAnnotationRepository.applyRemote(annotation)
+                true
+            }
         }
 
-    suspend fun applyFont(token: String, metadata: DriveObject, source: DriveObject): CloudFontApplyResult {
+    override suspend fun applyFont(token: String, metadata: DriveObject, source: DriveObject): CloudFontApplyResult {
         val rawUuid = metadata.objectKey.split('/').getOrNull(1) ?: return CloudFontApplyResult.INVALID
         val uuid = canonicalSyncUuidOrNull(rawUuid) ?: return CloudFontApplyResult.INVALID
         if (fonts.getFont(uuid) != null) return CloudFontApplyResult.ALREADY_PRESENT
@@ -277,6 +280,7 @@ internal class CloudRemoteStateApplier(
         info: DriveObject,
         block: suspend (JSONObject) -> T,
     ): T {
+        jsonDownload?.let { return block(it(token, info)) }
         val file = tempFile("json")
         return try {
             drive.download(token, info.id, file)
@@ -284,20 +288,6 @@ internal class CloudRemoteStateApplier(
         } finally {
             file.delete()
         }
-    }
-
-    private suspend fun rememberRemote(key: String, value: DriveObject) {
-        val previous = syncDao.objectState(key)
-        syncDao.upsertObjectState(
-            SyncObjectStateEntity(
-                key,
-                value.id,
-                previous?.localHash,
-                previous?.localChangedAt ?: 0,
-                value.modifiedAt,
-                value.version,
-            ),
-        )
     }
 
     private fun tempFile(prefix: String) = File(context.cacheDir, "cloud-sync/$prefix-${UUID.randomUUID()}")

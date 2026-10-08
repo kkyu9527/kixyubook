@@ -11,13 +11,13 @@ import com.kixyu9527.kixyubook.core.database.dao.ImportDao
 import com.kixyu9527.kixyubook.core.database.dao.RepairDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 
-const val KIXYU_DATABASE_VERSION = 22
+const val KIXYU_DATABASE_VERSION = 23
 
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, ParagraphEntity::class, ReadingProgressEntity::class,
         MetadataEditEntity::class, ReadingSessionEntity::class, UserFontEntity::class, BookmarkEntity::class,
         PendingBookmarkEntity::class,
-        SyncOutboxEntity::class, SyncObjectStateEntity::class, SyncTombstoneEntity::class,
+        SyncOutboxEntity::class, SyncObjectStateEntity::class, SyncTombstoneEntity::class, SyncRemoteInboxEntity::class,
         TextCorrectionEntity::class, ReaderAnnotationEntity::class,
         ImportItemEntity::class, PendingRepairEntity::class],
     version = KIXYU_DATABASE_VERSION,

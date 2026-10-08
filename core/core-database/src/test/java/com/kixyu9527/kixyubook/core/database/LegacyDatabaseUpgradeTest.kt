@@ -23,6 +23,7 @@ private val ALL_MIGRATIONS = arrayOf(
     MIGRATION_12_13, MIGRATION_12_14, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
     MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21,
     MIGRATION_21_22,
+    MIGRATION_22_23,
 )
 
 /**
@@ -70,6 +71,11 @@ class LegacyDatabaseUpgradeTest {
                     "VALUES ('11111111-1111-4111-8111-111111111111', '旧书', '作者', '', NULL, 'TXT', " +
                     "'/tmp/a.txt', '/tmp/a.txt', 1, 'hash', '未分类')",
             )
+            if (version == 22) database.execSQL(
+                "INSERT INTO sync_outbox (uuid, entityType, entityId, operation, changedAt, logicalCounter, " +
+                    "deviceId, attemptCount, lastAttemptAt) VALUES ('pending-delete', 'BOOK', " +
+                    "'11111111-1111-4111-8111-111111111111', 'DELETE', 10, 10, 'device', 3, 25)",
+            )
             database.setTransactionSuccessful()
         } finally {
             database.endTransaction()
@@ -80,7 +86,7 @@ class LegacyDatabaseUpgradeTest {
 
     @Test
     fun booksSurviveAnUpgradeFromEveryExportedLegacySchema() {
-        val legacyVersions = listOf(6, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
+        val legacyVersions = listOf(6, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22)
         val failures = legacyVersions.mapNotNull { version ->
             runCatching { booksSurviveAnUpgradeFrom(version) }
                 .exceptionOrNull()
@@ -102,6 +108,13 @@ class LegacyDatabaseUpgradeTest {
             val books = database.bookDao().getAllBooks()
             assertEquals("an upgrade from $legacyVersion must never empty the library", 1, books.size)
             assertEquals("旧书", books.single().title)
+            if (legacyVersion == 22) {
+                val pending = database.syncDao().allPending().single()
+                assertEquals("DELETE", pending.operation)
+                assertEquals(3, pending.attemptCount)
+                assertEquals(25L, pending.lastAttemptAt)
+                assertEquals(emptyList<Any>(), database.syncDao().remoteInbox())
+            }
         } finally {
             database.close()
         }

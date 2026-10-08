@@ -230,6 +230,9 @@ class CloudSyncEngine @Inject constructor(
             DiagnosticLog.record(Category.SYNC, "authorization_ready", details = mapOf("run" to syncRun))
             syncStage = FullSyncStage.REMOTE_SNAPSHOT
             val snapshot = loadRemoteSnapshot(token, persisted)
+            val received = CloudRemoteInbox(database, syncDao).receive(snapshot.changed)
+            snapshot.known.putAll(received)
+            snapshot.changed.putAll(received)
             DiagnosticLog.record(
                 Category.SYNC,
                 "remote_snapshot_loaded",
@@ -736,10 +739,14 @@ class CloudSyncEngine @Inject constructor(
         persisted: PersistedSyncState,
     ): RemoteSnapshot {
         if (!persisted.initialMergeComplete || persisted.pageToken == null) {
-            takePreparedInitialSnapshot(persisted.account?.subject)?.let { return it }
+            takePreparedInitialSnapshot(persisted.account?.subject)?.let {
+                discardMissingInboxObjects(it.known.keys)
+                return it
+            }
             // Token first, then list: a write committed during the listing stays discoverable.
             val pageToken = drive.startPageToken(token)
             val all = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
+            discardMissingInboxObjects(all.keys)
             return RemoteSnapshot(
                 known = all.toMutableMap(),
                 changed = all,
@@ -772,12 +779,14 @@ class CloudSyncEngine @Inject constructor(
             if (error.statusCode != 410) throw error
             val pageToken = drive.startPageToken(token)
             val all = drive.listAll(token).associateBy(DriveObject::objectKey).toMutableMap()
+            discardMissingInboxObjects(all.keys)
             return RemoteSnapshot(all.toMutableMap(), all, pageToken)
         }
         val changed = mutableMapOf<String, DriveObject>()
         val statesByFileId = states.mapNotNull { state -> state.driveFileId?.let { it to state } }.toMap()
         page.changes.forEach { change ->
             if (change.removed) {
+                syncDao.removeRemoteFile(change.fileId)
                 statesByFileId[change.fileId]?.let { state ->
                     known.remove(state.objectKey)
                     syncDao.removeObjectState(state.objectKey)
@@ -794,6 +803,10 @@ class CloudSyncEngine @Inject constructor(
             changed = changed,
             nextPageToken = page.newStartPageToken ?: persisted.pageToken,
         )
+    }
+
+    private suspend fun discardMissingInboxObjects(keys: Set<String>) {
+        syncDao.remoteInbox().filter { it.objectKey !in keys }.forEach { syncDao.consumeRemoteChange(it.objectKey) }
     }
 
     private fun takePreparedInitialSnapshot(accountSubject: String?): RemoteSnapshot? =
@@ -822,6 +835,7 @@ class CloudSyncEngine @Inject constructor(
             syncDao.clearOutbox()
             syncDao.clearObjectStates()
             syncDao.clearTombstones()
+            syncDao.clearRemoteInbox()
             synchronized(preparedSnapshotLock) { preparedInitialSnapshot = null }
             preferences.resetRemoteLedger()
         }
@@ -850,6 +864,7 @@ class CloudSyncEngine @Inject constructor(
             syncDao.clearObjectStates()
             syncDao.clearOutbox()
             syncDao.clearTombstones()
+            syncDao.clearRemoteInbox()
             synchronized(preparedSnapshotLock) { preparedInitialSnapshot = null }
             preferences.resetRemoteLedger()
         }

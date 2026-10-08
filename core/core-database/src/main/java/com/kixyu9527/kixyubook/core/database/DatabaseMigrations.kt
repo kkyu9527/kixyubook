@@ -228,10 +228,18 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
     }
 }
 
-/**
- * Sync retries gain a backoff stamp, and the never-read FTS mirror is dropped: production search
- * uses the paragraph scanner, so the table only cost write amplification and repair work.
- */
+/** Received cloud objects wait here until book/source dependencies are available. */
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `sync_remote_inbox` (`objectKey` TEXT NOT NULL, " +
+            "`driveFileId` TEXT NOT NULL, `name` TEXT NOT NULL, `mimeType` TEXT NOT NULL, " +
+            "`modifiedAt` INTEGER NOT NULL, `version` INTEGER NOT NULL, `size` INTEGER NOT NULL, " +
+            "`md5` TEXT, PRIMARY KEY(`objectKey`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_sync_remote_inbox_driveFileId` ON `sync_remote_inbox` (`driveFileId`)")
+    }
+}
+
+/** Drops the unused FTS mirror and adds durable retry backoff to the outgoing queue. */
 val MIGRATION_21_22 = object : Migration(21, 22) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `sync_outbox` ADD COLUMN `lastAttemptAt` INTEGER NOT NULL DEFAULT 0")

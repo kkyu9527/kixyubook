@@ -41,6 +41,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             database.query(
                 "SELECT userEditedTitle, userEditedAuthor, userEditedDescription FROM books WHERE uuid = 'b1'",
@@ -72,6 +73,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             database.query("SELECT originalFolderName FROM books WHERE uuid = 'b1'").use { cursor ->
                 cursor.moveToFirst()
@@ -90,6 +92,7 @@ class DatabaseMigrationTest {
             true,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             database.query("SELECT COUNT(*) FROM pending_repairs").use { cursor ->
                 cursor.moveToFirst()
@@ -113,6 +116,7 @@ class DatabaseMigrationTest {
             22,
             true,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             database.query("SELECT attemptCount, lastAttemptAt FROM sync_outbox WHERE uuid = 'm1'").use { cursor ->
                 cursor.moveToFirst()
@@ -152,6 +156,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertPublishedLibraryStateWasPreserved(database)
             assertEquals(0L, database.bookLastOpenedTime())
@@ -184,6 +189,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertPublishedLibraryStateWasPreserved(database)
             assertEquals(0L, database.bookLastOpenedTime())
@@ -215,6 +221,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             database.insertCorrection()
@@ -246,6 +253,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             assertEquals(1, database.correctionCount())
@@ -273,6 +281,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertEquals("迁移测试", database.bookTitle())
             assertEquals("第一章", database.chapterTitle())
@@ -311,6 +320,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertEquals(
                 1,
@@ -354,6 +364,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertEquals(
                 "chapter-0",
@@ -380,6 +391,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             database.execSQL(
                 "INSERT INTO pending_bookmarks(uuid, bookUuid, anchorText, preview, createdTime) " +
@@ -409,6 +421,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             database.query("SELECT titleSort, seriesName, seriesIndex FROM books WHERE uuid = 'migration-book'")
                 .use { cursor ->
@@ -436,6 +449,7 @@ class DatabaseMigrationTest {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         ).use { database ->
             assertEquals(
                 "",
