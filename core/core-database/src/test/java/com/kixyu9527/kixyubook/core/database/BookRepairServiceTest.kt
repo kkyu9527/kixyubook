@@ -52,8 +52,9 @@ class BookRepairServiceTest {
             val originalRows = dao.getParagraphs(12)
             var cleared = 0
             val service = BookRepairService(context, db, dao, notes, edits, Mutex()) { cleared++ }
-            service.repair("book", BookRepairMode.SEARCH_INDEX) {}
-            // The paragraph scanner reads rows directly; a repair must keep the indexed text intact.
+            service.repair("book", BookRepairMode.CACHE) {}
+            assertEquals("cache repair must invalidate the live reading cache", 1, cleared)
+            // Search reads these paragraphs directly; both supported repairs must preserve them.
             assertTrue(dao.getParagraphs(12).any { it.text.contains("searchable") })
             if (changeSource) source.writeText(source.readText().replace("searchable", "changed"))
             val outcome = service.repair("book", BookRepairMode.REPARSE) {}
@@ -64,8 +65,8 @@ class BookRepairServiceTest {
             assertEquals(listOf(note), notes.getBookAnnotations("book"))
             assertEquals(listOf(edit), edits.getBookCorrections("book"))
             assertEquals(originalRows.map { it.text }, dao.getParagraphs(12).map { it.text })
-            if (changeSource) { assertEquals(originalRows, dao.getParagraphs(12)); assertEquals(0, cleared) }
-            else assertEquals(1, cleared)
+            if (changeSource) { assertEquals(originalRows, dao.getParagraphs(12)); assertEquals(1, cleared) }
+            else assertEquals(2, cleared)
         } finally { db.close() }
     }
 }

@@ -31,9 +31,6 @@ internal class BookRepairService(
             return BookRepairOutcome(0)
         }
         val chapters = dao.getChapters(uuid)
-        if (mode == BookRepairMode.SEARCH_INDEX) {
-            return BookRepairOutcome(chapters.size)
-        }
         val source = File(book.storagePath)
         if (!source.isFile) throw java.io.FileNotFoundException()
         val staging = Files.createTempDirectory(context.cacheDir.toPath(), "book-repair-").toFile()

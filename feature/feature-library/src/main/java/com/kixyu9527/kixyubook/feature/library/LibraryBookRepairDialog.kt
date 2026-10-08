@@ -31,7 +31,6 @@ internal fun LibraryBookRepairDialog(
             BookRepairMode.entries.forEach { mode ->
                 KixyuTextButton(text = stringResource(when (mode) {
                     BookRepairMode.CACHE -> R.string.library_repair_cache
-                    BookRepairMode.SEARCH_INDEX -> R.string.library_repair_index
                     BookRepairMode.REPARSE -> R.string.library_repair_parse
                 }), enabled = !running, onClick = { onRepair(mode) })
             }

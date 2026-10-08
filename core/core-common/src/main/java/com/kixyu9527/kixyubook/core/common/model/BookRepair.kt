@@ -1,6 +1,6 @@
 package com.kixyu9527.kixyubook.core.common.model
 
-enum class BookRepairMode { CACHE, SEARCH_INDEX, REPARSE }
+enum class BookRepairMode { CACHE, REPARSE }
 data class BookRepairProgress(val completed: Int, val total: Int)
 data class BookRepairOutcome(val chapters: Int, val originalPreserved: Boolean = false)
 
