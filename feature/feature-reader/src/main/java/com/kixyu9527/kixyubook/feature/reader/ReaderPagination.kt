@@ -74,6 +74,14 @@ internal fun PagedReader(
     // layout is measured instead of leaving an empty background for the reflow window.
     var reflowPlaceholder by remember { mutableStateOf<RetainedReaderPage?>(null) }
     var textSelectionActive by remember { mutableStateOf(false) }
+    // The text location the pager actually presented. It survives the window/spec change a
+    // rotation produces, so the reader restores the visible paragraph instead of the chapter
+    // entry; a new navigationVersion resets it so explicit jumps stay authoritative.
+    var presentedAnchor by remember(state.navigationVersion) {
+        mutableStateOf(state.restorePosition.takeIf { it >= 0 }?.let {
+            ReaderLocation(state.chapterIndex, it, state.restoreCharOffset)
+        })
+    }
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     // These are references to the three displayed chapter layouts, not another global cache.
@@ -93,8 +101,8 @@ internal fun PagedReader(
         coordinator = paginationCoordinator,
         measurer = paginationMeasurer,
         paused = resourcePriorityActive,
-        minimumVisibleParagraphIndex = state.restorePosition,
-        minimumVisibleCharOffset = state.restoreCharOffset,
+        minimumVisibleParagraphIndex = presentedAnchor?.paragraphIndex ?: state.restorePosition,
+        minimumVisibleCharOffset = presentedAnchor?.charOffset ?: state.restoreCharOffset,
         retainedSnapshot = measuredWindow[chapter],
     )
     val pages = pagination.pages
@@ -229,11 +237,13 @@ internal fun PagedReader(
     } else if (acknowledgingVisibleLeaf) {
         checkNotNull(state.settledPageIndex).coerceIn(pages.indices)
     } else {
+        // A window/spec change (rotation) is not a navigation: restore the paragraph that was on
+        // screen. Explicit jumps reset presentedAnchor, so restorePosition still opens them.
         positions.pageFor(
             pages,
-            state.restorePosition,
+            presentedAnchor?.paragraphIndex ?: state.restorePosition,
             searchQuery = targetSearchQuery,
-            charOffset = state.restoreCharOffset,
+            charOffset = presentedAnchor?.charOffset ?: state.restoreCharOffset,
         ).coerceIn(pages.indices)
     }
     val desiredItemKey = pagerWindow.firstOrNull {
@@ -354,6 +364,23 @@ internal fun PagedReader(
                     val anchor = item.page.blocks.firstOrNull { block ->
                         block.kind == ParagraphKind.TEXT
                     }
+                    // A page that still shows the exact anchored character keeps that character as
+                    // the anchor. Replacing it with the page start on every re-measure ratchets the
+                    // reading position backwards each time the window changes (rotation drift).
+                    val settledLocation = ReaderLocation(
+                        chapterPosition = item.chapterIndex,
+                        paragraphIndex = anchor?.paragraphIndex ?: item.page.startParagraph,
+                        charOffset = anchor?.textStart ?: 0,
+                    )
+                    val currentAnchor = presentedAnchor
+                    presentedAnchor = if (
+                        currentAnchor != null && currentAnchor.chapterPosition == item.chapterIndex &&
+                        item.page.containsTextLocation(currentAnchor)
+                    ) {
+                        currentAnchor
+                    } else {
+                        settledLocation
+                    }
                     val visibleEnd = spread.items
                         .filter { visible -> visible.chapterIndex == item.chapterIndex }
                         .flatMap { visible -> visible.page?.blocks.orEmpty() }
@@ -362,8 +389,8 @@ internal fun PagedReader(
                         ?: anchor?.paragraphIndex
                         ?: item.page.startParagraph
                     savePosition(
-                        anchor?.paragraphIndex ?: item.page.startParagraph,
-                        anchor?.textStart ?: 0,
+                        presentedAnchor!!.paragraphIndex,
+                        presentedAnchor!!.charOffset,
                         latestPaginationComplete &&
                             lastVisible.pageCount > 0 &&
                             lastVisible.pageIndex == lastVisible.pageCount - 1,
@@ -922,4 +949,13 @@ internal fun readerPageNumber(state: ReaderContentState, pageIndex: Int, pageCou
         "${pageIndex + 1}/$pageCount"
     } else {
         null
+    }
+
+/** True when [location]'s exact character is part of this page's visible text. */
+private fun ReaderPage.containsTextLocation(location: ReaderLocation): Boolean =
+    blocks.any { block ->
+        block.kind == ParagraphKind.TEXT &&
+            block.paragraphIndex == location.paragraphIndex &&
+            location.charOffset in block.textStart until
+            (block.textStart + block.visibleText.length.coerceAtLeast(1))
     }

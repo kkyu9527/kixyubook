@@ -83,6 +83,10 @@ internal fun ReaderContent(
     val foldingFeature = rememberReaderFoldingFeature()
     val paginationCoordinator = rememberReaderPaginationCoordinator()
     val paginationMeasurer = rememberTextMeasurer(cacheSize = READER_TEXT_MEASURE_CACHE_SIZE)
+    // Scroll mode's last visible paragraph, read only when a spec change rebuilds the list. A plain
+    // holder keeps scrolling from invalidating the reader on every paragraph; navigationVersion
+    // resets it so explicit jumps still seed from restorePosition.
+    val scrollAnchor = remember(state.navigationVersion) { ReaderScrollAnchor() }
     // The reading viewport must not change when transient system bars appear. Derive its
     // reserved space from the preference and ignoring-visibility insets, never current visibility.
     val stableTopInsets = if (state.settings.showStatusBar) {
@@ -127,7 +131,10 @@ internal fun ReaderContent(
             key(chapter.id, spec, state.navigationVersion) {
                 val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
                 val restoredItem = remember(contentParagraphs, state.restorePosition) {
-                    ReaderPositionManager().contentItemFor(contentParagraphs, state.restorePosition)
+                    ReaderPositionManager().contentItemFor(
+                        contentParagraphs,
+                        scrollAnchor.paragraph ?: state.restorePosition,
+                    )
                 }
                 val listState = rememberReaderListState(state.sessionId, restoredItem + 1)
                 LaunchedEffect(listState, chapter.id) {
@@ -148,6 +155,7 @@ internal fun ReaderContent(
                         val visibleEnd = contentParagraphs.getOrNull(lastVisibleItem ?: 0)?.index ?: position
                         Triple(position, visibleEnd, chapterComplete)
                     }.filterNotNull().distinctUntilChanged().collect { (position, visibleEnd, complete) ->
+                        scrollAnchor.paragraph = position
                         savePosition(position, 0, complete, visibleEnd, latestLayoutVersion)
                     }
                 }
@@ -219,4 +227,9 @@ internal fun ReaderContent(
             }
         }
     }
+}
+
+/** Scroll mode's last visible paragraph; deliberately not snapshot state to avoid scroll jank. */
+private class ReaderScrollAnchor {
+    var paragraph: Int? = null
 }
