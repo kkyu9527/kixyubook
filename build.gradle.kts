@@ -17,6 +17,9 @@ val verifyHostTests = tasks.register("verifyHostTests") {
     dependsOn(
         "verifyAccessibilityResources", "verifyUiTextResources", "verifyEdgeToEdgeContracts",
         ":core:core-designsystem:verifyRoborazziDebug",
+        ":feature:feature-home:verifyRoborazziDebug",
+        ":feature:feature-library:verifyRoborazziDebug",
+        ":feature:feature-reader:verifyRoborazziDebug",
     )
 }
 
@@ -62,6 +65,7 @@ tasks.register("composePerformanceReport") {
         ":core:core-designsystem:compileReleaseKotlin",
         ":core:core-reader-engine:compileReleaseKotlin",
         ":core:core-ui:compileReleaseKotlin",
+        ":feature:feature-cloud:compileReleaseKotlin",
         ":feature:feature-home:compileReleaseKotlin",
         ":feature:feature-library:compileReleaseKotlin",
         ":feature:feature-reader:compileReleaseKotlin",
@@ -237,8 +241,44 @@ val verifyEdgeToEdgeContracts = tasks.register("verifyEdgeToEdgeContracts") {
     }
 }
 
+val verifyGlassStyleContracts = tasks.register("verifyGlassStyleContracts") {
+    group = "verification"
+    description = "Rejects glass rendering and optical overrides outside the shared material owner."
+    val sources = fileTree(rootDir) {
+        include("app/src/main/**/*.kt", "core/**/src/main/**/*.kt", "feature/**/src/main/**/*.kt")
+        exclude("**/build/**")
+    }
+    inputs.files(sources)
+    doLast {
+        val componentRoot = "core/core-designsystem/src/main/java/com/kixyu9527/kixyubook/core/designsystem/component/"
+        val renderer = componentRoot + "KixyuGlasmioSurface.kt"
+        val recipe = componentRoot + "KixyuGlassStyle.kt"
+        val nativeSurface = Regex("""\b(?:io\.github\.neoruaa\.glasmio\.glass\.)?GlassSurface\b""")
+        val opticalOverride = Regex("""^\s*(?:frostRadius|preserveBackdropColors|refractionHeight|refractionAmount)\s*[:=]""")
+        val violations = sources.files.sorted().flatMap { source ->
+            val path = source.relativeTo(rootDir).invariantSeparatorsPath
+            source.readLines().mapIndexedNotNull { index, line ->
+                val trimmed = line.trimStart()
+                if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) {
+                    return@mapIndexedNotNull null
+                }
+                val bypass = (path != renderer && nativeSurface.containsMatchIn(line)) ||
+                    (path != recipe && line.contains("NavigationGlassMaterial")) ||
+                    (path != renderer && opticalOverride.containsMatchIn(line))
+                if (bypass) "$path:${index + 1}: ${line.trim()}" else null
+            }
+        }
+        check(violations.isEmpty()) {
+            "Glass style must use KixyuGlassSurface/KixyuGlassIsland/KixyuPopupSurface. " +
+                "Only KixyuGlassStyle owns material parameters:\n" + violations.joinToString("\n")
+        }
+    }
+}
+
+verifyHostTests.configure { dependsOn(verifyGlassStyleContracts) }
+
 subprojects {
     tasks.matching { it.name == "preBuild" }.configureEach {
-        dependsOn(verifyEdgeToEdgeContracts)
+        dependsOn(verifyEdgeToEdgeContracts, verifyGlassStyleContracts)
     }
 }

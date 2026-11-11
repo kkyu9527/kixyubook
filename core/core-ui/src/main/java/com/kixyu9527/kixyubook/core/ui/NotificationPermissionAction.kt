@@ -1,4 +1,4 @@
-package com.kixyu9527.kixyubook.feature.settings
+package com.kixyu9527.kixyubook.core.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 /** Requests notification permission only after a related user action, never at app launch. */
 @Composable
-internal fun rememberNotificationPermissionAction(): (Boolean, () -> Unit) -> Unit {
+fun rememberNotificationPermissionAction(): (Boolean, () -> Unit) -> Unit {
     val context = LocalContext.current
     val permissionPreferences = remember(context) {
         context.getSharedPreferences("notification_state", android.content.Context.MODE_PRIVATE)

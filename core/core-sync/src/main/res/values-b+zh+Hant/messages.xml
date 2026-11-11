@@ -1,4 +1,5 @@
 <resources>
+    <string name="sync_reading_position_changed">雲端閱讀位置已更新，請重試以恢復最新位置。</string>
     <string name="sync_conflict_failed">同步衝突處理失敗</string>
     <string name="sync_reauthorize">需要重新授權 Google Drive</string>
     <string name="sync_storage_unavailable">暫時無法取得雲端空間</string>
@@ -14,6 +15,9 @@
     <string name="sync_http_error">Google Drive 要求失敗 (%1$d)</string>
     <string name="sync_backup_failed">完整備份工作失敗</string>
     <string name="sync_checking_local_cloud">正在檢查本機與雲端資料</string>
+    <string name="sync_updating_shelf">正在更新雲端書架</string>
+    <string name="sync_applying_deletions">正在處理雲端刪除紀錄</string>
+    <string name="sync_applying_reading_data">正在同步閱讀資料</string>
     <string name="sync_account_canceled">已取消 Google 帳戶授權</string>
     <string name="sync_account_picker_unavailable">Google 帳戶選擇介面無法使用</string>
     <string name="sync_token_missing">Google Drive 未傳回存取權杖</string>

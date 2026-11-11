@@ -61,6 +61,8 @@ class CloudSyncEngine @Inject constructor(
     private val accountGate: CloudSyncAccountGate,
 ) {
     private val syncMutex get() = accountGate.mutex
+    private val foregroundRequests = CloudForegroundRequests()
+    private val bookDownloadMutex = kotlinx.coroutines.sync.Mutex()
 
     private val remoteState = CloudRemoteStateApplier(
         context = context,
@@ -199,8 +201,9 @@ class CloudSyncEngine @Inject constructor(
 
     suspend fun synchronize(
         preferredBookUuid: String? = null,
+        onShelfReady: suspend () -> Unit = {},
         onProgress: suspend (CloudSyncProgress) -> Unit = {},
-    ): Result<Unit> = withContext(Dispatchers.IO) {
+    ): Result<Unit> = withContext(Dispatchers.IO + BackgroundSyncCheckpoint(foregroundRequests::checkpoint)) {
         val syncStartedAt = SystemClock.elapsedRealtime()
         // Cursors and conflict state belong to the account that started this run.
         var syncAccountSubject: String? = null
@@ -256,7 +259,11 @@ class CloudSyncEngine @Inject constructor(
             var remote = snapshot.known
 
             syncStage = FullSyncStage.APPLYING_REMOTE
-            pullPipeline.applyRemoteTombstones(token, snapshot.changed)
+            foregroundRequests.checkpoint()
+            pullPipeline.applyRemoteTombstones(token, snapshot.changed, remote) { progress ->
+                onProgress(progress)
+                foregroundRequests.checkpoint()
+            }
             resolveDirtyProgress(token, remote)
             syncStage = FullSyncStage.CONFLICT_CHECK
             val conflicts = findProvenConflicts(remote)
@@ -281,7 +288,7 @@ class CloudSyncEngine @Inject constructor(
                     return@runCatching
                 }
             }
-            syncStage = FullSyncStage.DOWNLOADING
+            syncStage = FullSyncStage.APPLYING_REMOTE
             pullPipeline.applyRemoteChanges(
                 token = token,
                 changedRemote = snapshot.changed,
@@ -289,10 +296,12 @@ class CloudSyncEngine @Inject constructor(
                 initialMergeComplete = persisted.initialMergeComplete,
                 preferredBookUuid = preferredBookUuid,
                 onProgress = onProgress,
+                checkpoint = foregroundRequests::checkpoint,
+                restoreSources = { onShelfReady() },
             )
 
             syncStage = FullSyncStage.PREPARING_UPLOADS
-            if (!persisted.initialMergeComplete) seedInitialOutbox()
+            if (!persisted.initialMergeComplete) seedInitialOutbox(onlyUntracked = true)
             // Drain the whole outbox: the paged read would leave a large backlog for later runs
             // while still advancing the page token as if the run had synced everything.
             val allPending = syncDao.allPending()
@@ -356,6 +365,7 @@ class CloudSyncEngine @Inject constructor(
                 )
             }
             pending.forEach { mutation ->
+                foregroundRequests.checkpoint()
                 if (mutation.operation == SyncMutationOperation.DELETE.name) {
                     flushUploadBatch()
                     try {
@@ -413,6 +423,13 @@ class CloudSyncEngine @Inject constructor(
                 ),
             )
         }.onFailure { error ->
+            if (error is CloudSyncYieldedException) {
+                preferences.markInterrupted()
+                DiagnosticLog.record(Category.SYNC, "full_sync_finished",
+                    elapsedMs = SystemClock.elapsedRealtime() - syncStartedAt, outcome = "interrupted",
+                    details = mapOf("run" to syncRun, "stage" to syncStage.logValue))
+                return@onFailure
+            }
             if (error is CancellationException) {
                 DiagnosticLog.record(
                     Category.SYNC,
@@ -446,13 +463,64 @@ class CloudSyncEngine @Inject constructor(
         } }
     }
 
+    private val bookTransfers = CloudBookTransferService(context, database, bookRepository, mutations,
+        preferences, accountClient, accountGate, drive, remoteState, foregroundRequests)
+    val bookTransferProgress get() = bookTransfers.progress
+
+    /** Reader opens join an existing file transfer; they do not start a whole-library restore. */
+    suspend fun downloadBook(bookUuid: String, onProgress: (BookPreparationProgress) -> Unit = {}): Result<Unit> =
+        foregroundRequests.prioritize(bookUuid) {
+            bookTransfers.ensure(bookUuid, background = false, onProgress).onFailure { error ->
+                if (error is AuthorizationRequiredException || error is DriveHttpException && error.statusCode == 401) {
+                    preferences.markAuthRequired()
+                }
+            }
+        }
+
+    /** Independent durable worker lane. Downloading bytes never holds the metadata mutex. */
+    suspend fun downloadPendingBooks(
+        preferredBookUuid: String? = null,
+        onNetworkDeferred: suspend () -> Unit = {},
+        onProgress: suspend (CloudSyncProgress) -> Unit = {},
+    ): Result<Unit> = withContext(Dispatchers.IO) { bookDownloadMutex.withLock {
+        runCatching {
+            val snapshot = syncMutex.withLock {
+                accountGate.finishPendingReset()
+                val persisted = preferences.current()
+                if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@runCatching
+                val lease = accountGate.transferLease()
+                val known = syncDao.allObjectStates().mapNotNull { state ->
+                    state.driveFileId?.let { id ->
+                        state.objectKey to DriveObject(id, state.objectKey.substringAfterLast('/'),
+                            state.objectKey, "application/octet-stream", state.remoteModifiedAt, state.remoteVersion, 0, null)
+                    }
+                }.toMap() + CloudRemoteInbox(database, syncDao).pending()
+                Triple(persisted, lease, known)
+            }
+            val (persisted, lease, remote) = snapshot
+            CloudBookSourceQueue(books, syncDao, foregroundRequests::checkpoint,
+                prepare = { uuid -> bookTransfers.ensure(uuid, background = true).getOrThrow() },
+                withLedger = { block -> syncMutex.withLock { lease.check(); block() } },
+            ).download(remote, preferredBookUuid, persisted.syncOriginalFiles,
+                !persisted.wifiOnlyForLargeFiles || isUnmeteredNetwork(context),
+                onNetworkDeferred = onNetworkDeferred,
+            ) { completed, total ->
+                onProgress(CloudSyncProgress(context.getString(R.string.sync_downloading_books),
+                    context.getString(R.string.sync_restored_count, completed, total), completed, total))
+            }?.let { throw it }
+            Unit
+        }.onFailure {
+            if (it is CancellationException) throw it
+            if (it is AuthorizationRequiredException || it is DriveHttpException && it.statusCode == 401) preferences.markAuthRequired()
+        }
+    } }
+
     private enum class FullSyncStage(val logValue: String) {
         PREPARING("preparing"),
         AUTHORIZATION("authorization"),
         REMOTE_SNAPSHOT("remote_snapshot"),
         APPLYING_REMOTE("applying_remote"),
         CONFLICT_CHECK("conflict_check"),
-        DOWNLOADING("downloading"),
         PREPARING_UPLOADS("preparing_uploads"),
         UPLOADING("uploading"),
         FINALIZING("finalizing"),
@@ -523,7 +591,10 @@ class CloudSyncEngine @Inject constructor(
                 ?: books.getAllProgress().maxByOrNull(ReadingProgressEntity::updatedTime)?.bookUuid
                 ?: return@runCatching
             diagnosticBookUuid = bookUuid
-            if (!books.bookExists(bookUuid)) return@runCatching
+            val book = books.getBook(bookUuid) ?: return@runCatching
+            // No reader data can be applied before its directory exists. In particular do not
+            // hold the shared mutex for settings/bookmark RPCs ahead of the first source download.
+            if (book.storagePath.isBlank() || !File(book.storagePath).isFile || books.getChapterCount(bookUuid) == 0) return@runCatching
             // This priority stage is intentionally silent. The following FULL worker owns the
             // persisted global phase; otherwise a cancelled/delayed continuation can leave the
             // app displaying SYNCING after this quick stage has already finished.
@@ -734,6 +805,9 @@ class CloudSyncEngine @Inject constructor(
         val persisted = preferences.current()
         if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@withContext false
         if (!persisted.initialMergeComplete) return@withContext true
+        if (syncDao.remoteInbox().any { it.objectKey.startsWith("books/") && it.objectKey.endsWith("/source") }) {
+            return@withContext true
+        }
         syncDao.allPending().any { mutation ->
             when (runCatching { SyncEntityType.valueOf(mutation.entityType) }.getOrNull()) {
                 SyncEntityType.BOOK -> persisted.syncOriginalFiles &&
@@ -843,6 +917,7 @@ class CloudSyncEngine @Inject constructor(
      */
     suspend fun resetRemoteLedger() = withContext(Dispatchers.IO) {
         syncMutex.withLock {
+            accountGate.invalidateTransfers()
             syncDao.clearOutbox()
             syncDao.clearObjectStates()
             syncDao.clearTombstones()
@@ -905,6 +980,7 @@ class CloudSyncEngine @Inject constructor(
         remote: Map<String, DriveObject>,
     ) {
         syncDao.allPending().forEach { mutation ->
+            foregroundRequests.checkpoint()
             if (
                 mutation.entityType != SyncEntityType.PROGRESS.name ||
                 mutation.operation != SyncMutationOperation.UPSERT.name
@@ -940,19 +1016,23 @@ class CloudSyncEngine @Inject constructor(
         -> null
     }
 
-    private suspend fun seedInitialOutbox() {
-        books.getAllBooks().forEach { mutations.record(SyncEntityType.BOOK, it.uuid) }
-        books.getAllProgress().forEach { mutations.record(SyncEntityType.PROGRESS, it.bookUuid) }
+    private suspend fun seedInitialOutbox(onlyUntracked: Boolean = false) {
+        val known = if (onlyUntracked) syncDao.allObjectStates().mapTo(hashSetOf()) { it.objectKey } else emptySet()
+        suspend fun seed(type: SyncEntityType, id: String, key: String) {
+            if (key !in known && syncDao.pendingCount(type.name, id) == 0) mutations.record(type, id)
+        }
+        books.getAllBooks().forEach { seed(SyncEntityType.BOOK, it.uuid, "books/${it.uuid}/metadata") }
+        books.getAllProgress().forEach { seed(SyncEntityType.PROGRESS, it.bookUuid, "progress/${it.bookUuid}") }
         (books.getAllBookmarkEntities().map(BookMarkOwner::from).map(BookMarkOwner::bookUuid) +
             books.getAllPendingBookmarks().map { it.bookUuid }).distinct()
-            .forEach { mutations.record(SyncEntityType.BOOKMARKS, it) }
-        mutations.record(SyncEntityType.SETTINGS, "global")
-        books.getAllSessions().forEach { mutations.record(SyncEntityType.SESSION, it.syncUuid) }
+            .forEach { seed(SyncEntityType.BOOKMARKS, it, "bookmarks/$it") }
+        seed(SyncEntityType.SETTINGS, "global", "settings/global")
+        books.getAllSessions().forEach { seed(SyncEntityType.SESSION, it.syncUuid, "sessions/${it.syncUuid}") }
         if (preferences.current().syncFonts) {
-            fonts.getAllFonts().forEach { mutations.record(SyncEntityType.FONT, it.uuid) }
+            fonts.getAllFonts().forEach { seed(SyncEntityType.FONT, it.uuid, "fonts/${it.uuid}/metadata") }
         }
-        correctionDao.getAll().forEach { mutations.record(SyncEntityType.CORRECTION, it.uuid) }
-        annotationDao.getAll().forEach { mutations.record(SyncEntityType.ANNOTATION, it.uuid) }
+        correctionDao.getAll().forEach { seed(SyncEntityType.CORRECTION, it.uuid, "corrections/${it.uuid}") }
+        annotationDao.getAll().forEach { seed(SyncEntityType.ANNOTATION, it.uuid, "annotations/${it.uuid}") }
     }
 
     private suspend fun <T> withJsonDownload(token: String, info: DriveObject, block: suspend (JSONObject) -> T): T {
@@ -965,10 +1045,10 @@ class CloudSyncEngine @Inject constructor(
         }
     }
 
-    private suspend fun rememberRemote(key: String, value: DriveObject) {
+    private suspend fun rememberRemote(key: String, value: DriveObject, localHash: String? = null) {
         val previous = syncDao.objectState(key)
         syncDao.upsertObjectState(
-            SyncObjectStateEntity(key, value.id, previous?.localHash, previous?.localChangedAt ?: 0, value.modifiedAt, value.version),
+            SyncObjectStateEntity(key, value.id, localHash ?: previous?.localHash, previous?.localChangedAt ?: 0, value.modifiedAt, value.version),
         )
     }
 

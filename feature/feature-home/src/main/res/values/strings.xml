@@ -20,4 +20,7 @@
     <string name="home_days_read">Days read</string>
     <string name="home_days_goal_met">Goal met</string>
     <string name="home_daily_average">Daily average</string>
+    <string name="home_today_label">Today</string>
+    <string name="home_continue_hint">Pick up where you left off</string>
+    <string name="home_goal_progress">%1$d%% of goal</string>
 </resources>

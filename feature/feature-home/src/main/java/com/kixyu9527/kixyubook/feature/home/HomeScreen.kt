@@ -1,9 +1,6 @@
 package com.kixyu9527.kixyubook.feature.home
 
-import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
-
 import android.os.Looper
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,22 +13,22 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -41,12 +38,19 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kixyu9527.kixyubook.core.common.model.DailyReading
 import com.kixyu9527.kixyubook.core.common.model.LibraryBook
+import com.kixyu9527.kixyubook.core.common.model.ReadingStats
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuCard
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuEmptyState
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMetric
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuProgressBar
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuWindowWidthClass
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
+import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import com.kixyu9527.kixyubook.core.ui.BookCover
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -70,9 +74,25 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
             onDispose { queue.removeIdleHandler(idleHandler) }
         }
     }
+    HomeScreen(state = state, onOpenBook = onOpenBook)
+}
 
-    val expanded = kixyuWindowSizeClass().supportsTwoPane
-    KixyuPageScaffold(title = stringResource(R.string.home_title), modifier = Modifier.fillMaxSize()) { innerPadding ->
+/**
+ * State-free home content. Keeping the ViewModel and idle prewarm in [HomeRoute] makes the visual
+ * contract testable with fixed state and keeps rendering independent of repositories.
+ */
+@Composable
+internal fun HomeScreen(
+    state: HomeUiState,
+    onOpenBook: (String) -> Unit,
+) {
+    val windowSizeClass = kixyuWindowSizeClass()
+    val expanded = windowSizeClass.supportsTwoPane
+    val wideCards = windowSizeClass.widthClass != KixyuWindowWidthClass.COMPACT
+    KixyuPageScaffold(
+        title = stringResource(R.string.home_title),
+        modifier = Modifier.fillMaxSize(),
+    ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .kixyuPageContentWidth(
@@ -87,35 +107,208 @@ fun HomeRoute(onOpenBook: (String) -> Unit, viewModel: HomeViewModel = hiltViewM
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
             item {
-                if (expanded) {
+                if (wideCards) {
                     Row(
                         modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
                         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
                     ) {
-                        ReadingFocusCard(
-                            state.current,
-                            onOpenBook,
-                            Modifier.weight(1.18f).fillMaxHeight(),
+                        ContinueReadingCard(
+                            item = state.current,
+                            open = onOpenBook,
+                            modifier = Modifier.weight(1.18f).fillMaxHeight(),
                             fillAvailableHeight = true,
                         )
-                        TodayOverview(
-                            state,
-                            Modifier.weight(.82f).fillMaxHeight(),
+                        TodaySummaryCard(
+                            stats = state.stats,
+                            modifier = Modifier.weight(.82f).fillMaxHeight(),
                             fillAvailableHeight = true,
                         )
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap)) {
-                        ReadingFocusCard(state.current, onOpenBook)
-                        TodayOverview(state)
+                        ContinueReadingCard(state.current, onOpenBook)
+                        TodaySummaryCard(state.stats)
                     }
                 }
             }
             if (state.recent.isNotEmpty()) {
-                item { RecentReadingSection(state.recent, onOpenBook, expanded) }
+                item { RecentReadingSection(state.recent, onOpenBook, wideCards) }
             }
             item { WeeklyReadingCard(state.stats.recentDays, state.stats.goalMinutes) }
             item { KixyuBottomContentSpacer() }
+        }
+    }
+}
+
+@Composable
+private fun SectionOverline(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
+private fun ContinueReadingCard(
+    item: LibraryBook?,
+    open: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    fillAvailableHeight: Boolean = false,
+) {
+    val openDescription = item?.let { stringResource(R.string.home_open_book, it.book.title) }
+    val cardModifier = if (fillAvailableHeight) modifier.fillMaxHeight() else modifier
+    KixyuCard(
+        modifier = cardModifier.then(
+            if (openDescription == null) Modifier else Modifier.semantics {
+                contentDescription = openDescription
+            },
+        ),
+        onClick = item?.let { { open(it.book.uuid) } },
+    ) {
+        if (item == null) {
+            KixyuEmptyState(
+                icon = KixyuSymbols.LibraryBooks,
+                title = stringResource(R.string.home_choose_book),
+                description = stringResource(R.string.home_choose_book_hint),
+            )
+        } else {
+            ContinueReadingBody(item, fillAvailableHeight)
+        }
+    }
+}
+
+@Composable
+private fun ContinueReadingBody(
+    item: LibraryBook,
+    fillAvailableHeight: Boolean,
+) {
+    val progress = (item.progress?.fraction ?: 0f).coerceIn(0f, 1f)
+    Column(Modifier.padding(KixyuSpacing.extraLarge)) {
+        SectionOverline(stringResource(R.string.home_continue_reading))
+        Spacer(Modifier.height(KixyuSpacing.medium))
+        Row(
+            modifier = if (fillAvailableHeight) Modifier.fillMaxHeight() else Modifier.heightIn(min = 132.dp),
+            horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BookCover(
+                title = item.book.title,
+                coverPath = item.book.coverPath,
+                modifier = Modifier.size(96.dp, 138.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
+            ) {
+                Text(
+                    item.book.title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    item.book.author,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(KixyuSpacing.small))
+                KixyuProgressBar(progress = progress, wavy = true)
+                val largeText = LocalDensity.current.fontScale > 1.25f
+                if (largeText) {
+                    Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                        Text(
+                            stringResource(R.string.home_read_progress, (progress * 100).toInt()),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            stringResource(R.string.home_continue_hint),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.home_read_progress, (progress * 100).toInt()),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            stringResource(R.string.home_continue_hint),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodaySummaryCard(
+    stats: ReadingStats,
+    modifier: Modifier = Modifier,
+    fillAvailableHeight: Boolean = false,
+) {
+    val goalMillis = TimeUnit.MINUTES.toMillis(stats.goalMinutes.toLong()).coerceAtLeast(1L)
+    val goalFraction = (stats.todayMillis.toFloat() / goalMillis).coerceIn(0f, 1f)
+    KixyuCard(
+        modifier = if (fillAvailableHeight) modifier.fillMaxHeight() else modifier,
+    ) {
+        Column(
+            modifier = Modifier.padding(KixyuSpacing.extraLarge),
+            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
+        ) {
+            SectionOverline(stringResource(R.string.home_today_label))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    TimeUnit.MILLISECONDS.toMinutes(stats.todayMillis).toString(),
+                    style = MaterialTheme.typography.displayMedium,
+                )
+                Text(
+                    stringResource(R.string.home_minutes_unit),
+                    modifier = Modifier.padding(start = 2.dp, bottom = 6.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.home_goal_progress, (goalFraction * 100).toInt()),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            KixyuProgressBar(progress = goalFraction, wavy = true)
+            Text(
+                stringResource(R.string.home_goal_minutes, stats.goalMinutes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                KixyuMetric(
+                    value = stringResource(R.string.home_days_value, stats.streakDays),
+                    label = stringResource(R.string.home_reading_streak),
+                )
+                KixyuMetric(
+                    value = stringResource(R.string.home_hours_value, TimeUnit.MILLISECONDS.toHours(stats.totalMillis)),
+                    label = stringResource(R.string.home_total_duration),
+                )
+            }
         }
     }
 }
@@ -127,13 +320,13 @@ private fun RecentReadingSection(
     expanded: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text(stringResource(R.string.home_recent_reading), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        SectionOverline(stringResource(R.string.home_recent_reading))
         if (expanded) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
             ) {
-                items.forEach { item ->
+                items.take(3).forEach { item ->
                     RecentReadingCard(
                         item = item,
                         open = open,
@@ -165,13 +358,10 @@ private fun RecentReadingCard(
     modifier: Modifier = Modifier,
 ) {
     val openDescription = stringResource(R.string.home_open_recent_book, item.book.title)
-    Surface(
-        modifier = modifier
-            .height(116.dp)
-            .semantics { contentDescription = openDescription }
-            .clickable { open(item.book.uuid) },
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
+    val progress = (item.progress?.fraction ?: 0f).coerceIn(0f, 1f)
+    KixyuCard(
+        modifier = modifier.heightIn(min = 124.dp).semantics { contentDescription = openDescription },
+        onClick = { open(item.book.uuid) },
     ) {
         Row(
             modifier = Modifier.padding(KixyuSpacing.medium),
@@ -200,11 +390,8 @@ private fun RecentReadingCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val progress = item.progress?.fraction?.coerceIn(0f, 1f) ?: 0f
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                )
+                Spacer(Modifier.height(2.dp))
+                KixyuProgressBar(progress = progress, wavy = true)
                 Text(
                     stringResource(R.string.home_read_progress, (progress * 100).toInt()),
                     style = MaterialTheme.typography.labelSmall,
@@ -216,161 +403,46 @@ private fun RecentReadingCard(
 }
 
 @Composable
-private fun ReadingFocusCard(
-    item: LibraryBook?,
-    open: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    fillAvailableHeight: Boolean = false,
-) {
-    val openDescription = if (item == null) null else stringResource(R.string.home_open_book, item.book.title)
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text(stringResource(R.string.home_continue_reading), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Surface(
-            modifier = (if (fillAvailableHeight) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth())
-                .then(
-                    if (item == null) Modifier else Modifier
-                        .semantics { contentDescription = openDescription.orEmpty() }
-                        .clickable { open(item.book.uuid) },
-                ),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.large,
-        ) {
-            if (item == null) {
-                Column(
-                    modifier = Modifier.padding(KixyuSpacing.large),
-                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                ) {
-                    Text(stringResource(R.string.home_choose_book), style = MaterialTheme.typography.titleLarge)
-                    Text(stringResource(R.string.home_choose_book_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                Row(
-                    modifier = Modifier.padding(KixyuSpacing.large),
-                    horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    BookCover(
-                        item.book.title,
-                        item.book.coverPath,
-                        Modifier.size(KixyuSize.continueCoverWidth, KixyuSize.continueCoverHeight),
-                    )
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-                        Text(item.book.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(item.book.author, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        LinearProgressIndicator(
-                            progress = { item.progress?.fraction?.coerceIn(0f, 1f) ?: 0f },
-                            modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                        )
-                        Text(
-                            stringResource(
-                                R.string.home_read_progress,
-                                ((item.progress?.fraction ?: 0f) * 100).toInt(),
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TodayOverview(
-    state: HomeUiState,
-    modifier: Modifier = Modifier,
-    fillAvailableHeight: Boolean = false,
-) {
-    val stats = state.stats
-    val goalMillis = TimeUnit.MINUTES.toMillis(stats.goalMinutes.toLong()).coerceAtLeast(1L)
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text(stringResource(R.string.home_today_goal), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Surface(
-            modifier = if (fillAvailableHeight) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(
-                modifier = Modifier.padding(KixyuSpacing.large),
-                verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        "${TimeUnit.MILLISECONDS.toMinutes(stats.todayMillis)}",
-                        style = MaterialTheme.typography.headlineLarge,
-                    )
-                    Text(stringResource(R.string.home_minutes_unit), modifier = Modifier.padding(bottom = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.weight(1f))
-                    Text(stringResource(R.string.home_goal_minutes, stats.goalMinutes), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                LinearProgressIndicator(
-                    progress = { (stats.todayMillis.toFloat() / goalMillis).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    StatItem(
-                        KixyuSymbols.LocalFireDepartment,
-                        stringResource(R.string.home_days_value, stats.streakDays),
-                        stringResource(R.string.home_reading_streak),
-                    )
-                    StatItem(
-                        KixyuSymbols.Schedule,
-                        stringResource(
-                            R.string.home_hours_value,
-                            TimeUnit.MILLISECONDS.toHours(stats.totalMillis),
-                        ),
-                        stringResource(R.string.home_total_duration),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatItem(icon: androidx.compose.ui.graphics.vector.ImageVector, value: String, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Icon(icon, null, Modifier.size(KixyuSize.iconSmall), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Column {
-            Text(value, style = MaterialTheme.typography.labelLarge)
-            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
 private fun WeeklyReadingCard(days: List<DailyReading>, goalMinutes: Int) {
     val normalizedDays = if (days.size == 7) days else {
         val today = LocalDate.now().toEpochDay()
         (6L downTo 0L).map { DailyReading(today - it, 0L) }
     }
     val maxDuration = normalizedDays.maxOfOrNull(DailyReading::durationMillis)?.coerceAtLeast(1L) ?: 1L
+    val weeklyMillis = normalizedDays.sumOf(DailyReading::durationMillis)
+    val weeklyMinutes = TimeUnit.MILLISECONDS.toMinutes(weeklyMillis)
+    val activeDays = normalizedDays.count { it.durationMillis > 0L }
+    val goalMillis = TimeUnit.MINUTES.toMillis(goalMinutes.toLong())
+    val goalDays = normalizedDays.count { it.durationMillis >= goalMillis }
+    val averageMinutes = TimeUnit.MILLISECONDS.toMinutes(weeklyMillis / normalizedDays.size)
+
     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-        Text(stringResource(R.string.home_last_seven_days), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.large,
-        ) {
+        SectionOverline(stringResource(R.string.home_last_seven_days))
+        KixyuCard {
             Column(
-                modifier = Modifier.padding(KixyuSpacing.large),
+                modifier = Modifier.padding(KixyuSpacing.extraLarge),
                 verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),
             ) {
-                val weeklyMillis = normalizedDays.sumOf(DailyReading::durationMillis)
-                val weeklyMinutes = TimeUnit.MILLISECONDS.toMinutes(weeklyMillis)
-                val activeDays = normalizedDays.count { it.durationMillis > 0L }
-                val goalMillis = TimeUnit.MINUTES.toMillis(goalMinutes.toLong())
-                val goalDays = normalizedDays.count { it.durationMillis >= goalMillis }
-                val averageMinutes = TimeUnit.MILLISECONDS.toMinutes(weeklyMillis / normalizedDays.size)
-                Text(stringResource(R.string.home_weekly_total, weeklyMinutes), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.home_weekly_total, weeklyMinutes),
+                    style = MaterialTheme.typography.titleLarge,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    WeeklyMetric(stringResource(R.string.home_days_value, activeDays), stringResource(R.string.home_days_read))
-                    WeeklyMetric(stringResource(R.string.home_days_value, goalDays), stringResource(R.string.home_days_goal_met))
-                    WeeklyMetric(stringResource(R.string.home_minutes_value, averageMinutes), stringResource(R.string.home_daily_average))
+                    KixyuMetric(
+                        value = stringResource(R.string.home_days_value, activeDays),
+                        label = stringResource(R.string.home_days_read),
+                    )
+                    KixyuMetric(
+                        value = stringResource(R.string.home_days_value, goalDays),
+                        label = stringResource(R.string.home_days_goal_met),
+                    )
+                    KixyuMetric(
+                        value = stringResource(R.string.home_minutes_value, averageMinutes),
+                        label = stringResource(R.string.home_daily_average),
+                    )
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth().height(112.dp),
@@ -387,31 +459,29 @@ private fun WeeklyReadingCard(days: List<DailyReading>, goalMinutes: Int) {
 }
 
 @Composable
-private fun WeeklyMetric(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, style = MaterialTheme.typography.labelLarge)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
 private fun DayBar(day: DailyReading, maxDuration: Long, modifier: Modifier = Modifier) {
     val ratio = (day.durationMillis.toFloat() / maxDuration).coerceIn(0f, 1f)
+    val hasReading = day.durationMillis > 0L
     val isToday = day.epochDay == LocalDate.now().toEpochDay()
+    val locale = LocalConfiguration.current.locales[0]
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(
             modifier = Modifier
                 .width(16.dp)
-                .height((6f + 72f * ratio).dp),
+                .height(if (hasReading) (6f + 72f * ratio).dp else 2.dp),
         ) {
-            Surface(
+            androidx.compose.material3.Surface(
                 modifier = Modifier.fillMaxSize(),
-                color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer,
+                color = when {
+                    !hasReading -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                    isToday -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                },
                 shape = MaterialTheme.shapes.small,
             ) { }
         }
         Text(
-            dayLabel(day.epochDay, androidx.compose.ui.platform.LocalConfiguration.current.locales[0]),
+            dayLabel(day.epochDay, locale),
             style = MaterialTheme.typography.labelSmall,
             color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )

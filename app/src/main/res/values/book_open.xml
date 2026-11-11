@@ -1,0 +1,7 @@
+<resources>
+    <string name="book_open_preparing">Preparing book</string>
+    <string name="book_open_failed">Could not open book</string>
+    <string name="book_open_retry">Retry</string>
+    <string name="book_open_stay">Stay on bookshelf</string>
+    <string name="book_open_background">You can return to the bookshelf and check download status or retry in Cloud Sync.</string>
+</resources>

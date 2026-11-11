@@ -1,0 +1,7 @@
+<resources>
+    <string name="book_open_preparing">正在準備書籍</string>
+    <string name="book_open_failed">書籍開啟失敗</string>
+    <string name="book_open_retry">重試</string>
+    <string name="book_open_stay">留在書架</string>
+    <string name="book_open_background">可以先返回書架，在雲同步頁查看下載狀態或重試。</string>
+</resources>

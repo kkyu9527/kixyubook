@@ -1,6 +1,4 @@
 package com.kixyu9527.kixyubook.core.database
-import com.kixyu9527.kixyubook.core.common.cache.ReaderCacheBudget
-import com.kixyu9527.kixyubook.core.common.cache.WeightedLruCache
 
 import android.content.Context
 import android.os.SystemClock
@@ -92,7 +90,6 @@ class LocalBookRepository @Inject constructor(
     private val epubChapterCache = EpubChapterCache(
         File(context.noBackupFilesDir, "epub-chapters").apply(File::mkdirs),
     )
-    private val chapterCacheLock = Any()
     private val chapterLoadMutex = Mutex()
     private val storageMutationMutex = LibraryStorageGate.mutex
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -128,15 +125,7 @@ class LocalBookRepository @Inject constructor(
     // Keep only the decoded chapters needed by the active pager. EPUB chapters outside this
     // window remain in the binary disk cache and are cheap to hydrate without retaining a whole
     // reading session in the process heap.
-    private val chapterCache = WeightedLruCache<ChapterCacheKey, ChapterContent>(
-        ReaderCacheBudget.CHAPTER_MEMORY_BYTES,
-        ReaderCacheBudget.MAX_MEMORY_CHAPTERS,
-        diagnosticsName = "chapter",
-    ) { content ->
-        256L + content.paragraphs.sumOf { paragraph ->
-            128L + paragraph.text.length * 2L + paragraph.spans.size * 96L
-        }
-    }
+    private val chapterCache = ChapterMemoryCache()
 
     init {
         MemoryPressureRegistry.register(this)
@@ -148,7 +137,7 @@ class LocalBookRepository @Inject constructor(
     }
 
     override fun onMemoryPressure(level: MemoryPressureLevel) {
-        synchronized(chapterCacheLock) { chapterCache.clear() }
+        chapterCache.clear()
         (parsers.parserFor(BookFormat.EPUB) as EpubBookParser).clearMemoryCaches()
     }
 
@@ -324,7 +313,7 @@ class LocalBookRepository @Inject constructor(
         try {
             val result = storageMutationMutex.withLock {
                 BookRepairService(context, database, dao, annotations, textCorrections, chapterLoadMutex) { uuid ->
-                    synchronized(chapterCacheLock) { chapterCache.removeMatching { it.bookUuid == uuid } }
+                    chapterCache.removeBook(uuid)
                     epubChapterCache.clearBook(uuid)
                     ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, uuid)
                 }.repair(bookUuid, mode, onProgress)
@@ -685,77 +674,28 @@ class LocalBookRepository @Inject constructor(
         ZipFile(this).use { zip -> zip.getEntry("mimetype")?.let { zip.getInputStream(it).bufferedReader().readText().trim() } == "application/epub+zip" }
     }.getOrDefault(false)
 
-    override suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean =
-        withContext(Dispatchers.IO) {
-            storageMutationMutex.withLock {
-                if (dao.bookExists(book.uuid)) return@withLock true
-                if (dao.findUuidByHash(book.contentHash) != null) return@withLock false
-                val source = File(sourceFilePath)
-                require(source.isFile) { context.getString(R.string.db_cloud_file_missing) }
-                val actualHash = source.inputStream().use { input ->
-                    val digest = MessageDigest.getInstance("SHA-256")
-                    DigestInputStream(input, digest).use { stream ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (stream.read(buffer) >= 0) {
-                            // DigestInputStream updates the digest as bytes are consumed.
-                        }
-                    }
-                    digest.digest().joinToString("") { "%02x".format(it) }
-                }
-                require(actualHash == book.contentHash) { context.getString(R.string.db_cloud_hash_failed) }
-                val extension = if (book.format == BookFormat.EPUB) "epub" else "txt"
-                val stored = File(context.filesDir, "books/${book.uuid}.$extension").also { it.parentFile?.mkdirs() }
-                source.copyTo(stored, overwrite = true)
-                try {
-                    val parser = parsers.parserFor(book.format)
-                    // A synced book carries no original file name; its title is not one either.
-                    val parsedMetadata = parser.readMetadata(stored, book.title, sourceName = "")
-                    val coverPath = parsedMetadata.coverBytes?.let { bytes ->
-                        File(context.filesDir, "covers/${book.uuid}.${parsedMetadata.coverExtension}").also {
-                            it.parentFile?.mkdirs()
-                            it.writeBytes(bytes)
-                        }.absolutePath
-                    }
-                    dao.insertBook(
-                        BookEntity(
-                            uuid = book.uuid,
-                            title = book.title,
-                            author = book.author,
-                            description = book.description,
-                            coverPath = coverPath,
-                            format = book.format.name,
-                            originalPath = "google-drive://${book.uuid}",
-                            storagePath = stored.absolutePath,
-                            createdTime = book.createdTime,
-                            contentHash = book.contentHash,
-                            category = book.category,
-                            // Synced sort/series data wins; a local reparse fills whatever the cloud
-                            // payload did not carry.
-                            originalDisplayName = book.originalDisplayName,
-                            userEditedTitle = book.metadataOwnership?.title ?: false,
-                            userEditedAuthor = book.metadataOwnership?.author ?: false,
-                            userEditedDescription = book.metadataOwnership?.description ?: false,
-                            titleSort = book.titleSort.ifBlank { parsedMetadata.titleSort },
-                            seriesName = book.seriesName.ifBlank { parsedMetadata.seriesName },
-                            seriesIndex = book.seriesIndex ?: parsedMetadata.seriesIndex,
-                        ),
-                    )
-                    if (book.format == BookFormat.EPUB) {
-                        epubIndex.registerDirectory(book.uuid, stored, parser as EpubBookParser)
-                        scheduleEpubIndex()
-                    } else {
-                        enqueueBackgroundIndex(
-                            RegisteredImport(null, "google-drive://${book.uuid}", book.uuid, book.title, book.format, stored, parser),
-                        )
-                    }
-                    true
-                } catch (error: Throwable) {
-                    removeIncompleteImport(book.uuid)
-                    stored.delete()
-                    throw error
-                }
+    private val syncedBookStore by lazy {
+        SyncedBookStore(context, database, parsers::parserFor,
+            afterInstall = { book -> if (book.format == BookFormat.EPUB) scheduleEpubIndex() },
+        ) { book, source, parser ->
+            if (book.format == BookFormat.EPUB) {
+                epubIndex.registerDirectory(book.uuid, source, parser as EpubBookParser)
+            } else {
+                // A downloaded body is not ready until its directory is published. Both automatic
+                // downloads and explicit opens use this path before announcing availability.
+                val count = importStreamingChapters(book.uuid, source, parser)
+                require(count > 0) { context.getString(R.string.db_no_chapters) }
             }
         }
+    }
+
+    override suspend fun registerSyncedBook(book: SyncedBook): Boolean = syncedBookStore.register(book)
+
+    override suspend fun hydrateSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean =
+        syncedBookStore.install(book, sourceFilePath, requireExisting = true)
+
+    override suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean =
+        syncedBookStore.install(book, sourceFilePath, requireExisting = false)
 
     override suspend fun deleteBook(bookUuid: String) = deleteBooks(setOf(bookUuid))
 
@@ -817,9 +757,7 @@ class LocalBookRepository @Inject constructor(
                 syncMutations.record(SyncEntityType.ANNOTATION, uuid, SyncMutationOperation.DELETE)
             }
         }
-        synchronized(chapterCacheLock) {
-            chapterCache.removeMatching { it.bookUuid in bookUuids }
-        }
+        chapterCache.removeBooks(bookUuids)
         DiagnosticLog.record(
             Category.LIBRARY,
             "books_deleted",
@@ -865,7 +803,7 @@ class LocalBookRepository @Inject constructor(
             // bytes (restore/repair) before the in-memory cache is cleared.
             val initialBook = dao.getBook(bookUuid)
             val cacheKey = ChapterCacheKey(bookUuid, initialBook?.contentHash.orEmpty(), chapterIndex)
-            synchronized(chapterCacheLock) { chapterCache[cacheKey] }?.let {
+            chapterCache[cacheKey]?.let {
                 return@withContext textCorrections.applyToChapter(it)
             }
 
@@ -930,7 +868,7 @@ class LocalBookRepository @Inject constructor(
             val content = chapterLoadMutex.withLock {
                 val book = dao.getBook(bookUuid) ?: return@withLock null
                 val lockedKey = ChapterCacheKey(bookUuid, book.contentHash, chapterIndex)
-                synchronized(chapterCacheLock) { chapterCache[lockedKey] }?.let {
+                chapterCache[lockedKey]?.let {
                     return@withLock it
                 }
                 val chapter = dao.getChapter(bookUuid, chapterIndex) ?: return@withLock null
@@ -956,7 +894,7 @@ class LocalBookRepository @Inject constructor(
                     }
                 }
                 ChapterContent(chapter.toModel(), paragraphs).also { loaded ->
-                    synchronized(chapterCacheLock) { chapterCache[lockedKey] = loaded }
+                    chapterCache[lockedKey] = loaded
                 }
             } ?: return@withContext null
 
@@ -1028,9 +966,7 @@ class LocalBookRepository @Inject constructor(
     }
 
     override fun releaseReaderMemory(bookUuid: String) {
-        synchronized(chapterCacheLock) {
-            chapterCache.removeMatching { it.bookUuid == bookUuid }
-        }
+        chapterCache.removeBook(bookUuid)
         (parsers.parserFor(BookFormat.EPUB) as EpubBookParser).clearMemoryCaches()
     }
 
@@ -1219,9 +1155,7 @@ class LocalBookRepository @Inject constructor(
                     syncMutations.record(SyncEntityType.BOOK, bookUuid)
                 }
             }
-            synchronized(chapterCacheLock) {
-                chapterCache.removeMatching { it.bookUuid == bookUuid }
-            }
+            chapterCache.removeBook(bookUuid)
             Result.success(Unit)
         } catch (error: CancellationException) {
             throw error

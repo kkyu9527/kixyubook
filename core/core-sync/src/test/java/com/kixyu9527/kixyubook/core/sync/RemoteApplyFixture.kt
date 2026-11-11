@@ -24,6 +24,11 @@ internal class RemoteApplyFixture : AutoCloseable {
     val drive = DriveAppDataClient(context)
     val payloads = mutableMapOf<String, JSONObject>()
     val bookRepository = object : BookRepository by unusedSyncRepository<BookRepository>() {
+        override suspend fun registerSyncedBook(book: SyncedBook): Boolean {
+            books.insertBook(BookEntity(book.uuid, book.title, book.author, book.description, null,
+                book.format.name, "google-drive://${book.uuid}", "", book.createdTime, book.contentHash, book.category))
+            return true
+        }
         override suspend fun applySyncedBookMetadata(bookUuid: String, title: String, author: String, description: String, ownership: BookMetadataOwnership?) {
             books.updateBookMetadata(bookUuid, title, author, description)
         }
@@ -43,8 +48,9 @@ internal class RemoteApplyFixture : AutoCloseable {
         annotations, ReadingReminderScheduler(context, NotificationPreferencesStore(context, mutations)),
         preferences, mutations, drive, jsonDownload = { _, info -> payloads.getValue(info.objectKey) })
 
-    fun pipeline(remote: CloudRemoteObjectApplier = applier) = CloudSyncPullPipeline(context, database,
-        books, sync, bookRepository, fontRepository, corrections, annotations, mutations, drive, remote)
+    fun pipeline(remote: CloudRemoteObjectApplier = applier, tombstoneDownload: (suspend (String, DriveObject) -> JSONObject)? = null) =
+        CloudSyncPullPipeline(context, database, books, sync, bookRepository, fontRepository,
+            corrections, annotations, mutations, drive, remote, tombstoneDownload)
 
     suspend fun addBook(uuid: String) {
         books.insertBook(BookEntity(uuid, "本地书名", "", "", null, "TXT", "", "", 1, "hash", ""))

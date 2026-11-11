@@ -66,6 +66,11 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.auto(Color.Transparent.toArgb(), Color.Transparent.toArgb()),
             navigationBarStyle = SystemBarStyle.auto(Color.Transparent.toArgb(), Color.Transparent.toArgb()),
         )
+        // MIUI can re-apply an extracted navigation-bar color after enableEdgeToEdge. Keep both
+        // bars explicitly transparent so gesture navigation never paints an app-coloured sheet.
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarDividerColor = android.graphics.Color.TRANSPARENT
         window.disableSystemBarContrastProtection()
         super.onCreate(savedInstanceState)
         if (StartupRecoveryState.failure != null) {
@@ -125,6 +130,7 @@ class MainActivity : ComponentActivity() {
                     onLoadReleaseNotes = appViewModel::loadCurrentReleaseNotes,
                     onAnimationPriorityChanged = appViewModel::setAnimationActive,
                     onPrepareReader = appViewModel::prepareReader,
+                    onEnsureBookAvailable = appViewModel::ensureBookAvailable,
                     onPrioritizeBookSync = appViewModel::prioritizeBookSync,
                     onBookOpened = bookRepository::markBookOpened,
                     onDownloadUpdate = updateDownloader::download,

@@ -20,6 +20,7 @@
     <string name="library_select_all">Select all</string>
     <string name="library_book_selected">Selected</string>
     <string name="library_book_not_selected">Not selected</string>
+    <string name="library_cloud_only">In cloud · download on open</string>
     <string name="library_import">Import books</string>
     <string name="library_actions">Library actions</string>
     <string name="library_display_title">Library display</string>

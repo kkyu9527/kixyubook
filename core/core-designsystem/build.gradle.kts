@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.kixyu9527.kixyubook.core.designsystem"
     compileSdk = 37
-    defaultConfig { minSdk = 26 }
+    defaultConfig { minSdk = 33 }
     buildFeatures { compose = true }
     testOptions.unitTests.isIncludeAndroidResources = true
 }
@@ -19,8 +19,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.miuix.ui.android)
-    implementation(libs.miuix.blur.android)
     implementation(libs.miuix.preference.android)
+    implementation(libs.glasmio.glass)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.roborazzi)

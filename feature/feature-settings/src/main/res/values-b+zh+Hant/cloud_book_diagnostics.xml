@@ -1,0 +1,11 @@
+<resources>
+    <string name="diag_cloud_book_title">開啟雲端書籍</string>
+    <string name="diag_cloud_book_description">逐階段記錄開啟耗時與接收位元組，不記錄正文或帳號資訊。</string>
+    <string name="diag_cloud_book_stage">開啟階段</string>
+    <string name="diag_cloud_book_bytes">已接收位元組</string>
+    <string name="diag_cloud_book_total">檔案總位元組</string>
+    <string name="diag_cloud_book_attempt">請求重試次數</string>
+    <string name="diag_cloud_book_local_file">本機原檔案可用</string>
+    <string name="diag_cloud_book_chapters">目錄章節數</string>
+    <string name="diag_cloud_book_background">背景自動下載</string>
+</resources>

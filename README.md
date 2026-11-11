@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/kkyu9527/kixyubook/releases/latest"><img src="https://img.shields.io/github/v/release/kkyu9527/kixyubook?display_name=tag&amp;sort=semver&amp;label=Release" alt="Latest release"></a>
-  <a href="https://developer.android.com/about/versions/oreo"><img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&amp;logoColor=white" alt="Android 8.0+"></a>
+  <a href="https://developer.android.com/about/versions/13"><img src="https://img.shields.io/badge/Android-13%2B-3DDC84?logo=android&amp;logoColor=white" alt="Android 13+"></a>
   <a href="https://kotlinlang.org/"><img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&amp;logoColor=white" alt="Kotlin 2.4"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
 </p>
@@ -28,7 +28,7 @@ Kixyu Book 是一款 local-first Android 小说阅读器，专注 TXT、EPUB、�
 
 ## 下载
 
-前往 [GitHub Releases](https://github.com/kkyu9527/kixyubook/releases/latest) 下载最新 APK。应用支持 Android 8.0（API 26）及以上版本，并提供应用内更新检查。
+前往 [GitHub Releases](https://github.com/kkyu9527/kixyubook/releases/latest) 下载最新 APK。应用支持 Android 13（API 33）及以上版本，并提供应用内更新检查。
 
 当前提供 Android 版本，不提供 Google Play、Windows、iOS 或 Web 版本。请只从本仓库 Release 页面下载安装包。
 
@@ -70,7 +70,7 @@ Kixyu Book 是一款 local-first Android 小说阅读器，专注 TXT、EPUB、�
 ### Android 体验
 
 - Material 3 / MIUIX 双界面体系
-- 简体中文、繁体中文、英文、日语；Android 13+ 支持应用内独立选择语言，旧版跟随系统（[翻译维护](docs/LOCALIZATION.md)）
+- 简体中文、繁体中文、英文、日语；支持应用内独立选择语言（[翻译维护](docs/LOCALIZATION.md)）
 - Material You 动态取色与自定义强调色
 - Edge-to-Edge、透明手势导航区和 Predictive Back
 - 高刷新率、Baseline Profile 与启动性能优化
@@ -196,6 +196,8 @@ Profile 任务会在目标设备上安装和卸载测试 APK，建议使用专�
 欢迎通过 [Issues](https://github.com/kkyu9527/kixyubook/issues) 报告问题或提出建议。提交问题时请尽量附上 Android 版本、设备型号、应用版本、复现步骤和必要的日志或录屏。
 
 如需提交代码，请先创建 Issue 说明目标，确保改动保持模块边界、复用 Design System，并同时验证 Material 3 与 MIUIX 两种界面风格。
+
+玻璃组件基于 [Glasmio](https://github.com/NEORUAA/Glasmio)（Apache-2.0），第三方许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 许可证
 

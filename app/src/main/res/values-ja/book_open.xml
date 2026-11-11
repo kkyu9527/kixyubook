@@ -1,0 +1,7 @@
+<resources>
+    <string name="book_open_preparing">書籍を準備しています</string>
+    <string name="book_open_failed">書籍を開けませんでした</string>
+    <string name="book_open_retry">再試行</string>
+    <string name="book_open_stay">本棚に戻る</string>
+    <string name="book_open_background">本棚に戻り、クラウド同期画面でダウンロード状況の確認や再試行ができます。</string>
+</resources>

@@ -48,24 +48,17 @@ internal class CloudRemoteStateApplier(
     private val drive: DriveAppDataClient,
     private val jsonDownload: (suspend (String, DriveObject) -> JSONObject)? = null,
 ) : CloudRemoteObjectApplier {
-    /** Returns true only when the book (and, for a new one, its source) is actually present. */
+    /** Register the entire shelf before the automatic source stage downloads the binary files. */
     override suspend fun restoreBook(token: String, uuid: String, knownRemote: Map<String, DriveObject>): Boolean {
         val key = "books/$uuid/metadata"
         val metadata = knownRemote[key] ?: return false
-        val sourceInfo = knownRemote["books/$uuid/source"]
         val imported = if (!books.bookExists(uuid)) {
-            if (sourceInfo == null) return false
-            val metaFile = tempFile("book-meta")
-            val sourceFile = tempFile("book-source")
-            try {
-                drive.download(token, metadata.id, metaFile)
-                drive.download(token, sourceInfo.id, sourceFile)
-                val book = parseBook(JSONObject(metaFile.readText()))
+            withJsonDownload(token, metadata) { payload ->
+                val book = parseBook(payload)
                 require(book.uuid == uuid) { "book identity does not match its Drive object key" }
-                mutations.withoutRecording { bookRepository.restoreSyncedBook(book, sourceFile.absolutePath) }
-            } finally {
-                metaFile.delete()
-                sourceFile.delete()
+                mutations.withoutRecording {
+                    bookRepository.registerSyncedBook(book)
+                }
             }
         } else {
             withJsonDownload(token, metadata) { payload ->
@@ -280,14 +273,15 @@ internal class CloudRemoteStateApplier(
         info: DriveObject,
         block: suspend (JSONObject) -> T,
     ): T {
-        jsonDownload?.let { return block(it(token, info)) }
-        val file = tempFile("json")
-        return try {
-            drive.download(token, info.id, file)
-            block(JSONObject(file.readText()))
-        } finally {
-            file.delete()
+        val json = CloudReadingPayloads(syncDao).read(info) {
+            jsonDownload?.let { return@read it(token, info) }
+            val file = tempFile("json")
+            try {
+                drive.download(token, info.id, file)
+                JSONObject(file.readText())
+            } finally { file.delete() }
         }
+        return block(json)
     }
 
     private fun tempFile(prefix: String) = File(context.cacheDir, "cloud-sync/$prefix-${UUID.randomUUID()}")
@@ -354,11 +348,22 @@ internal suspend fun replaceBookmarksFromRemote(
     if (!books.bookExists(bookUuid)) return false
     return database.withTransaction {
         if (syncDao.pendingCount(SyncEntityType.BOOKMARKS.name, bookUuid) > 0) return@withTransaction false
+        val items = json.optJSONArray("items") ?: JSONArray()
+        val targets = mutableMapOf<Int, com.kixyu9527.kixyubook.core.database.entity.ChapterEntity>()
+        for (index in 0 until items.length()) {
+            val item = items.getJSONObject(index)
+            if (item.optString("status", BOOKMARK_STATUS_LOCATED) == BOOKMARK_STATUS_PENDING) continue
+            val chapter = books.getChapterByKey(bookUuid, item.optString("chapterKey"))
+                ?: books.getChapter(bookUuid, item.optInt("chapterIndex"))
+                ?: return@withTransaction false
+            targets[index] = chapter
+        }
+        // A cloud shelf entry has no chapters yet. Keep the entire remote snapshot pending rather
+        // than clearing local rows, dropping its located items and acknowledging an empty list.
         // A snapshot is authoritative for the whole bookmark list, so a pending record the remote
         // no longer carries is a remote deletion and must be cleared locally too.
         books.deleteBookmarksForBook(bookUuid)
         books.deletePendingBookmarks(setOf(bookUuid))
-        val items = json.optJSONArray("items") ?: JSONArray()
         for (index in 0 until items.length()) {
             val value = items.getJSONObject(index)
             if (value.optString("status", BOOKMARK_STATUS_LOCATED) == BOOKMARK_STATUS_PENDING) {
@@ -373,9 +378,7 @@ internal suspend fun replaceBookmarksFromRemote(
                 )
                 continue
             }
-            val chapter = books.getChapterByKey(bookUuid, value.optString("chapterKey"))
-                ?: books.getChapter(bookUuid, value.optInt("chapterIndex"))
-                ?: continue
+            val chapter = targets.getValue(index)
             books.insertBookmark(
                 BookmarkEntity(
                     uuid = value.getString("uuid"),

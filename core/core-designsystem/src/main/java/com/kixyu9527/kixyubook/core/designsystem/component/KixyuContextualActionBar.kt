@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,7 +77,7 @@ val LocalKixyuContextualBarController = staticCompositionLocalOf<KixyuContextual
     null
 }
 
-/** Context actions share the exact geometry, backdrop and bottom inset contract of navigation. */
+/** Context actions share the exact bottom-island material and geometry contract of navigation. */
 @Composable
 fun KixyuContextualActionBar(
     actions: List<KixyuContextualAction>,
@@ -104,11 +103,10 @@ fun KixyuContextualActionBar(
                 .padding(bottom = KixyuSize.bottomNavigationBottomGap),
             contentAlignment = Alignment.TopCenter,
         ) {
-            KixyuGlassSurface(
+            KixyuGlassIsland(
                 backdrop = backdrop,
                 modifier = Modifier.fillMaxSize(),
-                shape = CircleShape,
-                fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                fallbackContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             ) {
                 Row(
                     modifier = Modifier

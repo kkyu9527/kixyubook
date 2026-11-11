@@ -1,0 +1,19 @@
+<resources>
+    <string name="settings_book_download_tasks">Book downloads</string>
+    <string name="settings_book_download_pending">Queued for automatic download</string>
+    <string name="settings_book_download_running">Book files are downloading automatically in the background.</string>
+    <string name="settings_book_download_waiting_network">Waiting for network; resumes automatically</string>
+    <string name="settings_book_download_failed">Download failed. Other books continue; tap to retry this book.</string>
+    <string name="settings_book_download_failed_row">Download failed; tap retry</string>
+    <string name="settings_book_download_retry_named">Retry downloading %1$s</string>
+    <string name="settings_book_download_empty">No book files to download</string>
+    <string name="settings_book_download_empty_summary">Files download automatically when needed; no action required.</string>
+    <string name="settings_book_download_section_failed">Failed (%1$d)</string>
+    <string name="settings_book_download_section_running">Downloading (%1$d)</string>
+    <string name="settings_book_download_section_waiting">Waiting (%1$d)</string>
+    <string name="settings_book_download_summary_empty">All book files are downloaded</string>
+    <string name="settings_book_download_summary_failed">%1$d failed, %2$d pending</string>
+    <string name="settings_book_download_summary_running">Downloading %1$d of %2$d</string>
+    <string name="settings_book_download_summary_pending">%1$d books waiting to download</string>
+    <string name="settings_book_download_percent">%1$d%%</string>
+</resources>

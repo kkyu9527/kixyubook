@@ -25,6 +25,19 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class RemoteBookmarkApplyTest {
+    @Test fun aSnapshotReceivedBeforeTheDirectoryIsNotAcknowledgedAsAnEmptyList() = runBlocking(Dispatchers.IO) {
+        val database = database()
+        try {
+            val books = database.bookDao()
+            books.insertBook(BookEntity("book", "书", "", "", null, "EPUB", "google-drive://book", "", 0, "hash", ""))
+            val remote = remoteJson("remote")
+            assertFalse(replaceBookmarksFromRemote(database, books, database.syncDao(), remote))
+            books.insertChapter(ChapterEntity(1, "book", "第一章", 0, chapterKey = "k"))
+            assertTrue(replaceBookmarksFromRemote(database, books, database.syncDao(), remote))
+            assertEquals(listOf("remote"), books.getAllBookmarkEntities().map { it.uuid })
+        } finally { database.close() }
+    }
+
     private fun remoteJson(vararg uuids: String): JSONObject = JSONObject()
         .put("bookUuid", "book")
         .put(

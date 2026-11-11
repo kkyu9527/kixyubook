@@ -26,7 +26,7 @@ import java.util.Locale
  */
 @Composable
 internal fun ReadingHabitsSection(
-    state: SettingsUiState,
+    state: ReadingHabitsState,
     onSetGoal: (Int) -> Unit,
     onRequestReminderEnabled: (Boolean) -> Unit,
     onSetReminderTime: (Int, Int) -> Unit,
@@ -44,42 +44,41 @@ internal fun ReadingHabitsSection(
         KixyuDivider()
         KixyuSettingsRow(
             title = stringResource(R.string.settings_daily_goal_reminder),
-            supportingText = if (state.readingReminder.enabled) {
+            supportingText = if (state.reminder.enabled) {
                 stringResource(
                     R.string.settings_reminder_enabled,
                     "%02d:%02d".format(
                         LocalConfiguration.current.locales[0],
-                        state.readingReminder.hour,
-                        state.readingReminder.minute,
+                        state.reminder.hour,
+                        state.reminder.minute,
                     ),
                 )
             } else {
                 stringResource(R.string.settings_reminder_disabled)
             },
-            onClick = { onRequestReminderEnabled(!state.readingReminder.enabled) },
+            onClick = { onRequestReminderEnabled(!state.reminder.enabled) },
         ) {
             KixyuSwitch(
-                checked = state.readingReminder.enabled,
+                checked = state.reminder.enabled,
                 onCheckedChange = onRequestReminderEnabled,
             )
         }
-        if (state.readingReminder.enabled) {
+        if (state.reminder.enabled) {
             KixyuDivider()
             KixyuSettingsRow(
                 title = stringResource(R.string.settings_reminder_time),
-                supportingText = stringResource(R.string.settings_reminder_delay_summary),
                 onClick = { reminderTimeVisible = true },
             ) {
                 Text(
-                    "%02d:%02d".format(Locale.US, state.readingReminder.hour, state.readingReminder.minute),
+                    "%02d:%02d".format(Locale.US, state.reminder.hour, state.reminder.minute),
                     color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                 )
             }
         }
     }
     if (reminderTimeVisible) {
-        var hour by rememberSaveable { mutableIntStateOf(state.readingReminder.hour) }
-        var minute by rememberSaveable { mutableIntStateOf(state.readingReminder.minute) }
+        var hour by rememberSaveable { mutableIntStateOf(state.reminder.hour) }
+        var minute by rememberSaveable { mutableIntStateOf(state.reminder.minute) }
         KixyuActionDialog(
             show = true,
             title = stringResource(R.string.settings_reminder_time),

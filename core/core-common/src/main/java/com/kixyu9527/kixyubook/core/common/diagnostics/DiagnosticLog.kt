@@ -103,7 +103,7 @@ object DiagnosticLog {
         .replace(Regex("[\\r\\n|]+"), " ")
         .take(MAX_FIELD_LENGTH)
 
-    enum class Category { LIBRARY, SYNC, IMPORT, EPUB_PARSE, READER, PAGINATION }
+    enum class Category { LIBRARY, SYNC, IMPORT, EPUB_PARSE, READER, PAGINATION, SETTINGS }
 }
 
 /** Stable, R8-independent description suitable for persisted diagnostic records. */

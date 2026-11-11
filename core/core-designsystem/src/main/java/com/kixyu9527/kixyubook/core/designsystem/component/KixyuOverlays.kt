@@ -2,7 +2,6 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
-import android.os.Build
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -85,7 +84,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogWindowProvider
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalAppUiStyle
-import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassFrostLevel
 import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
 import top.yukonga.miuix.kmp.basic.Button as MiuixButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
@@ -110,7 +108,7 @@ val KixyuEdgeToEdgeDialogProperties = DialogProperties(
     decorFitsSystemWindows = false,
 )
 
-private val KixyuAdaptiveDialogProperties = DialogProperties(
+internal val KixyuAdaptiveDialogProperties = DialogProperties(
     decorFitsSystemWindows = false,
     usePlatformDefaultWidth = false,
     dismissOnBackPress = false,
@@ -349,12 +347,14 @@ fun KixyuPopupMenu(
     width: Dp? = null,
     alignEnd: Boolean = false,
     offset: DpOffset = DpOffset.Zero,
+    shape: Shape = KixyuPopupShape,
 ) {
     if (LocalKixyuGlassEffectEnabled.current) {
         KixyuGlassDropdownMenu(
             expanded = expanded,
             onDismissRequest = onDismissRequest,
             offset = offset,
+            shape = shape,
             modifier = modifier
                 .then(
                     width?.let { Modifier.width(it) }
@@ -483,212 +483,43 @@ internal fun KixyuGlassDropdownMenu(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     offset: DpOffset = DpOffset.Zero,
+    shape: Shape = KixyuPopupShape,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val shape = MaterialTheme.shapes.extraLarge
     val backdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND
     val fallbackContainer = if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixTheme.colorScheme.surfaceContainer
     } else {
         MaterialTheme.colorScheme.surfaceContainerHigh
     }
+    val glassEnabled = LocalKixyuGlassEffectEnabled.current
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
         offset = offset,
-        modifier = modifier.kixyuPopupGlassSurfaceModifier(
-            shape = shape,
-            fallbackContainerColor = fallbackContainer,
-            windowBlurred = backdropEffect.blursWindow,
-        ),
+        modifier = modifier,
         shape = shape,
-        containerColor = Color.Transparent,
+        containerColor = if (glassEnabled) Color.Transparent else fallbackContainer,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
         if (backdropEffect.blursWindow) KixyuPopupWindowEffect()
-        CompositionLocalProvider(
-            LocalContentColor provides MaterialTheme.colorScheme.onSurface,
-        ) {
-            content()
-        }
-    }
-}
-
-@Composable
-fun KixyuTonalIconButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    minSize: Dp = KixyuSize.readerControlButton,
-    containerColor: Color = Color.Unspecified,
-    contentColor: Color = Color.Unspecified,
-    disabledContainerColor: Color = Color.Unspecified,
-    disabledContentColor: Color = Color.Unspecified,
-    content: @Composable () -> Unit,
-) {
-    val accessibleMinSize = maxOf(minSize, 48.dp)
-    val interactiveModifier = modifier
-        .minimumInteractiveComponentSize()
-        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-    val materialColors = MaterialTheme.colorScheme
-    val useMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
-    val resolvedContainer = if (containerColor == Color.Unspecified) {
-        if (useMiuix) materialColors.surfaceContainerHigh else materialColors.secondaryContainer
-    } else containerColor
-    val resolvedContent = if (contentColor == Color.Unspecified) {
-        materialColors.primary
-    } else contentColor
-    val resolvedDisabledContainer = if (disabledContainerColor == Color.Unspecified) {
-        if (useMiuix && containerColor == Color.Unspecified) resolvedContainer else resolvedContainer.copy(alpha = .38f)
-    } else disabledContainerColor
-    val resolvedDisabledContent = if (disabledContentColor == Color.Unspecified) {
-        if (useMiuix && contentColor == Color.Unspecified) resolvedContent else resolvedContent.copy(alpha = .38f)
-    } else disabledContentColor
-    if (useMiuix) {
-        MiuixIconButton(
-            onClick = onClick,
-            modifier = interactiveModifier,
-            enabled = enabled,
-            backgroundColor = if (enabled) resolvedContainer else resolvedDisabledContainer,
-            minWidth = accessibleMinSize,
-            minHeight = accessibleMinSize,
-        ) {
+        if (glassEnabled) {
+            KixyuGlasmioSurface(
+                backdrop = LocalKixyuGlassBackdrop.current,
+                modifier = Modifier,
+                shape = shape,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
+                Column { content() }
+            }
+        } else {
             CompositionLocalProvider(
-                LocalContentColor provides if (enabled) resolvedContent else resolvedDisabledContent,
-                content = content,
-            )
+                LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+            ) {
+                content()
+            }
         }
-    } else {
-        FilledTonalIconButton(
-            onClick = onClick,
-            modifier = interactiveModifier,
-            enabled = enabled,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = resolvedContainer,
-                contentColor = resolvedContent,
-                disabledContainerColor = resolvedDisabledContainer,
-                disabledContentColor = resolvedDisabledContent,
-            ),
-            content = content,
-        )
-    }
-}
-
-@Composable
-fun KixyuIconButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    content: @Composable () -> Unit,
-) {
-    val interactiveModifier = modifier
-        .minimumInteractiveComponentSize()
-        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-    val contentColor = MaterialTheme.colorScheme.primary
-    val disabledContentColor = contentColor.copy(alpha = .38f)
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
-        MiuixIconButton(
-            onClick = onClick,
-            modifier = interactiveModifier,
-            enabled = enabled,
-        ) {
-            CompositionLocalProvider(
-                LocalContentColor provides if (enabled) contentColor else disabledContentColor,
-                content = content,
-            )
-        }
-    } else {
-        IconButton(
-            onClick = onClick,
-            modifier = interactiveModifier,
-            enabled = enabled,
-            colors = IconButtonDefaults.iconButtonColors(
-                contentColor = contentColor,
-                disabledContentColor = disabledContentColor,
-            ),
-            content = content,
-        )
-    }
-}
-
-@Composable
-fun KixyuButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
-        MiuixButton(
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-            colors = MiuixButtonDefaults.buttonColorsPrimary(),
-        ) { MiuixText(text, maxLines = 1) }
-    } else {
-        Button(
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-        ) { Text(text, maxLines = 1) }
-    }
-}
-
-@Composable
-fun KixyuSecondaryButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
-        MiuixButton(
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-            colors = MiuixButtonDefaults.buttonColors(),
-        ) { MiuixText(text, maxLines = 1) }
-    } else {
-        FilledTonalButton(
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-        ) { Text(text, maxLines = 1) }
-    }
-}
-
-@Composable
-fun KixyuTextButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
-        val accent = MiuixTheme.colorScheme.primary
-        MiuixTextButton(
-            text = text,
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-            colors = MiuixButtonDefaults.textButtonColors(
-                color = Color.Transparent,
-                disabledColor = Color.Transparent,
-                textColor = accent,
-                disabledTextColor = accent.copy(alpha = .38f),
-            ),
-        )
-    } else {
-        TextButton(
-            onClick = onClick,
-            modifier = modifier,
-            enabled = enabled,
-            colors = ButtonDefaults.textButtonColors(
-                contentColor = MaterialTheme.colorScheme.primary,
-                disabledContentColor = MaterialTheme.colorScheme.primary.copy(alpha = .38f),
-            ),
-        ) { Text(text, maxLines = 1) }
     }
 }
 
@@ -704,7 +535,7 @@ internal val KixyuPopupBackdropEffect.blursWindow: Boolean
 @Composable
 fun KixyuPopupSurface(
     modifier: Modifier = Modifier,
-    shape: Shape = MaterialTheme.shapes.extraLarge,
+    shape: Shape = KixyuPopupShape,
     shadowElevation: Dp = KixyuSpacing.extraSmall,
     containerColor: Color? = null,
     contentColor: Color? = null,
@@ -720,17 +551,13 @@ fun KixyuPopupSurface(
     val windowBlurred = backdropEffect.blursWindow
     if (LocalKixyuGlassEffectEnabled.current) {
         if (windowBlurred) KixyuPopupWindowEffect()
-        Box(
-            modifier = modifier.kixyuPopupGlassSurfaceModifier(
-                shape = shape,
-                fallbackContainerColor = resolvedContainer,
-                windowBlurred = windowBlurred,
-            ),
-        ) {
-            CompositionLocalProvider(LocalContentColor provides resolvedContent) {
-                content()
-            }
-        }
+        KixyuGlasmioSurface(
+            backdrop = LocalKixyuGlassBackdrop.current,
+            modifier = modifier,
+            shape = shape,
+            contentColor = resolvedContent,
+            content = { content() },
+        )
     } else if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixSurface(
             modifier = modifier,
@@ -782,6 +609,7 @@ fun KixyuSafeTopPopup(
     visible: Boolean,
     modifier: Modifier = Modifier,
     shadowElevation: Dp = 0.dp,
+    surfaceModifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -801,7 +629,7 @@ fun KixyuSafeTopPopup(
                 scaleOut(tween(KixyuMotion.ReaderPopupExitMillis), targetScale = .98f),
         ) {
             KixyuPopupSurface(
-                modifier = Modifier.widthIn(max = KixyuSize.transientPopupMaxWidth),
+                modifier = Modifier.widthIn(max = KixyuSize.transientPopupMaxWidth).then(surfaceModifier),
                 shadowElevation = shadowElevation,
                 content = content,
             )
@@ -961,242 +789,15 @@ fun KixyuSnackbarHost(
 }
 
 @Composable
-fun KixyuActionDialog(
-    show: Boolean,
-    title: String,
-    onDismissRequest: () -> Unit,
-    confirmLabel: String,
-    onConfirm: () -> Unit,
-    confirmEnabled: Boolean = true,
-    alternativeLabel: String? = null,
-    onAlternative: (() -> Unit)? = null,
-    alternativeEnabled: Boolean = true,
-    dismissLabel: String? = stringResource(R.string.kixyu_cancel),
-    dismissRequiresConfirmation: Boolean = false,
-    /** Dialogs with dense lists can opt into a brighter surface and full-contrast content. */
-    containerColor: Color? = null,
-    contentColor: Color? = null,
-    backdropEffect: KixyuPopupBackdropEffect = KixyuPopupBackdropEffect.BLUR_BEHIND,
-    content: @Composable () -> Unit,
-) {
-    if (!show) return
-    val isMiuix = LocalAppUiStyle.current == AppUiStyle.MIUIX
-    val isCompact = kixyuWindowWidthClass() == KixyuWindowWidthClass.COMPACT
-    val resolvedAlternativeLabel = alternativeLabel.takeIf { onAlternative != null }
-    val predictiveBackState = rememberKixyuPredictiveBackState<Unit>()
-    Dialog(
-        onDismissRequest = onDismissRequest,
-        properties = KixyuAdaptiveDialogProperties,
-    ) {
-        KixyuDialogWindowEffect(predictiveBackState.progress)
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(if (isCompact) KixyuSpacing.large else KixyuSpacing.extraLarge),
-            contentAlignment = Alignment.Center,
-        ) {
-            val surfaceWidth = minOf(maxWidth, KixyuSize.actionDialogMaxWidth)
-            val surfaceHeight = minOf(maxHeight, KixyuSize.adaptiveDialogMaxHeight)
-            KixyuPopupSurface(
-                modifier = Modifier.width(surfaceWidth)
-                    .heightIn(max = surfaceHeight)
-                    .kixyuPredictivePopupTransform { predictiveBackState.progress },
-                shadowElevation = KixyuSpacing.small,
-                containerColor = containerColor,
-                contentColor = contentColor,
-                backdropEffect = backdropEffect,
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(KixyuSpacing.large),
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                    )
-                    Box(
-                        Modifier.weight(1f, fill = false)
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        CompositionLocalProvider(
-                            LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant,
-                            content = content,
-                        )
-                    }
-                    if (isMiuix) {
-                        KixyuMiuixWideActionButtons(
-                            primaryLabel = confirmLabel,
-                            onPrimary = onConfirm,
-                            primaryEnabled = confirmEnabled,
-                            secondaryLabel = resolvedAlternativeLabel ?: dismissLabel,
-                            onSecondary = onAlternative ?: onDismissRequest,
-                            secondaryEnabled = if (resolvedAlternativeLabel != null) {
-                                alternativeEnabled
-                            } else {
-                                true
-                            },
-                            tertiaryLabel = dismissLabel.takeIf { resolvedAlternativeLabel != null },
-                            onTertiary = onDismissRequest,
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                        )
-                    } else if (isCompact && resolvedAlternativeLabel != null) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-                            ) {
-                                KixyuSecondaryButton(
-                                    text = resolvedAlternativeLabel,
-                                    onClick = onAlternative ?: {},
-                                    enabled = alternativeEnabled,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                KixyuButton(
-                                    text = confirmLabel,
-                                    onClick = onConfirm,
-                                    enabled = confirmEnabled,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            dismissLabel?.let {
-                                KixyuTextButton(
-                                    text = it,
-                                    onClick = onDismissRequest,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(
-                                KixyuSpacing.small,
-                                Alignment.End,
-                            ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (resolvedAlternativeLabel != null) {
-                                dismissLabel?.let {
-                                    KixyuTextButton(text = it, onClick = onDismissRequest)
-                                }
-                                Spacer(Modifier.weight(1f))
-                                KixyuSecondaryButton(
-                                    text = resolvedAlternativeLabel,
-                                    onClick = onAlternative ?: {},
-                                    enabled = alternativeEnabled,
-                                    modifier = Modifier.widthIn(min = 140.dp),
-                                )
-                            } else {
-                                dismissLabel?.let {
-                                    KixyuSecondaryButton(
-                                        text = it,
-                                        onClick = onDismissRequest,
-                                        modifier = Modifier.widthIn(min = 112.dp),
-                                    )
-                                }
-                            }
-                            KixyuButton(
-                                text = confirmLabel,
-                                onClick = onConfirm,
-                                enabled = confirmEnabled,
-                                modifier = Modifier.widthIn(min = 112.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        KixyuPredictiveBackHandler(
-            target = Unit,
-            state = predictiveBackState,
-            onBack = { onDismissRequest() },
-            commitAllowed = { !dismissRequiresConfirmation },
-        )
-    }
-}
-
-/**
- * HyperOS-style popup actions: wide, equal buttons inside the popup, with a bounded action group
- * so tablet and unfolded layouts do not stretch controls across the whole window.
- */
-@Composable
-private fun KixyuMiuixWideActionButtons(
-    primaryLabel: String?,
-    onPrimary: () -> Unit,
-    modifier: Modifier = Modifier,
-    primaryEnabled: Boolean = true,
-    secondaryLabel: String? = null,
-    onSecondary: () -> Unit = {},
-    secondaryEnabled: Boolean = true,
-    tertiaryLabel: String? = null,
-    onTertiary: () -> Unit = {},
-) {
-    Column(
-        modifier = modifier.widthIn(max = 520.dp).fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
-    ) {
-        if (primaryLabel != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
-            ) {
-                secondaryLabel?.let {
-                    KixyuSecondaryButton(
-                        text = it,
-                        onClick = onSecondary,
-                        enabled = secondaryEnabled,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                KixyuButton(
-                    text = primaryLabel,
-                    onClick = onPrimary,
-                    enabled = primaryEnabled,
-                    modifier = if (secondaryLabel != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
-                )
-            }
-        } else if (secondaryLabel != null) {
-            KixyuSecondaryButton(
-                text = secondaryLabel,
-                onClick = onSecondary,
-                enabled = secondaryEnabled,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        tertiaryLabel?.let {
-            KixyuSecondaryButton(
-                text = it,
-                onClick = onTertiary,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-/**
- * Adds the same platform blur used by dialogs and sheets to Compose [androidx.compose.ui.window.Popup]
- * windows. Dropdown menus and custom context menus otherwise have the shared tint and border but
- * no blurred image behind them, which makes large menus such as the library category selector look
- * like a different glass material.
- */
-@Composable
 @Suppress("DEPRECATION")
 private fun KixyuPopupWindowEffect() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
     if (!kixyuCrossWindowBlurAvailable()) return
     val view = LocalView.current
     // Compose Dialog already has a stable Window API and is handled by KixyuDialogWindowEffect.
     if (view.parent is DialogWindowProvider) return
     val glassEnabled = LocalKixyuGlassEffectEnabled.current
-    val frostLevel = LocalKixyuGlassFrostLevel.current
     val blurRadius = with(LocalDensity.current) {
-        frostLevel.kixyuFrostBlurDp().dp.roundToPx()
+        KixyuGlassStyle.frostRadius.roundToPx()
     }
     DisposableEffect(view, glassEnabled, blurRadius) {
         if (!glassEnabled) return@DisposableEffect onDispose {}
@@ -1221,13 +822,11 @@ private fun KixyuPopupWindowEffect() {
 
 @Composable
 @Suppress("DEPRECATION") // Dialog windows still require the legacy soft-input resize flag.
-private fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
+internal fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
     val view = LocalView.current
     val glassEnabled = LocalKixyuGlassEffectEnabled.current
-    val frostLevel = LocalKixyuGlassFrostLevel.current
     val blurRadius = with(LocalDensity.current) {
-        (frostLevel.kixyuFrostBlurDp() * (1f - backProgress.coerceIn(0f, 1f)))
-            .dp.roundToPx()
+        (KixyuGlassStyle.frostRadius * (1f - backProgress.coerceIn(0f, 1f))).roundToPx()
     }
     DisposableEffect(view, glassEnabled) {
         val window = (view.parent as? DialogWindowProvider)?.window
@@ -1235,13 +834,9 @@ private fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
         val originalMode = window.attributes.softInputMode
         val originallyBlurred = window.attributes.flags
             .and(WindowManager.LayoutParams.FLAG_BLUR_BEHIND) != 0
-        val originalBlurRadius = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            window.attributes.blurBehindRadius
-        } else {
-            null
-        }
+        val originalBlurRadius = window.attributes.blurBehindRadius
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && glassEnabled) {
+        if (glassEnabled) {
             window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             window.attributes = window.attributes.apply {
                 blurBehindRadius = blurRadius
@@ -1249,13 +844,11 @@ private fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
         }
         onDispose {
             window.setSoftInputMode(originalMode)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                window.attributes = window.attributes.apply {
-                    blurBehindRadius = originalBlurRadius ?: 0
-                }
-                if (!originallyBlurred) {
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                }
+            window.attributes = window.attributes.apply {
+                blurBehindRadius = originalBlurRadius
+            }
+            if (!originallyBlurred) {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             }
         }
     }
@@ -1263,9 +856,7 @@ private fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
     // flags) every frame. Only send a window update when the rounded pixel radius changes.
     SideEffect {
         val window = (view.parent as? DialogWindowProvider)?.window
-        if (window != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && glassEnabled &&
-            window.attributes.blurBehindRadius != blurRadius
-        ) {
+        if (window != null && glassEnabled && window.attributes.blurBehindRadius != blurRadius) {
             window.attributes = window.attributes.apply { blurBehindRadius = blurRadius }
         }
     }

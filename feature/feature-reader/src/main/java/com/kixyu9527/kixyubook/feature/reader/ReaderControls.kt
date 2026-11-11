@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassIsland
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
@@ -182,11 +183,10 @@ internal fun ReaderControls(
                     modifier = Modifier.kixyuPredictivePopupTransform(popupBackProgress),
                 )
             }
-            KixyuGlassSurface(
+            KixyuGlassIsland(
                 backdrop = backdrop,
                 modifier = Modifier.align(Alignment.BottomCenter)
-                    .padding(bottom = KixyuSize.readerControlInset)
-                    .then(controlsBackModifier),
+                    .padding(bottom = KixyuSize.readerControlInset),
                 fallbackContainerColor = dockContainerColor,
                 contentColor = dockContentColor,
             ) {

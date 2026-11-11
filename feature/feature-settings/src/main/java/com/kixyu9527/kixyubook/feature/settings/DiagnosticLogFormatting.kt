@@ -86,10 +86,12 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
         "READER" -> resources.getString(R.string.diag_reading)
         "PAGINATION" -> resources.getString(R.string.diag_pagination)
         "CACHE" -> resources.getString(R.string.diag_cache)
+        "SETTINGS" -> resources.getString(R.string.diag_settings)
         else -> resources.getString(R.string.diag_other)
     }
 
     private fun eventDescription(event: String, outcome: String?, category: String): Pair<String, String> = when (event) {
+        "cloud_book_open" -> resources.getString(R.string.diag_cloud_book_title) to resources.getString(R.string.diag_cloud_book_description)
         "book_open_activity_failed" ->
             resources.getString(R.string.diag_could_not_save_last_opened_time) to resources.getString(R.string.diag_the_library_order_was_updated_but_saving_the_last_opened_time_failed)
         "book_exported" -> resources.getString(R.string.diag_book_exported) to resources.getString(R.string.diag_the_original_book_file_was_copied_to_the_chosen_location)
@@ -173,6 +175,14 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
         } else {
             resources.getString(R.string.diag_page_turn_complete) to resources.getString(R.string.diag_the_reader_crossed_a_chapter_boundary)
         }
+        "settings_write_failed" -> resources.getString(R.string.diag_settings_write_failed) to
+            resources.getString(R.string.diag_settings_write_failed_description)
+        "settings_locale_change_failed" -> resources.getString(R.string.diag_settings_locale_failed) to
+            resources.getString(R.string.diag_settings_locale_failed_description)
+        "settings_filename_rule_failed" -> resources.getString(R.string.diag_settings_rule_failed) to
+            resources.getString(R.string.diag_settings_rule_failed_description)
+        "settings_backup_failed" -> resources.getString(R.string.diag_settings_backup_failed) to
+            resources.getString(R.string.diag_settings_backup_failed_description)
         "cache_stats" -> resources.getString(R.string.diag_cache_stats) to
             resources.getString(R.string.diag_cache_hits_misses_evictions_and_repeated_parses_for_this_session)
         "restore" -> resources.getString(R.string.diag_pagination_cache_restored) to resources.getString(R.string.diag_previously_saved_pages_were_reused_without_new_layout_work)
@@ -253,6 +263,22 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
     }
 
     private fun fieldLabel(key: String, category: String): String = when (key) {
+        "openStage" -> resources.getString(R.string.diag_cloud_book_stage)
+        "receivedBytes" -> resources.getString(R.string.diag_cloud_book_bytes)
+        "totalBytes" -> resources.getString(R.string.diag_cloud_book_total)
+        "attempt" -> if (category == "SETTINGS") {
+            resources.getString(R.string.diag_attempt)
+        } else {
+            resources.getString(R.string.diag_cloud_book_attempt)
+        }
+        "failure" -> if (category == "SETTINGS") {
+            resources.getString(R.string.diag_failure_type)
+        } else {
+            resources.getString(R.string.diag_failure)
+        }
+        "localFile" -> resources.getString(R.string.diag_cloud_book_local_file)
+        "directoryChapters" -> resources.getString(R.string.diag_cloud_book_chapters)
+        "background" -> resources.getString(R.string.diag_cloud_book_background)
         "chapter" -> if (category == "PAGINATION") resources.getString(R.string.diag_chapter_id) else resources.getString(R.string.diag_chapter_index)
         "fromChapter" -> resources.getString(R.string.diag_from_chapter)
         "direction" -> resources.getString(R.string.diag_page_turn_direction)
@@ -291,6 +317,8 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
         "indexed" -> resources.getString(R.string.diag_chapters_indexed)
         "preempted" -> resources.getString(R.string.diag_times_yielded_to_foreground)
         "reason" -> resources.getString(R.string.diag_error_reason)
+        "target" -> resources.getString(R.string.diag_setting_key)
+        "errorType" -> resources.getString(R.string.diag_error_type)
         "stage" -> resources.getString(R.string.diag_interrupted_or_failed_stage)
         "statusCode" -> resources.getString(R.string.diag_http_status_code)
         "followedByFullSync" -> resources.getString(R.string.diag_full_sync_scheduled)
@@ -320,6 +348,11 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
     }
 
     private fun readableValue(key: String, value: String): String = when (key) {
+        "totalBytes" -> if (value == "0") resources.getString(R.string.diag_undetermined) else value
+        "openStage" -> runCatching {
+            resources.getString(com.kixyu9527.kixyubook.core.designsystem.component.bookPreparationStageLabel(
+                com.kixyu9527.kixyubook.core.common.model.BookPreparationStage.valueOf(value)))
+        }.getOrDefault(value)
         "prefetch" -> if (value == "true") resources.getString(R.string.diag_background_prefetch) else resources.getString(R.string.diag_current_reading)
         "prefetched" -> if (value == "true") resources.getString(R.string.diag_prefetched) else resources.getString(R.string.diag_on_demand_load)
         "preferredBook" -> if (value == "true") resources.getString(R.string.diag_yes) else resources.getString(R.string.diag_no)
@@ -396,6 +429,13 @@ internal class DiagnosticLogFormatter(private val resources: android.content.res
             "preparing_uploads" -> resources.getString(R.string.diag_preparing_upload_data)
             "uploading" -> resources.getString(R.string.diag_uploading_local_changes)
             "finalizing" -> resources.getString(R.string.diag_saving_sync_results)
+            "persist" -> resources.getString(R.string.diag_stage_persist)
+            "locale" -> resources.getString(R.string.diag_stage_locale)
+            "flush" -> resources.getString(R.string.diag_stage_flush)
+            "inspect" -> resources.getString(R.string.diag_stage_inspect)
+            "repair" -> resources.getString(R.string.diag_stage_repair)
+            "export" -> resources.getString(R.string.diag_stage_export)
+            "restore" -> resources.getString(R.string.diag_stage_restore)
             else -> value
         }
         else -> when (value) {

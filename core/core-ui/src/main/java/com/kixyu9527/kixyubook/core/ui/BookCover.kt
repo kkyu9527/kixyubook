@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -114,13 +116,22 @@ fun BookCover(
         bitmap = coverPath?.let { BookCoverMemoryCache.load(it) }
     }
     val currentBitmap = bitmap
+    val coverShape = RoundedCornerShape(KixyuSize.bookCoverCornerRadius)
+    val coverPalette = listOf(
+        MaterialTheme.colorScheme.primaryContainer,
+        MaterialTheme.colorScheme.secondaryContainer,
+        MaterialTheme.colorScheme.tertiaryContainer,
+    )
+    val paperStart = coverPalette[(title.hashCode() and Int.MAX_VALUE) % coverPalette.size]
+    val paperEnd = MaterialTheme.colorScheme.surfaceContainerHigh
     BoxWithConstraints(
         modifier = modifier
-            .clip(RoundedCornerShape(KixyuSize.bookCoverCornerRadius))
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF35463C), Color(0xFF879487), Color(0xFFD5CDBA)),
-                ),
+            .clip(coverShape)
+            .background(Brush.linearGradient(listOf(paperStart, paperEnd)))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f),
+                shape = coverShape,
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -147,6 +158,7 @@ fun BookCover(
                 else -> 0.72f
             }
             val titleFontSize = (sizeScale * lengthScale).coerceIn(12f, 30f)
+            val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
             val titleMaxLines = when {
                 maxHeight >= 200.dp -> 6
                 maxHeight >= 140.dp -> 5
@@ -154,11 +166,11 @@ fun BookCover(
             }
             Text(
                 text = displayTitle,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontFamily = FontFamily.Serif,
-                    fontSize = titleFontSize.sp,
-                    lineHeight = (titleFontSize * 1.24f).sp,
+                    fontSize = (titleFontSize / fontScale).sp,
+                    lineHeight = (titleFontSize * 1.24f / fontScale).sp,
                 ),
                 textAlign = TextAlign.Center,
                 maxLines = titleMaxLines,

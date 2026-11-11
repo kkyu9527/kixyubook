@@ -7,7 +7,7 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -18,11 +18,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -36,53 +37,56 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.lerp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalDensity
-import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassEffectEnabled
-import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassFrostLevel
-import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.drawBackdrop
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import androidx.compose.ui.platform.testTag
+import io.github.neoruaa.glasmio.glass.render.backdrops.LayerBackdrop
+import io.github.neoruaa.glasmio.glass.render.backdrops.layerBackdrop
+import io.github.neoruaa.glasmio.glass.render.backdrops.rememberLayerBackdrop
 import kotlin.math.roundToInt
 
-/** Keeps the MIUIX backdrop type out of app and feature module APIs. */
+/** Keeps the rendering library out of app and feature module APIs. */
 @Stable
 class KixyuNavigationBackdrop internal constructor(
     internal val value: LayerBackdrop,
-)
+) {
+    internal var coordinates by mutableStateOf<LayoutCoordinates?>(null)
+}
 
 @Composable
 fun rememberKixyuNavigationBackdrop(backgroundColor: Color): KixyuNavigationBackdrop =
     key(backgroundColor) {
-        val backdrop = rememberLayerBackdrop {
-            drawRect(backgroundColor)
-            drawContent()
+        val onDraw: ContentDrawScope.() -> Unit = remember(backgroundColor) {
+            {
+                drawRect(backgroundColor)
+                drawContent()
+            }
         }
+        val backdrop = rememberLayerBackdrop(onDraw = onDraw)
         remember(backdrop) { KixyuNavigationBackdrop(backdrop) }
     }
 
 fun Modifier.kixyuNavigationBackdrop(backdrop: KixyuNavigationBackdrop): Modifier =
-    layerBackdrop(backdrop.value)
+    layerBackdrop(backdrop.value).onGloballyPositioned { backdrop.coordinates = it }
 
 /**
- * KSU-compatible floating navigation geometry shared by MIUIX and Material modes.
+ * Floating navigation geometry shared by MIUIX and Material modes.
  *
- * On Android 13+ the bar samples and refracts the page beneath it. On unsupported devices the
- * exact same 64 dp capsule and 56 dp selection indicator are retained with an opaque surface.
+ * The bar uses the shared shadow-free bottom island material. It must never paint a second sheet
+ * over the system gesture area. Both the lens and the labels share the platter's centre.
  */
 @Composable
 internal fun KixyuFloatingNavigationBar(
@@ -98,15 +102,9 @@ internal fun KixyuFloatingNavigationBar(
 
     val selectedIndex = items.indexOfFirst { it.route == selectedKey }.coerceAtLeast(0)
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
-    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
     val accentColor = MaterialTheme.colorScheme.primary.copy(alpha = 1f)
     val unselectedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 1f)
-    val isDark = surfaceContainer.luminance() < 0.5f
-    val glassEnabled = LocalKixyuGlassEffectEnabled.current
-    val glassAvailable = glassEnabled && remember { isRuntimeShaderSupported() }
-    val frostLevel = LocalKixyuGlassFrostLevel.current
-    val frostFraction = frostLevel.kixyuFrostFraction()
-    val shape = CircleShape
+    val selectedItemColor = accentColor
     val itemKeys = remember(items) { items.map(KixyuNavigationItem::route) }
     var currentIndex by remember(itemKeys) { mutableIntStateOf(selectedIndex) }
     var dragPosition by remember(itemKeys) { mutableFloatStateOf(selectedIndex.toFloat()) }
@@ -129,29 +127,18 @@ internal fun KixyuFloatingNavigationBar(
         label = "navigationPress",
     )
     val restingVisualIndex = if (pressedIndex >= 0) pressedIndex else currentIndex
-    val indicatorPosition by animateFloatAsState(
+    val animatedIndicatorPosition = animateFloatAsState(
         targetValue = if (indicatorDragging) dragPosition else restingVisualIndex.toFloat(),
-        animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
+        // No trailing spring while dragging, and no catch-up jump when the finger releases.
+        animationSpec = if (indicatorDragging) snap() else spring(dampingRatio = 0.82f, stiffness = 420f),
         label = "navigationIndicatorPosition",
     )
-    val logicalIndicatorPosition = if (isLtr) {
-        indicatorPosition
-    } else {
-        items.lastIndex - indicatorPosition
-    }
-    val indicatorOffset = KixyuSize.bottomNavigationInnerPadding +
-        KixyuSize.bottomNavigationItemWidth * logicalIndicatorPosition
+    val indicatorPosition = { animatedIndicatorPosition.value }
     val visuallySelectedIndex = if (indicatorDragging) {
-        navigationDragTargetIndex(indicatorPosition, items.size)
+        navigationDragTargetIndex(dragPosition, items.size)
     } else {
         currentIndex
     }
-    val navigationSurfaceBackdrop = rememberLayerBackdrop()
-    val selectedIndicatorBackdrop = rememberKixyuCombinedBackdrop(
-        page = backdrop.value,
-        controlSurface = navigationSurfaceBackdrop,
-    )
-
     Box(
         modifier = modifier
             .width(
@@ -159,71 +146,36 @@ internal fun KixyuFloatingNavigationBar(
                     KixyuSize.bottomNavigationInnerPadding * 2,
             )
             .height(KixyuSize.bottomNavigationBarHeight),
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = Alignment.TopStart,
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .kixyuGlassSurfaceModifier(
-                    backdrop = backdrop,
-                    shape = shape,
-                    fallbackContainerColor = surfaceContainer,
-                    surfaceBackdrop = navigationSurfaceBackdrop,
-                ),
-        )
-
-        Box(
-            modifier = Modifier
-                .graphicsLayer {
-                    translationX = indicatorOffset.toPx()
-                    val scale = lerp(1f, 78f / 56f, pressProgress)
-                    scaleX = scale
-                    scaleY = scale
+        KixyuNavigationGlass(
+            backdrop = backdrop,
+            modifier = Modifier.fillMaxSize(),
+            pressProgress = { pressProgress },
+            selectionModifier = Modifier
+                .offset {
+                    IntOffset(
+                        x = (KixyuSize.bottomNavigationInnerPadding +
+                            KixyuSize.bottomNavigationItemWidth * indicatorPosition()).roundToPx(),
+                        y = ((KixyuSize.bottomNavigationBarHeight -
+                            KixyuSize.bottomNavigationIndicatorHeight) / 2).roundToPx(),
+                    )
                 }
                 .width(KixyuSize.bottomNavigationItemWidth)
                 .height(KixyuSize.bottomNavigationIndicatorHeight)
-                .then(
-                    if (glassAvailable) {
-                        Modifier.drawBackdrop(
-                            backdrop = selectedIndicatorBackdrop,
-                            shape = { shape },
-                            effects = {
-                                kixyuFrostedGlassEffects(frostLevel)
-                                if (frostFraction > 0f) {
-                                    kixyuLens(
-                                        refractionHeight = 10.dp.toPx() * pressProgress,
-                                        refractionAmount = 14.dp.toPx() * pressProgress,
-                                        depthEffect = true,
-                                        chromaticAberration = 0.5f,
-                                    )
-                                }
-                            },
-                            highlight = {
-                                kixyuFrostedGlassHighlight(
-                                    frostLevel = frostLevel,
-                                    // A resting selection is still a raised glass lens. Pressing
-                                    // only strengthens the highlight and refraction.
-                                    alphaMultiplier = lerp(.55f, 1f, pressProgress),
-                                )
-                            },
-                            onDrawSurface = {
-                                drawKixyuGlassIndicatorVeil(
-                                    isDark = isDark,
-                                    accentColor = accentColor,
-                                    frostFraction = frostFraction,
-                                    pressProgress = pressProgress,
-                                )
-                            },
-                        )
-                    } else {
-                        Modifier.background(accentColor.copy(alpha = 0.18f), shape)
-                    },
-                ),
+                .graphicsLayer {
+                    // Keep the lifted lens within the platter's breathing room.
+                    scaleX = 1f + .04f * pressProgress
+                    scaleY = 1f + .06f * pressProgress
+                }
+                .testTag("navigation_selection"),
         )
 
         Row(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("navigation_tabs")
+                .selectableGroup()
                 .padding(horizontal = KixyuSize.bottomNavigationInnerPadding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -231,7 +183,7 @@ internal fun KixyuFloatingNavigationBar(
                 val selected = currentIndex == index
                 val itemColor by animateColorAsState(
                     targetValue = if (visuallySelectedIndex == index) {
-                        accentColor
+                        selectedItemColor
                     } else {
                         unselectedColor
                     },

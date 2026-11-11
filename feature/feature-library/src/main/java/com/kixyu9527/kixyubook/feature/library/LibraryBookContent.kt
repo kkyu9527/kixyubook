@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -46,7 +48,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
@@ -70,6 +71,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.mimeTypes
@@ -98,6 +101,8 @@ import com.kixyu9527.kixyubook.core.common.model.LibraryBook
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
@@ -107,6 +112,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenu
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupShape
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupBackdropEffect
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
@@ -130,6 +136,7 @@ internal fun LibraryFilters(
     onCategory: (String) -> Unit,
 ) {
     var categoriesExpanded by remember { mutableStateOf(false) }
+    val glassBackdrop = LocalKixyuGlassBackdrop.current
     Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
         TextField(
             value = state.query,
@@ -143,7 +150,7 @@ internal fun LibraryFilters(
                     Icon(KixyuSymbols.Close, stringResource(R.string.library_clear_search), Modifier.size(KixyuSize.icon))
                 }
             },
-            shape = MaterialTheme.shapes.large,
+            shape = MaterialTheme.shapes.small,
             colors = TextFieldDefaults.colors(
                 focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent,
@@ -168,16 +175,32 @@ internal fun LibraryFilters(
                 Box(
                     modifier = Modifier.width(categorySelectorWidth),
                 ) {
-                    OutlinedButton(
-                        onClick = { categoriesExpanded = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
-                    ) {
-                        Icon(KixyuSymbols.Category, null, Modifier.size(KixyuSize.iconSmall))
-                        Spacer(Modifier.size(KixyuSpacing.small))
-                        Text(categoryFilterLabel(state.category), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(KixyuSymbols.ExpandMore, stringResource(R.string.library_choose_category), Modifier.size(KixyuSize.iconSmall))
+                    val categoryShape = KixyuPopupShape
+                    val categoryInteraction = remember { MutableInteractionSource() }
+                    val categoryModifier = Modifier.fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .clip(categoryShape)
+                        .clickable(
+                            interactionSource = categoryInteraction,
+                            indication = null,
+                        ) { categoriesExpanded = true }
+                    val categoryContent: @Composable () -> Unit = {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = KixyuSpacing.medium),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(KixyuSymbols.Category, null, Modifier.size(KixyuSize.iconSmall))
+                            Spacer(Modifier.size(KixyuSpacing.small))
+                            Text(categoryFilterLabel(state.category), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(KixyuSymbols.ExpandMore, stringResource(R.string.library_choose_category), Modifier.size(KixyuSize.iconSmall))
+                        }
                     }
+                    KixyuPopupSurface(
+                        modifier = categoryModifier,
+                        shape = categoryShape,
+                        shadowElevation = 0.dp,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) { categoryContent() }
                     KixyuPopupMenu(
                         expanded = categoriesExpanded,
                         onDismissRequest = { categoriesExpanded = false },
@@ -193,6 +216,7 @@ internal fun LibraryFilters(
                         },
                         modifier = Modifier.heightIn(max = KixyuSize.libraryCategoryMenuMaxHeight),
                         width = categorySelectorWidth,
+                        shape = categoryShape,
                     )
                 }
             }
@@ -211,7 +235,6 @@ internal fun LibraryFilters(
 internal fun LibraryBookCollection(
     books: List<LibraryBook>,
     layoutMode: LibraryLayoutMode,
-    adaptiveGrid: Boolean,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     header: (@Composable () -> Unit)? = null,
@@ -227,7 +250,6 @@ internal fun LibraryBookCollection(
     if (layoutMode == LibraryLayoutMode.GRID) {
         LibraryBookGrid(
             books = books,
-            adaptiveGrid = adaptiveGrid,
             modifier = modifier,
             contentPadding = contentPadding,
             header = header,
@@ -307,7 +329,6 @@ internal fun LibraryBookCollection(
 @Composable
 internal fun LibraryBookGrid(
     books: List<LibraryBook>,
-    adaptiveGrid: Boolean,
     modifier: Modifier,
     contentPadding: PaddingValues,
     header: (@Composable () -> Unit)?,
@@ -331,8 +352,8 @@ internal fun LibraryBookGrid(
         hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
     LazyVerticalGrid(
-        columns = if (adaptiveGrid) GridCells.Adaptive(112.dp) else GridCells.Fixed(3),
-        modifier = modifier,
+        columns = GridCells.Fixed(3),
+        modifier = modifier.fillMaxSize(),
         state = lazyGridState,
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.medium),

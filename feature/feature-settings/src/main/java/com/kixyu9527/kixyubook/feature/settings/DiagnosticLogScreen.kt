@@ -352,7 +352,7 @@ private fun DiagnosticEntryCard(entry: ReadableDiagnosticEntry) {
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(

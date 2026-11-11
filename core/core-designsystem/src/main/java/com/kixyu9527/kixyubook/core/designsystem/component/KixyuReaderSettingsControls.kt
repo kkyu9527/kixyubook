@@ -19,10 +19,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,8 +37,6 @@ import kotlin.math.roundToInt
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.CustomReaderTheme
-import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
-import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.PageMode
 import com.kixyu9527.kixyubook.core.common.model.PageTurnAnimation
 import com.kixyu9527.kixyubook.core.common.model.ReaderBrightnessMode
@@ -50,72 +48,12 @@ import com.kixyu9527.kixyubook.core.designsystem.R
 /** Field-level intent: applied to the latest pending settings, never to a stale snapshot. */
 typealias ReaderSettingsUpdate = ((ReaderSettings) -> ReaderSettings) -> Unit
 
-/** Global light/dark mode selector shared by app appearance and the reader shortcut. */
-@Composable
-fun KixyuThemeModeControl(
-    settings: ReaderSettings,
-    onSettingsChange: ReaderSettingsUpdate,
-    title: String? = null,
-) {
-    KixyuDropdownRow(
-        title = title ?: stringResource(R.string.kixyu_display_mode),
-        selected = settings.theme,
-        options = listOf(ReaderTheme.SYSTEM, ReaderTheme.DAY, ReaderTheme.NIGHT),
-        optionLabel = { it.displayName() },
-        onSelected = { onSettingsChange { current -> current.copy(theme = it) } },
-    )
-}
-
-@Composable
-fun KixyuAppColorControl(
-    settings: ReaderSettings,
-    onSettingsChange: ReaderSettingsUpdate,
-) {
-    KixyuDropdownRow(
-        title = stringResource(R.string.kixyu_theme_color),
-        selected = settings.appColorTheme,
-        options = AppColorTheme.entries.filter {
-            settings.appUiStyle == AppUiStyle.MATERIAL || it != AppColorTheme.WHITE
-        },
-        optionLabel = { it.displayName() },
-        onSelected = { onSettingsChange { current -> current.copy(appColorTheme = it) } },
-    )
-}
-
-@Composable
-fun KixyuAppUiStyleControl(
-    settings: ReaderSettings,
-    onSettingsChange: ReaderSettingsUpdate,
-) {
-    KixyuDropdownRow(
-        title = stringResource(R.string.kixyu_ui_style),
-        selected = settings.appUiStyle,
-        options = AppUiStyle.entries,
-        optionLabel = { it.displayName() },
-        onSelected = { style ->
-            onSettingsChange { current ->
-                current.copy(
-                    appUiStyle = style,
-                    appColorTheme = settings.appColorTheme.takeUnless {
-                        style == AppUiStyle.MIUIX && it == AppColorTheme.WHITE
-                    } ?: AppColorTheme.DEFAULT,
-                )
-            }
-        },
-    )
-}
-
 /** Glass controls shared by app appearance, global reading settings and the in-reader sheet. */
 @Composable
 fun KixyuGlassEffectControls(
     settings: ReaderSettings,
     onSettingsChange: ReaderSettingsUpdate,
 ) {
-    var previewLevel by remember { mutableFloatStateOf(settings.glassFrostLevel) }
-    var dragging by remember { mutableStateOf(false) }
-    LaunchedEffect(settings.glassFrostLevel) {
-        if (!dragging) previewLevel = settings.glassFrostLevel
-    }
     KixyuSettingsRow(
         title = stringResource(R.string.kixyu_glass_effect),
         supportingText = stringResource(R.string.kixyu_glass_unsupported) + " · " +
@@ -131,25 +69,6 @@ fun KixyuGlassEffectControls(
             },
         )
     }
-    KixyuDivider()
-    KixyuSliderRow(
-        title = stringResource(R.string.kixyu_frost_level),
-        value = previewLevel,
-        valueLabel = "${previewLevel.roundToInt()}%",
-        onValueChange = { value ->
-            dragging = true
-            previewLevel = value.coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
-        },
-        onValueChangeFinished = {
-            dragging = false
-            val snappedLevel = (previewLevel / 5f).roundToInt() * 5f
-            previewLevel = snappedLevel.coerceIn(MIN_GLASS_FROST_LEVEL, MAX_GLASS_FROST_LEVEL)
-            onSettingsChange { current -> current.copy(glassFrostLevel = previewLevel) }
-        },
-        valueRange = MIN_GLASS_FROST_LEVEL..MAX_GLASS_FROST_LEVEL,
-        steps = 19,
-        enabled = settings.glassEffectEnabled,
-    )
 }
 
 /** Both surfaces render one font entry that opens the shared font management page. */
@@ -486,7 +405,7 @@ private fun KixyuColorEditorRow(label: String, value: String, onValidValue: (Str
 
 @Composable
 fun ReaderTheme.displayName(): String = stringResource(when (this) {
-    ReaderTheme.SYSTEM -> R.string.kixyu_follow_system
+    ReaderTheme.SYSTEM -> R.string.kixyu_display_mode_system
     ReaderTheme.DAY -> R.string.kixyu_theme_day
     ReaderTheme.NIGHT -> R.string.kixyu_theme_night
 })

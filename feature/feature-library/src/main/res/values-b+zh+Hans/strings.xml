@@ -19,6 +19,7 @@
     <string name="library_select_all">全选</string>
     <string name="library_book_selected">已选择</string>
     <string name="library_book_not_selected">未选择</string>
+    <string name="library_cloud_only">云端书籍 · 点开下载</string>
     <string name="library_import">导入书籍</string>
     <string name="library_actions">书库操作</string>
     <string name="library_display_title">书架显示</string>

@@ -1,0 +1,19 @@
+<resources>
+    <string name="settings_book_download_tasks">書籍下載任務</string>
+    <string name="settings_book_download_pending">已排隊，將自動下載</string>
+    <string name="settings_book_download_running">書籍正文正在背景自動下載。</string>
+    <string name="settings_book_download_waiting_network">等待網路，連線後自動繼續</string>
+    <string name="settings_book_download_failed">下載失敗，其他書籍不受影響；點擊可單獨重試。</string>
+    <string name="settings_book_download_failed_row">下載失敗，點擊右側重試</string>
+    <string name="settings_book_download_retry_named">重試下載《%1$s》</string>
+    <string name="settings_book_download_empty">沒有待下載的書籍正文</string>
+    <string name="settings_book_download_empty_summary">正文會在需要時自動下載，無需手動操作。</string>
+    <string name="settings_book_download_section_failed">下載失敗（%1$d）</string>
+    <string name="settings_book_download_section_running">正在下載（%1$d）</string>
+    <string name="settings_book_download_section_waiting">等待下載（%1$d）</string>
+    <string name="settings_book_download_summary_empty">所有書籍正文均已下載</string>
+    <string name="settings_book_download_summary_failed">%1$d 本下載失敗，共 %2$d 本待處理</string>
+    <string name="settings_book_download_summary_running">正在下載 %1$d 本，共 %2$d 本待下載</string>
+    <string name="settings_book_download_summary_pending">%1$d 本書等待下載</string>
+    <string name="settings_book_download_percent">%1$d%%</string>
+</resources>

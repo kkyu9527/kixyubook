@@ -4,8 +4,4 @@
     <string name="settings_reading_reset">閱讀設定已全部還原預設</string>
     <string name="settings_font_applied">已匯入並使用 %1$s</string>
     <string name="settings_backup_read_failed">無法讀取備份資訊</string>
-    <string name="settings_conflict_failed">同步衝突處理失敗</string>
-    <string name="settings_cloud_deleted">Google Drive 同步資料已刪除</string>
-    <string name="settings_cloud_delete_failed">刪除雲端資料失敗</string>
-    <string name="settings_account_connected">Google 帳戶已連線，正在自動同步</string>
 </resources>

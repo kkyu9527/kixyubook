@@ -52,7 +52,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
@@ -107,6 +106,7 @@ import com.kixyu9527.kixyubook.core.common.model.LibraryBook
 import com.kixyu9527.kixyubook.core.common.model.LibraryLayoutMode
 import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.LibrarySortMode
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuProgressBar
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuActionDialog
@@ -145,7 +145,7 @@ internal fun LibraryBookDetailPane(
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.medium,
     ) {
         if (selectionCount > 0) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -196,12 +196,7 @@ internal fun LibraryBookDetailPane(
                     maxLines = 8,
                     overflow = TextOverflow.Ellipsis,
                 )
-                item.progress?.let {
-                    LinearProgressIndicator(
-                        progress = { it.fraction.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                    )
-                }
+                item.progress?.let { KixyuProgressBar(progress = it.fraction, wavy = true) }
                 KixyuButton(
                     text = stringResource(
                         if (item.progress == null) R.string.library_start_reading else R.string.library_continue_reading,
@@ -236,7 +231,7 @@ internal fun LibraryBookRow(
     dragging: Boolean = false,
     reorderHandle: (@Composable BoxScope.() -> Unit)? = null,
 ) {
-    val rowShape = MaterialTheme.shapes.large
+    val rowShape = MaterialTheme.shapes.medium
     val raisedScale by animateFloatAsState(
         targetValue = if (dragging) 1.015f else 1f,
         label = "libraryBookRowScale",
@@ -279,6 +274,14 @@ internal fun LibraryBookRow(
             },
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = rowShape,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.60f)
+            },
+        ),
         shadowElevation = 0.dp,
     ) {
         Row(
@@ -303,6 +306,7 @@ internal fun LibraryBookRow(
                     selected = selected,
                     modifier = Modifier.align(Alignment.TopEnd).padding(KixyuSpacing.extraSmall),
                 )
+                if (item.book.isCloudOnly && !selectionMode) LibraryCloudBadge(Modifier.align(Alignment.BottomEnd))
             }
             Column(
                 Modifier.weight(1f),
@@ -317,12 +321,7 @@ internal fun LibraryBookRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                item.progress?.let {
-                    LinearProgressIndicator(
-                        progress = { it.fraction },
-                        modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
-                    )
-                }
+                item.progress?.let { KixyuProgressBar(progress = it.fraction, wavy = true) }
             }
             Column(horizontalAlignment = Alignment.End) {
                 reorderHandle?.let { handle -> Box { handle() } }
@@ -348,7 +347,7 @@ internal fun LibraryBookGridCard(
     modifier: Modifier = Modifier,
     reorderHandle: (@Composable BoxScope.() -> Unit)? = null,
 ) {
-    val cardShape = MaterialTheme.shapes.large
+    val cardShape = MaterialTheme.shapes.medium
     val raisedScale by animateFloatAsState(
         targetValue = if (dragging) 1.025f else 1f,
         label = "libraryBookGridCardScale",
@@ -391,6 +390,14 @@ internal fun LibraryBookGridCard(
             },
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         shape = cardShape,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.60f)
+            },
+        ),
         shadowElevation = 0.dp,
     ) {
         Column(
@@ -414,6 +421,7 @@ internal fun LibraryBookGridCard(
                     selected = selected,
                     modifier = Modifier.align(Alignment.TopEnd).padding(KixyuSpacing.extraSmall),
                 )
+                if (item.book.isCloudOnly && !selectionMode) LibraryCloudBadge(Modifier.align(Alignment.BottomEnd))
                 reorderHandle?.invoke(this)
             }
             Column(
@@ -435,12 +443,22 @@ internal fun LibraryBookGridCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                LinearProgressIndicator(
-                    progress = { (item.progress?.fraction ?: 0f).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(KixyuSize.progressHeight),
+                KixyuProgressBar(
+                    progress = item.progress?.fraction,
+                    modifier = Modifier.padding(top = KixyuSpacing.extraSmall),
+                    wavy = true,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun LibraryCloudBadge(modifier: Modifier = Modifier) {
+    Surface(modifier = modifier, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Icon(KixyuSymbols.Cloud, stringResource(R.string.library_cloud_only),
+            modifier = Modifier.padding(KixyuSpacing.extraSmall).size(20.dp),
+            tint = MaterialTheme.colorScheme.primary)
     }
 }
 

@@ -2,13 +2,10 @@ package com.kixyu9527.kixyubook.feature.settings
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
-import android.app.Activity
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -49,14 +46,12 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.designsystem.component.displayName
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import kotlin.system.exitProcess
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
+import com.kixyu9527.kixyubook.core.sync.BackupOperationType
 import kotlinx.coroutines.launch
 
-enum class SettingsPane { CLOUD_SYNC, READING, APPEARANCE, ABOUT }
+enum class SettingsPane { CLOUD_SYNC, READING, APPEARANCE, HABITS, BACKUP, ABOUT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,19 +59,16 @@ fun SettingsRoute(
     onCloudSync: () -> Unit,
     onReadingSettings: () -> Unit,
     onAppearance: () -> Unit,
+    onHabits: () -> Unit,
+    onBackup: () -> Unit,
     onAbout: () -> Unit,
     currentVersion: String,
     detailContent: (@Composable (SettingsPane) -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val backupPreview by viewModel.backupPreview.collectAsStateWithLifecycle()
-    val backupInspectionActive by viewModel.backupInspectionActive.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    val requestNotificationPermission = rememberNotificationPermissionAction()
-    var restored by rememberSaveable { mutableStateOf(false) }
-    var restoreFailure by rememberSaveable { mutableStateOf<String?>(null) }
     var rulesManagerVisible by rememberSaveable { mutableStateOf(false) }
     var ruleEditorVisible by rememberSaveable { mutableStateOf(false) }
     var advancedEditorVisible by rememberSaveable { mutableStateOf(false) }
@@ -85,32 +77,7 @@ fun SettingsRoute(
     val samplePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { pickedSample = context.documentDisplayName(it) }
     }
-    val backupCreator = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/zip"),
-    ) { uri ->
-        uri?.let {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    it,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-            }
-            viewModel.exportBackup(it.toString())
-        }
-    }
-    val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    it,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            }
-            viewModel.inspectBackup(it.toString())
-        }
-    }
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
-    LaunchedEffect(Unit) { viewModel.restoreCompleted.collect { restoreFailure = it; restored = true } }
     val syncAccount = state.cloudSync.account
     val windowSizeClass = kixyuWindowSizeClass()
     val twoPane = windowSizeClass.supportsTwoPane && detailContent != null
@@ -142,7 +109,9 @@ fun SettingsRoute(
         }
     }
     val preferenceSection: @Composable () -> Unit = {
-        KixyuSection(title = stringResource(R.string.settings_preferences_section)) {
+        KixyuSection(
+            title = stringResource(R.string.settings_preferences_section),
+        ) {
             KixyuSettingsRow(
                 title = stringResource(R.string.settings_reading),
                 supportingText = buildString {
@@ -167,10 +136,35 @@ fun SettingsRoute(
                 selected = if (twoPane) selectedPane == SettingsPane.APPEARANCE else null,
                 onClick = { openPane(SettingsPane.APPEARANCE, onAppearance) },
             ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+            KixyuDivider()
+            KixyuSettingsRow(
+                title = stringResource(R.string.settings_reading_habits_section),
+                supportingText = stringResource(
+                    R.string.settings_habits_summary,
+                    state.goalMinutes,
+                    if (state.readingReminder.enabled) {
+                        stringResource(
+                            R.string.settings_reminder_enabled,
+                            "%02d:%02d".format(
+                                Locale.US,
+                                state.readingReminder.hour,
+                                state.readingReminder.minute,
+                            ),
+                        )
+                    } else {
+                        stringResource(R.string.settings_habits_reminder_off)
+                    },
+                ),
+                icon = KixyuSymbols.Schedule,
+                selected = if (twoPane) selectedPane == SettingsPane.HABITS else null,
+                onClick = { openPane(SettingsPane.HABITS, onHabits) },
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
     val metadataSection: @Composable () -> Unit = {
-        KixyuSection(title = stringResource(R.string.settings_metadata_section)) {
+        KixyuSection(
+            title = stringResource(R.string.settings_metadata_section),
+        ) {
             KixyuSettingsRow(
                 title = stringResource(R.string.settings_filename_rules),
                 supportingText = if (state.filenameRules.isEmpty() && state.filenameRuleSpecs.isEmpty()) {
@@ -186,33 +180,22 @@ fun SettingsRoute(
             ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
         }
     }
-    val habitsSection: @Composable () -> Unit = {
-        ReadingHabitsSection(
-            state = state,
-            onSetGoal = viewModel::setGoal,
-            onRequestReminderEnabled = { enabled ->
-                requestNotificationPermission(enabled) { viewModel.setReadingReminderEnabled(enabled) }
-            },
-            onSetReminderTime = viewModel::setReadingReminderTime,
-        )
-    }
     val dataSection: @Composable () -> Unit = {
-        SettingsBackupSection(
-            operation = state.backupOperation,
-            inspectionActive = backupInspectionActive,
-            onRestore = {
-                requestNotificationPermission(false) {
-                    backupPicker.launch(arrayOf("application/zip", "application/octet-stream"))
-                }
-            },
-            onExport = {
-                requestNotificationPermission(false) {
-                    backupCreator.launch(
-                        "KixyuBook-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.kixyubackup",
-                    )
-                }
-            },
-        )
+        KixyuSection(
+            title = stringResource(R.string.settings_data_section),
+        ) {
+            KixyuSettingsRow(
+                title = stringResource(R.string.settings_backup_page_title),
+                supportingText = when (state.backupOperation) {
+                    BackupOperationType.EXPORT -> stringResource(R.string.settings_backup_exporting_detail)
+                    BackupOperationType.RESTORE -> stringResource(R.string.settings_backup_restoring_detail)
+                    null -> null
+                },
+                icon = KixyuSymbols.Backup,
+                selected = if (twoPane) selectedPane == SettingsPane.BACKUP else null,
+                onClick = { openPane(SettingsPane.BACKUP, onBackup) },
+            ) { Icon(KixyuSymbols.KeyboardArrowRight, null, Modifier.size(KixyuSize.icon)) }
+        }
     }
     val aboutSection: @Composable () -> Unit = {
         KixyuSection(title = stringResource(R.string.settings_about_section)) {
@@ -252,7 +235,6 @@ fun SettingsRoute(
                     item { accountSection() }
                     item { preferenceSection() }
                     item { metadataSection() }
-                    item { habitsSection() }
                     item { dataSection() }
                     item { aboutSection() }
                     item { KixyuBottomContentSpacer() }
@@ -280,7 +262,6 @@ fun SettingsRoute(
                 item { accountSection() }
                 item { preferenceSection() }
                 item { metadataSection() }
-                item { habitsSection() }
                 item { dataSection() }
                 item { aboutSection() }
                 item { KixyuBottomContentSpacer() }
@@ -339,18 +320,4 @@ fun SettingsRoute(
         )
     }
 
-    SettingsBackupDialogs(
-        preview = backupPreview,
-        restored = restored,
-        restoreFailure = restoreFailure,
-        onDismissPreview = viewModel::clearBackupPreview,
-        onRestore = { preview ->
-            viewModel.clearBackupPreview()
-            viewModel.restoreBackup(preview.uriString)
-        },
-        onCloseApp = {
-            (context as? Activity)?.finishAffinity()
-            exitProcess(0)
-        },
-    )
 }

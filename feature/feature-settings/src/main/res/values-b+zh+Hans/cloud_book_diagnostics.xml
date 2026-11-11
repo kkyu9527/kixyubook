@@ -1,0 +1,11 @@
+<resources>
+    <string name="diag_cloud_book_title">打开云端书籍</string>
+    <string name="diag_cloud_book_description">逐阶段记录打开耗时和接收字节，不记录正文或账号信息。</string>
+    <string name="diag_cloud_book_stage">打开阶段</string>
+    <string name="diag_cloud_book_bytes">已接收字节</string>
+    <string name="diag_cloud_book_total">文件总字节</string>
+    <string name="diag_cloud_book_attempt">请求重试次数</string>
+    <string name="diag_cloud_book_local_file">本地原文件可用</string>
+    <string name="diag_cloud_book_chapters">目录章节数</string>
+    <string name="diag_cloud_book_background">后台自动下载</string>
+</resources>

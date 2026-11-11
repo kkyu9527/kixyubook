@@ -1,0 +1,13 @@
+<resources>
+    <string name="kixyu_book_preparation_waiting">バックグラウンド同期の終了を待っています</string>
+    <string name="kixyu_book_preparation_authorization">Google の認証を確認中</string>
+    <string name="kixyu_book_preparation_locating">クラウドの書籍ファイルを確認中</string>
+    <string name="kixyu_book_preparation_downloading">クラウドから本をダウンロード中</string>
+    <string name="kixyu_book_preparation_verifying">書籍の整合性を確認中</string>
+    <string name="kixyu_book_preparation_metadata">書籍情報を読み込み中</string>
+    <string name="kixyu_book_preparation_directory">章の目次を準備中</string>
+    <string name="kixyu_book_preparation_progress">読書位置を復元中</string>
+    <string name="kixyu_book_preparation_ready">読書の準備ができました</string>
+    <string name="kixyu_book_preparation_transfer">ダウンロード中：%1$s / %2$s（%3$d%%）</string>
+    <string name="kixyu_book_preparation_received">ダウンロード中：%1$s 受信済み</string>
+</resources>

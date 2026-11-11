@@ -1,7 +1,9 @@
 *.iml
 .gradle
-# Local design, planning and agent notes are kept on disk but not tracked.
-/docs/
+# Keep local notes private; publish only the contributor guides linked from README.
+/docs/*
+!/docs/LOCALIZATION.md
+!/docs/HOST_TESTS.md
 /AGENTS.md
 /local.properties
 /.idea/

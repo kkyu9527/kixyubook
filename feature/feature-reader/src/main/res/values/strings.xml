@@ -14,6 +14,7 @@
     <string name="reader_clear_search_history">Clear</string>
     <string name="reader_content_pane">Book content</string>
     <string name="reader_opening_book">Opening book</string>
+    <string name="reader_downloading_book">Downloading book from the cloud</string>
     <string name="reader_parsing_epub">Parsing EPUB</string>
     <string name="reader_preparing_text">Preparing text</string>
     <string name="reader_preparing_first_page">Laying out the first page</string>

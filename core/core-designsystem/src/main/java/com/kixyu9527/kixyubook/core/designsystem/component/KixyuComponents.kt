@@ -4,6 +4,7 @@ import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
@@ -119,18 +121,18 @@ object KixyuSize {
     val bottomNavigationBarHeight = 64.dp
     val bottomNavigationIndicatorHeight = 56.dp
     val bottomNavigationInnerPadding = 4.dp
-    val bottomNavigationBottomGap = 12.dp
+    val bottomNavigationBottomGap = 16.dp
     val floatingSurfaceBottomGap = 24.dp
     // Semantic corner roles: one material language, but each surface keeps a radius that matches
     // its task instead of every control sharing the navigation capsule.
     val controlCornerRadius = 12.dp
-    val fieldCornerRadius = 16.dp
-    val cardCornerRadius = 20.dp
+    val fieldCornerRadius = 14.dp
+    val cardCornerRadius = 18.dp
     val sheetCornerRadius = 28.dp
     val navigationContainerCornerRadius = 32.dp
     // Physical book covers only have the slight rounding of a printed cover, not a card corner.
     val bookCoverCornerRadius = 6.dp
-    val bottomNavigationContentHeight = 76.dp
+    val bottomNavigationContentHeight = bottomNavigationBarHeight + bottomNavigationBottomGap
     val bottomNavigationDefaultWidth = bottomNavigationItemWidth * 3 + bottomNavigationInnerPadding * 2
     val transientPopupMaxWidth = 560.dp
     val navigationRailWidth = 72.dp
@@ -170,6 +172,7 @@ object KixyuSize {
 fun KixyuSection(
     modifier: Modifier = Modifier,
     title: String? = null,
+    description: String? = null,
     action: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -190,9 +193,23 @@ fun KixyuSection(
                 action?.invoke()
             }
         }
+        description?.let {
+            Text(
+                text = it,
+                modifier = Modifier.padding(horizontal = KixyuSpacing.extraSmall),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
             MiuixCard(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(KixyuSize.cardCornerRadius),
+                    ),
                 cornerRadius = KixyuSize.cardCornerRadius,
                 insideMargin = PaddingValues(0.dp),
             ) {
@@ -212,6 +229,10 @@ fun KixyuSection(
                     MaterialTheme.colorScheme.surfaceContainerLow
                 },
                 shape = MaterialTheme.shapes.large,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f),
+                ),
                 content = { Column(content = content) },
             )
         }
@@ -384,8 +405,8 @@ fun KixyuListRow(
         if (titleStyle != null || supportingTextStyle != null || titleMaxLines != 1) {
             MiuixBasicComponent(
                 modifier = rowModifier.fillMaxWidth()
-                    .clip(MaterialTheme.shapes.large)
-                    .background(containerColor, MaterialTheme.shapes.large)
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(containerColor, MaterialTheme.shapes.medium)
                     .heightIn(min = KixyuSize.rowMinHeight),
                 startAction = leading?.let { content ->
                     {
@@ -438,8 +459,8 @@ fun KixyuListRow(
         }
         MiuixBasicComponent(
             modifier = rowModifier.fillMaxWidth()
-                .clip(MaterialTheme.shapes.large)
-                .background(containerColor, MaterialTheme.shapes.large)
+                .clip(MaterialTheme.shapes.medium)
+                .background(containerColor, MaterialTheme.shapes.medium)
                 .heightIn(min = KixyuSize.rowMinHeight),
             title = title,
             titleColor = if (selected) {
@@ -503,7 +524,7 @@ fun KixyuListRow(
             trailingContent = { trailing() },
             colors = ListItemDefaults.colors(containerColor = containerColor),
             modifier = rowModifier.fillMaxWidth()
-                .clip(MaterialTheme.shapes.large)
+                .clip(MaterialTheme.shapes.medium)
                 .clickable(onClick = onClick),
         )
     }
@@ -821,6 +842,9 @@ fun KixyuSwitch(
         Switch(checked, onCheckedChange, modifier, enabled = enabled)
     }
 }
+
+/** The single radius for every popup surface, trigger and overflow menu. */
+val KixyuPopupShape: Shape = RoundedCornerShape(KixyuSize.controlCornerRadius)
 
 data class KixyuNavigationItem(
     val route: String,

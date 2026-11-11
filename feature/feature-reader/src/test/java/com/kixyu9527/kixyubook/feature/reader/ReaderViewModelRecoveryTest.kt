@@ -579,16 +579,22 @@ internal fun readerRecoveryHarness(
     paragraphText: (Int) -> String = { index -> "第 $index 段正文" },
     initialProgress: ReadingProgress? = null,
     initialSettings: ReaderSettings = ReaderSettings(fontSize = 19f),
+    cloudDownload: (suspend () -> Result<Unit>)? = null,
+    cloudPublishesChapters: Boolean = true,
 ): ReaderRecoveryHarness {
     val globalSettings = MutableStateFlow(initialSettings)
     val durable = MutableStateFlow<ReadingProgress?>(initialProgress)
     val chapters = listOf(Chapter(1, "book", "第一章", 0, chapterKey = "first"))
+    var cloudFileAvailable = false
+    val availableChapters = MutableStateFlow(if (cloudDownload == null) chapters else emptyList())
     val repository = object : BookRepository by fake<BookRepository>({ method, _ ->
         when (method) {
-            "observeChapters" -> MutableStateFlow(chapters)
+            "observeChapters" -> availableChapters
             "observeProgress" -> durable
             "observeBookmarks" -> flowOf(emptyList<Bookmark>())
-            "getBook" -> Book("book", "测试", "", "", null, format, "", "", 0, "hash")
+            "getBook" -> Book("book", "测试", "", "", null, format,
+                if (cloudDownload == null) "" else "google-drive://book",
+                if (cloudFileAvailable) "/cached/book" else "", 0, "hash")
             "readEpubNavigation" -> emptyList<EpubNavigationEntry>()
             "setReaderSessionActive", "setReaderInteractionActive", "releaseReaderMemory" -> Unit
             else -> error("Unexpected book call: $method")
@@ -623,12 +629,23 @@ internal fun readerRecoveryHarness(
         check(method == "observeFonts"); fontsFlow
     }
     val stats = fake<ReadingStatsRepository> { method, _ -> error("Unexpected stats call: $method") }
-    val sync = fake<CloudSyncCoordinator> { method, _ ->
+    val syncDelegate = fake<CloudSyncCoordinator> { method, _ ->
         when (method) {
             "getPriorityBookSync" ->
                 MutableStateFlow(PriorityBookSyncState("book", PriorityBookSyncPhase.PULLING))
             "prioritizeBook", "releaseBook" -> Unit
             else -> error("Unexpected sync call: $method")
+        }
+    }
+    val sync = object : CloudSyncCoordinator by syncDelegate {
+        override suspend fun ensureBookAvailable(bookUuid: String, onProgress: (BookPreparationProgress) -> Unit): Result<Unit> {
+            if (cloudFileAvailable) return Result.success(Unit)
+            return requireNotNull(cloudDownload).invoke().also { result ->
+                if (result.isSuccess) {
+                    cloudFileAvailable = true
+                    if (cloudPublishesChapters) availableChapters.value = chapters
+                }
+            }
         }
     }
     val corrections = fake<TextCorrectionRepository> { method, _ ->

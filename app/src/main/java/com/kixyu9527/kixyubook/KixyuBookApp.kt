@@ -3,8 +3,9 @@ package com.kixyu9527.kixyubook
 import android.os.Build
 import android.view.ViewTreeObserver
 import android.view.Window
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -23,7 +24,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
@@ -38,6 +38,7 @@ import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.ReleaseNotesState
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSystemBarHost
@@ -65,6 +66,12 @@ internal fun Window.disableSystemBarContrastProtection() {
     isNavigationBarContrastEnforced = false
 }
 
+private data class AppThemeVisual(
+    val uiStyle: com.kixyu9527.kixyubook.core.common.model.AppUiStyle,
+    val theme: ReaderTheme,
+    val colorTheme: com.kixyu9527.kixyubook.core.common.model.AppColorTheme,
+)
+
 @Composable
 internal fun KixyuBookApp(
     settings: ReaderSettings,
@@ -81,6 +88,7 @@ internal fun KixyuBookApp(
     onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
     onPrepareReader: (String) -> Unit,
+    onEnsureBookAvailable: suspend (String, (com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress) -> Unit) -> Result<Unit>,
     onPrioritizeBookSync: (String) -> Unit,
     onBookOpened: (String) -> Unit,
     onDownloadUpdate: (AppUpdateInfo) -> Boolean,
@@ -135,6 +143,7 @@ internal fun KixyuBookApp(
                 onLoadReleaseNotes = onLoadReleaseNotes,
                 onAnimationPriorityChanged = onAnimationPriorityChanged,
                 onPrepareReader = onPrepareReader,
+                onEnsureBookAvailable = onEnsureBookAvailable,
                 onPrioritizeBookSync = onPrioritizeBookSync,
                 onBookOpened = onBookOpened,
                 externalImportRequestId = latestExternalBookImport.value?.id,
@@ -145,14 +154,17 @@ internal fun KixyuBookApp(
         }
     }
 
-    var renderedUiStyle by remember { mutableStateOf(settings.appUiStyle) }
-    val styleTransitionVeil = remember { Animatable(0f) }
-    LaunchedEffect(settings.appUiStyle) {
-        if (settings.appUiStyle == renderedUiStyle) return@LaunchedEffect
-        styleTransitionVeil.animateTo(1f, tween(110))
-        renderedUiStyle = settings.appUiStyle
-        withFrameNanos { }
-        styleTransitionVeil.animateTo(0f, tween(190))
+    // Theme changes are one visual transaction: fade the current content down, swap the
+    // rendered theme/style, then fade back in. A white veil would read as a flash, so the page
+    // background itself carries the transition while content opacity handles the swap.
+    val targetVisual = AppThemeVisual(
+        uiStyle = settings.appUiStyle,
+        theme = settings.theme,
+        colorTheme = settings.appColorTheme,
+    )
+    var renderedVisual by remember { mutableStateOf(targetVisual) }
+    LaunchedEffect(targetVisual) {
+        renderedVisual = targetVisual
     }
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val darkTheme = when (settings.theme) {
@@ -214,24 +226,22 @@ internal fun KixyuBookApp(
         },
     ) {
         KixyuBookTheme(
-            themeMode = settings.theme,
-            colorTheme = settings.appColorTheme,
-            uiStyle = renderedUiStyle,
+            themeMode = renderedVisual.theme,
+            colorTheme = renderedVisual.colorTheme,
+            uiStyle = renderedVisual.uiStyle,
             glassEffectEnabled = settings.glassEffectEnabled,
             glassFrostLevel = settings.glassFrostLevel,
             predictiveBackEnabled = settings.predictiveBackEnabled,
         ) {
-            val appBackground = kixyuPageBackground()
+            val targetBackground = kixyuPageBackground()
+            val appBackground by animateColorAsState(
+                targetValue = targetBackground,
+                animationSpec = tween(KixyuMotion.ThemeFadeInMillis, easing = FastOutSlowInEasing),
+                label = "appThemeBackground",
+            )
             KixyuOverlayHost(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize().background(appBackground)) {
                     appContent()
-                    if (styleTransitionVeil.value > 0f) {
-                        Box(
-                            Modifier.fillMaxSize().background(
-                                MaterialTheme.colorScheme.background.copy(alpha = styleTransitionVeil.value),
-                            ),
-                        )
-                    }
                     var showGlobalSync by remember { mutableStateOf(false) }
                     LaunchedEffect(cloudSyncState.phase, currentRoute) {
                         showGlobalSync = false

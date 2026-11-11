@@ -1,0 +1,11 @@
+<resources>
+    <string name="diag_cloud_book_title">Opening a cloud book</string>
+    <string name="diag_cloud_book_description">Reports each open stage, its duration and received bytes; no book content or account information is logged.</string>
+    <string name="diag_cloud_book_stage">Open stage</string>
+    <string name="diag_cloud_book_bytes">Bytes received</string>
+    <string name="diag_cloud_book_total">Total file bytes</string>
+    <string name="diag_cloud_book_attempt">Request retry</string>
+    <string name="diag_cloud_book_local_file">Local source file available</string>
+    <string name="diag_cloud_book_chapters">Directory chapter count</string>
+    <string name="diag_cloud_book_background">Automatic background download</string>
+</resources>

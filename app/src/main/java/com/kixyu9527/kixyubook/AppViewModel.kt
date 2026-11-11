@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class AppViewModel @Inject constructor(
@@ -29,6 +32,7 @@ class AppViewModel @Inject constructor(
     cloudSyncManager: CloudSyncManager,
     private val readingReminders: ReadingReminderScheduler,
     val appMessages: AppTransientMessages,
+    @param:dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
     /**
@@ -75,6 +79,19 @@ class AppViewModel @Inject constructor(
     }
 
     fun prioritizeBookSync(bookUuid: String) = cloudSync.prioritizeBook(bookUuid)
+
+    suspend fun ensureBookAvailable(uuid: String, progress: (BookPreparationProgress) -> Unit): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val book = books.getBook(uuid) ?: error(context.getString(com.kixyu9527.kixyubook.feature.reader.R.string.reader_error_missing_book))
+                if (book.originalPath.startsWith("google-drive://")) {
+                    cloudSync.ensureBookAvailable(uuid, progress).getOrThrow()
+                    check(books.getChapters(uuid).isNotEmpty()) {
+                        context.getString(com.kixyu9527.kixyubook.feature.reader.R.string.reader_error_no_chapters)
+                    }
+                }
+            }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        }
 
     override fun onCleared() {
         books.setAppAnimationActive(false)

@@ -82,11 +82,40 @@ data class CloudSyncState(
     val phase: CloudSyncPhase = CloudSyncPhase.IDLE,
     val lastSyncTime: Long = 0,
     val pendingCount: Int = 0,
+    val pendingBookDownloads: Int = 0,
+    val bookDownloads: List<CloudBookDownload> = emptyList(),
     val errorMessage: String? = null,
     val initialSyncDecision: InitialSyncDecision? = null,
     val inspectingInitialSync: Boolean = false,
     val storageQuota: DriveStorageQuotaState = DriveStorageQuotaState(),
 )
+
+/** Persisted transfer states stay strings in Room; UI and callers use this closed set. */
+enum class CloudBookDownloadStatus {
+    PENDING,
+    RUNNING,
+    WAITING_NETWORK,
+    FAILED;
+
+    companion object {
+        /** A stale persisted RUNNING marker (for example after process death) is queued again. */
+        fun fromPersisted(value: String?): CloudBookDownloadStatus =
+            entries.firstOrNull { it.name == value } ?: PENDING
+    }
+}
+
+data class CloudBookDownload(
+    val bookUuid: String,
+    val title: String,
+    val status: CloudBookDownloadStatus,
+    val attempts: Int,
+    val progress: com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress? = null,
+) {
+    val fraction: Float?
+        get() = progress
+            ?.takeIf { it.totalBytes > 0 }
+            ?.let { (it.downloadedBytes.toDouble() / it.totalBytes).coerceIn(0.0, 1.0).toFloat() }
+}
 
 data class CloudSyncProgress(
     val title: String,
@@ -113,6 +142,7 @@ interface CloudSyncManager {
     suspend fun setWifiOnlyForLargeFiles(enabled: Boolean)
     suspend fun resolveInitialSync(choice: InitialSyncChoice): Result<Unit>
     fun syncNow()
+    fun retryBookDownload(bookUuid: String) { syncNow() }
     fun refreshStorageQuota(force: Boolean = false)
     suspend fun deleteCloudData(activity: Activity): Result<Unit>
 }

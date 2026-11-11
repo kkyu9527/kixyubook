@@ -1,5 +1,7 @@
 package com.kixyu9527.kixyubook.core.common.operation
 
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog
+import com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -51,6 +53,21 @@ class LatestOperationWriter(private val scope: CoroutineScope, private val contr
                     controller.submit(action = write)
                     val result = controller.state.first { it !is UserOperationState.Running }
                     if (result is UserOperationState.Succeeded || result is UserOperationState.Failed) active = null
+                    if (result is UserOperationState.Failed) {
+                        // Persist a stable failure classification and the setting key; the exception
+                        // message is deliberately not stored because callers may include paths.
+                        DiagnosticLog.record(
+                            Category.SETTINGS,
+                            "settings_write_failed",
+                            outcome = "failed",
+                            details = mapOf(
+                                "stage" to "persist",
+                                "target" to keyToWrite,
+                                "failure" to result.failure.name,
+                                "attempt" to result.attempt,
+                            ),
+                        )
+                    }
                     failedKey = keyToWrite.takeIf { result is UserOperationState.Failed }
                     // A newer value supersedes the failed payload, not the user's latest intention.
                     if (result is UserOperationState.Failed && pending.containsKey(keyToWrite)) {
@@ -67,11 +84,17 @@ class LatestOperationWriter(private val scope: CoroutineScope, private val contr
                     remaining.putAll(pending)
                     pending.clear()
                     withContext(NonCancellable) {
-                        remaining.values.forEach { action ->
-                            try { action() } catch (_: Exception) {
-                                com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.record(
-                                    com.kixyu9527.kixyubook.core.common.diagnostics.DiagnosticLog.Category.READER,
-                                    "settings_flush_failed",
+                        remaining.entries.forEach { (target, action) ->
+                            try { action() } catch (error: Exception) {
+                                DiagnosticLog.record(
+                                    Category.SETTINGS,
+                                    "settings_write_failed",
+                                    outcome = "failed",
+                                    details = mapOf(
+                                        "stage" to "flush",
+                                        "target" to target,
+                                        "errorType" to error.javaClass.simpleName,
+                                    ),
                                 )
                             }
                         }

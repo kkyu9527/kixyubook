@@ -230,6 +230,16 @@ data class SyncRemoteInboxEntity(
     val version: Long,
     val size: Long,
     val md5: String?,
+    val payloadJson: String? = null,
+    @ColumnInfo(defaultValue = "'PENDING'") val transferState: String = "PENDING",
+    @ColumnInfo(defaultValue = "0") val transferAttempts: Int = 0,
+    val transferError: String? = null,
+)
+
+data class BookTransferRow(
+    @Embedded val receipt: SyncRemoteInboxEntity,
+    val bookUuid: String,
+    val bookTitle: String,
 )
 
 @Entity(

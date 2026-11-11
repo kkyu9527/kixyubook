@@ -186,6 +186,7 @@ private fun LoadedReaderRoute(
             settings = renderedState.settings,
             stage = state.loadStage,
             format = state.book?.format,
+            preparation = state.cloudPreparation,
         )
         return
     }
@@ -256,6 +257,7 @@ private fun ReaderEntrySurface(
     settings: ReaderSettings,
     stage: ReaderLoadStage?,
     format: BookFormat?,
+    preparation: com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress? = null,
 ) {
     val palette = readerPalette(settings, androidx.compose.foundation.isSystemInDarkTheme())
     var showSlowStatus by remember(stage) { mutableStateOf(false) }
@@ -275,7 +277,9 @@ private fun ReaderEntrySurface(
             modifier = Modifier.padding(bottom = 32.dp),
         ) {
             Text(
-                text = readerLoadStageLabel(stage, format),
+                text = if (stage == ReaderLoadStage.DOWNLOADING_BOOK && preparation != null)
+                    com.kixyu9527.kixyubook.core.designsystem.component.bookPreparationLabel(preparation)
+                    else readerLoadStageLabel(stage, format),
                 color = palette.secondary,
                 style = MaterialTheme.typography.labelMedium,
             )
@@ -286,6 +290,7 @@ private fun ReaderEntrySurface(
 @Composable
 private fun readerLoadStageLabel(stage: ReaderLoadStage?, format: BookFormat?): String = when (stage) {
     ReaderLoadStage.OPENING_BOOK -> stringResource(R.string.reader_opening_book)
+    ReaderLoadStage.DOWNLOADING_BOOK -> stringResource(R.string.reader_downloading_book)
     ReaderLoadStage.READING_CONTENT -> if (format == BookFormat.EPUB) {
         stringResource(R.string.reader_parsing_epub)
     } else {

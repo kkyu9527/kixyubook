@@ -19,6 +19,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -76,6 +77,7 @@ internal fun KixyuNavDisplay(
     onLoadReleaseNotes: () -> Unit,
     onAnimationPriorityChanged: (Boolean) -> Unit,
     onPrepareReader: (String) -> Unit,
+    onEnsureBookAvailable: suspend (String, (com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress) -> Unit) -> Result<Unit>,
     onPrioritizeBookSync: (String) -> Unit,
     onBookOpened: (String) -> Unit,
     externalImportRequestId: Long?,
@@ -110,6 +112,13 @@ internal fun KixyuNavDisplay(
     )
     val scope = rememberCoroutineScope()
     val view = LocalView.current
+    val latestEnsureBookAvailable by rememberUpdatedState(onEnsureBookAvailable)
+    val bookOpening = remember(scope) { BookOpeningController(scope, { uuid, progress -> latestEnsureBookAvailable(uuid, progress) }) }
+    val openingState by bookOpening.state.collectAsState()
+    var openingPage by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(pagerState.settledPage) {
+        if (openingPage != null && openingPage != pagerState.settledPage) bookOpening.cancel()
+    }
     val uriHandler = LocalUriHandler.current
     var pageAnimation by remember { mutableStateOf<Job?>(null) }
     var animationPriorityJob by remember { mutableStateOf<Job?>(null) }
@@ -126,6 +135,7 @@ internal fun KixyuNavDisplay(
     }
     LaunchedEffect(externalImportRequestId) {
         if (externalImportRequestId == null) return@LaunchedEffect
+        bookOpening.cancel()
         if (navigator.current() != AppRoute.Home) navigator.popToHome()
         val libraryPage = top.indexOfFirst { it.route == Routes.LIBRARY }
         if (libraryPage >= 0 && pagerState.currentPage != libraryPage) {
@@ -159,6 +169,7 @@ internal fun KixyuNavDisplay(
         // update instead of leaving the library unable to open books until process restart.
         bookNavigationPending = false
         if (previousRoute != route) {
+            bookOpening.cancel()
             previousRoute = route
             prioritizeAnimation()
         }
@@ -167,6 +178,7 @@ internal fun KixyuNavDisplay(
         onDispose {
             animationPriorityJob?.cancel()
             bookReorderAfterReaderExitJob?.cancel()
+            bookOpening.cancel()
             onAnimationPriorityChanged(false)
         }
     }
@@ -174,25 +186,28 @@ internal fun KixyuNavDisplay(
     val openBook: (String) -> Unit = { bookUuid ->
         val sourceRoute = navigator.current()
         if (sourceRoute in setOf(AppRoute.Home, AppRoute.HiddenLibrary) && !bookNavigationPending) {
-            bookNavigationPending = true
-            // Warm only Room and an existing binary chapter cache while the lightweight reader
-            // surface animates. An uncached EPUB deliberately does not start parsing here.
-            onPrepareReader(bookUuid)
-            onPrioritizeBookSync(bookUuid)
-            // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
-            // from a Compose frame callback. withFrameNanos resumed at the beginning of the next
-            // VSYNC and placed destination creation directly inside that frame's 8.3 ms budget.
-            val posted = view.post {
-                try {
-                    if (navigator.current() == sourceRoute) {
-                        prioritizeAnimation()
-                        navigator.push(AppRoute.Reader(bookUuid))
+            openingPage = pagerState.settledPage
+            bookOpening.open(bookUuid) {
+                bookNavigationPending = true
+                // Warm only Room and an existing binary chapter cache while the lightweight reader
+                // surface animates. An uncached EPUB deliberately does not start parsing here.
+                onPrepareReader(bookUuid)
+                onPrioritizeBookSync(bookUuid)
+                // Leave the current input dispatch, like Readest's setTimeout(0), without resuming
+                // from a Compose frame callback. withFrameNanos resumed at the beginning of the next
+                // VSYNC and placed destination creation directly inside that frame's 8.3 ms budget.
+                val posted = view.post {
+                    try {
+                        if (navigator.current() == sourceRoute) {
+                            prioritizeAnimation()
+                            navigator.push(AppRoute.Reader(bookUuid))
+                        }
+                    } finally {
+                        bookNavigationPending = false
                     }
-                } finally {
-                    bookNavigationPending = false
                 }
+                if (!posted) bookNavigationPending = false
             }
-            if (!posted) bookNavigationPending = false
         }
     }
 
@@ -375,6 +390,9 @@ internal fun KixyuNavDisplay(
                 onDismiss = onUpdateResultConsumed,
                 onDownload = onDownloadUpdate,
             )
+            // Keep the same backdrop recipe as navigation and other glass controls. This is an
+            // overlay, not a dialog: the user can keep browsing or choose a different book.
+            BookOpeningFeedback(openingState, bookOpening::cancel, bookOpening::retry)
         }
     }
 }

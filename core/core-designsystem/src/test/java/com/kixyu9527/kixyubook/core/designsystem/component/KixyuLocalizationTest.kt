@@ -66,10 +66,10 @@ class KixyuLocalizationTest {
             }
         }
         listOf(
-            "en" to "Follow system",
+            "en" to "System",
             "zh-Hans" to "跟随系统",
             "zh-Hant" to "跟隨系統",
-            "ja" to "システムに従う",
+            "ja" to "システム",
         ).forEach { (tag, expected) ->
             compose.runOnIdle { language.value = tag }
             compose.onAllNodesWithText(expected).assertCountEquals(AppUiStyle.entries.size)

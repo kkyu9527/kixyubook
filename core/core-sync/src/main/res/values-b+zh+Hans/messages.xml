@@ -1,4 +1,5 @@
 <resources>
+    <string name="sync_reading_position_changed">云端阅读位置已更新，请重试以恢复最新位置。</string>
     <string name="sync_conflict_failed">同步冲突处理失败</string>
     <string name="sync_reauthorize">需要重新授权 Google Drive</string>
     <string name="sync_storage_unavailable">暂时无法获取云空间</string>
@@ -14,6 +15,9 @@
     <string name="sync_http_error">Google Drive 请求失败 (%1$d)</string>
     <string name="sync_backup_failed">完整备份任务失败</string>
     <string name="sync_checking_local_cloud">正在检查本地与云端数据</string>
+    <string name="sync_updating_shelf">正在更新云端书架</string>
+    <string name="sync_applying_deletions">正在处理云端删除记录</string>
+    <string name="sync_applying_reading_data">正在同步阅读数据</string>
     <string name="sync_account_canceled">已取消 Google 账号授权</string>
     <string name="sync_account_picker_unavailable">Google 账号选择界面不可用</string>
     <string name="sync_token_missing">Google Drive 未返回访问令牌</string>

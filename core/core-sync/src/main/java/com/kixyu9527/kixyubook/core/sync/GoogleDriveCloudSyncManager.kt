@@ -59,7 +59,23 @@ class GoogleDriveCloudSyncManager @Inject constructor(
     @Volatile private var lastReaderBookUuid: String? = null
     override val state = combine(
         preferences.state,
-        syncDao.observePendingCount(),
+        combine(syncDao.observePendingCount(), syncDao.observeBookTransfers(), engine.bookTransferProgress) { uploads, downloads, live ->
+            uploads to downloads.map { row ->
+                val liveProgress = live[row.bookUuid]
+                val persisted = CloudBookDownloadStatus.fromPersisted(row.receipt.transferState)
+                CloudBookDownload(
+                    bookUuid = row.bookUuid,
+                    title = row.bookTitle,
+                    status = when {
+                        liveProgress != null -> CloudBookDownloadStatus.RUNNING
+                        persisted == CloudBookDownloadStatus.RUNNING -> CloudBookDownloadStatus.PENDING
+                        else -> persisted
+                    },
+                    attempts = row.receipt.transferAttempts,
+                    progress = liveProgress,
+                )
+            }
+        },
         initialSyncDecision,
         inspectingInitialSync,
         storageQuota,
@@ -72,7 +88,9 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             wifiOnlyForLargeFiles = persisted.wifiOnlyForLargeFiles,
             phase = persisted.phase,
             lastSyncTime = persisted.lastSyncTime,
-            pendingCount = pending,
+            pendingCount = pending.first,
+            pendingBookDownloads = pending.second.size,
+            bookDownloads = pending.second,
             errorMessage = persisted.error,
             initialSyncDecision = decision ?: persisted.conflicts.takeIf { it.isNotEmpty() }?.let { conflicts ->
                 InitialSyncDecision(
@@ -227,6 +245,15 @@ class GoogleDriveCloudSyncManager @Inject constructor(
 
     override fun syncNow() = scheduler.requestImmediate()
 
+    override fun retryBookDownload(bookUuid: String) {
+        scope.launch {
+            try { engine.downloadBook(bookUuid) } finally { scheduler.requestBookDownloads(continuation = true) }
+        }
+    }
+
+    override suspend fun ensureBookAvailable(bookUuid: String, onProgress: (com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress) -> Unit): Result<Unit> =
+        try { engine.downloadBook(bookUuid, onProgress) } finally { runCatching { scheduler.requestBookDownloads(continuation = true) } }
+
     override fun refreshStorageQuota(force: Boolean) {
         if (storageQuotaJob?.isActive == true) return
         storageQuotaJob = scope.launch(Dispatchers.IO) {
@@ -290,6 +317,9 @@ class GoogleDriveCloudSyncManager @Inject constructor(
             if (!persisted.enabled || persisted.account == null || !persisted.initialSyncApproved) return@launch
             scheduler.ensurePeriodic()
             val hasPendingChanges = syncDao.pending(limit = 1).isNotEmpty()
+            if (persisted.syncOriginalFiles && syncDao.pendingBookDownloadCount() > 0) {
+                scheduler.requestBookDownloads(lastReaderBookUuid)
+            }
             val remoteCheckDue = System.currentTimeMillis() - persisted.lastSyncTime >=
                 FOREGROUND_REMOTE_CHECK_INTERVAL_MILLIS
             if (activeBookUuid == null && (hasPendingChanges || remoteCheckDue)) {

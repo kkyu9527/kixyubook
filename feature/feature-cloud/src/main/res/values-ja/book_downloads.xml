@@ -1,0 +1,19 @@
+<resources>
+    <string name="settings_book_download_tasks">書籍のダウンロード</string>
+    <string name="settings_book_download_pending">自動ダウンロードの待機中</string>
+    <string name="settings_book_download_running">書籍の本文をバックグラウンドで自動ダウンロードしています。</string>
+    <string name="settings_book_download_waiting_network">ネットワークを待機中。接続後に自動で再開します</string>
+    <string name="settings_book_download_failed">ダウンロードに失敗しました。他の書籍は継続し、タップでこの書籍だけ再試行できます。</string>
+    <string name="settings_book_download_failed_row">ダウンロード失敗。右のボタンで再試行</string>
+    <string name="settings_book_download_retry_named">%1$s のダウンロードを再試行</string>
+    <string name="settings_book_download_empty">ダウンロード待ちの本文はありません</string>
+    <string name="settings_book_download_empty_summary">本文は必要に応じて自動でダウンロードされます。操作は不要です。</string>
+    <string name="settings_book_download_section_failed">ダウンロード失敗（%1$d）</string>
+    <string name="settings_book_download_section_running">ダウンロード中（%1$d）</string>
+    <string name="settings_book_download_section_waiting">ダウンロード待ち（%1$d）</string>
+    <string name="settings_book_download_summary_empty">すべての本文をダウンロード済みです</string>
+    <string name="settings_book_download_summary_failed">%1$d 件失敗、%2$d 件待機中</string>
+    <string name="settings_book_download_summary_running">%1$d / %2$d 件をダウンロード中</string>
+    <string name="settings_book_download_summary_pending">%1$d 冊がダウンロード待ちです</string>
+    <string name="settings_book_download_percent">%1$d%%</string>
+</resources>

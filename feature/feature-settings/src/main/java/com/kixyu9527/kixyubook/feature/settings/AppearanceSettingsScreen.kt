@@ -63,9 +63,16 @@ fun AppearanceRoute(
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
         ) {
             item {
-                KixyuSection(title = stringResource(R.string.settings_app_interface_section)) {
+                KixyuSection(
+                    title = stringResource(R.string.settings_appearance_language_section),
+                ) {
                     AppLanguageControl()
-                    KixyuDivider()
+                }
+            }
+            item {
+                KixyuSection(
+                    title = stringResource(R.string.settings_appearance_theme_section),
+                ) {
                     KixyuThemeModeControl(
                         settings = state.settings,
                         onSettingsChange = viewModel::update,
@@ -76,6 +83,16 @@ fun AppearanceRoute(
                         onSettingsChange = viewModel::update,
                     )
                     KixyuDivider()
+                    KixyuAppColorControl(
+                        settings = state.settings,
+                        onSettingsChange = viewModel::update,
+                    )
+                }
+            }
+            item {
+                KixyuSection(
+                    title = stringResource(R.string.settings_appearance_behavior_section),
+                ) {
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_predictive_back),
                         supportingText = if (state.settings.predictiveBackEnabled) {
@@ -98,11 +115,6 @@ fun AppearanceRoute(
                     }
                     KixyuDivider()
                     KixyuGlassEffectControls(
-                        settings = state.settings,
-                        onSettingsChange = viewModel::update,
-                    )
-                    KixyuDivider()
-                    KixyuAppColorControl(
                         settings = state.settings,
                         onSettingsChange = viewModel::update,
                     )

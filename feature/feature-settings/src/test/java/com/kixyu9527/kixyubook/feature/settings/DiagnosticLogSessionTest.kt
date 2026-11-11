@@ -75,6 +75,22 @@ class DiagnosticLogSessionTest {
         assertFalse(session.load(context, config, null, false).hasEntries)
     }
 
+    @Test fun settingsFailureLinePreservesRootCauseFields() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val entry = DiagnosticLogFormatter(context.resources).parseDiagnosticEntry(
+            "2026-11-10T10:00:00Z | SETTINGS | settings_write_failed | outcome=failed | " +
+                "stage=persist | target=reader:theme | failure=TEMPORARY | attempt=2",
+        )
+        assertEquals("SETTINGS", entry.categoryKey)
+        assertEquals("Settings", entry.category)
+        assertEquals("Setting could not be saved", entry.title)
+        assertTrue(entry.isFailure)
+        assertTrue(entry.details.any { it.first == "Setting" && it.second == "reader:theme" })
+        assertTrue(entry.details.any { it.first == "Failure type" && it.second == "TEMPORARY" })
+        assertTrue(entry.details.any { it.first == "Attempt" && it.second == "2" })
+        assertTrue(entry.details.any { it.first == "Interrupted or failed stage" && it.second == "Persisting setting" })
+    }
+
     @Test fun changingLocaleDoesNotReuseLabelsFromOldSnapshot() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         DiagnosticLog.initialize(context)

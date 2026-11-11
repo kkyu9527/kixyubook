@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.kixyu9527.kixyubook.feature.settings"
     compileSdk = 37
-    defaultConfig { minSdk = 26 }
+    defaultConfig { minSdk = 33 }
     buildFeatures { compose = true }
     testOptions.unitTests.isIncludeAndroidResources = true
 }
@@ -15,19 +15,17 @@ android {
 dependencies {
     implementation(project(":core:core-common"))
     implementation(project(":core:core-designsystem"))
+    implementation(project(":core:core-ui"))
     implementation(project(":core:core-reader-engine"))
     implementation(project(":core:core-sync"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.browser)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
-    implementation(libs.coil.compose)
-    implementation(libs.coil.network.okhttp)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     testImplementation(libs.junit)

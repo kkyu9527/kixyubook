@@ -1,0 +1,13 @@
+<resources>
+    <string name="kixyu_book_preparation_waiting">Waiting for background sync to yield</string>
+    <string name="kixyu_book_preparation_authorization">Checking Google authorization</string>
+    <string name="kixyu_book_preparation_locating">Locating the cloud book file</string>
+    <string name="kixyu_book_preparation_downloading">Downloading book from the cloud</string>
+    <string name="kixyu_book_preparation_verifying">Verifying book integrity</string>
+    <string name="kixyu_book_preparation_metadata">Reading book metadata</string>
+    <string name="kixyu_book_preparation_directory">Preparing the chapter directory</string>
+    <string name="kixyu_book_preparation_progress">Restoring the reading position</string>
+    <string name="kixyu_book_preparation_ready">Book ready</string>
+    <string name="kixyu_book_preparation_transfer">Downloading book: %1$s / %2$s (%3$d%%)</string>
+    <string name="kixyu_book_preparation_received">Downloading book: %1$s received</string>
+</resources>

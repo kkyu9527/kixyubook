@@ -292,9 +292,24 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     private suspend fun loadInitial() = runCatching {
+        val shelfBook = books.getBook(bookUuid)
+            ?: error(context.getString(R.string.reader_error_missing_book))
+        if (shelfBook.originalPath.startsWith("google-drive://")) {
+            if (shelfBook.isCloudOnly) _uiState.update { it.copy(book = shelfBook, loadStage = ReaderLoadStage.DOWNLOADING_BOOK) }
+            cloudSync.ensureBookAvailable(bookUuid) { progress ->
+                _uiState.update { it.copy(cloudPreparation = progress,
+                    loadStage = if (progress.stage == BookPreparationStage.READY) it.loadStage else ReaderLoadStage.DOWNLOADING_BOOK) }
+            }.getOrThrow()
+        }
         val initialData = coroutineScope {
             val book = async { books.getBook(bookUuid) }
-            val chapters = async { books.observeChapters(bookUuid).first { it.isNotEmpty() } }
+            val chapters = async {
+                if (shelfBook.originalPath.startsWith("google-drive://")) {
+                    books.observeChapters(bookUuid).first().also {
+                        require(it.isNotEmpty()) { context.getString(R.string.reader_error_no_chapters) }
+                    }
+                } else books.observeChapters(bookUuid).first { it.isNotEmpty() }
+            }
             val progress = async { books.observeProgress(bookUuid).first() }
             val presentation = async {
                 combine(effectiveSettings, fonts.observeFonts()) { settings, fontList ->

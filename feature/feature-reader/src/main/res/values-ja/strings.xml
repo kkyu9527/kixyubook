@@ -14,6 +14,7 @@
     <string name="reader_clear_search_history">消去</string>
     <string name="reader_content_pane">本文</string>
     <string name="reader_opening_book">本を開いています</string>
+    <string name="reader_downloading_book">クラウドから本をダウンロード中</string>
     <string name="reader_parsing_epub">EPUB を解析中</string>
     <string name="reader_preparing_text">本文を準備中</string>
     <string name="reader_preparing_first_page">最初のページを組版中</string>

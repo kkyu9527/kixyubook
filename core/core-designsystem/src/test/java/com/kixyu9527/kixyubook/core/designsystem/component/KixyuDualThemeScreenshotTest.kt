@@ -41,6 +41,10 @@ class KixyuDualThemeScreenshotTest {
 
     @Test fun miuixContextBar() = captureContextBar(AppUiStyle.MIUIX, "miuix")
 
+    @Test fun materialGlassContextBar() = captureContextBar(AppUiStyle.MATERIAL, "material_glass", glassEnabled = true)
+
+    @Test fun miuixGlassContextBar() = captureContextBar(AppUiStyle.MIUIX, "miuix_glass", glassEnabled = true)
+
     @Test fun materialDarkContextBar() = captureContextBar(AppUiStyle.MATERIAL, "material_dark", ReaderTheme.NIGHT)
 
     @Test fun miuixDarkContextBar() = captureContextBar(AppUiStyle.MIUIX, "miuix_dark", ReaderTheme.NIGHT)
@@ -53,18 +57,32 @@ class KixyuDualThemeScreenshotTest {
     @Config(qualifiers = "zh-rCN-w1000dp-h700dp")
     fun miuixTabletContextBar() = captureContextBar(AppUiStyle.MIUIX, "miuix_tablet")
 
-    private fun captureContextBar(style: AppUiStyle, suffix: String, theme: ReaderTheme = ReaderTheme.DAY) {
+    private fun captureContextBar(
+        style: AppUiStyle,
+        suffix: String,
+        theme: ReaderTheme = ReaderTheme.DAY,
+        glassEnabled: Boolean = false,
+    ) {
         compose.setContent {
             KixyuBookTheme(
                 themeMode = theme,
                 uiStyle = style,
                 // Runtime blur is device/GPU dependent. Screenshot contracts validate the shared
                 // geometry, fallback glass tint, typography and semantic colors instead.
-                glassEffectEnabled = false,
+                glassEffectEnabled = glassEnabled,
             ) {
                 val background = kixyuPageBackground()
                 val backdrop = rememberKixyuNavigationBackdrop(background)
                 Box(Modifier.fillMaxSize().background(background)) {
+                    if (glassEnabled) {
+                        Box(Modifier.fillMaxSize().kixyuNavigationBackdrop(backdrop).background(background)) {
+                            Text(
+                                "书架内容 · 长按后操作栏仍使用同一份玻璃材质",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp),
+                            )
+                        }
+                    }
                     Column(
                         Modifier.fillMaxWidth().padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -74,6 +92,7 @@ class KixyuDualThemeScreenshotTest {
                         Text("批量操作会替换常规导航", color = textColor)
                     }
                     KixyuContextualActionBar(
+                        backdrop = backdrop,
                         actions = listOf(
                             KixyuContextualAction("category", "分类", KixyuSymbols.Category) {},
                             KixyuContextualAction("share", "分享", KixyuSymbols.Share) {},
@@ -84,7 +103,6 @@ class KixyuDualThemeScreenshotTest {
                                 destructive = true,
                             ) {},
                         ),
-                        backdrop = backdrop,
                         modifier = Modifier.align(Alignment.BottomCenter).height(112.dp),
                     )
                 }

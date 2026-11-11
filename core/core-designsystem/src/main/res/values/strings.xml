@@ -83,4 +83,5 @@
     <string name="kixyu_color_preview_title">Sample title</string>
     <string name="kixyu_color_preview_body">This is how body text looks with the current colors.</string>
     <string name="kixyu_color_preview_accent">Accent sample</string>
+    <string name="kixyu_display_mode_system">System</string>
 </resources>

@@ -10,6 +10,27 @@ import org.junit.Test
 @org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
 @org.robolectric.annotation.Config(sdk = [35], qualifiers = "zh-rCN")
 class DiagnosticLogFormattingTest {
+    @Test fun cloudBookStagesAndHeartbeatProgressAreReadableInAllFourLanguages() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        for (tag in listOf("en", "zh-Hans", "zh-Hant", "ja")) {
+            val configuration = android.content.res.Configuration(context.resources.configuration).apply {
+                setLocales(android.os.LocaleList.forLanguageTags(tag))
+            }
+            val resources = context.createConfigurationContext(configuration).resources
+            val formatter = DiagnosticLogFormatter(resources)
+            for (stage in com.kixyu9527.kixyubook.core.common.model.BookPreparationStage.entries) {
+                val entry = formatter.parseDiagnosticEntry("2026-11-06T08:00:00Z | SYNC | cloud_book_open | elapsedMs=5000 | " +
+                    "openStage=${stage.name} | book=12345678 | run=test | receivedBytes=1024 | totalBytes=4096 | attempt=2")
+                assertEquals(resources.getString(R.string.diag_cloud_book_title), entry.title)
+                assertEquals(false, entry.isFailure)
+                assertTrue(entry.details.any { it.second == resources.getString(
+                    com.kixyu9527.kixyubook.core.designsystem.component.bookPreparationStageLabel(stage)) })
+                assertTrue(entry.details.contains(resources.getString(R.string.diag_cloud_book_bytes) to "1024"))
+                assertTrue(entry.details.contains(resources.getString(R.string.diag_cloud_book_attempt) to "2"))
+            }
+        }
+    }
+
     private fun parseDiagnosticEntry(rawLine: String): ReadableDiagnosticEntry =
         DiagnosticLogFormatter(
             androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources,

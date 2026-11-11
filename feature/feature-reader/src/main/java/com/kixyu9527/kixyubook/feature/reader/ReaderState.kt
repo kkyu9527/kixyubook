@@ -16,6 +16,7 @@ import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
 
 enum class ReaderLoadStage {
     OPENING_BOOK,
+    DOWNLOADING_BOOK,
     READING_CONTENT,
     PAGINATING_FIRST_PAGE,
 }
@@ -67,6 +68,7 @@ data class ReaderUiState(
     val settledPageIndex: Int? = null,
     val loading: Boolean = true,
     val loadStage: ReaderLoadStage? = ReaderLoadStage.OPENING_BOOK,
+    val cloudPreparation: com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress? = null,
     val error: String? = null,
     /** In-memory ViewModel identity; deliberately not restored from saved instance state. */
     val sessionId: String = "",

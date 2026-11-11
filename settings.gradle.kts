@@ -39,6 +39,7 @@ include(
     ":feature:feature-home",
     ":feature:feature-library",
     ":feature:feature-reader",
+    ":feature:feature-cloud",
     ":feature:feature-settings",
     ":baselineprofile",
 )

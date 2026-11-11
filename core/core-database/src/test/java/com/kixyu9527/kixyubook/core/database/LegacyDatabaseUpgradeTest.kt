@@ -24,6 +24,7 @@ private val ALL_MIGRATIONS = arrayOf(
     MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21,
     MIGRATION_21_22,
     MIGRATION_22_23,
+    MIGRATION_23_24,
 )
 
 /**
@@ -76,6 +77,11 @@ class LegacyDatabaseUpgradeTest {
                     "deviceId, attemptCount, lastAttemptAt) VALUES ('pending-delete', 'BOOK', " +
                     "'11111111-1111-4111-8111-111111111111', 'DELETE', 10, 10, 'device', 3, 25)",
             )
+            if (version == 23) database.execSQL(
+                "INSERT INTO sync_remote_inbox (objectKey, driveFileId, name, mimeType, modifiedAt, version, size, md5) " +
+                    "VALUES ('progress/11111111-1111-4111-8111-111111111111', 'remote-progress', 'progress', " +
+                    "'application/json', 50, 7, 120, NULL)",
+            )
             database.setTransactionSuccessful()
         } finally {
             database.endTransaction()
@@ -86,7 +92,7 @@ class LegacyDatabaseUpgradeTest {
 
     @Test
     fun booksSurviveAnUpgradeFromEveryExportedLegacySchema() {
-        val legacyVersions = listOf(6, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22)
+        val legacyVersions = listOf(6, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
         val failures = legacyVersions.mapNotNull { version ->
             runCatching { booksSurviveAnUpgradeFrom(version) }
                 .exceptionOrNull()
@@ -114,6 +120,14 @@ class LegacyDatabaseUpgradeTest {
                 assertEquals(3, pending.attemptCount)
                 assertEquals(25L, pending.lastAttemptAt)
                 assertEquals(emptyList<Any>(), database.syncDao().remoteInbox())
+            }
+            if (legacyVersion == 23) {
+                val received = database.syncDao().remoteInbox().single()
+                assertEquals("remote-progress", received.driveFileId)
+                assertEquals(7L, received.version)
+                assertEquals("PENDING", received.transferState)
+                assertEquals(0, received.transferAttempts)
+                assertEquals(null, received.payloadJson)
             }
         } finally {
             database.close()

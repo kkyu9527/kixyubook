@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "com.kixyu9527.kixyubook.core.ui"
     compileSdk = 37
-    defaultConfig { minSdk = 26 }
+    defaultConfig { minSdk = 33 }
     buildFeatures { compose = true }
 }
 
@@ -16,6 +16,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.activity.compose)
     implementation(project(":core:core-designsystem"))
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.compose.ui.tooling)

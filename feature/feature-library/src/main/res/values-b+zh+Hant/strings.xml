@@ -19,6 +19,7 @@
     <string name="library_select_all">全選</string>
     <string name="library_book_selected">已選取</string>
     <string name="library_book_not_selected">未選取</string>
+    <string name="library_cloud_only">雲端書籍 · 點選下載</string>
     <string name="library_import">匯入書籍</string>
     <string name="library_actions">書庫操作</string>
     <string name="library_display_title">書架顯示</string>

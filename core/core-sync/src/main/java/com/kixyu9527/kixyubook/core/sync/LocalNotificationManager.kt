@@ -279,6 +279,7 @@ class LocalNotificationManager @Inject constructor(
 
         const val NOTIFICATION_SYNC_PROGRESS = 2107
         const val NOTIFICATION_BACKUP_PROGRESS = 2108
+        const val NOTIFICATION_BOOK_DOWNLOADS = 2113
         private const val NOTIFICATION_BACKUP_RESULT = 2109
         private const val NOTIFICATION_AUTH_REQUIRED = 2110
         private const val NOTIFICATION_SYNC_CONFLICT = 2111

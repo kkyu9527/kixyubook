@@ -22,7 +22,10 @@ data class Book(
     val titleSort: String = "",
     val seriesName: String = "",
     val seriesIndex: Double? = null,
-)
+) {
+    /** A synced shelf entry whose immutable file has not been requested on this device yet. */
+    val isCloudOnly: Boolean get() = originalPath.startsWith("google-drive://") && storagePath.isBlank()
+}
 
 data class Chapter(
     val id: Long,

@@ -53,9 +53,10 @@ class CloudSyncScheduler @Inject constructor(
         enqueuePriorityChain(preferredBookUuid, ExistingWorkPolicy.KEEP)
     }
 
-    fun requestFromTrigger() {
+    fun requestFromTrigger(appendAfterRunning: Boolean = false) {
         // The debounce/periodic worker must not cancel its own unique work while it is running.
-        enqueuePriorityChain(preferredBookUuid = null, ExistingWorkPolicy.KEEP)
+        enqueuePriorityChain(preferredBookUuid = null,
+            if (appendAfterRunning) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP)
     }
 
     /** Appends a final progress flush without cancelling work that already survived backgrounding. */
@@ -108,10 +109,32 @@ class CloudSyncScheduler @Inject constructor(
         workManager.enqueueUniquePeriodicWork(PERIODIC_WORK, ExistingPeriodicWorkPolicy.KEEP, request)
     }
 
+    /** Do not wait six hours for the next periodic run after Wi-Fi becomes available. */
+    fun requestUnmeteredContinuation() {
+        val request = OneTimeWorkRequestBuilder<CloudSyncWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build())
+            .setInputData(workerData(SyncWorkerMode.BOOK_FILES, null))
+            .build()
+        workManager.enqueueUniqueWork(UNMETERED_TRIGGER_WORK, ExistingWorkPolicy.KEEP, request)
+    }
+
+    /** Independent of the metadata chain: a failed book cannot block progress/notes sync. */
+    fun requestBookDownloads(preferredBookUuid: String? = null, continuation: Boolean = false) {
+        val request = OneTimeWorkRequestBuilder<CloudSyncWorker>()
+            .setConstraints(connected)
+            .setInputData(workerData(SyncWorkerMode.BOOK_FILES, preferredBookUuid))
+            .apply { if (continuation) setInitialDelay(2, TimeUnit.SECONDS) }
+            .build()
+        workManager.enqueueUniqueWork(BOOK_FILES_WORK,
+            if (continuation) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP, request)
+    }
+
     fun cancel() {
         workManager.cancelUniqueWork(SYNC_CHAIN_WORK)
         workManager.cancelUniqueWork(DEBOUNCE_TRIGGER_WORK)
         workManager.cancelUniqueWork(PERIODIC_WORK)
+        workManager.cancelUniqueWork(UNMETERED_TRIGGER_WORK)
+        workManager.cancelUniqueWork(BOOK_FILES_WORK)
     }
 
     /**
@@ -139,6 +162,8 @@ class CloudSyncScheduler @Inject constructor(
         const val SYNC_CHAIN_WORK = "google-cloud-sync-chain"
         const val DEBOUNCE_TRIGGER_WORK = "google-cloud-sync-debounce-trigger"
         const val PERIODIC_WORK = "google-cloud-sync-periodic"
+        const val UNMETERED_TRIGGER_WORK = "google-cloud-sync-unmetered"
+        const val BOOK_FILES_WORK = "google-cloud-book-files"
         const val FULL_SYNC_WORK_TAG = "google-cloud-sync-full"
         const val WORK_INFO_QUERY_TIMEOUT_SECONDS = 5L
     }
@@ -153,12 +178,14 @@ class CloudSyncTriggerWorker(
         EntryPointAccessors.fromApplication(
             applicationContext,
             CloudSyncWorkerEntryPoint::class.java,
-        ).scheduler().requestFromTrigger()
+        ).scheduler().requestFromTrigger(inputData.getBoolean(KEY_APPEND, false))
         return Result.success()
     }
+
+    companion object { const val KEY_APPEND = "append_after_running" }
 }
 
-private enum class SyncWorkerMode { PRIORITY_BOOK, FULL }
+private enum class SyncWorkerMode { PRIORITY_BOOK, FULL, BOOK_FILES }
 
 class CloudSyncWorker(
     appContext: Context,
@@ -180,7 +207,7 @@ class CloudSyncWorker(
         )
         val foregroundStarted = AtomicBoolean(false)
         var foregroundJob: Job? = null
-        if (mode == SyncWorkerMode.FULL) {
+        if (mode != SyncWorkerMode.PRIORITY_BOOK) {
             val largeTransferExpected = engine.requiresLongRunningWorker()
             foregroundJob = launch {
                 if (largeTransferExpected) {
@@ -197,12 +224,14 @@ class CloudSyncWorker(
             }
         }
         try {
+            var bookDownloadsDeferred = false
             val operation = when (mode) {
                 SyncWorkerMode.PRIORITY_BOOK -> engine.synchronizePriorityBook(
                     preferredBookUuid = preferredBookUuid,
                     followedByFullSync = true,
                 )
-                SyncWorkerMode.FULL -> engine.synchronize(preferredBookUuid) { progress ->
+                SyncWorkerMode.FULL -> engine.synchronize(preferredBookUuid,
+                    onShelfReady = { dependencies.scheduler().requestBookDownloads(preferredBookUuid) }) { progress ->
                     latestProgress.set(progress)
                     if (foregroundStarted.get()) {
                         try {
@@ -212,11 +241,33 @@ class CloudSyncWorker(
                         }
                     }
                 }
+                SyncWorkerMode.BOOK_FILES -> engine.downloadPendingBooks(preferredBookUuid,
+                    onNetworkDeferred = { bookDownloadsDeferred = true }) { progress ->
+                    latestProgress.set(progress)
+                    if (foregroundStarted.get()) {
+                        try { setForeground(syncForegroundInfo(notifications, progress)) }
+                        catch (_: RuntimeException) { foregroundStarted.set(false) }
+                    }
+                }
             }
             operation.fold(
-                onSuccess = { Result.success() },
+                onSuccess = {
+                    if (mode == SyncWorkerMode.FULL) dependencies.scheduler().requestBookDownloads(preferredBookUuid, continuation = true)
+                    if (mode == SyncWorkerMode.BOOK_FILES && bookDownloadsDeferred) {
+                        dependencies.scheduler().requestUnmeteredContinuation()
+                    }
+                    Result.success()
+                },
                 onFailure = { error ->
                     when {
+                        error is CloudSyncYieldedException -> {
+                            // This is a deliberate handoff, not a network failure. Do not grow
+                            // WorkManager's exponential retry delay each time the user opens a
+                            // book. The foreground request also schedules a continuation on exit.
+                            if (mode == SyncWorkerMode.BOOK_FILES) dependencies.scheduler().requestBookDownloads(preferredBookUuid, continuation = true)
+                            else dependencies.scheduler().requestDebounced()
+                            Result.success()
+                        }
                         error is DriveHttpException && error.statusCode in 400..499 -> Result.failure()
                         // Re-authorization needs the user; retrying cannot fix it and only burns
                         // WorkManager attempts until they sign in again.
@@ -242,14 +293,16 @@ class CloudSyncWorker(
             total = progress.total,
             workerId = id,
         )
+        val notificationId = if (inputData.getString(KEY_MODE) == SyncWorkerMode.BOOK_FILES.name)
+            LocalNotificationManager.NOTIFICATION_BOOK_DOWNLOADS else LocalNotificationManager.NOTIFICATION_SYNC_PROGRESS
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
-                LocalNotificationManager.NOTIFICATION_SYNC_PROGRESS,
+                notificationId,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } else {
-            ForegroundInfo(LocalNotificationManager.NOTIFICATION_SYNC_PROGRESS, notification)
+            ForegroundInfo(notificationId, notification)
         }
     }
 

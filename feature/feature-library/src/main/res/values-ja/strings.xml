@@ -19,6 +19,7 @@
     <string name="library_select_all">すべて選択</string>
     <string name="library_book_selected">選択済み</string>
     <string name="library_book_not_selected">未選択</string>
+    <string name="library_cloud_only">クラウドの本 · 開くとダウンロード</string>
     <string name="library_import">本をインポート</string>
     <string name="library_actions">本棚の操作</string>
     <string name="library_display_title">本棚の表示</string>

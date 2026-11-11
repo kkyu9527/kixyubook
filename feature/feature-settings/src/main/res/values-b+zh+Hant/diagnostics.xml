@@ -261,4 +261,11 @@
     <string name="diag_clear">清空</string>
     <string name="diag_no_errors">暫無異常日誌</string>
     <string name="diag_empty">暫無診斷日誌</string>
+    <string name="diag_stage_persist">寫入設定</string>
+    <string name="diag_stage_locale">系統語言</string>
+    <string name="diag_stage_flush">離開頁面前補寫</string>
+    <string name="diag_stage_inspect">檢查備份</string>
+    <string name="diag_stage_repair">修復備份資源</string>
+    <string name="diag_stage_export">匯出備份</string>
+    <string name="diag_stage_restore">還原備份</string>
 </resources>

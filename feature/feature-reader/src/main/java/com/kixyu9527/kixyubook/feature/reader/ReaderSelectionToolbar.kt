@@ -372,7 +372,7 @@ private fun ReaderTextSelectionMenu(
 
 /**
  * The selection toolbar remains in the reader render tree so it can sample the exact same
- * backdrop, frost percentage and fallback recipe as the bottom navigation capsule. Moving it to
+ * backdrop, clear material and fallback recipe as the bottom navigation capsule. Moving it to
  * a separate Popup window forces a denser simulated veil or a whole-window blur, both of which
  * make the configured opacity look different from the rest of the app.
  */

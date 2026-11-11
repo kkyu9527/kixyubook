@@ -1,0 +1,11 @@
+<resources>
+    <string name="diag_cloud_book_title">クラウドの本を開く</string>
+    <string name="diag_cloud_book_description">各段階の所要時間と受信バイト数を記録します。本文やアカウント情報は記録しません。</string>
+    <string name="diag_cloud_book_stage">開く処理の段階</string>
+    <string name="diag_cloud_book_bytes">受信バイト数</string>
+    <string name="diag_cloud_book_total">ファイルの総バイト数</string>
+    <string name="diag_cloud_book_attempt">リクエストの再試行回数</string>
+    <string name="diag_cloud_book_local_file">ローカルの原本ファイルあり</string>
+    <string name="diag_cloud_book_chapters">目次の章数</string>
+    <string name="diag_cloud_book_background">バックグラウンド自動ダウンロード</string>
+</resources>

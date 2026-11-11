@@ -15,6 +15,11 @@ import com.kixyu9527.kixyubook.core.database.runWithPostCommitFileCleanup
 import com.kixyu9527.kixyubook.core.database.entity.SyncObjectStateEntity
 import com.kixyu9527.kixyubook.core.database.entity.SyncTombstoneEntity
 import androidx.room.withTransaction
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -31,15 +36,39 @@ internal class CloudSyncPullPipeline(
     private val mutations: RoomSyncMutationRecorder,
     private val drive: DriveAppDataClient,
     private val remoteState: CloudRemoteObjectApplier,
+    private val tombstoneJsonDownload: (suspend (String, DriveObject) -> JSONObject)? = null,
 ) {
-    suspend fun applyRemoteTombstones(token: String, remote: MutableMap<String, DriveObject>) {
-        remote.filterKeys { it.startsWith("tombstones/") }.forEach { (key, objectInfo) ->
-            val temp = tempFile("tombstone")
-            try {
-                drive.download(token, objectInfo.id, temp)
-                val json = JSONObject(temp.readText())
-                val type = runCatching { SyncEntityType.valueOf(json.getString("type")) }.getOrNull() ?: return@forEach
+    suspend fun applyRemoteTombstones(
+        token: String,
+        remote: MutableMap<String, DriveObject>,
+        knownRemote: Map<String, DriveObject> = remote,
+        onProgress: suspend (CloudSyncProgress) -> Unit = {},
+    ) {
+        val entries = remote.filterKeys { it.startsWith("tombstones/") }.values.toList()
+        replayRemoteTombstones(
+            entries = entries,
+            needsPayload = { info ->
+                val state = syncDao.objectState(info.objectKey)
+                if (state != null && state.driveFileId == info.id && !isRemoteNewer(info, state.remoteModifiedAt, state.remoteVersion)) {
+                    false
+                } else {
+                    needsTombstonePayload(info.objectKey, knownRemote)
+                }
+            },
+            download = { info ->
+                tombstoneJsonDownload?.invoke(token, info) ?: run {
+                    val file = tempFile("tombstone")
+                    try {
+                        drive.download(token, info.id, file)
+                        JSONObject(file.readText())
+                    } finally { file.delete() }
+                }
+            },
+            apply = apply@{ objectInfo, json ->
+                val key = objectInfo.objectKey
+                val type = SyncEntityType.valueOf(json.getString("type"))
                 val id = json.getString("entityId")
+                require(key == "tombstones/${type.name.lowercase()}/$id") { "tombstone identity mismatch" }
                 val deletedAt = json.optLong("deletedAt")
                 val tombstone = SyncTombstoneEntity(
                     objectKey = key,
@@ -51,14 +80,13 @@ internal class CloudSyncPullPipeline(
                 // was restored on this device after the remote deletion and must not be removed.
                 if (tombstoneSupersededByLocalUpload(syncDao, type, id, deletedAt)) {
                     syncDao.upsertTombstone(tombstone)
-                    syncDao.consumeRemoteChange(key)
                     DiagnosticLog.record(
                         Category.SYNC,
                         "tombstone_superseded_by_local_upload",
                         outcome = "local_wins",
                         details = mapOf("entity" to type.name.lowercase()),
                     )
-                    return@forEach
+                    return@apply
                 }
                 // A tombstone must not discard an edit this device has not uploaded yet. Keep the
                 // local change (it will be pushed and re-create the object) instead of deleting it.
@@ -101,10 +129,36 @@ internal class CloudSyncPullPipeline(
                         details = mapOf("entity" to type.name.lowercase()),
                     )
                 }
-                syncDao.consumeRemoteChange(key)
-            } finally {
-                temp.delete()
-            }
+            },
+            acknowledge = { info -> rememberRemote(info.objectKey, info) },
+            onProgress = { completed, total ->
+                onProgress(CloudSyncProgress(context.getString(R.string.sync_applying_deletions),
+                    context.getString(R.string.sync_processed_items, completed, total), completed, total))
+            },
+        )
+    }
+
+    /** A fresh device has nothing to delete for old tombstones with no surviving cloud object. */
+    private suspend fun needsTombstonePayload(key: String, knownRemote: Map<String, DriveObject>): Boolean {
+        val parts = key.split('/')
+        if (parts.size != 3) return true
+        val type = runCatching { SyncEntityType.valueOf(parts[1].uppercase()) }.getOrNull() ?: return true
+        val id = parts[2]
+        if (type != SyncEntityType.SETTINGS && canonicalSyncUuidOrNull(id) == null) return true
+        val mutableKey = mutableTombstoneObjectKey(type, id)
+        if (mutableKey in knownRemote || (type == SyncEntityType.BOOK && "books/$id/source" in knownRemote)) return true
+        if (hasRemoteTombstoneConflict(type, id, syncDao,
+                { readerAnnotationRepository.getBookAnnotations(it).map { value -> value.uuid } },
+                { textCorrectionRepository.getBookCorrections(it).map { value -> value.uuid } })) return true
+        return when (type) {
+            SyncEntityType.BOOK -> books.bookExists(id)
+            SyncEntityType.FONT -> fontRepository.getFont(id) != null
+            SyncEntityType.PROGRESS -> books.getProgress(id) != null
+            SyncEntityType.BOOKMARKS -> books.getBookmarks(id).isNotEmpty() || books.getPendingBookmarks(id).isNotEmpty()
+            SyncEntityType.SESSION -> books.getSessionBySyncUuid(id) != null
+            SyncEntityType.CORRECTION -> database.textCorrectionDao().get(id) != null
+            SyncEntityType.ANNOTATION -> database.readerAnnotationDao().get(id) != null
+            SyncEntityType.SETTINGS -> true
         }
     }
 
@@ -114,20 +168,21 @@ internal class CloudSyncPullPipeline(
         knownRemote: Map<String, DriveObject>,
         initialMergeComplete: Boolean,
         preferredBookUuid: String?,
+        checkpoint: suspend () -> Unit = {},
+        restoreSources: suspend (Map<String, DriveObject>) -> Unit = {},
         onProgress: suspend (CloudSyncProgress) -> Unit,
     ) {
         // Read the whole outbox, not a 256-row page: a truncated set would let a remote object
         // overwrite a local change that was not visible in the snapshot.
         val dirty = syncDao.allPending().flatMap(::keysForMutationOrEmpty).toSet()
         val localStates = syncDao.allObjectStates().associateBy { it.objectKey }
-        val handledKeys = mutableSetOf<String>()
+        val handledKeys = ConcurrentHashMap.newKeySet<String>()
         // Receipt is durable even if the book/source arrives in a later change batch. Baselines
         // remain applied-only; pending entries are offered again after every cursor advancement.
         val received = CloudRemoteInbox(database, syncDao).receive(changedRemote.filterKeys { !it.startsWith("tombstones/") })
         val availableRemote = knownRemote + received
         val candidates = received.filter { (key, value) ->
             if (key.startsWith("tombstones/") || key in dirty) return@filter false
-            if (!initialMergeComplete) return@filter true
             val state = localStates[key] ?: return@filter true
             isRemoteNewer(value, state.remoteModifiedAt, state.remoteVersion).also { newer ->
                 if (!newer) syncDao.consumeRemoteChange(key)
@@ -169,6 +224,7 @@ internal class CloudSyncPullPipeline(
         // therefore arrive in two Drive change pages; either half must complete the restoration.
         val changedBookUuids = candidates.keys.asSequence()
             .filter { it.startsWith("books/") }
+            .filter { it.endsWith("/metadata") }
             .mapNotNull { it.split('/').getOrNull(1) }
             .distinct()
             .filter { uuid ->
@@ -177,11 +233,11 @@ internal class CloudSyncPullPipeline(
             }
             .toList()
 
-        var restoredBooks = 0
+        val restoredBooks = AtomicInteger()
         if (changedBookUuids.isNotEmpty()) {
             onProgress(
                 CloudSyncProgress(
-                    title = if (initialMergeComplete) context.getString(R.string.sync_downloading_books) else context.getString(R.string.sync_restoring_library),
+                    title = context.getString(R.string.sync_updating_shelf),
                     text = context.getString(R.string.sync_restored_count, 0, changedBookUuids.size),
                     completed = 0,
                     total = changedBookUuids.size,
@@ -193,6 +249,9 @@ internal class CloudSyncPullPipeline(
             knownRemote: Map<String, DriveObject>,
             handledKeys: MutableSet<String>,
         ) {
+            // Source-less shelf entries cannot resolve chapter positions. Leave their snapshots
+            // queued without downloading the same JSON on every interrupted reconciliation.
+            if (books.getChapterCount(uuid) == 0) return
             val progressKey = "progress/$uuid"
             val bookmarksKey = "bookmarks/$uuid"
             if (progressKey !in handledKeys) {
@@ -214,6 +273,7 @@ internal class CloudSyncPullPipeline(
         }
 
         suspend fun restoreBook(uuid: String): Boolean {
+            checkpoint()
             val restored = remoteState.restoreBook(token, uuid, availableRemote)
             if (!restored) {
                 // A metadata-only book (source not uploaded yet) must not consume its keys, and its
@@ -227,15 +287,15 @@ internal class CloudSyncPullPipeline(
                 return false
             }
             handledKeys += "books/$uuid/metadata"
-            handledKeys += "books/$uuid/source"
             availableRemote["books/$uuid/metadata"]?.let { rememberRemote(it.objectKey, it) }
-            availableRemote["books/$uuid/source"]?.let { rememberRemote(it.objectKey, it) }
-            restoredBooks++
+            // The automatic source stage installs the body only after all shelf rows appear.
+            // Catalog receipt alone must not acknowledge a binary file.
+            val completed = restoredBooks.incrementAndGet()
             onProgress(
                 CloudSyncProgress(
-                    title = if (initialMergeComplete) context.getString(R.string.sync_downloading_books) else context.getString(R.string.sync_restoring_library),
-                    text = context.getString(R.string.sync_restored_count, restoredBooks, changedBookUuids.size),
-                    completed = restoredBooks,
+                    title = context.getString(R.string.sync_updating_shelf),
+                    text = context.getString(R.string.sync_restored_count, completed, changedBookUuids.size),
+                    completed = completed,
                     total = changedBookUuids.size,
                 ),
             )
@@ -248,22 +308,30 @@ internal class CloudSyncPullPipeline(
         suspend fun bookIsDirty(uuid: String): Boolean =
             stillDirty("books/$uuid/metadata") || stillDirty("books/$uuid/source")
 
+        suspend fun restoreShelfEntries(uuids: List<String>) {
+            uuids.chunked(4).forEach { batch ->
+                coroutineScope { batch.map { uuid -> async {
+                    if (!bookIsDirty(uuid)) restoreBook(uuid)
+                } }.awaitAll() }
+            }
+        }
+
         if (initialMergeComplete) {
-            changedBookUuids.forEach { if (!bookIsDirty(it)) restoreBook(it) }
+            restoreShelfEntries(changedBookUuids)
             // A book restored without its child objects in this page still needs them; the helper
             // already ran per restore, so nothing else is required here.
         } else {
             val restorePlan = planInitialRestore(changedBookUuids, availableRemote)
             restorePlan.priorityBookUuids.forEach { uuid ->
                 if (!bookIsDirty(uuid)) restoreBook(uuid)
-                candidates["progress/$uuid"]?.let { info ->
+                candidates["progress/$uuid"]?.takeIf { books.getChapterCount(uuid) > 0 }?.let { info ->
                     if (stillDirty("progress/$uuid")) return@let
                     if (remoteState.applyProgress(token, info)) {
                         rememberRemote("progress/$uuid", info)
                         handledKeys += "progress/$uuid"
                     }
                 }
-                candidates["bookmarks/$uuid"]?.let { info ->
+                candidates["bookmarks/$uuid"]?.takeIf { books.getChapterCount(uuid) > 0 }?.let { info ->
                     if (stillDirty("bookmarks/$uuid")) return@let
                     if (remoteState.applyBookmarks(token, info)) {
                         rememberRemote("bookmarks/$uuid", info)
@@ -273,8 +341,13 @@ internal class CloudSyncPullPipeline(
             }
 
             // Put every other source-backed book on the shelf before restoring its secondary data.
-            restorePlan.remainingBookUuids.forEach { if (!bookIsDirty(it)) restoreBook(it) }
+            restoreShelfEntries(restorePlan.remainingBookUuids)
         }
+
+        // Book files are automatic, not click-to-download. Prioritize them before historical
+        // sessions/annotations, but never before the complete shelf has been registered.
+        checkpoint()
+        restoreSources(availableRemote)
 
         // A font is represented by two Drive objects. Apply the pair once even when both objects
         // occur in the same change page; the previous per-key loop imported every font twice.
@@ -283,6 +356,7 @@ internal class CloudSyncPullPipeline(
             .mapNotNull { it.split('/').getOrNull(1) }
             .distinct()
             .forEach { uuid ->
+                checkpoint()
                 val metadataKey = "fonts/$uuid/metadata"
                 val sourceKey = "fonts/$uuid/source"
                 val metadata = availableRemote[metadataKey] ?: return@forEach
@@ -302,22 +376,32 @@ internal class CloudSyncPullPipeline(
                 }
             }
 
-        candidates.forEach { (key, info) ->
-            if (key in handledKeys || stillDirty(key)) return@forEach
-            val applied = when {
-                key.startsWith("progress/") -> remoteState.applyProgress(token, info)
-                key.startsWith("bookmarks/") -> remoteState.applyBookmarks(token, info)
-                key == "settings/global" -> remoteState.applySettings(token, info)
-                key.startsWith("sessions/") -> remoteState.applySession(token, info)
-                key.startsWith("corrections/") -> remoteState.applyCorrection(token, info)
-                key.startsWith("annotations/") -> remoteState.applyAnnotation(token, info)
-                // Books/fonts are consumed only by the successful pair apply above.
-                key.startsWith("books/") || key.startsWith("fonts/") -> false
-                else -> true
-            }
-            // A failed apply (for example a book that is not restored yet) must not advance the
-            // baseline, otherwise the change stream never offers the object again.
-            if (applied) rememberRemote(key, info)
+        // Small reading-data objects do not need a serial network lane either. Room still
+        // serializes each write and the local-dirty guards run immediately before application.
+        val remaining = candidates.entries.filter { (key, _) ->
+            key !in handledKeys && !key.startsWith("books/") && !key.startsWith("fonts/")
+        }
+        var processed = 0
+        remaining.chunked(4).forEach { batch ->
+            checkpoint()
+            coroutineScope { batch.map { (key, info) -> async {
+                if (stillDirty(key)) return@async
+                val latest = syncDao.objectState(key)
+                if (latest != null && !isRemoteNewer(info, latest.remoteModifiedAt, latest.remoteVersion)) return@async
+                val applied = when {
+                    key.startsWith("progress/") -> remoteState.applyProgress(token, info)
+                    key.startsWith("bookmarks/") -> remoteState.applyBookmarks(token, info)
+                    key == "settings/global" -> remoteState.applySettings(token, info)
+                    key.startsWith("sessions/") -> remoteState.applySession(token, info)
+                    key.startsWith("corrections/") -> remoteState.applyCorrection(token, info)
+                    key.startsWith("annotations/") -> remoteState.applyAnnotation(token, info)
+                    else -> true
+                }
+                if (applied) rememberRemote(key, info)
+            } }.awaitAll() }
+            processed += batch.size
+            onProgress(CloudSyncProgress(context.getString(R.string.sync_applying_reading_data),
+                context.getString(R.string.sync_processed_items, processed, remaining.size), processed, remaining.size))
         }
     }
 

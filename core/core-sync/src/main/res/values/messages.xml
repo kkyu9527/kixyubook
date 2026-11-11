@@ -14,6 +14,10 @@
     <string name="sync_http_error">Google Drive request failed (%1$d)</string>
     <string name="sync_backup_failed">Backup task failed</string>
     <string name="sync_checking_local_cloud">Checking local and cloud data</string>
+    <string name="sync_reading_position_changed">The cloud reading position changed. Retry to restore the latest position.</string>
+    <string name="sync_updating_shelf">Updating cloud bookshelf</string>
+    <string name="sync_applying_deletions">Applying cloud deletions</string>
+    <string name="sync_applying_reading_data">Syncing reading data</string>
     <string name="sync_account_canceled">Google authorization canceled</string>
     <string name="sync_account_picker_unavailable">Google account picker unavailable</string>
     <string name="sync_token_missing">Google Drive did not return an access token</string>

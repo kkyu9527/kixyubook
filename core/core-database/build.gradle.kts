@@ -7,7 +7,7 @@ android {
     namespace = "com.kixyu9527.kixyubook.core.database"
     compileSdk = 37
     defaultConfig {
-        minSdk = 26
+        minSdk = 33
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     testOptions.unitTests.isIncludeAndroidResources = true

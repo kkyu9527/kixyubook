@@ -1,6 +1,7 @@
 package com.kixyu9527.kixyubook.core.designsystem.component
 
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -33,6 +34,46 @@ class KixyuAccessibilityTest {
             }
         }
         compose.onNodeWithText("Chapter").assertIsSelected().assertHasClickAction()
+    }
+
+    @Test
+    fun materialPrimaryButtonKeepsMinimumTouchTarget() = primaryButtonTouchTarget(AppUiStyle.MATERIAL)
+
+    @Test
+    fun miuixPrimaryButtonKeepsMinimumTouchTarget() = primaryButtonTouchTarget(AppUiStyle.MIUIX)
+
+    private fun primaryButtonTouchTarget(style: AppUiStyle) {
+        compose.setContent {
+            KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = style) {
+                KixyuButton(text = "继续", onClick = {})
+            }
+        }
+
+        compose.onNodeWithText("继续").assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test
+    fun materialActionDialogKeepsActionsReachable() = actionDialog(AppUiStyle.MATERIAL)
+
+    @Test
+    fun miuixActionDialogKeepsActionsReachable() = actionDialog(AppUiStyle.MIUIX)
+
+    private fun actionDialog(style: AppUiStyle) {
+        compose.setContent {
+            KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = style) {
+                KixyuActionDialog(
+                    show = true,
+                    title = "删除书籍",
+                    onDismissRequest = {},
+                    confirmLabel = "确认",
+                    onConfirm = {},
+                ) {
+                    Text("此操作不可撤销")
+                }
+            }
+        }
+        compose.onNodeWithText("此操作不可撤销").assertExists()
+        compose.onNodeWithText("确认").assertHasClickAction()
     }
 
     @Test

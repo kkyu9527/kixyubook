@@ -11,7 +11,7 @@ import com.kixyu9527.kixyubook.core.database.dao.ImportDao
 import com.kixyu9527.kixyubook.core.database.dao.RepairDao
 import com.kixyu9527.kixyubook.core.database.entity.*
 
-const val KIXYU_DATABASE_VERSION = 23
+const val KIXYU_DATABASE_VERSION = 24
 
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, ParagraphEntity::class, ReadingProgressEntity::class,

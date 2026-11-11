@@ -39,7 +39,7 @@ internal fun SettingsBackupSection(
     onRestore: () -> Unit,
     onExport: () -> Unit,
 ) {
-    KixyuSection(title = stringResource(R.string.settings_data_section)) {
+    KixyuSection {
         Column(
             modifier = Modifier.fillMaxWidth().padding(
                 horizontal = KixyuSpacing.rowHorizontal,
@@ -74,17 +74,19 @@ internal fun SettingsBackupSection(
                         stringResource(R.string.settings_local_full_backup),
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    Text(
-                        stringResource(
-                            when (operation) {
-                                BackupOperationType.EXPORT -> R.string.settings_backup_exporting_detail
-                                BackupOperationType.RESTORE -> R.string.settings_backup_restoring_detail
-                                null -> R.string.settings_backup_content_detail
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    when (operation) {
+                        BackupOperationType.EXPORT -> Text(
+                            stringResource(R.string.settings_backup_exporting_detail),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        BackupOperationType.RESTORE -> Text(
+                            stringResource(R.string.settings_backup_restoring_detail),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        null -> Unit
+                    }
                 }
             }
             Row(

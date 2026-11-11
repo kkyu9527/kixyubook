@@ -62,6 +62,26 @@ class BackupSnapshotConsistencyTest {
     }
 
     @Test
+    fun aCloudOnlyShelfEntryRoundTripsWithoutAnInventedSourceFile() = runBlocking {
+        val uuid = java.util.UUID.randomUUID().toString()
+        database.bookDao().insertBook(com.kixyu9527.kixyubook.core.database.entity.BookEntity(
+            uuid, "云端书籍", "作者", "简介", null, "EPUB", "google-drive://$uuid", "", 1, "cloud-hash", "分类"))
+        val repository = LocalBackupRepository(context, database, FakeReaderSettingsRepository(), FakeLibraryPreferences(), FakeReminders())
+        assertEquals(1, repository.exportTo(backupFile.toUri().toString()).getOrThrow().bookCount)
+        java.util.zip.ZipFile(backupFile).use { zip ->
+            assertFalse(zip.entries().asSequence().any { it.name.startsWith("files/books/") })
+        }
+        assertEquals(1, repository.restoreFrom(backupFile.toUri().toString()).getOrThrow().bookCount)
+        SQLiteDatabase.openDatabase(context.getDatabasePath(DATABASE_NAME).absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery("SELECT originalPath, storagePath FROM books WHERE uuid = ?", arrayOf(uuid)).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("google-drive://$uuid", cursor.getString(0))
+                assertEquals("", cursor.getString(1))
+            }
+        }
+    }
+
+    @Test
     fun concurrentDeletionAfterSnapshotDoesNotBreakPortableBackup() = runBlocking {
         val bookFile = File(context.filesDir, "books/book-1.txt").apply {
             parentFile?.mkdirs()

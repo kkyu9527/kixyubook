@@ -1,4 +1,4 @@
-package com.kixyu9527.kixyubook.feature.settings
+package com.kixyu9527.kixyubook.feature.cloud
 
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import android.app.Activity
@@ -53,6 +53,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationContentPadding
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.displayName
+import com.kixyu9527.kixyubook.feature.cloud.R
 import com.kixyu9527.kixyubook.core.sync.SyncAccount
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -62,12 +63,12 @@ import kotlinx.coroutines.launch
 @Composable
 fun GoogleAccountRoute(
     onBack: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel(),
+    viewModel: CloudSettingsViewModel = hiltViewModel(),
 ) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = context as? Activity
-    val account = state.cloudSync.account
+    val account = state.account
     val openAccountError = stringResource(R.string.settings_open_account_error)
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()

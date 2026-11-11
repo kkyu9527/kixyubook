@@ -261,4 +261,11 @@
     <string name="diag_clear">消去</string>
     <string name="diag_no_errors">エラーログはありません</string>
     <string name="diag_empty">診断ログはありません</string>
+    <string name="diag_stage_persist">設定の保存</string>
+    <string name="diag_stage_locale">システム言語</string>
+    <string name="diag_stage_flush">画面を離れる前の保存</string>
+    <string name="diag_stage_inspect">バックアップの確認</string>
+    <string name="diag_stage_repair">バックアップ資源の修復</string>
+    <string name="diag_stage_export">バックアップの書き出し</string>
+    <string name="diag_stage_restore">バックアップの復元</string>
 </resources>

@@ -270,9 +270,15 @@ class LocalBackupRepository @Inject constructor(
                     cursor.moveToFirst() && cursor.getInt(0) in SUPPORTED_BACKUP_DATABASE_VERSIONS,
                 ) { context.getString(R.string.backup_database_version) }
             }
-            db.rawQuery("SELECT uuid, format, coverPath FROM books", null).use { cursor ->
+            db.rawQuery("SELECT uuid, format, coverPath, originalPath, storagePath FROM books", null).use { cursor ->
                 while (cursor.moveToNext()) {
                     val uuid = cursor.getString(0)
+                    if (cursor.getString(3).startsWith("google-drive://") && cursor.getString(4).isBlank()) {
+                        // Cloud-only entries deliberately have no archive resource. Keep the
+                        // entry (and its reading data); it can be downloaded after sign-in.
+                        db.execSQL("UPDATE books SET coverPath = NULL WHERE uuid = ?", arrayOf(uuid))
+                        continue
+                    }
                     val resolved = resolveArchivedBook(assets, uuid, cursor.getString(1))
                         ?: error(context.getString(R.string.backup_book_missing, uuid))
                     // Only point at a cover the archive actually shipped; otherwise clear it so the
@@ -483,9 +489,10 @@ class LocalBackupRepository @Inject constructor(
     private fun collectReferencedAssets(snapshot: File): List<BackupAsset> {
         val assets = LinkedHashMap<String, BackupAsset>()
         SQLiteDatabase.openDatabase(snapshot.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
-            db.rawQuery("SELECT uuid, format, coverPath FROM books", null).use { cursor ->
+            db.rawQuery("SELECT uuid, format, coverPath, originalPath, storagePath FROM books", null).use { cursor ->
                 while (cursor.moveToNext()) {
                     val uuid = cursor.getString(0)
+                    if (cursor.getString(3).startsWith("google-drive://") && cursor.getString(4).isBlank()) continue
                     val format = cursor.getString(1).lowercase()
                     val book = File(context.filesDir, "books/$uuid.$format")
                     require(book.isFile) { context.getString(R.string.backup_original_book_missing, uuid) }

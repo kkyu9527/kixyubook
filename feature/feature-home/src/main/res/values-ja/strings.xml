@@ -20,4 +20,7 @@
     <string name="home_days_read">読書した日</string>
     <string name="home_days_goal_met">目標達成</string>
     <string name="home_daily_average">1 日の平均</string>
+    <string name="home_today_label">今日</string>
+    <string name="home_continue_hint">前回の位置から続きを読む</string>
+    <string name="home_goal_progress">目標の %1$d%%</string>
 </resources>

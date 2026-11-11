@@ -1,4 +1,5 @@
 <resources>
+    <string name="sync_reading_position_changed">クラウドの読書位置が更新されました。再試行して最新の位置を復元してください。</string>
     <string name="sync_conflict_failed">同期の競合を解決できませんでした</string>
     <string name="sync_reauthorize">Google Drive の再認証が必要です</string>
     <string name="sync_storage_unavailable">クラウド容量を取得できません</string>
@@ -14,6 +15,9 @@
     <string name="sync_http_error">Google Drive のリクエスト失敗（%1$d）</string>
     <string name="sync_backup_failed">バックアップ処理に失敗しました</string>
     <string name="sync_checking_local_cloud">端末とクラウドのデータを確認中</string>
+    <string name="sync_updating_shelf">クラウドの本棚を更新中</string>
+    <string name="sync_applying_deletions">クラウドの削除履歴を処理中</string>
+    <string name="sync_applying_reading_data">読書データを同期中</string>
     <string name="sync_account_canceled">Google 認証をキャンセルしました</string>
     <string name="sync_account_picker_unavailable">Google アカウントの選択画面を利用できません</string>
     <string name="sync_token_missing">Google Drive からアクセストークンが返されませんでした</string>

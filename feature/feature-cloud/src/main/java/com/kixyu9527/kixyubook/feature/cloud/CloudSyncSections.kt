@@ -1,5 +1,4 @@
-package com.kixyu9527.kixyubook.feature.settings
-
+package com.kixyu9527.kixyubook.feature.cloud
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import android.app.Activity
 import android.text.format.Formatter
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -48,6 +46,7 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPageScaffold
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuProgressBar
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSection
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSnackbarHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSettingsRow
@@ -58,237 +57,19 @@ import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuNavigationC
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPageContentWidth
 import com.kixyu9527.kixyubook.core.designsystem.component.displayName
 import java.util.Date
+import com.kixyu9527.kixyubook.core.sync.CloudBookDownload
+import com.kixyu9527.kixyubook.core.sync.CloudBookDownloadStatus
 import com.kixyu9527.kixyubook.core.sync.CloudSyncPhase
+import com.kixyu9527.kixyubook.feature.cloud.R
 import com.kixyu9527.kixyubook.core.sync.CloudSyncState
+import com.kixyu9527.kixyubook.core.ui.rememberNotificationPermissionAction
 import com.kixyu9527.kixyubook.core.sync.DriveStorageQuotaState
 import com.kixyu9527.kixyubook.core.sync.SyncAccount
 import com.kixyu9527.kixyubook.core.sync.InitialSyncChoice
 import kotlinx.coroutines.launch
 
 @Composable
-fun CloudSyncRoute(
-    onBack: () -> Unit,
-    onGoogleAccount: () -> Unit,
-    embedded: Boolean = false,
-    viewModel: SettingsViewModel = hiltViewModel(),
-) = com.kixyu9527.kixyubook.core.designsystem.component.KixyuOperationHost(viewModel.operations) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val activity = context as? Activity
-    val snackbar = remember { SnackbarHostState() }
-    val navigationContentPadding = LocalKixyuNavigationContentPadding.current
-    val syncAccount = state.cloudSync.account
-    var conflictDeferred by rememberSaveable { mutableStateOf(false) }
-    val requestNotificationPermission = rememberNotificationPermissionAction()
-    val authorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (activity != null) viewModel.finishGoogleAuthorization(activity, result.data)
-    }
-    LaunchedEffect(Unit) {
-        viewModel.messages.collect { snackbar.showSnackbar(it) }
-    }
-    LaunchedEffect(Unit) {
-        viewModel.authorizationRequests.collect { pendingIntent ->
-            authorizationLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
-        }
-    }
-    LaunchedEffect(state.cloudSync.initialSyncDecision) {
-        if (state.cloudSync.initialSyncDecision != null) conflictDeferred = false
-    }
-    LaunchedEffect(syncAccount?.subject) {
-        if (syncAccount != null) viewModel.refreshGoogleDriveStorage()
-    }
-    val overviewSection: @Composable () -> Unit = {
-        CloudSyncOverviewCard(
-            state = state.cloudSync,
-            account = syncAccount,
-            onAccountClick = onGoogleAccount,
-            onConnect = {
-                requestNotificationPermission(false) {
-                    activity?.let(viewModel::connectGoogle)
-                }
-            },
-            connectEnabled = activity != null,
-            onSyncAction = {
-                if (state.cloudSync.initialSyncDecision != null) {
-                    conflictDeferred = false
-                } else if (state.cloudSync.phase == CloudSyncPhase.AUTH_REQUIRED) {
-                    activity?.let(viewModel::connectGoogle)
-                } else {
-                    viewModel.syncNow()
-                }
-            },
-        )
-    }
-    val syncBehaviorSection: @Composable () -> Unit = {
-        KixyuSection(title = stringResource(R.string.settings_sync_section)) {
-            KixyuSettingsRow(
-                title = stringResource(R.string.settings_auto_sync),
-                supportingText = stringResource(R.string.settings_auto_sync_summary),
-                icon = KixyuSymbols.CloudSync,
-                onClick = {
-                    if (state.cloudSync.initialSyncDecision != null) {
-                        conflictDeferred = false
-                    } else {
-                        val enabled = !state.cloudSync.enabled
-                        if (enabled) requestNotificationPermission(false) {
-                            viewModel.setCloudSyncEnabled(true)
-                        } else viewModel.setCloudSyncEnabled(false)
-                    }
-                },
-            ) {
-                KixyuSwitch(
-                    checked = state.cloudSync.enabled,
-                    onCheckedChange = { enabled ->
-                        if (enabled) requestNotificationPermission(false) {
-                            viewModel.setCloudSyncEnabled(true)
-                        } else viewModel.setCloudSyncEnabled(false)
-                    },
-                    enabled = state.cloudSync.initialSyncDecision == null &&
-                        !state.cloudSync.inspectingInitialSync,
-                )
-            }
-            KixyuDivider()
-            KixyuDropdownRow(
-                title = stringResource(R.string.settings_large_file_network),
-                selected = state.cloudSync.wifiOnlyForLargeFiles,
-                options = listOf(true, false),
-                optionLabel = { wifiOnly ->
-                    if (wifiOnly) stringResource(R.string.settings_wifi_only) else stringResource(R.string.settings_any_network)
-                },
-                onSelected = viewModel::setWifiOnlyForLargeFiles,
-                icon = KixyuSymbols.Wifi,
-            )
-        }
-    }
-    val syncContentSection: @Composable () -> Unit = {
-        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-            KixyuSection(title = stringResource(R.string.settings_sync_content_section)) {
-                KixyuSettingsRow(
-                    title = stringResource(R.string.settings_original_book_files),
-                    supportingText = stringResource(R.string.settings_sync_books_summary),
-                    icon = KixyuSymbols.Backup,
-                    onClick = {
-                        val enabled = !state.cloudSync.syncOriginalFiles
-                        if (enabled) requestNotificationPermission(false) {
-                            viewModel.setSyncOriginalFiles(true)
-                        } else viewModel.setSyncOriginalFiles(false)
-                    },
-                ) {
-                    KixyuSwitch(
-                        checked = state.cloudSync.syncOriginalFiles,
-                        onCheckedChange = { enabled ->
-                            if (enabled) requestNotificationPermission(false) {
-                                viewModel.setSyncOriginalFiles(true)
-                            } else viewModel.setSyncOriginalFiles(false)
-                        },
-                    )
-                }
-                KixyuDivider()
-                KixyuSettingsRow(
-                    title = stringResource(R.string.settings_user_fonts),
-                    supportingText = stringResource(R.string.settings_sync_fonts_summary),
-                    icon = KixyuSymbols.Tune,
-                    onClick = {
-                        val enabled = !state.cloudSync.syncFonts
-                        if (enabled) requestNotificationPermission(false) {
-                            viewModel.setSyncFonts(true)
-                        } else viewModel.setSyncFonts(false)
-                    },
-                ) {
-                    KixyuSwitch(
-                        checked = state.cloudSync.syncFonts,
-                        onCheckedChange = { enabled ->
-                            if (enabled) requestNotificationPermission(false) {
-                                viewModel.setSyncFonts(true)
-                            } else viewModel.setSyncFonts(false)
-                        },
-                    )
-                }
-            }
-            Text(
-                stringResource(R.string.settings_always_synced),
-                modifier = Modifier.padding(horizontal = KixyuSpacing.extraSmall),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-
-    KixyuPageScaffold(
-        title = stringResource(R.string.settings_google_drive_sync),
-        largeTitle = false,
-        showTopBar = !embedded,
-        modifier = Modifier.fillMaxSize(),
-        navigationIcon = {
-            if (!embedded) {
-                KixyuIconButton(onClick = onBack) {
-                    Icon(KixyuSymbols.ArrowBack, stringResource(R.string.settings_back))
-                }
-            }
-        },
-        snackbarHost = {
-            KixyuSnackbarHost(
-                hostState = snackbar,
-                modifier = Modifier.padding(horizontal = KixyuSpacing.screenHorizontal),
-            )
-        },
-    ) { innerPadding ->
-        LazyColumn(
-            Modifier.kixyuPageContentWidth()
-                .padding(innerPadding)
-                .consumeWindowInsets(innerPadding),
-            contentPadding = PaddingValues(
-                horizontal = KixyuSpacing.screenHorizontal,
-                vertical = KixyuSpacing.screenVertical,
-            ),
-            verticalArrangement = Arrangement.spacedBy(KixyuSpacing.sectionGap),
-        ) {
-            item { overviewSection() }
-            if (syncAccount != null) {
-                item {
-                    GoogleStorageSection(
-                        state = state.cloudSync.storageQuota,
-                        onRefresh = { viewModel.refreshGoogleDriveStorage(force = true) },
-                    )
-                }
-                item { syncBehaviorSection() }
-                item { syncContentSection() }
-            }
-            item { KixyuBottomContentSpacer() }
-        }
-    }
-
-    val syncConflict = state.cloudSync.initialSyncDecision
-    KixyuActionDialog(
-        show = syncConflict != null && !conflictDeferred,
-        title = stringResource(R.string.settings_sync_conflict_title),
-        onDismissRequest = { conflictDeferred = true },
-        confirmLabel = stringResource(R.string.settings_use_local),
-        onConfirm = {
-            viewModel.resolveInitialSync(InitialSyncChoice.KEEP_LOCAL_CHANGES)
-        },
-        confirmEnabled = !state.cloudSync.inspectingInitialSync,
-        alternativeLabel = stringResource(R.string.settings_use_cloud),
-        onAlternative = {
-            viewModel.resolveInitialSync(InitialSyncChoice.USE_CLOUD_CHANGES)
-        },
-        alternativeEnabled = !state.cloudSync.inspectingInitialSync,
-        dismissLabel = stringResource(R.string.settings_resolve_later),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-            Text(stringResource(R.string.settings_sync_conflict_count, syncConflict?.conflicts?.size ?: 0))
-            Text(
-                stringResource(R.string.settings_conflict_explanation),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-
-}
-
-@Composable
-private fun GoogleStorageSection(
+internal fun GoogleStorageSection(
     state: DriveStorageQuotaState,
     onRefresh: () -> Unit,
 ) {
@@ -363,20 +144,10 @@ private fun GoogleStorageSection(
                 }
             }
             if (state.refreshing) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(KixyuSize.progressHeight),
-                )
+                KixyuProgressBar(progress = null, wavy = true)
             } else {
                 quota?.usedFraction?.let { fraction ->
-                    LinearProgressIndicator(
-                        progress = { fraction },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(KixyuSize.progressHeight),
-                        color = accentColor,
-                    )
+                    KixyuProgressBar(progress = fraction, color = accentColor, wavy = true)
                 }
             }
             quota?.takeIf { it.usageInDriveBytes > 0L }?.let {
@@ -393,10 +164,11 @@ private fun GoogleStorageSection(
 }
 
 @Composable
-private fun CloudSyncOverviewCard(
+internal fun CloudSyncOverviewCard(
     state: CloudSyncState,
     account: SyncAccount?,
     onAccountClick: () -> Unit,
+    onBookDownloads: () -> Unit,
     onConnect: () -> Unit,
     connectEnabled: Boolean,
     onSyncAction: () -> Unit,
@@ -488,6 +260,7 @@ private fun CloudSyncOverviewCard(
             KixyuSettingsRow(
                 title = status.title,
                 supportingText = status.detail,
+                onClick = if (state.pendingBookDownloads > 0) onBookDownloads else null,
                 leading = {
                     Surface(
                         modifier = Modifier.size(40.dp),
@@ -515,11 +288,10 @@ private fun CloudSyncOverviewCard(
                 }
             }
             if (status.busy) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = KixyuSpacing.rowHorizontal)
-                        .height(KixyuSize.progressHeight),
+                KixyuProgressBar(
+                    progress = null,
+                    modifier = Modifier.padding(horizontal = KixyuSpacing.rowHorizontal),
+                    wavy = true,
                 )
             }
             if (prominentAction) {
@@ -561,11 +333,23 @@ private enum class CloudSyncStatusTone { ACTIVE, SUCCESS, ATTENTION, ERROR, MUTE
 
 private data class CloudSyncStatusUi(
     val title: String,
-    val detail: String,
+    val detail: String?,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
     val tone: CloudSyncStatusTone,
     val busy: Boolean = false,
 )
+
+@Composable
+internal fun bookDownloadSummary(downloads: List<CloudBookDownload>): String {
+    val failed = downloads.count { it.status == CloudBookDownloadStatus.FAILED }
+    val running = downloads.count { it.status == CloudBookDownloadStatus.RUNNING }
+    return when {
+        downloads.isEmpty() -> stringResource(R.string.settings_book_download_summary_empty)
+        failed > 0 -> stringResource(R.string.settings_book_download_summary_failed, failed, downloads.size)
+        running > 0 -> stringResource(R.string.settings_book_download_summary_running, running, downloads.size)
+        else -> stringResource(R.string.settings_book_download_summary_pending, downloads.size)
+    }
+}
 
 @Composable
 private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
@@ -611,7 +395,11 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
         )
         state.phase == CloudSyncPhase.SYNCING -> CloudSyncStatusUi(
             title = stringResource(R.string.settings_sync_status_syncing),
-            detail = if (state.pendingCount > 0) stringResource(R.string.settings_pending_changes, state.pendingCount) else stringResource(R.string.settings_checking_changes),
+            detail = when {
+                state.pendingBookDownloads > 0 -> stringResource(R.string.settings_sync_pending_bodies, state.pendingBookDownloads)
+                state.pendingCount > 0 -> stringResource(R.string.settings_pending_changes, state.pendingCount)
+                else -> stringResource(R.string.settings_checking_changes)
+            },
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ACTIVE,
             busy = true,
@@ -628,9 +416,22 @@ private fun cloudSyncStatus(state: CloudSyncState): CloudSyncStatusUi {
             icon = KixyuSymbols.CloudSync,
             tone = CloudSyncStatusTone.ATTENTION,
         )
+        state.pendingBookDownloads > 0 -> CloudSyncStatusUi(
+            title = stringResource(R.string.settings_sync_pending_bodies, state.pendingBookDownloads),
+            detail = when {
+                state.bookDownloads.any { it.status == CloudBookDownloadStatus.FAILED } -> stringResource(R.string.settings_book_download_failed)
+                state.bookDownloads.any { it.status == CloudBookDownloadStatus.RUNNING } -> stringResource(R.string.settings_book_download_running)
+                !state.syncOriginalFiles -> stringResource(R.string.settings_sync_bodies_disabled)
+                state.wifiOnlyForLargeFiles -> stringResource(R.string.settings_sync_bodies_wifi)
+                else -> stringResource(R.string.settings_sync_bodies_resume)
+            },
+            icon = KixyuSymbols.CloudSync,
+            tone = if (state.bookDownloads.any { it.status == CloudBookDownloadStatus.RUNNING }) CloudSyncStatusTone.ACTIVE else CloudSyncStatusTone.ATTENTION,
+            busy = state.bookDownloads.any { it.status == CloudBookDownloadStatus.RUNNING },
+        )
         lastSync != null -> CloudSyncStatusUi(
-            title = stringResource(R.string.settings_sync_status_complete),
-            detail = stringResource(R.string.settings_last_sync, lastSync),
+            title = stringResource(R.string.settings_last_sync, lastSync),
+            detail = null,
             icon = KixyuSymbols.CloudDone,
             tone = CloudSyncStatusTone.SUCCESS,
         )

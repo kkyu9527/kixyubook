@@ -28,6 +28,11 @@ interface BookRepository {
     suspend fun exportBooks(bookUuids: Set<String>, directoryUriString: String): BookExportSummary
     /** Restores an immutable source blob while preserving its permanent book UUID. */
     suspend fun restoreSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean
+    /** Installs only a cloud shelf entry, without downloading or parsing its source. */
+    suspend fun registerSyncedBook(book: SyncedBook): Boolean = false
+    /** Unlike restore, a download must not resurrect a shelf entry deleted while it was running. */
+    suspend fun hydrateSyncedBook(book: SyncedBook, sourceFilePath: String): Boolean =
+        restoreSyncedBook(book, sourceFilePath)
     suspend fun deleteBook(bookUuid: String)
     suspend fun deleteBooks(bookUuids: Set<String>)
     suspend fun getBook(bookUuid: String): Book?
@@ -311,6 +316,9 @@ interface SyncMutationRecorder {
  */
 interface CloudSyncCoordinator {
     val priorityBookSync: StateFlow<PriorityBookSyncState>
+
+    /** Explicit, awaitable download; failures reach the reader's existing retry/back surface. */
+    suspend fun ensureBookAvailable(bookUuid: String, onProgress: (BookPreparationProgress) -> Unit = {}): Result<Unit> = Result.success(Unit)
 
     /** Starts a lightweight progress pull followed by durable background reconciliation. */
     fun onAppForeground()

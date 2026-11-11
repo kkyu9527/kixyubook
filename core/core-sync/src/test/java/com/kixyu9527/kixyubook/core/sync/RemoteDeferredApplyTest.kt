@@ -56,8 +56,9 @@ class RemoteDeferredApplyTest {
             assertEquals(annotation, f.annotations.getBookAnnotations(book).single().uuid)
             assertEquals(correction, f.corrections.getBookCorrections(book).single().uuid)
             assertNotNull(f.books.getSessionBySyncUuid(session))
-            assertTrue(f.sync.remoteInbox().isEmpty())
-            assertEquals(changes.keys + sourceKey, f.sync.allObjectStates().map { it.objectKey }.toSet())
+            // Binary receipt is not installation: keep it available for the explicit open path.
+            assertEquals(sourceKey, f.sync.remoteInbox().single().objectKey)
+            assertEquals(changes.keys, f.sync.allObjectStates().map { it.objectKey }.toSet())
         }
     }
 

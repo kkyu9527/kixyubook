@@ -1,6 +1,5 @@
 package com.kixyu9527.kixyubook.core.designsystem.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +27,13 @@ import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassStyle
+import io.github.neoruaa.glasmio.core.GlassAppearance
+import io.github.neoruaa.glasmio.core.GlassDimensions
+import io.github.neoruaa.glasmio.core.LocalGlassAppearance
+import io.github.neoruaa.glasmio.core.LocalGlassColors
+import io.github.neoruaa.glasmio.core.LocalGlassDimensions
+import io.github.neoruaa.glasmio.core.defaultGlassColors
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -40,47 +46,82 @@ private data class ThemeSeed(
 )
 
 private val seeds = mapOf(
-    AppColorTheme.SAGE to ThemeSeed(Color(0xFF52655A), Color(0xFFDCE8DF), Color(0xFFB8CCBD), Color(0xFF3A4D40)),
-    AppColorTheme.OCEAN to ThemeSeed(Color(0xFF496477), Color(0xFFD4E5F2), Color(0xFFB3CCDE), Color(0xFF314958)),
-    AppColorTheme.VIOLET to ThemeSeed(Color(0xFF665D78), Color(0xFFE8DEF2), Color(0xFFCEC2E1), Color(0xFF4C435C)),
-    AppColorTheme.AMBER to ThemeSeed(Color(0xFF775D38), Color(0xFFF3E1C3), Color(0xFFE5C38F), Color(0xFF574426)),
+    AppColorTheme.SAGE to ThemeSeed(Color(0xFF3F5A4B), Color(0xFFD6E5DA), Color(0xFFB8CCBD), Color(0xFF354A3B)),
+    AppColorTheme.OCEAN to ThemeSeed(Color(0xFF3D5B6D), Color(0xFFD2E5ED), Color(0xFFAFCADD), Color(0xFF2D4757)),
+    AppColorTheme.VIOLET to ThemeSeed(Color(0xFF5A5168), Color(0xFFE5DEED), Color(0xFFCDBEE0), Color(0xFF463D54)),
+    AppColorTheme.AMBER to ThemeSeed(Color(0xFF6B5435), Color(0xFFEFE0C4), Color(0xFFE1C08C), Color(0xFF4C3A22)),
 )
 
-private fun lightColors(theme: AppColorTheme) = (seeds[theme] ?: seeds.getValue(AppColorTheme.SAGE)).let { seed ->
+/**
+ * Optional Quiet Editorial palettes: warm paper surfaces, ink text and a low-saturation accent.
+ * These are opt-in color themes; [AppColorTheme.DEFAULT] keeps the component libraries' official
+ * baseline palettes so Material and MIUIX look like their stock design systems first.
+ */
+internal fun lightColors(theme: AppColorTheme) = (seeds[theme] ?: seeds.getValue(AppColorTheme.SAGE)).let { seed ->
     lightColorScheme(
         primary = seed.lightPrimary,
         onPrimary = Color.White,
         primaryContainer = seed.lightContainer,
-        onPrimaryContainer = Color(0xFF18201B),
-        secondary = Color(0xFF66645E),
-        background = Color(0xFFFAF9F5),
-        surface = Color(0xFFFAF9F5),
-        surfaceContainer = Color(0xFFF0EFEB),
-        surfaceContainerLow = Color(0xFFF6F5F1),
-        surfaceContainerHigh = Color(0xFFE9E8E4),
-        onSurface = Color(0xFF20211E),
-        onSurfaceVariant = Color(0xFF656661),
-        outline = Color(0xFF858680),
-        outlineVariant = Color(0xFFDEDFD9),
+        onPrimaryContainer = Color(0xFF14251B),
+        secondary = Color(0xFF6C6252),
+        onSecondary = Color.White,
+        secondaryContainer = Color(0xFFEFE2CE),
+        onSecondaryContainer = Color(0xFF2A2115),
+        tertiary = Color(0xFF8A6A3B),
+        onTertiary = Color.White,
+        tertiaryContainer = Color(0xFFF0E1C6),
+        onTertiaryContainer = Color(0xFF2B1F0E),
+        background = Color(0xFFF7F3E9),
+        onBackground = Color(0xFF1C201B),
+        surface = Color(0xFFFCF9F2),
+        onSurface = Color(0xFF1C201B),
+        surfaceVariant = Color(0xFFE7E1D4),
+        onSurfaceVariant = Color(0xFF556055),
+        surfaceContainerLowest = Color(0xFFFFFDF8),
+        surfaceContainerLow = Color(0xFFECE5D6),
+        surfaceContainer = Color(0xFFE3DBC9),
+        surfaceContainerHigh = Color(0xFFDED5C1),
+        surfaceContainerHighest = Color(0xFFD6CCB6),
+        outline = Color(0xFF788176),
+        outlineVariant = Color(0xFFCFC7B6),
+        inverseSurface = Color(0xFF2F332D),
+        inverseOnSurface = Color(0xFFF1F1E9),
+        inversePrimary = Color(0xFFB8CCBD),
+        scrim = Color.Black,
     )
 }
 
-private fun darkColors(theme: AppColorTheme) = (seeds[theme] ?: seeds.getValue(AppColorTheme.SAGE)).let { seed ->
+internal fun darkColors(theme: AppColorTheme) = (seeds[theme] ?: seeds.getValue(AppColorTheme.SAGE)).let { seed ->
     darkColorScheme(
         primary = seed.darkPrimary,
-        onPrimary = Color(0xFF203027),
+        onPrimary = Color(0xFF233529),
         primaryContainer = seed.darkContainer,
-        onPrimaryContainer = Color(0xFFE1E9E3),
-        secondary = Color(0xFFC9C5BC),
-        background = Color(0xFF121310),
-        surface = Color(0xFF121310),
-        surfaceContainer = Color(0xFF1C1E1A),
-        surfaceContainerLow = Color(0xFF181A17),
-        surfaceContainerHigh = Color(0xFF272925),
-        onSurface = Color(0xFFE7E8E1),
-        onSurfaceVariant = Color(0xFFC5C6BF),
-        outline = Color(0xFF8F918A),
-        outlineVariant = Color(0xFF41433E),
+        onPrimaryContainer = Color(0xFFD3E7D8),
+        secondary = Color(0xFFCBC2B2),
+        onSecondary = Color(0xFF332F26),
+        secondaryContainer = Color(0xFF4A4134),
+        onSecondaryContainer = Color(0xFFE8DFCE),
+        tertiary = Color(0xFFE4C08D),
+        onTertiary = Color(0xFF3F2D11),
+        tertiaryContainer = Color(0xFF5A431F),
+        onTertiaryContainer = Color(0xFFFFDFA8),
+        background = Color(0xFF10130F),
+        onBackground = Color(0xFFE6E9E1),
+        surface = Color(0xFF161A15),
+        onSurface = Color(0xFFE6E9E1),
+        surfaceVariant = Color(0xFF2A3028),
+        onSurfaceVariant = Color(0xFFC1C8BC),
+        surfaceContainerLowest = Color(0xFF0C0F0B),
+        surfaceContainerLow = Color(0xFF20261E),
+        surfaceContainer = Color(0xFF252C24),
+        surfaceContainerHigh = Color(0xFF2B332A),
+        surfaceContainerHighest = Color(0xFF333B31),
+        outline = Color(0xFF8C9487),
+        outlineVariant = Color(0xFF3E463C),
+        inverseSurface = Color(0xFFE6E9E1),
+        inverseOnSurface = Color(0xFF2F332D),
+        inversePrimary = Color(0xFF3F5A4B),
+        scrim = Color.Black,
     )
 }
 
@@ -104,22 +145,37 @@ private fun whiteColors() = lightColorScheme(
 )
 
 private val KixyuTypography = Typography(
+    displayMedium = TextStyle(
+        fontFamily = FontFamily.Serif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 40.sp,
+        lineHeight = 46.sp,
+        letterSpacing = (-0.5).sp,
+    ),
     displaySmall = TextStyle(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 32.sp,
-        lineHeight = 39.sp,
-        letterSpacing = (-0.3).sp,
+        fontSize = 34.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.4).sp,
+    ),
+    headlineMedium = TextStyle(
+        fontFamily = FontFamily.Serif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 28.sp,
+        lineHeight = 34.sp,
+        letterSpacing = (-0.2).sp,
     ),
     headlineSmall = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp),
-    titleLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 18.sp, lineHeight = 24.sp),
+    titleLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp),
     titleMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 22.sp),
     titleSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 25.sp),
+    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 21.sp),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
     labelLarge = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
     labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp),
+    labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 15.sp),
 )
 
 // One material language, semantic structure: Material's shape slots follow the purpose of the
@@ -135,7 +191,6 @@ private val KixyuShapes = Shapes(
 
 val LocalAppUiStyle = staticCompositionLocalOf { AppUiStyle.MATERIAL }
 val LocalKixyuGlassEffectEnabled = staticCompositionLocalOf { true }
-val LocalKixyuGlassFrostLevel = staticCompositionLocalOf { DEFAULT_GLASS_FROST_LEVEL }
 val LocalKixyuPredictiveBackEnabled = staticCompositionLocalOf { false }
 
 /** The opaque window background shared by navigation and page scaffolds. */
@@ -207,35 +262,53 @@ fun KixyuBookTheme(
     val context = LocalContext.current
     val colors = when {
         colorTheme == AppColorTheme.DEFAULT -> {
+            // Stock Material baseline: this is what a plain MaterialTheme would render.
             if (darkTheme) darkColorScheme() else lightColorScheme()
         }
         colorTheme == AppColorTheme.WHITE -> {
             if (darkTheme) darkColorScheme() else whiteColors()
         }
-        colorTheme == AppColorTheme.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
         colorTheme == AppColorTheme.DYNAMIC -> {
-            if (darkTheme) darkColorScheme() else lightColorScheme()
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> darkColors(colorTheme)
         else -> lightColors(colorTheme)
+    }
+    val glassColors = remember(darkTheme, colors.primary) {
+        defaultGlassColors(isDark = darkTheme, accent = colors.primary).let { base ->
+            // Apple's bars are much clearer than the default 64% container. Keep the native
+            // material/refraction, but lower the opaque fill to roughly 30%.
+            base.copy(
+                container = KixyuGlassStyle.fallbackTint(darkTheme),
+            )
+        }
+    }
+    val glassContent: @Composable () -> Unit = {
+        CompositionLocalProvider(
+            LocalGlassColors provides glassColors,
+            LocalGlassAppearance provides GlassAppearance(
+                liquidGlassEnabled = glassEffectEnabled,
+                reduceTransparency = !glassEffectEnabled,
+            ),
+            LocalGlassDimensions provides GlassDimensions(),
+        ) {
+            content()
+        }
     }
     val themedContent: @Composable () -> Unit = {
         CompositionLocalProvider(
             LocalAppUiStyle provides uiStyle,
             LocalKixyuGlassEffectEnabled provides glassEffectEnabled,
-            LocalKixyuGlassFrostLevel provides glassFrostLevel.coerceIn(
-                MIN_GLASS_FROST_LEVEL,
-                MAX_GLASS_FROST_LEVEL,
-            ),
             LocalKixyuPredictiveBackEnabled provides predictiveBackEnabled,
         ) {
             if (uiStyle == AppUiStyle.MIUIX) {
                 val miuixMode = when (colorTheme) {
-                    AppColorTheme.DEFAULT, AppColorTheme.WHITE -> {
-                        if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light
-                    }
+                    // Keep MIUIX's own white/blue baseline instead of inheriting the wallpaper
+                    // Monet palette or the Material baseline purple.
+                    AppColorTheme.DEFAULT,
+                    AppColorTheme.WHITE,
+                    -> if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light
+
                     else -> if (darkTheme) ColorSchemeMode.MonetDark else ColorSchemeMode.MonetLight
                 }
                 val keyColor = colors.primary.takeIf {
@@ -251,11 +324,11 @@ fun KixyuBookTheme(
                         colorScheme = miuixMaterialColorScheme(colors),
                         typography = KixyuTypography,
                         shapes = KixyuShapes,
-                        content = content,
+                        content = glassContent,
                     )
                 }
             } else {
-                content()
+                glassContent()
             }
         }
     }

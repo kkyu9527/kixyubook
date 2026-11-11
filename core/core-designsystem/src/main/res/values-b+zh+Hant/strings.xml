@@ -83,4 +83,5 @@
     <string name="kixyu_color_preview_title">標題範例</string>
     <string name="kixyu_color_preview_body">這是目前配色下的正文效果。</string>
     <string name="kixyu_color_preview_accent">強調色範例</string>
+    <string name="kixyu_display_mode_system">跟隨系統</string>
 </resources>

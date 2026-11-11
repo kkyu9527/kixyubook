@@ -261,4 +261,11 @@
     <string name="diag_clear">Clear</string>
     <string name="diag_no_errors">No error logs</string>
     <string name="diag_empty">No diagnostic logs</string>
+    <string name="diag_stage_persist">Persisting setting</string>
+    <string name="diag_stage_locale">System language</string>
+    <string name="diag_stage_flush">Saving before leaving screen</string>
+    <string name="diag_stage_inspect">Inspecting backup</string>
+    <string name="diag_stage_repair">Repairing backup resources</string>
+    <string name="diag_stage_export">Exporting backup</string>
+    <string name="diag_stage_restore">Restoring backup</string>
 </resources>

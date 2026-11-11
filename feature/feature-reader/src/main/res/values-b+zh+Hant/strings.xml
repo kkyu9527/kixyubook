@@ -14,6 +14,7 @@
     <string name="reader_clear_search_history">清除</string>
     <string name="reader_content_pane">閱讀內文</string>
     <string name="reader_opening_book">正在開啟書籍</string>
+    <string name="reader_downloading_book">正在下載雲端書籍</string>
     <string name="reader_parsing_epub">正在解析 EPUB</string>
     <string name="reader_preparing_text">正在準備內文</string>
     <string name="reader_preparing_first_page">正在排版首頁</string>

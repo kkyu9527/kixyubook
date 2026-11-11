@@ -15,6 +15,30 @@ interface SyncDao {
     @Query("SELECT * FROM sync_remote_inbox")
     suspend fun remoteInbox(): List<SyncRemoteInboxEntity>
 
+    @Query("SELECT * FROM sync_remote_inbox WHERE objectKey = :key")
+    suspend fun receivedObject(key: String): SyncRemoteInboxEntity?
+
+    @Query("UPDATE sync_remote_inbox SET payloadJson = :json WHERE objectKey = :key AND driveFileId = :fileId AND version = :version AND modifiedAt = :modifiedAt")
+    suspend fun cacheReceivedPayload(key: String, fileId: String, version: Long, modifiedAt: Long, json: String): Int
+
+    @Query("UPDATE sync_remote_inbox SET transferState = :state, transferError = :error, transferAttempts = transferAttempts + :attempt WHERE objectKey = :key")
+    suspend fun updateBookTransfer(key: String, state: String, error: String? = null, attempt: Int = 0)
+
+    @Query("SELECT r.*, b.uuid AS bookUuid, b.title AS bookTitle FROM sync_remote_inbox r INNER JOIN books b ON r.objectKey = 'books/' || b.uuid || '/source'")
+    fun observeBookTransfers(): Flow<List<com.kixyu9527.kixyubook.core.database.entity.BookTransferRow>>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM sync_remote_inbox WHERE objectKey = :key)")
+    suspend fun hasReceivedObject(key: String): Boolean
+
+    @Query("SELECT size FROM sync_remote_inbox WHERE objectKey = :key LIMIT 1")
+    suspend fun receivedObjectSize(key: String): Long?
+
+    @Query("SELECT COUNT(*) FROM sync_remote_inbox r INNER JOIN books b ON r.objectKey = 'books/' || b.uuid || '/source'")
+    fun observePendingBookDownloads(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM sync_remote_inbox r INNER JOIN books b ON r.objectKey = 'books/' || b.uuid || '/source'")
+    suspend fun pendingBookDownloadCount(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun retainRemoteChanges(values: List<SyncRemoteInboxEntity>)
 

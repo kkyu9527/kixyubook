@@ -12,4 +12,6 @@ object KixyuMotion {
     const val ReaderPopupExitMillis = 150
     const val ReaderSearchEnterMillis = 280
     const val ReaderSearchExitMillis = 220
+    const val ThemeFadeOutMillis = 120
+    const val ThemeFadeInMillis = 220
 }

@@ -20,4 +20,7 @@
     <string name="home_days_read">有阅读</string>
     <string name="home_days_goal_met">完成目标</string>
     <string name="home_daily_average">日均</string>
+    <string name="home_today_label">今天</string>
+    <string name="home_continue_hint">从上次读到的位置继续</string>
+    <string name="home_goal_progress">已完成目标的 %1$d%%</string>
 </resources>

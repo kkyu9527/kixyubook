@@ -229,6 +229,15 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
 }
 
 /** Received cloud objects wait here until book/source dependencies are available. */
+val MIGRATION_23_24 = object : Migration(23, 24) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `sync_remote_inbox` ADD COLUMN `payloadJson` TEXT")
+        db.execSQL("ALTER TABLE `sync_remote_inbox` ADD COLUMN `transferState` TEXT NOT NULL DEFAULT 'PENDING'")
+        db.execSQL("ALTER TABLE `sync_remote_inbox` ADD COLUMN `transferAttempts` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `sync_remote_inbox` ADD COLUMN `transferError` TEXT")
+    }
+}
+
 val MIGRATION_22_23 = object : Migration(22, 23) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `sync_remote_inbox` (`objectKey` TEXT NOT NULL, " +

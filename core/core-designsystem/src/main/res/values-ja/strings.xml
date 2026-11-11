@@ -83,4 +83,5 @@
     <string name="kixyu_color_preview_title">見出しサンプル</string>
     <string name="kixyu_color_preview_body">現在の配色での本文イメージです。</string>
     <string name="kixyu_color_preview_accent">アクセントのサンプル</string>
+    <string name="kixyu_display_mode_system">システム</string>
 </resources>

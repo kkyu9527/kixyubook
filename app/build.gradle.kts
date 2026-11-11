@@ -14,10 +14,10 @@ android {
 
     defaultConfig {
         applicationId = "com.kixyu9527.kixyubook"
-        minSdk = 26
+        minSdk = 33
         targetSdk = 37
-        versionCode = 3202
-        versionName = "3.2.2"
+        versionCode = 3203
+        versionName = "3.2.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -71,6 +71,7 @@ dependencies {
     implementation(project(":feature:feature-home"))
     implementation(project(":feature:feature-library"))
     implementation(project(":feature:feature-reader"))
+    implementation(project(":feature:feature-cloud"))
     implementation(project(":feature:feature-settings"))
 
     implementation(libs.androidx.core.ktx)
@@ -107,4 +108,38 @@ baselineProfile {
     automaticGenerationDuringBuild = false
     mergeIntoMain = true
     saveInSrc = true
+}
+
+// Guardrail for a repeated visual regression: popup triggers and menus must never fall back to
+// an unrounded rectangular surface or a rectangular press shadow. Any plain RectangleShape in the
+// design-system/feature-library UI sources fails the app build.
+val verifyNoRectangularPopupShadow by tasks.registering {
+    val uiSources = fileTree(rootDir) {
+        include("core/core-designsystem/src/main/**/*.kt")
+        include("feature/feature-library/src/main/**/*.kt")
+        exclude("**/build/**")
+    }
+    inputs.files(uiSources)
+    doLast {
+        val offenders = uiSources.files.filter { file -> file.readText().contains("RectangleShape") }
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "Rectangular popup/button surfaces are forbidden; use KixyuPopupShape: " +
+                    offenders.joinToString { it.relativeTo(rootDir).path },
+            )
+        }
+        val categorySource = rootDir.resolve(
+            "feature/feature-library/src/main/java/com/kixyu9527/kixyubook/feature/library/LibraryBookContent.kt",
+        )
+        if (!categorySource.exists()) return@doLast
+        val text = categorySource.readText()
+        if (!text.contains("KixyuPopupShape") || !text.contains("indication = null")) {
+            throw GradleException(
+                "Category trigger must use KixyuPopupShape and have no rectangular press ripple.",
+            )
+        }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(verifyNoRectangularPopupShadow)
 }

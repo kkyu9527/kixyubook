@@ -20,9 +20,14 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import java.util.concurrent.atomic.AtomicLong
 
 data class DriveObject(
     val id: String,
@@ -52,7 +57,15 @@ private data class ChunkUploadResult(
 @Singleton
 class DriveAppDataClient @Inject constructor(
     @param:ApplicationContext private val context: Context,
+    private val accounts: GoogleAccountClient? = null,
 ) {
+    /** Only tests replace this; production always talks to the Drive v3 endpoint. */
+    private var apiBaseUrl: String = DRIVE_API
+
+    internal constructor(context: Context, accounts: GoogleAccountClient?, apiBaseUrl: String) : this(context, accounts) {
+        this.apiBaseUrl = apiBaseUrl
+    }
+
     private val uploadSessions = context.getSharedPreferences("drive_resumable_uploads", Context.MODE_PRIVATE)
 
     suspend fun storageQuota(token: String): DriveStorageQuota {
@@ -132,17 +145,50 @@ class DriveAppDataClient @Inject constructor(
         return DriveChangePage(changes, pageToken, newStart)
     }
 
-    suspend fun download(token: String, fileId: String, destination: File) {
+    /**
+     * Downloads a Drive object with resumable single-stream I/O for small files and bounded
+     * parallel range requests for larger books. Parallel range transfers use at most
+     * [MAX_DOWNLOAD_SEGMENTS] connections per file; the queue layer bounds how many books run at
+     * once, so the whole transfer stays within the blocking-IO dispatcher's capacity.
+     */
+    suspend fun download(
+        token: String,
+        fileId: String,
+        destination: File,
+        onProgress: (Long) -> Unit = {},
+        expectedSize: Long = 0L,
+        contentVersion: Long = 0L,
+    ) {
         destination.parentFile?.mkdirs()
-        val downloadKey = fileId.hashCode().toUInt().toString(16)
-        // Key the resume file by destination as well: two downloads of the same object into the
-        // same directory must not share (and corrupt) one partial file.
-        val destinationKey = destination.name.hashCode().toUInt().toString(16)
         cleanupStalePartialDownloads(destination.parentFile)
+        val segments = planDownloadSegments(expectedSize)
+        if (segments.size > 1) {
+            val result = runCatching {
+                downloadSegments(token, fileId, destination, segments, contentVersion, onProgress)
+            }
+            val failure = result.exceptionOrNull()
+            if (failure is CancellationException) throw failure
+            if (result.isSuccess) return
+            if (failure !is RangeUnsupportedException) throw failure ?: IllegalStateException()
+            // The server ignored Range and sent the whole object. Never assemble a duplicated
+            // body from those responses; discard the split files and resume the single stream.
+            segmentPartsDirectory(destination, fileId, contentVersion).deleteRecursively()
+        }
+        downloadSingle(token, fileId, destination, onProgress)
+    }
+
+    private suspend fun downloadSingle(
+        token: String,
+        fileId: String,
+        destination: File,
+        onProgress: (Long) -> Unit,
+    ) {
+        val (downloadKey, destinationKey) = downloadKeys(fileId, destination)
         val partial = File(destination.parentFile, ".drive-$downloadKey-$destinationKey.part")
-        withBackoff {
+        withBackoff(token) { token ->
             val offset = partial.length()
-            val connection = open("$DRIVE_API/files/${encode(fileId)}?alt=media", "GET", token).apply {
+            onProgress(offset)
+            val connection = open("$apiBaseUrl/files/${encode(fileId)}?alt=media", "GET", token).apply {
                 if (offset > 0L) {
                     setRequestProperty("Range", "bytes=$offset-")
                     uploadSessions.getString("download.$downloadKey.etag", null)?.let {
@@ -169,7 +215,7 @@ class DriveAppDataClient @Inject constructor(
                 val append = offset > 0L && connection.responseCode == HttpURLConnection.HTTP_PARTIAL
                 connection.inputStream.use { input ->
                     FileOutputStream(partial, append).buffered().use { output ->
-                        copyCancellable(input, output)
+                        copyCancellable(input, output) { copied -> onProgress((if (append) offset else 0L) + copied) }
                     }
                 }
             } finally {
@@ -181,14 +227,173 @@ class DriveAppDataClient @Inject constructor(
         uploadSessions.edit { remove("download.$downloadKey.etag") }
     }
 
+    private suspend fun downloadSegments(
+        token: String,
+        fileId: String,
+        destination: File,
+        segments: List<DownloadSegment>,
+        contentVersion: Long,
+        onProgress: (Long) -> Unit,
+    ) {
+        val directory = segmentPartsDirectory(destination, fileId, contentVersion).apply { mkdirs() }
+        val parts = segments.map { it to File(directory, "${it.index}.part") }
+        // A segment that is longer than its range came from a stale/foreign run; restart it.
+        parts.forEach { (segment, part) -> if (part.length() > segment.length) part.delete() }
+        val totalBytes = segments.sumOf { it.length }
+        // Pin the object version before splitting. A book source is uploaded over the same Drive
+        // file id, so without this guard a mid-download update could mix two versions into one
+        // file; a changed ETag makes If-Range return 200 and sends us down the single-stream path.
+        val etag = withBackoff(token) { currentToken ->
+            val probe = open("$apiBaseUrl/files/${encode(fileId)}?alt=media", "GET", currentToken).apply {
+                setRequestProperty("Range", "bytes=0-0")
+            }
+            try {
+                probe.connect()
+                if (probe.responseCode == HTTP_RANGE_NOT_SATISFIABLE) {
+                    throw RangeUnsupportedException(
+                        context.getString(R.string.sync_download_range_expired),
+                    )
+                }
+                ensureSuccess(probe)
+                if (probe.responseCode != HttpURLConnection.HTTP_PARTIAL) {
+                    throw RangeUnsupportedException(
+                        context.getString(R.string.sync_download_range_expired),
+                    )
+                }
+                // A stale metadata size would silently truncate the assembled file; let the
+                // resumable single stream fetch whatever the object actually contains.
+                val actualTotal = probe.getHeaderField("Content-Range")
+                    ?.substringAfterLast('/')
+                    ?.toLongOrNull()
+                if (actualTotal != null && actualTotal != totalBytes) {
+                    throw RangeUnsupportedException(
+                        context.getString(R.string.sync_download_range_expired),
+                    )
+                }
+                probe.getHeaderField("ETag")
+            } finally {
+                probe.disconnect()
+            }
+        } ?: throw RangeUnsupportedException(context.getString(R.string.sync_download_range_expired))
+        val downloaded = AtomicLong(parts.sumOf { (segment, part) ->
+            part.length().coerceIn(0L, segment.length)
+        })
+        val lastReportAt = AtomicLong(0L)
+        onProgress(downloaded.get())
+
+        fun report(force: Boolean) {
+            val now = System.currentTimeMillis()
+            val previous = lastReportAt.get()
+            if (force || now - previous >= PROGRESS_REPORT_INTERVAL_MILLIS) {
+                if (lastReportAt.compareAndSet(previous, now)) onProgress(downloaded.get())
+            }
+        }
+
+        coroutineScope {
+            parts.map { (segment, part) ->
+                async {
+                    while (true) {
+                        val current = part.length().coerceIn(0L, segment.length)
+                        if (current >= segment.length) break
+                        val before = part.length()
+                        withBackoff(token) { currentToken ->
+                            val offset = part.length().coerceIn(0L, segment.length)
+                            if (offset >= segment.length) return@withBackoff
+                            val start = segment.start + offset
+                            val end = segment.endExclusive - 1
+                            val connection = open(
+                                "$apiBaseUrl/files/${encode(fileId)}?alt=media",
+                                "GET",
+                                currentToken,
+                            ).apply {
+                                setRequestProperty("Range", "bytes=$start-$end")
+                                setRequestProperty("If-Range", etag)
+                            }
+                            try {
+                                connection.connect()
+                                if (connection.responseCode == HTTP_RANGE_NOT_SATISFIABLE) {
+                                    throw RangeUnsupportedException(
+                                        context.getString(R.string.sync_download_range_expired),
+                                    )
+                                }
+                                ensureSuccess(connection)
+                                if (connection.responseCode != HttpURLConnection.HTTP_PARTIAL) {
+                                    throw RangeUnsupportedException(
+                                        context.getString(R.string.sync_download_range_expired),
+                                    )
+                                }
+                                val responseEtag = connection.getHeaderField("ETag")
+                                if (responseEtag != null && responseEtag != etag) {
+                                    throw RangeUnsupportedException(
+                                        context.getString(R.string.sync_download_range_expired),
+                                    )
+                                }
+                                connection.inputStream.use { input ->
+                                    FileOutputStream(part, true).buffered().use { output ->
+                                        var copiedInAttempt = 0L
+                                        copyCancellable(input, output) { copied ->
+                                            val delta = copied - copiedInAttempt
+                                            copiedInAttempt = copied
+                                            downloaded.addAndGet(delta)
+                                            report(force = false)
+                                        }
+                                    }
+                                }
+                            } finally {
+                                connection.disconnect()
+                            }
+                        }
+                        if (part.length() <= before) {
+                            throw RangeUnsupportedException(
+                                context.getString(R.string.sync_download_range_expired),
+                            )
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+
+        parts.forEach { (segment, part) ->
+            if (part.length() != segment.length) {
+                throw RangeUnsupportedException(
+                    context.getString(R.string.sync_download_range_expired),
+                )
+            }
+        }
+        val assembled = File(directory, "assembled")
+        assembled.delete()
+        FileOutputStream(assembled).buffered().use { output ->
+            parts.forEach { (_, part) ->
+                part.inputStream().buffered().use { input -> copyCancellable(input, output) }
+            }
+        }
+        if (assembled.length() != totalBytes) {
+            throw RangeUnsupportedException(
+                context.getString(R.string.sync_download_range_expired),
+            )
+        }
+        assembled.copyTo(destination, overwrite = true)
+        directory.deleteRecursively()
+        report(force = true)
+    }
+
+    private fun downloadKeys(fileId: String, destination: File): Pair<String, String> =
+        fileId.hashCode().toUInt().toString(16) to destination.name.hashCode().toUInt().toString(16)
+
+    private fun segmentPartsDirectory(destination: File, fileId: String, contentVersion: Long): File {
+        val (downloadKey, destinationKey) = downloadKeys(fileId, destination)
+        val version = if (contentVersion > 0L) contentVersion.toString() else "0"
+        return File(destination.parentFile, ".drive-$downloadKey-$destinationKey-v$version.parts")
+    }
+
     /** Removes resume files abandoned by a crash so they do not accumulate in the cache. */
     private fun cleanupStalePartialDownloads(directory: File?) {
         val cutoff = System.currentTimeMillis() - PARTIAL_DOWNLOAD_RETENTION_MILLIS
         directory?.listFiles()?.forEach { file ->
-            if (file.isFile && file.name.startsWith(".drive-") && file.name.endsWith(".part") &&
-                file.lastModified() < cutoff
-            ) {
-                runCatching { file.delete() }
+            val resumable = file.isFile && file.name.startsWith(".drive-") && file.name.endsWith(".part") ||
+                file.isDirectory && file.name.startsWith(".drive-") && file.name.endsWith(".parts")
+            if (resumable && file.lastModified() < cutoff) {
+                runCatching { file.deleteRecursively() }
             }
         }
     }
@@ -268,7 +473,7 @@ class DriveAppDataClient @Inject constructor(
         mimeType: String,
         source: File,
         metadata: JSONObject,
-    ): DriveObject = withBackoff {
+    ): DriveObject = withBackoff(token) { token ->
         val endpoint = if (existingFileId == null) {
             "$DRIVE_UPLOAD/files?uploadType=multipart&fields=${encode(FILE_FIELDS)}"
         } else {
@@ -307,7 +512,7 @@ class DriveAppDataClient @Inject constructor(
         mimeType: String,
         length: Long,
         metadata: JSONObject,
-    ): String = withBackoff {
+    ): String = withBackoff(token) { token ->
         val session = open(endpoint, method, token).apply {
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
@@ -340,7 +545,7 @@ class DriveAppDataClient @Inject constructor(
                 currentCoroutineContext().ensureActive()
                 val endExclusive = minOf(offset + UPLOAD_CHUNK_BYTES, source.length())
                 val count = (endExclusive - offset).toInt()
-                val result = withBackoff {
+                val result = withBackoff(token) { token ->
                     val upload = open(location, "PUT", token).apply {
                         doOutput = true
                         setRequestProperty("Content-Type", mimeType)
@@ -384,7 +589,7 @@ class DriveAppDataClient @Inject constructor(
     private suspend fun driveObjectAfterCompletedUpload(token: String, objectKey: String): DriveObject =
         findByObjectKey(token, objectKey) ?: error(context.getString(R.string.sync_upload_complete_metadata_missing))
 
-    private suspend fun queryUploadOffset(location: String, token: String, total: Long): Long = withBackoff {
+    private suspend fun queryUploadOffset(location: String, token: String, total: Long): Long = withBackoff(token) { token ->
         val query = open(location, "PUT", token).apply {
             doOutput = true
             setFixedLengthStreamingMode(0)
@@ -418,7 +623,7 @@ class DriveAppDataClient @Inject constructor(
         )
     }
 
-    suspend fun delete(token: String, fileId: String) = withBackoff {
+    suspend fun delete(token: String, fileId: String) = withBackoff(token) { token ->
         val connection = open("$DRIVE_API/files/${encode(fileId)}", "DELETE", token)
         try {
             connection.connect()
@@ -428,7 +633,7 @@ class DriveAppDataClient @Inject constructor(
         }
     }
 
-    private suspend fun requestJson(method: String, url: String, token: String): JSONObject = withBackoff {
+    private suspend fun requestJson(method: String, url: String, token: String): JSONObject = withBackoff(token) { token ->
         val connection = open(url, method, token)
         try {
             connection.connect()
@@ -443,7 +648,7 @@ class DriveAppDataClient @Inject constructor(
         (URI(url).toURL().openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 20_000
-            readTimeout = 90_000
+            readTimeout = 30_000
             setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", "application/json")
         }
@@ -458,31 +663,59 @@ class DriveAppDataClient @Inject constructor(
         )
     }
 
-    private suspend fun <T> withBackoff(block: suspend () -> T): T {
+    private suspend fun <T> withBackoff(token: String, block: suspend (String) -> T): T = withRefreshingDriveToken(
+        current = {
+            currentCoroutineContext()[CloudTransferLease]?.check?.invoke()
+            if (accounts == null) token else accounts.accessToken()
+                ?: throw CloudSyncEngine.AuthorizationRequiredException(context.getString(R.string.sync_reauthorize))
+        },
+        refresh = { expired ->
+            currentCoroutineContext()[CloudTransferLease]?.check?.invoke()
+            currentCoroutineContext()[com.kixyu9527.kixyubook.core.common.model.BookPreparationObserver]?.retry?.invoke(1, 401)
+            accounts?.refreshAccessToken(expired)
+                ?: throw DriveHttpException(401, context.getString(R.string.sync_auth_expired))
+        },
+    ) { currentToken ->
+        retryTransientRequest {
+            currentCoroutineContext()[CloudTransferLease]?.check?.invoke()
+            block(currentToken)
+        }
+    }
+
+    private suspend fun <T> retryTransientRequest(block: suspend () -> T): T {
         var attempt = 0
         while (true) {
             currentCoroutineContext().ensureActive()
+            currentCoroutineContext()[BackgroundSyncCheckpoint]?.check?.invoke()
+            currentCoroutineContext()[CloudTransferLease]?.check?.invoke()
             try {
                 return block()
             } catch (error: DriveHttpException) {
                 val transient = error.statusCode == 429 || error.statusCode >= 500
                 if (!transient || attempt >= MAX_BACKOFF_RETRIES) throw error
-                delay(error.retryAfterMillis ?: BASE_BACKOFF_MILLIS * (1L shl attempt))
+                currentCoroutineContext()[com.kixyu9527.kixyubook.core.common.model.BookPreparationObserver]?.retry?.invoke(attempt + 1, error.statusCode)
+                delay((error.retryAfterMillis ?: BASE_BACKOFF_MILLIS * (1L shl attempt)).coerceAtMost(60_000L))
             } catch (error: IOException) {
                 if (attempt >= MAX_BACKOFF_RETRIES) throw error
+                currentCoroutineContext()[com.kixyu9527.kixyubook.core.common.model.BookPreparationObserver]?.retry?.invoke(attempt + 1, null)
                 delay(BASE_BACKOFF_MILLIS * (1L shl attempt))
             }
             attempt += 1
         }
     }
 
-    private suspend fun copyCancellable(input: InputStream, output: OutputStream) {
+    private suspend fun copyCancellable(input: InputStream, output: OutputStream, onBytes: (Long) -> Unit = {}) {
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var copied = 0L
         while (true) {
             currentCoroutineContext().ensureActive()
+            currentCoroutineContext()[BackgroundSyncCheckpoint]?.check?.invoke()
+            currentCoroutineContext()[CloudTransferLease]?.check?.invoke()
             val count = input.read(buffer)
             if (count < 0) break
             output.write(buffer, 0, count)
+            copied += count
+            onBytes(copied)
         }
     }
 
@@ -521,6 +754,42 @@ class DriveAppDataClient @Inject constructor(
         fun encode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.name())
     }
 }
+
+internal const val MAX_DOWNLOAD_SEGMENTS = 8
+internal const val MIN_PARALLEL_DOWNLOAD_SEGMENT_BYTES = 1L * 1024L * 1024L
+private const val PROGRESS_REPORT_INTERVAL_MILLIS = 120L
+
+internal data class DownloadSegment(
+    val index: Int,
+    val start: Long,
+    val endExclusive: Long,
+) {
+    val length: Long get() = endExclusive - start
+}
+
+/**
+ * Splits a known file into a bounded number of contiguous ranges. Small objects stay on the
+ * single-stream path because connection setup costs more than the transfer saves.
+ */
+internal fun planDownloadSegments(
+    size: Long,
+    maxSegments: Int = MAX_DOWNLOAD_SEGMENTS,
+    minSegmentBytes: Long = MIN_PARALLEL_DOWNLOAD_SEGMENT_BYTES,
+): List<DownloadSegment> {
+    if (size <= 0L || maxSegments <= 1) return listOf(DownloadSegment(0, 0L, size.coerceAtLeast(0L)))
+    val count = minOf(maxSegments.toLong(), size / minSegmentBytes.coerceAtLeast(1L))
+        .toInt()
+        .coerceAtLeast(1)
+    val base = size / count
+    val remainder = size % count
+    var start = 0L
+    return List(count) { index ->
+        val length = base + if (index < remainder) 1L else 0L
+        DownloadSegment(index, start, start + length).also { start += length }
+    }
+}
+
+private class RangeUnsupportedException(message: String) : IOException(message)
 
 internal fun parseRetryAfterMillis(
     value: String?,

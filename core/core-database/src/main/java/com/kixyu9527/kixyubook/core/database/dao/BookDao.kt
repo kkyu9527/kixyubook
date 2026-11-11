@@ -52,6 +52,9 @@ interface BookDao {
     suspend fun getBookmarkEntity(uuid: String): BookmarkEntity?
     @Query("SELECT chapterKey FROM chapters WHERE id = :chapterId") suspend fun getChapterKey(chapterId: Long): String?
     @Insert suspend fun insertBook(book: BookEntity)
+    /** Hydrating a cloud entry must not REPLACE its row and cascade-delete reading data. */
+    @Query("UPDATE books SET storagePath = :storagePath, coverPath = COALESCE(:coverPath, coverPath) WHERE uuid = :uuid")
+    suspend fun installBookSource(uuid: String, storagePath: String, coverPath: String?)
     @Insert suspend fun insertChapter(chapter: ChapterEntity): Long
     @Insert suspend fun insertChapters(chapters: List<ChapterEntity>): List<Long>
     @Insert suspend fun insertParagraphs(paragraphs: List<ParagraphEntity>): List<Long>

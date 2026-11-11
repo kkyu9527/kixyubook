@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "com.kixyu9527.kixyubook.core.datastore"
     compileSdk = 37
-    defaultConfig { minSdk = 26 }
+    defaultConfig { minSdk = 33 }
     testOptions.unitTests.isIncludeAndroidResources = true
 }
 

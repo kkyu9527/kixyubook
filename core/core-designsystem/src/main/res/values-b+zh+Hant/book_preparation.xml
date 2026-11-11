@@ -1,0 +1,13 @@
+<resources>
+    <string name="kixyu_book_preparation_waiting">正在等待背景同步讓位</string>
+    <string name="kixyu_book_preparation_authorization">正在檢查 Google 授權</string>
+    <string name="kixyu_book_preparation_locating">正在定位雲端書籍檔案</string>
+    <string name="kixyu_book_preparation_downloading">正在下載雲端書籍</string>
+    <string name="kixyu_book_preparation_verifying">正在驗證書籍完整性</string>
+    <string name="kixyu_book_preparation_metadata">正在讀取書籍資訊</string>
+    <string name="kixyu_book_preparation_directory">正在準備章節目錄</string>
+    <string name="kixyu_book_preparation_progress">正在還原閱讀位置</string>
+    <string name="kixyu_book_preparation_ready">書籍已就緒</string>
+    <string name="kixyu_book_preparation_transfer">正在下載：%1$s / %2$s（%3$d%%）</string>
+    <string name="kixyu_book_preparation_received">正在下載：已接收 %1$s</string>
+</resources>

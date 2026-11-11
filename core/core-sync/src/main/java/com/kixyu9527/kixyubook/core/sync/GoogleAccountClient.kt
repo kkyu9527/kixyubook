@@ -92,6 +92,18 @@ class GoogleAccountClient @Inject constructor(
         }
     }
 
+    /** Parallel 401s must not evict a token another request has already refreshed. */
+    suspend fun refreshAccessToken(expiredToken: String): String? {
+        tokenMutex.withLock {
+            if (cachedToken?.value == expiredToken || cachedToken == null) {
+                cachedToken = null
+                Identity.getAuthorizationClient(context)
+                    .clearToken(ClearTokenRequest.builder().setToken(expiredToken).build()).await()
+            }
+        }
+        return accessToken()
+    }
+
     suspend fun disconnect() {
         invalidateAccessToken()
         val email = preferences.current().account?.email.orEmpty()
