@@ -46,7 +46,8 @@
 - 搜索点击测试验证到控制器发出的章节/段落位置；新增真实 ReaderViewModel 的跳转/历史/会话重建串联，尚未把屏幕点击、导航宿主和全部持久化边界组合成一个端到端真机测试。
 - Robolectric 的 API 35 放大镜缺少 compositor Surface。`HostMagnifierShadow` 仅替代系统
   放大镜绘制；不替代选择算法、工具栏或 App 业务逻辑，因此不验证放大镜像素及厂商效果。
-- 截图覆盖公共组件的稳定底色、布局与玻璃背景；`KixyuUnifiedGlassTest` 还比较两套主题、明暗模式下公共玻璃入口的像素，防止材质分叉。这不代表真机 GPU 折射效果、全部屏幕或动画帧率。
+- 截图覆盖公共组件的稳定底色、布局与玻璃背景；`KixyuUnifiedGlassTest` 按 CONTROL / CONTENT 两种语义用途比较两套主题、明暗模式下公共入口的像素，防止同用途材质分叉。这不代表真机 GPU 折射效果、全部屏幕或动画帧率。
+- `KixyuGlassLegibilityTest` 用高频黑白背景验证小控件中央保留细节、静止边缘确实折射背景、内容面板压制干扰及按钮可点击；`KixyuGlassTest` 验证共用折射几何、内容底色对比度和背景采样预算。这些是宿主渲染回归，不代替真机视觉与帧率验收。
 - `verifyGlassStyleContracts` 在构建阶段阻止业务组件直接使用底层玻璃或单独覆盖模糊、折射与材质；`KixyuGlassSamplingTest` 验证背景采样的同源循环与跨窗口边界。
 - Lint 和 Edge-to-Edge 规则不能穷尽所有视觉遮挡；系统手势、系统栏、厂商 ROM、真实云端同步仍不在这套检查范围。
 - 云同步用例使用本地 Room、受控下载结果与授权回调，不读取 Google 账号或真实云盘，也不能证明真实网络速度、Google Play 授权弹窗或弱网下的厂商后台行为。

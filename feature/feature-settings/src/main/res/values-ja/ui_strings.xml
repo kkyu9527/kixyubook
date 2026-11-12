@@ -18,6 +18,8 @@
     <string name="settings_checking_update">確認中…</string>
     <string name="settings_check_update">更新を確認</string>
     <string name="settings_release_notes">更新履歴</string>
+    <string name="settings_check_update_action">更新確認</string>
+    <string name="settings_release_notes_action">更新履歴</string>
     <string name="settings_open_github_error">GitHub を開けません。ブラウザを確認してください</string>
     <string name="settings_open_telegram_error">Telegram の連絡先リンクを開けません</string>
     <string name="settings_sync_login_hint">ログインして端末間の変更を同期</string>

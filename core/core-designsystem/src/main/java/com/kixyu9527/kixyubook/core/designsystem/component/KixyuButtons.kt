@@ -2,6 +2,7 @@ package com.kixyu9527.kixyubook.core.designsystem.component
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.sizeIn
@@ -135,6 +136,7 @@ fun KixyuButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    horizontalPadding: Dp? = null,
 ) {
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixButton(
@@ -142,12 +144,18 @@ fun KixyuButton(
             modifier = modifier,
             enabled = enabled,
             colors = MiuixButtonDefaults.buttonColorsPrimary(),
+            insideMargin = horizontalPadding?.let {
+                PaddingValues(horizontal = it, vertical = MiuixButtonDefaults.InsideMargin.calculateTopPadding())
+            } ?: MiuixButtonDefaults.InsideMargin,
         ) { MiuixText(text, maxLines = 1) }
     } else {
         Button(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
+            contentPadding = horizontalPadding?.let {
+                PaddingValues(horizontal = it, vertical = ButtonDefaults.ContentPadding.calculateTopPadding())
+            } ?: ButtonDefaults.ContentPadding,
         ) { Text(text, maxLines = 1) }
     }
 }
@@ -158,6 +166,7 @@ fun KixyuSecondaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    horizontalPadding: Dp? = null,
 ) {
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixButton(
@@ -165,12 +174,18 @@ fun KixyuSecondaryButton(
             modifier = modifier,
             enabled = enabled,
             colors = MiuixButtonDefaults.buttonColors(),
+            insideMargin = horizontalPadding?.let {
+                PaddingValues(horizontal = it, vertical = MiuixButtonDefaults.InsideMargin.calculateTopPadding())
+            } ?: MiuixButtonDefaults.InsideMargin,
         ) { MiuixText(text, maxLines = 1) }
     } else {
         FilledTonalButton(
             onClick = onClick,
             modifier = modifier,
             enabled = enabled,
+            contentPadding = horizontalPadding?.let {
+                PaddingValues(horizontal = it, vertical = ButtonDefaults.ContentPadding.calculateTopPadding())
+            } ?: ButtonDefaults.ContentPadding,
         ) { Text(text, maxLines = 1) }
     }
 }

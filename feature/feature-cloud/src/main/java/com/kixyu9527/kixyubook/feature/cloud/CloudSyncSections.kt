@@ -36,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -259,7 +261,27 @@ internal fun CloudSyncOverviewCard(
             KixyuDivider()
             KixyuSettingsRow(
                 title = status.title,
+                modifier = Modifier.testTag("cloud_sync_status"),
                 supportingText = status.detail,
+                // A timestamp is compact metadata, not a wrapping MIUIX settings title.
+                titleStyle = if (status.tone == CloudSyncStatusTone.SUCCESS) MaterialTheme.typography.bodyMedium else null,
+                supportingContent = if (status.busy) {
+                    {
+                        Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall)) {
+                            status.detail?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            // Inside the row: aligned with the text and clear of the card edge.
+                            KixyuProgressBar(progress = null, wavy = true)
+                        }
+                    }
+                } else null,
                 onClick = if (state.pendingBookDownloads > 0) onBookDownloads else null,
                 leading = {
                     Surface(
@@ -286,13 +308,6 @@ internal fun CloudSyncOverviewCard(
                         )
                     }
                 }
-            }
-            if (status.busy) {
-                KixyuProgressBar(
-                    progress = null,
-                    modifier = Modifier.padding(horizontal = KixyuSpacing.rowHorizontal),
-                    wavy = true,
-                )
             }
             if (prominentAction) {
                 KixyuButton(

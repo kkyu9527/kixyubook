@@ -38,7 +38,7 @@ class ReaderLocalizationTest {
 
     @Test fun traditionalAndJapaneseReaderActionsAreNotSimplifiedFallbacks() {
         assertEquals("新增目前頁面書籤", resources("zh-TW").getString(R.string.reader_add_page_bookmark))
-        assertEquals("このページにしおりを追加", resources("ja").getString(R.string.reader_add_page_bookmark))
+        assertEquals("しおりを追加", resources("ja").getString(R.string.reader_add_page_bookmark))
         assertEquals("すべて", resources("ja").getString(R.string.reader_annotation_filter_all))
     }
 }

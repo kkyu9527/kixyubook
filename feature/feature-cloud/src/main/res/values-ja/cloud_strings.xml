@@ -14,7 +14,7 @@
     <string name="settings_disconnect_account_summary">同期を停止し、Kixyu Book のアクセス権を取り消す</string>
     <string name="settings_disconnect_google_account">Google アカウントの連携を解除</string>
     <string name="settings_google_drive_sync">Google Drive 同期</string>
-    <string name="settings_large_file_network">大容量ファイルの同期回線</string>
+    <string name="settings_large_file_network">大容量ファイル</string>
     <string name="settings_manage_account_summary">個人情報、セキュリティ、プライバシー、端末</string>
     <string name="settings_manage_google_account">Google アカウントを管理</string>
     <string name="settings_manage_your_google_account">Google アカウントを管理</string>
@@ -53,7 +53,7 @@
     <string name="settings_conflict_failed">同期の競合を解決できませんでした</string>
     <string name="settings_back">戻る</string>
     <string name="settings_always_synced">本棚、読書位置、しおり、統計、読書設定は常に同期します</string>
-    <string name="settings_any_network">Wi-Fi とモバイルデータ</string>
+    <string name="settings_any_network">全回線</string>
     <string name="settings_authorizing">認証中…</string>
     <string name="settings_check_network">接続を確認して再試行してください</string>
     <string name="settings_checking_changes">クラウドの変更を確認中</string>

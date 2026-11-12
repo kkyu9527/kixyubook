@@ -14,7 +14,7 @@
     <string name="settings_disconnect_account_summary">停止同步并撤销 Kixyu Book 的访问权限</string>
     <string name="settings_disconnect_google_account">断开 Google 账号</string>
     <string name="settings_google_drive_sync">Google Drive 同步</string>
-    <string name="settings_large_file_network">大文件同步网络</string>
+    <string name="settings_large_file_network">大文件网络</string>
     <string name="settings_manage_account_summary">个人信息、安全、隐私和设备</string>
     <string name="settings_manage_google_account">管理 Google 账号</string>
     <string name="settings_manage_your_google_account">管理你的 Google 账号</string>
@@ -53,7 +53,7 @@
     <string name="settings_conflict_failed">同步冲突处理失败</string>
     <string name="settings_back">返回</string>
     <string name="settings_always_synced">书库、进度、书签、统计和阅读设置始终同步</string>
-    <string name="settings_any_network">Wi-Fi 和移动数据</string>
+    <string name="settings_any_network">不限网络</string>
     <string name="settings_authorizing">正在授权…</string>
     <string name="settings_check_network">请检查网络后重试</string>
     <string name="settings_checking_changes">正在检查云端变更</string>

@@ -16,6 +16,7 @@ import io.github.neoruaa.glasmio.glass.nativeControlLens
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberCombinedBackdrop
 import io.github.neoruaa.glasmio.glass.render.backdrops.rememberLayerBackdrop
 import io.github.neoruaa.glasmio.glass.render.drawPlainBackdrop
+import io.github.neoruaa.glasmio.glass.render.effects.lens
 
 /** One clear platter, one control lens, then sharp foreground tabs drawn by the caller. */
 @Composable
@@ -48,12 +49,22 @@ internal fun KixyuNavigationGlass(
                     backdrop = lensBackdrop,
                     shape = { shape },
                     effects = {
-                        nativeControlLens(
-                            style = NativeControlLensStyle.TabBarIndicator,
-                            liftProgress = pressProgress(),
-                            isDark = isDark,
-                            restingColor = selectionColor,
-                        )
+                        val lift = pressProgress().coerceIn(0f, 1f)
+                        // Both the settled and held lens refract. The settled ray shares
+                        // the surface geometry without adding a second whole-lens blur.
+                        if (lift > 0f) {
+                            nativeControlLens(
+                                style = NativeControlLensStyle.TabBarIndicator,
+                                liftProgress = lift,
+                                isDark = isDark,
+                                restingColor = selectionColor,
+                            )
+                        } else {
+                            lens(KixyuGlassStyle.refractionHeight.toPx(), KixyuGlassStyle.refractionAmount.toPx())
+                        }
+                    },
+                    onDrawSurface = {
+                        drawRect(selectionColor, alpha = 1f - pressProgress().coerceIn(0f, 1f))
                     },
                 ),
             )

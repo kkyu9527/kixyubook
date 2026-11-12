@@ -253,7 +253,9 @@ val verifyGlassStyleContracts = tasks.register("verifyGlassStyleContracts") {
         val componentRoot = "core/core-designsystem/src/main/java/com/kixyu9527/kixyubook/core/designsystem/component/"
         val renderer = componentRoot + "KixyuGlasmioSurface.kt"
         val recipe = componentRoot + "KixyuGlassStyle.kt"
+        val selection = componentRoot + "KixyuNavigationGlass.kt"
         val nativeSurface = Regex("""\b(?:io\.github\.neoruaa\.glasmio\.glass\.)?GlassSurface\b""")
+        val backdropRenderer = Regex("""import\s+io\.github\.neoruaa\.glasmio\.glass\.render\.(?:drawBackdrop|drawPlainBackdrop)\b""")
         val opticalOverride = Regex("""^\s*(?:frostRadius|preserveBackdropColors|refractionHeight|refractionAmount)\s*[:=]""")
         val violations = sources.files.sorted().flatMap { source ->
             val path = source.relativeTo(rootDir).invariantSeparatorsPath
@@ -263,6 +265,7 @@ val verifyGlassStyleContracts = tasks.register("verifyGlassStyleContracts") {
                     return@mapIndexedNotNull null
                 }
                 val bypass = (path != renderer && nativeSurface.containsMatchIn(line)) ||
+                    (path != renderer && path != selection && backdropRenderer.containsMatchIn(line)) ||
                     (path != recipe && line.contains("NavigationGlassMaterial")) ||
                     (path != renderer && opticalOverride.containsMatchIn(line))
                 if (bypass) "$path:${index + 1}: ${line.trim()}" else null

@@ -18,6 +18,8 @@
     <string name="settings_checking_update">正在检查…</string>
     <string name="settings_check_update">检查更新</string>
     <string name="settings_release_notes">更新日志</string>
+    <string name="settings_check_update_action">检查更新</string>
+    <string name="settings_release_notes_action">更新日志</string>
     <string name="settings_open_github_error">无法打开 GitHub，请检查可用的浏览器</string>
     <string name="settings_open_telegram_error">无法打开 Telegram 联系链接</string>
     <string name="settings_sync_login_hint">登录后在设备间增量同步</string>

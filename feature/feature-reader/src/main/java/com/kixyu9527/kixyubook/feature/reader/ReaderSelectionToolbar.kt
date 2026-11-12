@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassRole
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuMotion
@@ -391,7 +392,7 @@ private fun ReaderTextSelectionSurface(
             content()
         }
     } else {
-        KixyuPopupSurface(modifier = modifier) { content() }
+        KixyuPopupSurface(modifier = modifier, role = KixyuGlassRole.CONTROL) { content() }
     }
 }
 

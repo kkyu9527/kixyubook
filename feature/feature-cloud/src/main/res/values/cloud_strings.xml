@@ -13,8 +13,8 @@
     <string name="settings_delete_cloud_warning">Local data will not be deleted, but recovery from Google Drive will no longer be possible.</string>
     <string name="settings_disconnect_account_summary">Stop syncing and revoke access for Kixyu Book</string>
     <string name="settings_disconnect_google_account">Disconnect Google account</string>
-    <string name="settings_google_drive_sync">Google Drive sync</string>
-    <string name="settings_large_file_network">Network for large files</string>
+    <string name="settings_google_drive_sync">Drive sync</string>
+    <string name="settings_large_file_network">Large files</string>
     <string name="settings_manage_account_summary">Personal information, security, privacy, and devices</string>
     <string name="settings_manage_google_account">Manage Google account</string>
     <string name="settings_manage_your_google_account">Manage your Google account</string>
@@ -53,7 +53,7 @@
     <string name="settings_conflict_failed">Could not resolve sync conflicts</string>
     <string name="settings_back">Back</string>
     <string name="settings_always_synced">Library, progress, bookmarks, statistics, and reading settings are always synced</string>
-    <string name="settings_any_network">Wi-Fi and mobile data</string>
+    <string name="settings_any_network">Any network</string>
     <string name="settings_authorizing">Authorizing…</string>
     <string name="settings_check_network">Check your connection and try again</string>
     <string name="settings_checking_changes">Checking cloud changes</string>
@@ -88,8 +88,8 @@
     <string name="settings_storage_used_limit">%1$s of %2$s used</string>
     <string name="settings_sync_now">Sync now</string>
     <string name="settings_syncing">Syncing…</string>
-    <string name="settings_use_cloud">Use cloud changes</string>
-    <string name="settings_use_local">Use local changes</string>
+    <string name="settings_use_cloud">Use cloud</string>
+    <string name="settings_use_local">Use local</string>
     <string name="settings_wait_network">Starts automatically when connected</string>
     <string name="settings_wifi_only">Wi-Fi only</string>
 </resources>

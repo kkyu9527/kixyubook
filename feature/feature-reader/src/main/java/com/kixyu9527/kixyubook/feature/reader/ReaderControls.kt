@@ -22,6 +22,7 @@ import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupMenuItem
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassIsland
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassRole
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSpacing
@@ -233,6 +234,7 @@ private fun ReaderInlinePopup(
 ) {
     KixyuGlassSurface(
         backdrop = backdrop,
+        role = KixyuGlassRole.CONTENT,
         modifier = modifier.widthIn(min = 208.dp, max = 320.dp),
         fallbackContainerColor = backgroundColor,
         contentColor = contentColor,

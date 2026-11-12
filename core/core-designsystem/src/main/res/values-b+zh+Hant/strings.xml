@@ -48,8 +48,8 @@
     <string name="kixyu_mode_slide">左右滑動</string>
     <string name="kixyu_mode_cover">覆蓋翻頁</string>
     <string name="kixyu_palette_default">預設</string>
-    <string name="kixyu_palette_white">純淨白</string>
-    <string name="kixyu_palette_dynamic">莫奈動態取色</string>
+    <string name="kixyu_palette_white">純白</string>
+    <string name="kixyu_palette_dynamic">動態取色</string>
     <string name="kixyu_palette_sage">靜謐青</string>
     <string name="kixyu_palette_ocean">霧海藍</string>
     <string name="kixyu_palette_violet">暮光紫</string>

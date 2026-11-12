@@ -287,6 +287,7 @@ private fun KixyuBackdropAdaptiveModal(
             ) {
                 KixyuGlassSurface(
                     backdrop = backdrop,
+                    role = KixyuGlassRole.CONTENT,
                     modifier = Modifier
                         .then(
                             if (compact) {
@@ -507,6 +508,7 @@ internal fun KixyuGlassDropdownMenu(
         if (glassEnabled) {
             KixyuGlasmioSurface(
                 backdrop = LocalKixyuGlassBackdrop.current,
+                role = KixyuGlassRole.CONTENT,
                 modifier = Modifier,
                 shape = shape,
                 contentColor = MaterialTheme.colorScheme.onSurface,
@@ -540,6 +542,7 @@ fun KixyuPopupSurface(
     containerColor: Color? = null,
     contentColor: Color? = null,
     backdropEffect: KixyuPopupBackdropEffect = KixyuPopupBackdropEffect.SURFACE_ONLY,
+    role: KixyuGlassRole = KixyuGlassRole.CONTENT,
     content: @Composable () -> Unit,
 ) {
     val resolvedContainer = containerColor ?: if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
@@ -556,6 +559,7 @@ fun KixyuPopupSurface(
             modifier = modifier,
             shape = shape,
             contentColor = resolvedContent,
+            role = role,
             content = { content() },
         )
     } else if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
@@ -630,6 +634,7 @@ fun KixyuSafeTopPopup(
         ) {
             KixyuPopupSurface(
                 modifier = Modifier.widthIn(max = KixyuSize.transientPopupMaxWidth).then(surfaceModifier),
+                role = KixyuGlassRole.CONTROL,
                 shadowElevation = shadowElevation,
                 content = content,
             )
@@ -709,6 +714,7 @@ fun KixyuSnackbarHost(
             modifier = Modifier
                 .widthIn(max = KixyuSize.transientPopupMaxWidth)
                 .heightIn(min = KixyuSize.bottomNavigationBarHeight),
+            role = KixyuGlassRole.CONTROL,
             shape = RoundedCornerShape(KixyuSize.navigationContainerCornerRadius),
             shadowElevation = KixyuSpacing.extraSmall,
         ) {
@@ -797,7 +803,7 @@ private fun KixyuPopupWindowEffect() {
     if (view.parent is DialogWindowProvider) return
     val glassEnabled = LocalKixyuGlassEffectEnabled.current
     val blurRadius = with(LocalDensity.current) {
-        KixyuGlassStyle.frostRadius.roundToPx()
+        KixyuGlassStyle.windowBlurRadius.roundToPx()
     }
     DisposableEffect(view, glassEnabled, blurRadius) {
         if (!glassEnabled) return@DisposableEffect onDispose {}
@@ -826,7 +832,7 @@ internal fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
     val view = LocalView.current
     val glassEnabled = LocalKixyuGlassEffectEnabled.current
     val blurRadius = with(LocalDensity.current) {
-        (KixyuGlassStyle.frostRadius * (1f - backProgress.coerceIn(0f, 1f))).roundToPx()
+        (KixyuGlassStyle.windowBlurRadius * (1f - backProgress.coerceIn(0f, 1f))).roundToPx()
     }
     DisposableEffect(view, glassEnabled) {
         val window = (view.parent as? DialogWindowProvider)?.window

@@ -58,7 +58,7 @@
     <string name="settings_about_summary">Version %1$s · Updates &amp; project information</string>
     <string name="settings_log_category_summary">Records: %1$d · Latest: %2$s</string>
     <string name="settings_import_font_summary">Supports TTF / OTF; applied after import</string>
-    <string name="settings_app_summary">Offline book reader</string>
+    <string name="settings_app_summary">Offline reader</string>
     <string name="settings_log_details_summary">View sync, import, parsing, and reading performance logs</string>
     <string name="settings_project_url" translatable="false">github.com/kkyu9527/kixyubook</string>
     <string name="settings_telegram_handle" translatable="false">@kkyu9527s_bot</string>

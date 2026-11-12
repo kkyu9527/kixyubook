@@ -41,6 +41,7 @@ fun KixyuGlassSurface(
     shape: Shape = MaterialTheme.shapes.extraLarge,
     fallbackContainerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     contentColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    role: KixyuGlassRole = KixyuGlassRole.CONTROL,
     content: @Composable BoxScope.() -> Unit,
 ) {
     if (!LocalKixyuGlassEffectEnabled.current) {
@@ -55,6 +56,7 @@ fun KixyuGlassSurface(
             modifier = modifier,
             shape = shape,
             contentColor = contentColor,
+            role = role,
             content = content,
         )
     }
@@ -69,6 +71,7 @@ fun KixyuBackdropAwareInteractiveSurface(
     modifier: Modifier = Modifier,
     shape: Shape = MaterialTheme.shapes.extraLarge,
     fallbackContainerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    role: KixyuGlassRole = KixyuGlassRole.CONTENT,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val backdrop = LocalKixyuGlassBackdrop.current
@@ -83,6 +86,7 @@ fun KixyuBackdropAwareInteractiveSurface(
             modifier = interactiveModifier,
             shape = shape,
             fallbackContainerColor = fallbackContainerColor,
+            role = role,
             content = content,
         )
     } else {
@@ -90,6 +94,7 @@ fun KixyuBackdropAwareInteractiveSurface(
             modifier = interactiveModifier,
             shape = shape,
             containerColor = fallbackContainerColor,
+            role = role,
             shadowElevation = androidx.compose.ui.unit.Dp(0f),
         ) {
             Box(content = content)

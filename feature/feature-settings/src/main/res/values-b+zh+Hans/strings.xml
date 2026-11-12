@@ -57,7 +57,7 @@
     <string name="settings_about_summary">版本 %1$s · 更新与项目信息</string>
     <string name="settings_log_category_summary">%1$d 条记录 · 最新 %2$s</string>
     <string name="settings_import_font_summary">支持 TTF / OTF，导入后自动应用</string>
-    <string name="settings_app_summary">本地离线小说阅读器</string>
+    <string name="settings_app_summary">本地离线阅读</string>
     <string name="settings_log_details_summary">查看同步、导入、解析与阅读性能记录</string>
     <string name="settings_metadata_section">元数据与导入</string>
     <string name="settings_filename_rules">自定义文件名规则</string>

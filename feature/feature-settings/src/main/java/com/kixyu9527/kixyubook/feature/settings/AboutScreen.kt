@@ -26,6 +26,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.AppUpdateState
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBottomContentSpacer
@@ -118,16 +121,22 @@ fun AboutRoute(
                         modifier = Modifier.fillMaxWidth().padding(KixyuSpacing.rowHorizontal),
                         horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
                     ) {
+                        val checkDescription = stringResource(R.string.settings_check_update)
+                        val notesDescription = stringResource(R.string.settings_release_notes)
                         KixyuButton(
-                            text = if (updateState == AppUpdateState.Checking) stringResource(R.string.settings_checking_update) else stringResource(R.string.settings_check_update),
+                            text = if (updateState == AppUpdateState.Checking) stringResource(R.string.settings_checking_update) else stringResource(R.string.settings_check_update_action),
                             onClick = onCheckForUpdates,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = if (updateState == AppUpdateState.Checking) resources.getString(R.string.settings_checking_update) else checkDescription
+                            },
                             enabled = updateState != AppUpdateState.Checking,
+                            horizontalPadding = 12.dp,
                         )
                         KixyuSecondaryButton(
-                            text = stringResource(R.string.settings_release_notes),
+                            text = stringResource(R.string.settings_release_notes_action),
                             onClick = onShowReleaseNotes,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).semantics { contentDescription = notesDescription },
+                            horizontalPadding = 12.dp,
                         )
                     }
                 }

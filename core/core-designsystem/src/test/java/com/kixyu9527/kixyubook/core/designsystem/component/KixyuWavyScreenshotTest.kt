@@ -47,6 +47,7 @@ class KixyuWavyScreenshotTest {
                             .padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(32.dp),
                     ) {
+                        KixyuWavyProgressBar(progress = .05f)
                         KixyuWavyProgressBar(progress = .42f)
                         KixyuWavyProgressBar(progress = null)
                     }
@@ -71,6 +72,8 @@ class KixyuWavyScreenshotTest {
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(32.dp),
                 ) {
+                    KixyuWavyProgressBar(progress = 0f)
+                    KixyuWavyProgressBar(progress = .05f)
                     KixyuWavyProgressBar(progress = .42f)
                     KixyuWavyProgressBar(progress = .83f)
                     KixyuWavyProgressBar(progress = 1f)

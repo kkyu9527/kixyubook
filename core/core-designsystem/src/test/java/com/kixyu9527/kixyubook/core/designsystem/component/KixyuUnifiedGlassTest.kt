@@ -40,13 +40,20 @@ class KixyuUnifiedGlassTest {
     @Test fun darkMaterialSurfacesShareTheirRenderedMaterial() = compare(AppUiStyle.MATERIAL, ReaderTheme.NIGHT)
     @Test fun darkMiuixSurfacesShareTheirRenderedMaterial() = compare(AppUiStyle.MIUIX, ReaderTheme.NIGHT)
     @Test fun surfacesWithoutABackdropShareTheSameClearFallback() = compare(AppUiStyle.MATERIAL, sampled = false)
+    @Test fun materialContentSurfacesShareTheirReadableMaterial() = compare(AppUiStyle.MATERIAL, role = KixyuGlassRole.CONTENT)
+    @Test fun miuixContentSurfacesShareTheirReadableMaterial() = compare(AppUiStyle.MIUIX, role = KixyuGlassRole.CONTENT)
+    @Test fun darkMaterialContentSurfacesShareTheirReadableMaterial() = compare(AppUiStyle.MATERIAL, ReaderTheme.NIGHT, role = KixyuGlassRole.CONTENT)
+    @Test fun darkMiuixContentSurfacesShareTheirReadableMaterial() = compare(AppUiStyle.MIUIX, ReaderTheme.NIGHT, role = KixyuGlassRole.CONTENT)
+    @Test fun readableFallbackDoesNotDependOnHavingABackdrop() = compare(AppUiStyle.MATERIAL, sampled = false, role = KixyuGlassRole.CONTENT)
 
     private fun compare(
         style: AppUiStyle,
         theme: ReaderTheme = ReaderTheme.DAY,
         sampled: Boolean = true,
+        role: KixyuGlassRole = KixyuGlassRole.CONTROL,
     ) {
-        val tags = listOf("track", "surface", "island", "popup", "interactive")
+        val tags = listOf("track", "surface", "popup", "interactive") +
+            listOfNotNull("island".takeIf { role == KixyuGlassRole.CONTROL })
         compose.setContent {
             KixyuBookTheme(themeMode = theme, uiStyle = style, glassEffectEnabled = true) {
                 val background = MaterialTheme.colorScheme.background
@@ -65,11 +72,11 @@ class KixyuUnifiedGlassTest {
                         ) {
                             val shape = KixyuGlassStyle.islandShape
                             fun surfaceModifier(tag: String) = Modifier.size(236.dp, 64.dp).testTag(tag)
-                            KixyuGlasmioSurface(source, surfaceModifier("track"), shape, MaterialTheme.colorScheme.onSurface) {}
-                            KixyuGlassSurface(source, surfaceModifier("surface"), shape) {}
-                            KixyuGlassIsland(source, surfaceModifier("island"), shape) {}
-                            KixyuPopupSurface(surfaceModifier("popup"), shape) {}
-                            KixyuBackdropAwareInteractiveSurface(surfaceModifier("interactive"), shape) {}
+                            KixyuGlasmioSurface(source, surfaceModifier("track"), shape, MaterialTheme.colorScheme.onSurface, role = role) {}
+                            KixyuGlassSurface(source, surfaceModifier("surface"), shape, role = role) {}
+                            if (role == KixyuGlassRole.CONTROL) KixyuGlassIsland(source, surfaceModifier("island"), shape) {}
+                            KixyuPopupSurface(surfaceModifier("popup"), shape, role = role) {}
+                            KixyuBackdropAwareInteractiveSurface(surfaceModifier("interactive"), shape, role = role) {}
                         }
                     }
                 }

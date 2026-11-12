@@ -38,8 +38,8 @@ import kotlin.math.sin
  * Material 3 expressive wavy progress indicator, implemented locally because the project's
  * Material 3 artifact does not ship the expressive API yet.
  *
- * The wave amplitude fades out near 0% and 100% like the official component. [progress] null
- * renders an indeterminate travelling segment; determinate progress gets a moving wave.
+ * The active segment follows the same wave as the remainder at every percentage. [progress]
+ * null renders an indeterminate travelling segment; determinate progress gets a moving wave.
  */
 @Composable
 fun KixyuWavyProgressBar(
@@ -147,10 +147,8 @@ private fun DrawScope.drawWavyBars(
         }
     } else if (animatedProgress > 0f) {
         val endX = startX + (trackEndX - startX) * animatedProgress
-        // Match the official amplitude curve: flat at the ends, wavy through the middle.
-        val activeAmplitude = if (animatedProgress in .1f..0.95f) amplitudePx else 0f
         drawPath(
-            path = wavePath(startX, endX, centerY, activeAmplitude, wavelengthPx, phase),
+            path = wavePath(startX, endX, centerY, amplitudePx, wavelengthPx, phase),
             color = color,
             style = Stroke(width = strokePx, cap = StrokeCap.Round),
         )

@@ -9,7 +9,7 @@
     <string name="reader_edit_annotation_note">Edit annotation note</string>
     <string name="reader_search_scope">Search scope</string>
     <string name="reader_search_scope_book">Whole book</string>
-    <string name="reader_search_scope_chapter">Current chapter</string>
+    <string name="reader_search_scope_chapter">Chapter</string>
     <string name="reader_search_history">Recent searches</string>
     <string name="reader_clear_search_history">Clear</string>
     <string name="reader_content_pane">Book content</string>
@@ -29,8 +29,8 @@
     <string name="reader_directory">Contents</string>
     <string name="reader_previous_chapter">Previous chapter</string>
     <string name="reader_next_chapter">Next chapter</string>
-    <string name="reader_previous_reading_location">Previous reading location</string>
-    <string name="reader_next_reading_location">Next reading location</string>
+    <string name="reader_previous_reading_location">Previous location</string>
+    <string name="reader_next_reading_location">Next location</string>
     <string name="reader_annotation_note_title">Reading note</string>
     <string name="reader_annotation_highlight">Highlight</string>
     <string name="reader_annotation_underline">Underline</string>

@@ -32,7 +32,7 @@
     <string name="library_action_delete">削除</string>
     <string name="library_action_done">完了</string>
     <string name="library_action_save">保存</string>
-    <string name="library_action_export">エクスポート</string>
+    <string name="library_action_export">書き出す</string>
     <string name="library_action_manage">管理</string>
     <string name="library_action_edit">編集</string>
     <string name="library_action_category">カテゴリ</string>

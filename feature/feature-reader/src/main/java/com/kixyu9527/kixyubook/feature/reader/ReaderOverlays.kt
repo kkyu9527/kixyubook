@@ -41,6 +41,7 @@ import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDivider
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuDropdownRow
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassRole
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuBackdropAwareInteractiveSurface
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuIconButton
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuListRow
@@ -109,6 +110,7 @@ internal fun ReaderFloatingSheet(
             ) {
                 KixyuGlassSurface(
                     backdrop = backdrop,
+                    role = KixyuGlassRole.CONTENT,
                     modifier = Modifier.widthIn(max = maxContentWidth)
                         .fillMaxWidth()
                         .heightIn(max = sheetMaxHeight)
@@ -554,6 +556,7 @@ private fun ReaderSettingsSheetHeader(
             val dialogHeight = minOf(maxHeight, 480.dp)
             KixyuGlassSurface(
                 backdrop = backdrop,
+                role = KixyuGlassRole.CONTENT,
                 modifier = Modifier.widthIn(max = 480.dp)
                     .fillMaxWidth()
                     .height(dialogHeight)

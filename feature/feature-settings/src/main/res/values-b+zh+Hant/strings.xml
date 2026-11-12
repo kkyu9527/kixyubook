@@ -57,7 +57,7 @@
     <string name="settings_about_summary">版本 %1$s · 更新與專案資訊</string>
     <string name="settings_log_category_summary">%1$d 筆記錄 · 最新 %2$s</string>
     <string name="settings_import_font_summary">支援 TTF / OTF，匯入後自動套用</string>
-    <string name="settings_app_summary">本機離線小說閱讀器</string>
+    <string name="settings_app_summary">本機離線閱讀</string>
     <string name="settings_log_details_summary">查看同步、匯入、解析與閱讀效能記錄</string>
     <string name="settings_metadata_section">中繼資料與匯入</string>
     <string name="settings_filename_rules">自訂檔案名稱規則</string>

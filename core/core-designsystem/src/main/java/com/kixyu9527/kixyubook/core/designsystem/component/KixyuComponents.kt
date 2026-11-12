@@ -239,6 +239,7 @@ fun KixyuSection(
     }
 }
 
+/** [supportingContent] replaces [supportingText] inside the padded text column in either theme. */
 @Composable
 fun KixyuSettingsRow(
     title: String,
@@ -249,6 +250,8 @@ fun KixyuSettingsRow(
     selected: Boolean? = null,
     onClick: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
+    titleStyle: TextStyle? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     val isSelected = selected == true
@@ -286,7 +289,46 @@ fun KixyuSettingsRow(
             )
         }
     }
+    val textContent: @Composable () -> Unit = {
+        Text(
+            title,
+            style = titleStyle ?: MaterialTheme.typography.bodyLarge,
+            color = if (isSelected) selectedContentColor else rowContentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (supportingContent != null) {
+            CompositionLocalProvider(
+                LocalContentColor provides if (isSelected) selectedSupportingColor else rowSupportingColor,
+            ) { supportingContent() }
+        } else supportingText?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isSelected) selectedSupportingColor else rowSupportingColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
+        if (titleStyle != null || supportingContent != null) {
+            MiuixBasicComponent(
+                modifier = rowModifier,
+                startAction = leadingContent,
+                endActions = {
+                    CompositionLocalProvider(
+                        LocalContentColor provides if (isSelected) selectedContentColor else rowSupportingColor,
+                    ) { trailing() }
+                },
+                insideMargin = PaddingValues(
+                    horizontal = KixyuSpacing.rowHorizontal,
+                    vertical = KixyuSpacing.rowVertical,
+                ),
+                onClick = onClick,
+            ) { textContent() }
+            return
+        }
         MiuixBasicComponent(
             modifier = rowModifier,
             title = title,
@@ -338,30 +380,7 @@ fun KixyuSettingsRow(
             Spacer(Modifier.width(KixyuSpacing.medium))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (isSelected) {
-                    selectedContentColor
-                } else {
-                    rowContentColor
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            supportingText?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isSelected) {
-                        selectedSupportingColor
-                    } else {
-                        rowSupportingColor
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            textContent()
         }
         Spacer(Modifier.width(KixyuSpacing.small))
         CompositionLocalProvider(

@@ -18,6 +18,8 @@
     <string name="settings_checking_update">Checking…</string>
     <string name="settings_check_update">Check for updates</string>
     <string name="settings_release_notes">Release notes</string>
+    <string name="settings_check_update_action">Check</string>
+    <string name="settings_release_notes_action">Changelog</string>
     <string name="settings_open_github_error">Cannot open GitHub. Check that a browser is available.</string>
     <string name="settings_open_telegram_error">Cannot open the Telegram contact link</string>
     <string name="settings_sync_login_hint">Sign in to sync changes across devices</string>

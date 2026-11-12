@@ -73,11 +73,38 @@ labels in both themes, English singular/plural results, search progress format a
 locale-independent diagnostic failure classification. Existing reading, search, annotation,
 bookmark and persistence regression tests continue to run.
 
+## Layout rules and regression coverage
+
+- Prefer short, contextual action labels, not literal word-for-word translations or runtime
+  word chopping. Keep component dimensions and typography; do not make buttons, capsules,
+  menus or toolbars taller to accommodate a verbose label. Preserve single-line navigation
+  labels and the existing fixed-height bar, including its large-font icon-only mode.
+- Compact About actions have dedicated localized labels, while accessibility descriptions keep
+  the full action names. The pair stays horizontal, equal-width and at the original native
+  height. Only internal horizontal padding is reduced; fonts and vertical padding are unchanged.
+- Settings labels use their context: for example, “Slide” under “Page turn effect”, rather
+  than repeating “Horizontal slide”. Keep detailed help, user-data previews and identifiers
+  distinct from functional action names. Existing data-preview truncation is intentional.
+- `KixyuLocalizedLayoutTest`, `AboutLocalizedLayoutTest`, `ReaderControlsLocalizedLayoutTest`
+  and `LocalizedChromeTest` check
+  functional labels' real line extents, ellipsis and line-count overflow, rather than merely
+  matching complete semantics strings. Coverage includes the four supported languages, both
+  component families, 320dp phones/600dp content and font scales 1.0/1.3. About button heights
+  are compared with a normal same-language native button, including the checking state and
+  enabled/click callbacks. This is not exhaustive prose-layout, extreme-font or device coverage.
+
 The initial English, Traditional Chinese and Japanese translations need native-speaker review;
 passing automated checks is not a claim of linguistic or full-device UI certification.
 
 ## Design references
 
+- [Apple button content guidance](https://developer.apple.com/design/human-interface-guidelines/buttons):
+  use a few words that clearly describe the action, usually beginning with a verb.
+- [Microsoft button guidance](https://learn.microsoft.com/en-us/windows/apps/design/controls/buttons):
+  keep action text concise, specific and self-explanatory. This project's fixed-size requirement
+  selects concise labels instead of the guide's optional control-expansion alternatives.
+- [Apple's Japanese export wording](https://support.apple.com/ja-jp/guide/iphone/iph480caa1f3/ios):
+  prefer the familiar action “書き出す” in a compact export control rather than a long transliteration.
 - [Android per-app languages](https://developer.android.com/guide/topics/resources/app-languages):
   use system APIs for per-app locale ownership; older Compose hosts require AppCompatActivity for
   AppCompat locale overrides.

@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.kixyu9527.kixyubook.core.common.model.*
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuWindowSizeClass
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassSurface
+import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassRole
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuOverlayHost
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPopupSurface
@@ -776,6 +777,7 @@ internal fun ReaderDirectorySidePanel(
         ) {
             KixyuGlassSurface(
                 backdrop = backdrop,
+                role = KixyuGlassRole.CONTENT,
                 modifier = Modifier
                     .widthIn(min = 360.dp, max = 480.dp)
                     .fillMaxHeight()

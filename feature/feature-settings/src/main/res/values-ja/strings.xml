@@ -39,7 +39,7 @@
     <string name="settings_minute">分</string>
     <string name="settings_app_interface_section">アプリの表示</string>
     <string name="settings_predictive_back">予測型「戻る」</string>
-    <string name="settings_about_title">アプリについて</string>
+    <string name="settings_about_title">アプリ情報</string>
     <string name="settings_application_section">アプリ</string>
     <string name="settings_version">v%1$s</string>
     <string name="settings_diagnostics_section">診断</string>
@@ -57,7 +57,7 @@
     <string name="settings_about_summary">バージョン %1$s · 更新とプロジェクト情報</string>
     <string name="settings_log_category_summary">記録: %1$d 件 · 最新: %2$s</string>
     <string name="settings_import_font_summary">TTF / OTF に対応。インポート後に自動適用</string>
-    <string name="settings_app_summary">オフライン読書アプリ</string>
+    <string name="settings_app_summary">オフライン読書</string>
     <string name="settings_log_details_summary">同期、インポート、解析、読書性能のログを表示</string>
     <string name="settings_metadata_section">メタデータとインポート</string>
     <string name="settings_filename_rules">ファイル名ルールをカスタマイズ</string>
