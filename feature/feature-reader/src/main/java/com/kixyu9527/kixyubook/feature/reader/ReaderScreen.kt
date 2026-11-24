@@ -98,6 +98,8 @@ internal fun ReaderScreen(
     onManageCorrections: () -> Unit,
     onManageFonts: () -> Unit,
     onResetReadingConfiguration: () -> Unit,
+    presentationAnchor: (Int, Int) -> ReaderLocation? = { _, _ -> null },
+    presentationCurrent: (Int, Long) -> Boolean = { _, _ -> true },
 ) {
     val readerPaneTitle = stringResource(R.string.reader_content_pane)
     var controls by remember { mutableStateOf(false) }
@@ -179,8 +181,7 @@ internal fun ReaderScreen(
             directoryPanelComposed = false
         }
     }
-    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
-    val palette = readerPalette(state.settings, systemDark)
+    val palette = rememberReaderPalette(state.settings)
     val readerBackdrop = rememberKixyuNavigationBackdrop(palette.background)
     val chromeState = ReaderChromeState(
         controlsVisible = controls,
@@ -458,6 +459,8 @@ internal fun ReaderScreen(
                     }
                     state.chapter != null -> ReaderContent(
                         state = contentState,
+                        presentationAnchor = presentationAnchor,
+                        presentationCurrent = presentationCurrent,
                         palette = palette,
                         savePosition = savePosition,
                         moveChapterFromPage = moveChapterFromPage,
@@ -475,6 +478,7 @@ internal fun ReaderScreen(
                         resourcePriorityActive = overlayAnimationPriority,
                         onTextActionTarget = textInteraction::publishTarget,
                         onDocumentLink = openDocumentLink,
+                        directChapterTurn = { moveChapter(it, false) },
                     )
                 }
                 AnimatedVisibility(

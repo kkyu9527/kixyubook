@@ -1,4 +1,11 @@
 <resources>
+    <string name="kixyu_reader_color_scheme">読書の配色</string>
+    <string name="kixyu_reader_colors_default">標準</string>
+    <string name="kixyu_reader_colors_dynamic">壁紙の色</string>
+    <string name="kixyu_reader_colors_paper">紙色</string>
+    <string name="kixyu_reader_colors_sepia">セピア</string>
+    <string name="kixyu_reader_colors_green">ソフトグリーン</string>
+    <string name="kixyu_reader_colors_gray">ソフトグレー</string>
     <string name="kixyu_decrease_value">%1$sを減らす</string>
     <string name="kixyu_increase_value">%1$sを増やす</string>
     <string name="kixyu_enable_auto_brightness">システムの明るさを使用</string>

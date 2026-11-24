@@ -111,7 +111,6 @@ fun AboutRoute(
                 KixyuSection(title = stringResource(R.string.settings_application_section)) {
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_app_name),
-                        supportingText = stringResource(R.string.settings_app_summary),
                         leading = appLogo,
                     ) {
                         Text(stringResource(R.string.settings_version, currentVersion), style = MaterialTheme.typography.labelLarge, maxLines = 1)
@@ -145,7 +144,6 @@ fun AboutRoute(
                 KixyuSection(title = stringResource(R.string.settings_diagnostics_section)) {
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_log_details),
-                        supportingText = stringResource(R.string.settings_log_details_summary),
                         icon = KixyuSymbols.Storage,
                         onClick = onOpenDiagnosticLog,
                     ) {

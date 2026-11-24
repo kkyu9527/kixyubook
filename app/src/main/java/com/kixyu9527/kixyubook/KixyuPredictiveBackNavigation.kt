@@ -45,6 +45,15 @@ internal fun KixyuNavigationBackHandler(onBack: () -> Unit) {
     )
 }
 
+/** No enabled application callback may claim a root gesture owned by the system launcher. */
+@Composable
+internal fun KixyuRootBackHandler(active: Boolean, onExit: () -> Unit) {
+    BackHandler(
+        enabled = active && !LocalKixyuPredictiveBackEnabled.current,
+        onBack = onExit,
+    )
+}
+
 private data class WindowCornerRadii(
     val topLeft: Int = 0,
     val topRight: Int = 0,

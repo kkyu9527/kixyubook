@@ -48,7 +48,8 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             pageTurnAnimation = values[PAGE_TURN_ANIMATION]
                 ?.let { runCatching { PageTurnAnimation.valueOf(it) }.getOrNull() }
                 ?: PageTurnAnimation.HORIZONTAL_SLIDE,
-            customThemeEnabled = values[CUSTOM_THEME_ENABLED] ?: (storedTheme == "CUSTOM"),
+            readerColorScheme = restoreReaderColorScheme(values[READER_COLOR_SCHEME],
+                values[CUSTOM_THEME_ENABLED] ?: (storedTheme == "CUSTOM")),
             customDayTheme = CustomReaderTheme(
                 values[CUSTOM_DAY_BACKGROUND] ?: "#F7F4EC",
                 values[CUSTOM_DAY_BODY] ?: "#292722",
@@ -99,7 +100,8 @@ class DataStoreReaderSettingsRepository @Inject constructor(
             values[LETTER_SPACING] = updated.letterSpacing; values[MARGIN] = updated.margin
             values[THEME] = updated.theme.name; values[PAGE_MODE] = updated.pageMode.name
             values[PAGE_TURN_ANIMATION] = updated.pageTurnAnimation.name
-            values[CUSTOM_THEME_ENABLED] = updated.customThemeEnabled
+            values[READER_COLOR_SCHEME] = updated.readerColorScheme.name
+            values.remove(CUSTOM_THEME_ENABLED)
             values[CUSTOM_DAY_BACKGROUND] = updated.customDayTheme.backgroundHex
             values[CUSTOM_DAY_BODY] = updated.customDayTheme.bodyHex
             values[CUSTOM_DAY_TITLE] = updated.customDayTheme.titleHex
@@ -149,6 +151,7 @@ class DataStoreReaderSettingsRepository @Inject constructor(
     }
 
     private companion object {
+        val READER_COLOR_SCHEME = stringPreferencesKey("reader_color_scheme")
         val BOOK_OVERRIDES = stringPreferencesKey("book_reader_overrides")
         val FONT_SIZE = floatPreferencesKey("font_size"); val LINE_HEIGHT = floatPreferencesKey("line_height")
         val LETTER_SPACING = floatPreferencesKey("letter_spacing"); val MARGIN = floatPreferencesKey("margin")

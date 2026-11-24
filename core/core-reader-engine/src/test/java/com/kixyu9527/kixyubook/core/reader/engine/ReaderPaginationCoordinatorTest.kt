@@ -13,6 +13,41 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReaderPaginationCoordinatorTest {
+    @Test fun cancellingFarAheadWorkKeepsRequiredAndPromotedLayoutsRunningWithoutRestart() = runBlocking {
+        val coordinator = ReaderPaginationCoordinator()
+        val release = CompletableDeferred<Unit>()
+        val farStarted = CompletableDeferred<Unit>()
+        val farCancelled = CompletableDeferred<Unit>()
+        fun chapter(index: Int) = ReaderChapter(index.toLong(), "runway", "Chapter $index", index,
+            listOf(Paragraph(index.toLong(), index.toLong(), 0, "正文")))
+        var promotedStarts = 0
+        try {
+            val current = chapter(0)
+            val next = chapter(1)
+            val far = chapter(2)
+            val currentState = coordinator.getOrLoad(key(current), current, false) { _, _ ->
+                release.await(); listOf(ReaderPage(0, 0, "Current", true, emptyList()))
+            }
+            val nextState = coordinator.getOrLoad(key(next), next, true) { _, _ ->
+                promotedStarts++
+                release.await(); listOf(ReaderPage(0, 1, "Next", true, emptyList()))
+            }
+            val promoted = coordinator.getOrLoad(key(next), next, false) { _, _ -> error("must reuse the original layout") }
+            coordinator.getOrLoad(key(far), far, true) { _, _ ->
+                farStarted.complete(Unit)
+                try { CompletableDeferred<Unit>().await(); emptyList() }
+                finally { farCancelled.complete(Unit) }
+            }
+            withTimeout(1_000) { farStarted.await() }
+            coordinator.cancelSpeculativeLayouts()
+            withTimeout(1_000) { farCancelled.await() }
+            release.complete(Unit)
+            withTimeout(1_000) { currentState.first { it.isComplete } }
+            withTimeout(1_000) { promoted.first { it.isComplete } }
+            assertTrue(nextState === promoted)
+            assertEquals(1, promotedStarts)
+        } finally { coordinator.close() }
+    }
     @Test
     fun currentPaginationPublishesReadablePagesThenWaitsForAnimationBudget() = runBlocking {
         val chapter = ReaderChapter(

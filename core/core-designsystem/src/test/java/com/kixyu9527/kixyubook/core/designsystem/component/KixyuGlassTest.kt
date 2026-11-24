@@ -10,9 +10,9 @@ import org.junit.Test
 
 class KixyuGlassTest {
     @Test
-    fun controlsKeepTheirSourceSharpWhileContentReceivesLocalFrost() {
-        assertEquals(0.dp, KixyuGlassStyle.frostRadius(KixyuGlassRole.CONTROL))
-        assertEquals(.75.dp, KixyuGlassStyle.frostRadius(KixyuGlassRole.CONTENT))
+    fun bothRolesFilterCompetingTextWhileContentUsesThickerFrost() {
+        assertTrue(KixyuGlassStyle.frostRadius(KixyuGlassRole.CONTROL) >= 15.dp)
+        assertTrue(KixyuGlassStyle.frostRadius(KixyuGlassRole.CONTENT) > KixyuGlassStyle.frostRadius(KixyuGlassRole.CONTROL))
         assertEquals(1f, KixyuGlassStyle.samplingScale(KixyuGlassRole.CONTROL, 236f * 64 * 9), .0001f)
     }
 
@@ -20,24 +20,23 @@ class KixyuGlassTest {
     fun surfaceAndSettledLensRetainTheOriginalClearRefractionGeometry() {
         assertEquals(18.dp, KixyuGlassStyle.refractionHeight)
         assertEquals(32.5.dp, KixyuGlassStyle.refractionAmount)
-        assertTrue(KixyuGlassStyle.contentBackingInset < KixyuGlassStyle.refractionHeight)
     }
 
     @Test
     fun unsampledPopupsUseTheSameTranslucentTintInEitherTheme() {
         val light = KixyuGlassStyle.fallbackTint(false)
         val dark = KixyuGlassStyle.fallbackTint(true)
-        assertEquals(.12f, light.alpha, .005f)
-        assertEquals(.12f, dark.alpha, .005f)
+        assertEquals(.78f, light.alpha, .005f)
+        assertEquals(.86f, dark.alpha, .005f)
         assertEquals(1f, light.red, .005f)
         assertTrue(dark.red < .15f)
     }
 
     @Test
-    fun contentBackingProtectsContrastAcrossBothBackgroundExtremesAndSamplingPaths() {
+    fun theEntireTranslucentMaterialProtectsContrastWithoutAnOpaqueInset() {
         for (dark in listOf(false, true)) for (sampled in listOf(false, true)) {
             val tint = KixyuGlassStyle.surfaceTint(KixyuGlassRole.CONTENT, dark, sampled)
-            assertEquals(.96f, tint.alpha, .005f)
+            assertTrue(tint.alpha < .9f)
             val foreground = if (dark) Color.White else Color.Black
             for (background in listOf(Color.Black, Color.White)) {
                 val panel = tint.compositeOver(background)
@@ -45,6 +44,23 @@ class KixyuGlassTest {
                 val low = minOf(foreground.luminance(), panel.luminance())
                 assertTrue("Text contrast must remain readable", (high + .05f) / (low + .05f) >= 4.5f)
             }
+        }
+    }
+
+    @Test
+    fun everyRoleAndSamplingPathFollowsTheFullPercentageRange() {
+        for (role in KixyuGlassRole.entries) for (dark in listOf(false, true)) {
+            for (sampled in listOf(false, true)) {
+                val alphas = listOf(0f, 25f, 55f, 75f, 100f).map { level ->
+                    KixyuGlassStyle.surfaceTint(role, dark, sampled, level).alpha
+                }
+                assertEquals(0f, alphas.first(), .001f)
+                assertEquals(1f, alphas.last(), .001f)
+                assertTrue(alphas.zipWithNext().all { (a, b) -> a < b })
+            }
+            assertEquals(0.dp, KixyuGlassStyle.frostRadius(role, -1f))
+            assertEquals(KixyuGlassStyle.frostRadius(role, 100f), KixyuGlassStyle.frostRadius(role, 101f))
+            assertEquals(KixyuGlassStyle.frostRadius(role), KixyuGlassStyle.frostRadius(role, Float.NaN))
         }
     }
 

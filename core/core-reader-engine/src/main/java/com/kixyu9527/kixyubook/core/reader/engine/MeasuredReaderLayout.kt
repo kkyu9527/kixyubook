@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.util.concurrent.Executors
 import kotlin.coroutines.coroutineContext
 
@@ -241,6 +242,11 @@ class ReaderPaginationCoordinator internal constructor(
     fun setPaused(value: Boolean) {
         paused.value = value
         if (!value) return
+        cancelSpeculativeLayouts()
+    }
+
+    /** A finger drag only withdraws far-ahead work, never required/current page layouts. */
+    fun cancelSpeculativeLayouts() {
         synchronized(lock) {
             val speculative = inFlight.filterValues { it.prefetch }
             speculative.forEach { (key, load) ->
@@ -456,7 +462,7 @@ internal class MeasuredReaderPaginator(
             openingTitleLineCount = openingTitleLineCount,
             showRegularChapterTitle = showRegularChapterTitle,
         )
-        fun flush() {
+        suspend fun flush() {
             if (blocks.isEmpty()) return
             pages += ReaderPage(pages.size, chapter.index, chapter.title, opening, blocks.toList())
             blocks = mutableListOf()
@@ -468,6 +474,9 @@ internal class MeasuredReaderPaginator(
             ) {
                 publishPartial(pages.toList())
             }
+            // A single long chapter must not monopolize the shared measurement lane. Yield at
+            // finalized page boundaries so a newly requested/adjacent layout can make progress.
+            yield()
         }
 
         chapter.contentParagraphs().forEach { paragraph ->

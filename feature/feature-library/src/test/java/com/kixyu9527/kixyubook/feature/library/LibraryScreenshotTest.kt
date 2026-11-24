@@ -6,6 +6,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -39,6 +41,10 @@ class LibraryScreenshotTest {
     @Test
     @Config(qualifiers = "zh-rCN-w800dp-h1280dp")
     fun materialTablet() = capture(AppUiStyle.MATERIAL, ReaderTheme.DAY, "material_tablet")
+
+    @Test
+    @Config(qualifiers = "zh-rCN-w1280dp-h800dp")
+    fun miuixTabletLandscape() = capture(AppUiStyle.MIUIX, ReaderTheme.DAY, "miuix_tablet_landscape")
 
     @Test
     fun materialLargeText() {
@@ -92,6 +98,7 @@ class LibraryScreenshotTest {
         ).onFirst().assertExists()
         compose.mainClock.advanceTimeBy(500)
         compose.waitForIdle()
+        assertFirstBookVisible()
         compose.onRoot().captureRoboImage("src/test/screenshots/library_material_large_text.png")
     }
 
@@ -140,7 +147,15 @@ class LibraryScreenshotTest {
         compose.onAllNodesWithText(androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().getString(R.string.library_title)).onFirst().assertExists()
         compose.mainClock.advanceTimeBy(500)
         compose.waitForIdle()
+        assertFirstBookVisible()
         compose.onRoot().captureRoboImage("src/test/screenshots/library_$suffix.png")
+    }
+
+    private fun assertFirstBookVisible() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        // A visible title alone never protected the tablet from a zero-height collection.
+        compose.onAllNodesWithContentDescription(context.getString(R.string.library_open_book, "三体"))
+            .onFirst().assertIsDisplayed()
     }
 
     private fun libraryState() = LibraryUiState(

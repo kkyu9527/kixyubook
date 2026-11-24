@@ -118,7 +118,6 @@ fun CorrectionManagementRoute(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(stringResource(R.string.reader_no_corrections), style = MaterialTheme.typography.titleLarge)
-                Text(stringResource(R.string.reader_corrections_hint))
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {

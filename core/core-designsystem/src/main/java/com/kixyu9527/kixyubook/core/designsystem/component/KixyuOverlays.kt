@@ -802,8 +802,9 @@ private fun KixyuPopupWindowEffect() {
     // Compose Dialog already has a stable Window API and is handled by KixyuDialogWindowEffect.
     if (view.parent is DialogWindowProvider) return
     val glassEnabled = LocalKixyuGlassEffectEnabled.current
+    val frostLevel = com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassFrostLevel.current
     val blurRadius = with(LocalDensity.current) {
-        KixyuGlassStyle.windowBlurRadius.roundToPx()
+        KixyuGlassStyle.windowBlurRadius(frostLevel).roundToPx()
     }
     DisposableEffect(view, glassEnabled, blurRadius) {
         if (!glassEnabled) return@DisposableEffect onDispose {}
@@ -831,8 +832,9 @@ private fun KixyuPopupWindowEffect() {
 internal fun KixyuDialogWindowEffect(backProgress: Float = 0f) {
     val view = LocalView.current
     val glassEnabled = LocalKixyuGlassEffectEnabled.current
+    val frostLevel = com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassFrostLevel.current
     val blurRadius = with(LocalDensity.current) {
-        (KixyuGlassStyle.windowBlurRadius * (1f - backProgress.coerceIn(0f, 1f))).roundToPx()
+        (KixyuGlassStyle.windowBlurRadius(frostLevel) * (1f - backProgress.coerceIn(0f, 1f))).roundToPx()
     }
     DisposableEffect(view, glassEnabled) {
         val window = (view.parent as? DialogWindowProvider)?.window

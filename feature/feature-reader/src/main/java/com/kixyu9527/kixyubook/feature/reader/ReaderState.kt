@@ -10,6 +10,7 @@ import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderAnnotation
 import com.kixyu9527.kixyubook.core.common.model.EpubLinkResult
 import com.kixyu9527.kixyubook.core.common.model.EpubNavigationEntry
+import com.kixyu9527.kixyubook.core.common.model.EpubBrowserPlan
 import com.kixyu9527.kixyubook.core.common.model.TextCorrection
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.reader.engine.ReaderChapter
@@ -27,6 +28,7 @@ data class ReaderUiState(
     val book: Book? = null,
     val chapters: List<Chapter> = emptyList(),
     val epubNavigation: List<EpubNavigationEntry> = emptyList(),
+    val browserPlan: EpubBrowserPlan? = null,
     val chapter: ReaderChapter? = null,
     val prefetchedChapters: Map<Int, ReaderChapter> = emptyMap(),
     val chapterIndex: Int = 0,
@@ -105,6 +107,8 @@ internal data class ReaderContentState(
     val layoutVersion: Int,
     val settledPageIndex: Int? = null,
     val sessionId: String = "",
+    val browserPlan: EpubBrowserPlan? = null,
+    val browserCorrections: List<TextCorrection> = emptyList(),
 )
 
 data class ReaderPageDestination(
@@ -147,4 +151,6 @@ internal fun ReaderUiState.toReaderContentState() = ReaderContentState(
     layoutVersion = layoutVersion,
     settledPageIndex = settledPageIndex,
     sessionId = sessionId,
+    browserPlan = browserPlan,
+    browserCorrections = corrections,
 )

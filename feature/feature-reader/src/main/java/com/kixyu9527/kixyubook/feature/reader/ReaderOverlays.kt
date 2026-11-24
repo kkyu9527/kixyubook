@@ -9,7 +9,6 @@ import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import androidx.core.graphics.toColorInt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.height
@@ -643,30 +642,6 @@ private fun ReaderSettingsSheetHeader(
         }
     }
 }
-
-internal fun readerPalette(settings: ReaderSettings, systemDark: Boolean): ReaderRenderPalette {
-    // Built-in night reading always uses true black for OLED panels. Custom reading themes
-    // intentionally keep the exact background selected by the user below.
-    val dark = ReaderRenderPalette(Color.Black, Color(0xFFD9D9D0), Color(0xFFF0F0E7), Color(0xFFB8CCBD), Color(0xFF92948B))
-    val day = ReaderRenderPalette(Color(0xFFFAF8F2), Color(0xFF282620), Color(0xFF171713), Color(0xFF52655A), Color(0xFF716F67))
-    val useNightColors = when (settings.theme) {
-        ReaderTheme.SYSTEM -> systemDark
-        ReaderTheme.DAY -> false
-        ReaderTheme.NIGHT -> true
-    }
-    val default = if (useNightColors) dark else day
-    if (!settings.customThemeEnabled) return default
-    val custom = if (useNightColors) settings.customNightTheme else settings.customDayTheme
-    return ReaderRenderPalette(
-        custom.backgroundHex.colorOr(default.background),
-        custom.bodyHex.colorOr(default.body),
-        custom.titleHex.colorOr(default.title),
-        custom.accentHex.colorOr(default.accent),
-        custom.bodyHex.colorOr(default.secondary).copy(alpha = .62f),
-    )
-}
-
-internal fun String.colorOr(fallback: Color) = runCatching { Color(toColorInt()) }.getOrDefault(fallback)
 
 internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

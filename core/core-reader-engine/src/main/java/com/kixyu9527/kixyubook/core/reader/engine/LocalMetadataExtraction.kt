@@ -774,12 +774,9 @@ object LocalMetadata {
     fun isDescriptionHeading(line: String): Boolean =
         DESCRIPTION_HEADING_PATTERN.matchEntire(line.trim()) != null
 
-    /**
-     * EPUB-only: a synopsis may live on a front-matter page titled like a preface instead of a
-     * labelled description. Projects such as calibre and Legado treat these pages as intros too.
-     */
-    fun isIntroHeading(line: String): Boolean =
-        isDescriptionHeading(line) || INTRO_HEADING_PATTERN.matchEntire(line.trim()) != null
+    /** Copyright pages and narrative prologues are not a synopsis merely because they come first. */
+    fun isEpubDescriptionHeading(line: String): Boolean =
+        isDescriptionHeading(line) || line.trim() in setOf("作品相关", "作品相關", "编辑推荐", "編輯推薦")
 
     /** Shared chapter/volume judgment so metadata boundaries match the body parser exactly. */
     fun isChapterHeading(line: String): Boolean = chapterHeading(line) != null || volumeHeading(line) != null
@@ -995,13 +992,6 @@ object LocalMetadata {
             "内容介绍|內容介紹|内容提要|內容提要|故事梗概|故事梗概|内容梗概|內容梗概|摘要|梗概|" +
             "本书简介|本書簡介|书籍简介|書籍簡介|简介|簡介|文案|导读|導讀|" +
             "synopsis|summary|description|あらすじ|前書き)(?:\\s*[：:]\\s*(.*))?\\s*$",
-        RegexOption.IGNORE_CASE,
-    )
-    /** Anchored to the line start: a synopsis may legitimately mention 版权 or 字数 mid-sentence. */
-    private val INTRO_HEADING_PATTERN = Regex(
-        "^\\s*(?:前言|序言|序|引子|引言|楔子|卷首语|卷首語|作品相关|作品相關|书籍信息|書籍資訊|" +
-            "本书信息|本書資訊|关于本书|關於本書|作者的话|作者的話|编者按|編者按|编辑推荐|編輯推薦|" +
-            "preface|foreword|prologue|about this book|introduction)(?:\\s*[：:]\\s*(.*))?\\s*$",
         RegexOption.IGNORE_CASE,
     )
     /** Anchored to the line start: a synopsis may legitimately mention 版权 or 字数 mid-sentence. */

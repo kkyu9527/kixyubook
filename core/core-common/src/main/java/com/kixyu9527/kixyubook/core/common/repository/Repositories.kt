@@ -104,6 +104,7 @@ interface BookRepository {
     ): List<BookSearchResult>
     suspend fun resolveEpubLink(bookUuid: String, target: String): EpubLinkResult?
     suspend fun readEpubNavigation(bookUuid: String): List<EpubNavigationEntry> = emptyList()
+    suspend fun readEpubBrowserPlan(bookUuid: String): EpubBrowserPlan? = null
 }
 
 /** Outcome of [BookRepository.refreshMetadata]; preserved fields keep the user's manual edit. */

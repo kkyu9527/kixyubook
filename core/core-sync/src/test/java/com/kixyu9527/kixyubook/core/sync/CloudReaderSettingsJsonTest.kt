@@ -7,6 +7,20 @@ import org.junit.Test
 import org.junit.Assert.assertEquals
 
 class CloudReaderSettingsJsonTest {
+    @Test fun allReadingPalettesSurviveBackupAndCloudRoundTrip() {
+        ReaderColorScheme.entries.forEach { scheme ->
+            val settings = ReaderSettings(readerColorScheme = scheme)
+            assertEquals(settings, jsonToSettings(settingsToJson(settings)))
+        }
+    }
+
+    @Test fun oldCustomSettingsAndUnknownFuturePalettesMigrateWithoutLosingUserColours() {
+        assertEquals(ReaderColorScheme.CUSTOM, jsonToSettings(JSONObject().put("customThemeEnabled", true)).readerColorScheme)
+        assertEquals(ReaderColorScheme.CUSTOM, jsonToSettings(JSONObject().put("theme", "CUSTOM")).readerColorScheme)
+        assertEquals(ReaderColorScheme.DEFAULT, jsonToSettings(JSONObject().put("readerColorScheme", "future")).readerColorScheme)
+        assertEquals(ReaderColorScheme.GREEN, jsonToSettings(JSONObject().put("readerColorScheme", "GREEN")
+            .put("customThemeEnabled", true)).readerColorScheme)
+    }
     @Test
     fun globalReaderSettingsRoundTripIncludesEveryConfigurableField() {
         val expected = ReaderSettings(
@@ -17,7 +31,7 @@ class CloudReaderSettingsJsonTest {
             theme = ReaderTheme.NIGHT,
             pageMode = PageMode.PAGED,
             pageTurnAnimation = PageTurnAnimation.COVER,
-            customThemeEnabled = true,
+            readerColorScheme = ReaderColorScheme.CUSTOM,
             customDayTheme = CustomReaderTheme("#102030", "#203040", "#304050", "#405060"),
             customNightTheme = CustomReaderTheme("#506070", "#607080", "#708090", "#8090A0"),
             fontUuid = "custom-font",

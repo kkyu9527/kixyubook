@@ -8,6 +8,8 @@ fun settingsChanges(before: ReaderSettings, after: ReaderSettings): Map<String, 
     val old = settingsToJson(before)
     val updated = settingsToJson(after)
     return (old.keys().asSequence().toSet() + updated.keys().asSequence().toSet()).mapNotNull { key ->
+        // A wire-only alias for older clients, not an independently editable setting.
+        if (key == "customThemeEnabled") return@mapNotNull null
         val value = updated.opt(key) ?: JSONObject.NULL
         if (old.opt(key).toString() == value.toString()) null else key to JSONObject().put(key, value).toString()
     }.toMap()

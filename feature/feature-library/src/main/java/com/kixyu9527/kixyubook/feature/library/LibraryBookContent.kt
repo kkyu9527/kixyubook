@@ -178,7 +178,9 @@ internal fun LibraryFilters(
                     val categoryShape = KixyuPopupShape
                     val categoryInteraction = remember { MutableInteractionSource() }
                     val categoryModifier = Modifier.fillMaxWidth()
-                        .heightIn(min = 40.dp)
+                        // This header also lives in a bounded tablet Column. Its child fills
+                        // the control, not the entire remaining library viewport.
+                        .height(40.dp)
                         .clip(categoryShape)
                         .clickable(
                             interactionSource = categoryInteraction,
@@ -220,13 +222,6 @@ internal fun LibraryFilters(
                     )
                 }
             }
-        }
-        if (state.hiddenOnly && state.hiddenCategories.isNotEmpty()) {
-            Text(
-                stringResource(R.string.library_hidden_only_hint),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
         }
     }
 }

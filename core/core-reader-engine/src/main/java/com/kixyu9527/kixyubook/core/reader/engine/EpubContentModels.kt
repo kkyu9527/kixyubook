@@ -20,6 +20,13 @@ internal data class PackageDocument(
     val seriesIndex: Double? = null,
     /** `guide` references that name an introduction page, resolved against the OPF path. */
     val guideTitlePages: List<String> = emptyList(),
+    /** Publisher navigation is cached with the immutable package revision, not reparsed per leaf. */
+    val navigation: Map<String, NavigationEntry> = emptyMap(),
+    val spineNavigation: List<NavigationEntry?> = emptyList(),
+    val ncxId: String? = null,
+    val titlePageRedirects: Map<Int, Int> = emptyMap(),
+    val fixedLayout: Boolean = false,
+    val browserReason: String? = null,
 )
 
 internal data class PackageCacheKey(

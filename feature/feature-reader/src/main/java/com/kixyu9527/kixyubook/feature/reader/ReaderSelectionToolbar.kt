@@ -54,7 +54,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Density
@@ -75,6 +74,9 @@ import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuPredicti
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import com.kixyu9527.kixyubook.core.reader.engine.LocalReaderSelectionClearRequest
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import com.kixyu9527.kixyubook.feature.reader.browser.LocalBrowserSelectionHandler
 
 /** The only UI and lifecycle owner for long-press text interactions in the reader. */
 @Composable
@@ -95,7 +97,10 @@ internal fun ReaderTextInteractionHost(
     val noteLabel = stringResource(R.string.reader_annotation_note)
     val underlineLabel = stringResource(R.string.reader_annotation_underline)
     val correctionLabel = stringResource(R.string.reader_correction_action)
+    val copyLabel = stringResource(android.R.string.copy)
     val provider = remember { ReaderTextContextMenuProvider() }
+    val scope = rememberCoroutineScope()
+    var browserClear by remember { mutableStateOf<(() -> Unit)?>(null) }
     val predictiveBackState = rememberKixyuPredictiveBackState<Unit>()
     var layoutCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val menuBounds = remember { mutableStateOf<Rect?>(null) }
@@ -104,12 +109,38 @@ internal fun ReaderTextInteractionHost(
         val hadInteraction = provider.isVisible || state.target != null
         menuBounds.value = null
         provider.dismiss()
+        browserClear?.invoke()
+        browserClear = null
         if (hadInteraction) state.clearSelection()
     }
 
     DisposableEffect(provider) { onDispose(provider::dismiss) }
     LaunchedEffect(dismissKey) { dismissSelection() }
     CompositionLocalProvider(
+        LocalBrowserSelectionHandler provides { browser ->
+            if (browser == null) {
+                if (browserClear != null) dismissSelection()
+            } else {
+                state.publishTarget(browser.target)
+                browserClear = browser.clear
+                scope.launch {
+                    provider.showTextContextMenu(object : TextContextMenuDataProvider {
+                        override fun position(destinationCoordinates: LayoutCoordinates) = contentBounds(destinationCoordinates).topLeft
+                        override fun contentBounds(destinationCoordinates: LayoutCoordinates): Rect {
+                            val origin = destinationCoordinates.localToWindow(androidx.compose.ui.geometry.Offset.Zero)
+                            return browser.boundsInWindow.translate(-origin.x, -origin.y)
+                        }
+                        override fun data() = TextContextMenuData(listOf(
+                            TextContextMenuItem(TextContextMenuKeys.CopyKey, copyLabel) { browser.copyToClipboard(); close() },
+                            TextContextMenuItem(HighlightTextKey, highlightLabel) { currentHighlightAction(); close() },
+                            TextContextMenuItem(UnderlineTextKey, underlineLabel) { currentUnderlineAction(); close() },
+                            TextContextMenuItem(NoteTextKey, noteLabel) { currentNoteAction(); close() },
+                            TextContextMenuItem(CorrectTextKey, correctionLabel) { currentCorrectionAction(); close() },
+                        ))
+                    })
+                }
+            }
+        },
         LocalTextContextMenuToolbarProvider provides provider,
         LocalTextContextMenuDropdownProvider provides provider,
         LocalReaderSelectionClearRequest provides state.clearRequest,
@@ -223,7 +254,10 @@ private class ReaderTextContextMenuProvider : TextContextMenuProvider {
         if (!coordinates.isAttached) return
         LaunchedEffect(currentRequest) { onPanelChange(ReaderTextActionPanel.PRIMARY) }
         DisposableEffect(currentRequest) {
-            onDispose { onMenuBoundsChange(null) }
+            onDispose {
+                // Replacing a selection must not erase the replacement menu's hit rectangle.
+                if (request == null || request === currentRequest) onMenuBoundsChange(null)
+            }
         }
         val data by remember(currentRequest.dataProvider) {
             derivedStateOf(currentRequest.dataProvider::data)
@@ -243,7 +277,7 @@ private class ReaderTextContextMenuProvider : TextContextMenuProvider {
                     onDismiss = onDismiss,
                     backProgress = backProgress,
                     modifier = Modifier.onGloballyPositioned { child ->
-                        onMenuBoundsChange(child.boundsInParent())
+                        onMenuBoundsChange(coordinates.localBoundingBoxOf(child, clipBounds = false))
                     },
                 )
             },

@@ -50,7 +50,11 @@ internal fun readPackageStreaming(
 ): PackageDocument {
     val manifest = linkedMapOf<String, ManifestItem>()
     val spine = mutableListOf<String>()
-    val metadata = linkedMapOf<String, StringBuilder>()
+    val identifiers = mutableListOf<Pair<String, StringBuilder>>()
+    var uniqueIdentifier = ""
+    var ncxId: String? = null
+    var fixedLayout = false
+    var layoutMetadata: StringBuilder? = null
     val creatorNames = mutableListOf<StringBuilder>()
     val creatorIds = mutableListOf<String>()
     val creatorInlineRoles = mutableListOf<String>()
@@ -78,9 +82,12 @@ internal fun readPackageStreaming(
         override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes) {
             val name = elementName(localName, qName)
             when (name) {
+                "package" -> uniqueIdentifier = attributes.value("unique-identifier")
+                "spine" -> ncxId = attributes.value("toc").takeIf(String::isNotBlank)
                 "metadata" -> metadataDepth++
                 "identifier" -> if (metadataDepth > 0) {
-                    val builder = metadata.getOrPut(name) { StringBuilder() }
+                    val builder = StringBuilder()
+                    identifiers += attributes.value("id") to builder
                     capture = name
                     captureBuilder = builder
                 }
@@ -107,6 +114,12 @@ internal fun readPackageStreaming(
                     captureBuilder = builder
                 }
                 "meta" -> if (metadataDepth > 0) {
+                    if (attributes.value("property").equals("rendition:layout", true)) {
+                        layoutMetadata = StringBuilder()
+                        capture = "meta-layout"
+                        captureBuilder = layoutMetadata
+                    }
+                    if (attributes.value("name").equals("fixed-layout", true) && attributes.value("content").equals("true", true)) fixedLayout = true
                     val metaName = attributes.value("name")
                     if (metaName.equals("cover", true)) {
                         coverId = attributes.value("content").takeIf(String::isNotBlank)
@@ -226,7 +239,8 @@ internal fun readPackageStreaming(
         .replace(Regex("\\s+"), " ")
         .trim()
     return PackageDocument(
-        identifier = metadata["identifier"].normalizedMetadata(),
+        identifier = (identifiers.firstOrNull { uniqueIdentifier.isNotBlank() && it.first == uniqueIdentifier }
+            ?: identifiers.firstOrNull())?.second.normalizedMetadata(),
         title = title,
         authors = LocalMetadata.selectEpubAuthors(creators),
         descriptions = LocalMetadata.selectEpubDescriptions(descriptions.map { it.toString() }),
@@ -237,6 +251,8 @@ internal fun readPackageStreaming(
         seriesName = seriesName,
         seriesIndex = seriesIndex,
         guideTitlePages = guideTitlePages,
+        ncxId = ncxId,
+        fixedLayout = fixedLayout || layoutMetadata?.toString()?.trim().equals("pre-paginated", true),
     )
 }
 

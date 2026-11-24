@@ -25,6 +25,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -48,9 +49,6 @@ import androidx.compose.ui.res.stringResource
 import com.kixyu9527.kixyubook.core.common.model.ParagraphKind
 import com.kixyu9527.kixyubook.core.common.model.ReaderTextSpan
 import com.kixyu9527.kixyubook.core.common.model.ReaderAnnotation
-import com.kixyu9527.kixyubook.core.common.model.ReaderAnnotationStyle
-import com.kixyu9527.kixyubook.core.common.model.ReaderInlineStyle
-import com.kixyu9527.kixyubook.core.common.model.ReaderSemanticColor
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -110,6 +108,7 @@ fun ReaderScrollRenderer(
     onDocumentLink: (String) -> Unit = {},
 ) {
     val family = rememberReaderFont(fontPath)
+    val annotationIndex = rememberReaderAnnotationIndex(readerAnnotations)
     val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
     val fullPageImage = remember(chapter) { chapter.fullPageImageParagraph() }
     var selectionActive by remember(chapter.id) { androidx.compose.runtime.mutableStateOf(false) }
@@ -165,6 +164,8 @@ fun ReaderScrollRenderer(
                                     sizeClass,
                                 ),
                                 placeholderColor = palette.secondary,
+                                pageColor = palette.background,
+                                inkColor = palette.body,
                                 onTapFraction = handleTap,
                                 fullPage = true,
                                 cropToFill = fullPageImage.cropImageToFill,
@@ -190,6 +191,8 @@ fun ReaderScrollRenderer(
                                     altText = paragraph.text,
                                     layout = layout,
                                     placeholderColor = palette.secondary,
+                                    pageColor = palette.background,
+                                    inkColor = palette.body,
                                     onTapFraction = handleTap,
                                 )
                             }
@@ -199,14 +202,11 @@ fun ReaderScrollRenderer(
                                 spec,
                                 palette.body,
                                 family,
-                                spans = paragraph.spans + annotationSpans(
-                                    readerAnnotations,
-                                    chapter.index,
-                                    paragraph.index,
-                                    paragraph.text,
-                                    0,
-                                    paragraph.text.length,
-                                ),
+                                spans = remember(paragraph, annotationIndex) {
+                                    paragraph.spans + annotationIndex.spans(
+                                        chapter.index, paragraph.index, paragraph.text, 0, paragraph.text.length,
+                                    )
+                                },
                                 accentColor = palette.accent,
                                 backgroundColor = palette.background,
                                 highlightQuery = highlightQuery,
@@ -270,6 +270,7 @@ fun ReaderPageRenderer(
     onDocumentLink: (String) -> Unit = {},
 ) {
     val family = rememberReaderFont(fontPath)
+    val annotationIndex = rememberReaderAnnotationIndex(readerAnnotations)
     var selectionActive by remember(page.chapterIndex, page.index) { androidx.compose.runtime.mutableStateOf(false) }
     val selectionState = rememberSelectionState()
     var actionTarget by remember(page.chapterIndex, page.index) { mutableStateOf<ReaderTextActionTarget?>(null) }
@@ -311,7 +312,7 @@ fun ReaderPageRenderer(
             modifier = modifier,
             showRegularChapterTitle = showRegularChapterTitle,
             highlightQuery = highlightQuery,
-            readerAnnotations = readerAnnotations,
+            annotationIndex = annotationIndex,
             pageNumber = pageNumber,
             showReadingTime = showReadingTime,
             showBatteryLevel = showBatteryLevel,
@@ -331,10 +332,16 @@ fun ReaderPageRenderer(
             onDocumentLink = onDocumentLink,
         )
     }
+    // A drag changes selection availability, not the identity of the visible page. Preserve
+    // its composition (including decoded images and active image loads) when moving it in/out
+    // of the selection scope. A normal conditional here disposes the entire page twice per turn.
+    val retainedContent = remember(page.chapterIndex, page.index) {
+        movableContentOf<@Composable () -> Unit> { currentContent -> currentContent() }
+    }
     if (selectionEnabled) {
-        SelectionContainer(state = selectionState) { content() }
+        SelectionContainer(state = selectionState) { retainedContent(content) }
     } else {
-        content()
+        retainedContent(content)
     }
 }
 
@@ -348,7 +355,7 @@ private fun ReaderPageContent(
     modifier: Modifier,
     showRegularChapterTitle: Boolean,
     highlightQuery: String,
-    readerAnnotations: List<ReaderAnnotation>,
+    annotationIndex: ReaderAnnotationIndex,
     pageNumber: String?,
     showReadingTime: Boolean,
     showBatteryLevel: Boolean,
@@ -379,6 +386,8 @@ private fun ReaderPageContent(
                     ).sizeClass,
                 ),
                 placeholderColor = palette.secondary,
+                pageColor = palette.background,
+                inkColor = palette.body,
                 onTapFraction = handleTap,
                 fullPage = true,
                 cropToFill = fullPageBlock.cropImageToFill,
@@ -421,6 +430,8 @@ private fun ReaderPageContent(
                             ).sizeClass,
                         ),
                         placeholderColor = palette.secondary,
+                        pageColor = palette.background,
+                        inkColor = palette.body,
                         onTapFraction = handleTap,
                     )
                 }
@@ -430,14 +441,12 @@ private fun ReaderPageContent(
                     spec,
                     palette.body,
                     family,
-                    spans = block.spans + annotationSpans(
-                        readerAnnotations,
-                        page.chapterIndex,
-                        block.paragraphIndex,
-                        block.fullText,
-                        block.textStart,
-                        block.visibleText.length,
-                    ),
+                    spans = remember(block, annotationIndex) {
+                        block.spans + annotationIndex.spans(
+                            page.chapterIndex, block.paragraphIndex, block.fullText,
+                            block.textStart, block.visibleText.length,
+                        )
+                    },
                     accentColor = palette.accent,
                     backgroundColor = palette.background,
                     indent = !block.continuation,
@@ -647,45 +656,6 @@ private fun Modifier.readerLinkInput(
             links.firstOrNull { offset in it.start until it.end }?.linkTarget?.let(onLinkClick)
         }
     }
-}
-
-private fun annotationSpans(
-    annotations: List<ReaderAnnotation>,
-    chapterIndex: Int,
-    paragraphIndex: Int,
-    sourceText: String,
-    textStart: Int,
-    visibleLength: Int,
-): List<ReaderTextSpan> {
-    val visibleEnd = textStart + visibleLength
-    return annotations.asSequence()
-        .filter {
-            it.chapterIndex == chapterIndex && it.paragraphIndex == paragraphIndex &&
-                it.startOffset in 0..sourceText.length && it.endOffset in 0..sourceText.length &&
-                it.startOffset < it.endOffset &&
-                sourceText.substring(it.startOffset, it.endOffset) == it.exactText
-        }
-        .mapNotNull { annotation ->
-            val start = maxOf(annotation.startOffset, textStart)
-            val end = minOf(annotation.endOffset, visibleEnd)
-            if (start >= end) return@mapNotNull null
-            ReaderTextSpan(
-                start = start - textStart,
-                end = end - textStart,
-                styles = buildSet {
-                    add(
-                    when (annotation.style) {
-                        ReaderAnnotationStyle.HIGHLIGHT -> ReaderInlineStyle.HIGHLIGHT
-                        ReaderAnnotationStyle.UNDERLINE -> ReaderInlineStyle.UNDERLINE
-                    })
-                    if (annotation.note.isNotBlank()) add(ReaderInlineStyle.NOTE)
-                },
-                background = ReaderSemanticColor.YELLOW.takeIf {
-                    annotation.style == ReaderAnnotationStyle.HIGHLIGHT
-                },
-            )
-        }
-        .toList()
 }
 
 /** Records the source offset at pointer-down without consuming the native selection gesture. */

@@ -237,7 +237,6 @@ private fun GoogleAccountPage(
                 KixyuSection(title = stringResource(R.string.settings_account_authorization_section)) {
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_manage_your_google_account),
-                        supportingText = stringResource(R.string.settings_manage_account_summary),
                         icon = KixyuSymbols.AccountCircle,
                         onClick = onManageGoogleAccount,
                     ) {
@@ -250,7 +249,6 @@ private fun GoogleAccountPage(
                     KixyuDivider()
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_switch_google_account),
-                        supportingText = stringResource(R.string.settings_switch_account_summary),
                         icon = KixyuSymbols.SwitchAccount,
                         onClick = onSwitchAccount,
                     ) {
@@ -263,7 +261,6 @@ private fun GoogleAccountPage(
                     KixyuDivider()
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_reauthorize_google_drive),
-                        supportingText = stringResource(R.string.settings_reauthorize_summary),
                         icon = KixyuSymbols.Refresh,
                         onClick = onReconnect,
                     )
@@ -273,7 +270,6 @@ private fun GoogleAccountPage(
                 KixyuSection(title = stringResource(R.string.settings_account_actions_section)) {
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_disconnect_google_account),
-                        supportingText = stringResource(R.string.settings_disconnect_account_summary),
                         icon = KixyuSymbols.Cloud,
                         contentColor = MaterialTheme.colorScheme.error,
                         onClick = onDisconnect,
@@ -281,7 +277,6 @@ private fun GoogleAccountPage(
                     KixyuDivider()
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_delete_cloud_data),
-                        supportingText = stringResource(R.string.settings_delete_cloud_summary),
                         icon = KixyuSymbols.DeleteOutline,
                         contentColor = MaterialTheme.colorScheme.error,
                         onClick = onDeleteCloudData,

@@ -6,7 +6,7 @@ import org.w3c.dom.Element
 import org.w3c.dom.Node
 
 internal fun parseCss(source: String, sourcePath: String): List<CssRule> {
-    val clean = source.replace(CSS_COMMENT, "").replace(CSS_IMPORT, "")
+    val clean = normalizedReaderCssSource(source)
     return CSS_RULE.findAll(clean).flatMap { match ->
         val declarations = match.groupValues[2].split(';').mapNotNull { declaration ->
             val separator = declaration.indexOf(':')
@@ -26,6 +26,10 @@ internal fun parseCss(source: String, sourcePath: String): List<CssRule> {
             .map { selector -> CssRule(selector, declarations, cssSpecificity(selector), sourcePath = sourcePath) }
     }.toList()
 }
+
+internal fun normalizedReaderCssSource(source: String): String = baseReaderCss(
+    source.replace(CSS_COMMENT, "").replace(CSS_IMPORT, "").replace(CSS_HEADER, ""),
+)
 
 internal fun Element.backgroundImage(cssRules: List<CssRule>, xhtmlPath: String): CssBackgroundImage? {
     var reference: String? = getAttribute("background").trim().takeIf(String::isNotBlank)
@@ -81,14 +85,13 @@ internal fun Element.toStyledText(stylesheet: CssStylesheet, xhtmlPath: String):
                 val element = node as Element
                 val tag = element.localName.orEmpty().lowercase()
                 if (tag in NON_CONTENT_TAGS) return
+                if (tag == "svg" && element.isVectorIllustration()) return
                 if (tag == "br") {
                     builder.appendBreak(inherited)
                     return
                 }
-                // Inline raster images are intentionally omitted. Publisher EPUBs frequently
-                // repeat decorative logos in every chapter and their dimensions cannot be
-                // represented reliably by the text paginator. Independent illustrations are
-                // still emitted as image blocks by readXhtml().
+                // Text metrics cannot contain raster objects. Noterefs receive a semantic marker;
+                // substantial inline illustrations are emitted after their containing text block.
                 if (element.imageReference(tag) != null) return
                 val normalized = element.normalizedStyle(stylesheet.rules, inherited)
                 val styles = if (tag == "a") {
@@ -105,6 +108,17 @@ internal fun Element.toStyledText(stylesheet: CssStylesheet, xhtmlPath: String):
                     )
                 } else normalized
                 if (styles.hidden) return
+                // Many EPUB 2/3 publishers use an image-only noteref. Dropping every inline image
+                // also drops the only clickable text range. Emit a semantic marker, not the logo.
+                if (tag == "a" && styles.linkTarget != null && element.textContent.isNullOrBlank() &&
+                    (element.getAttributeNS("http://www.idpf.org/2007/ops", "type").contains("noteref") ||
+                        element.getAttribute("epub:type").contains("noteref") ||
+                        element.getAttribute("role").contains("doc-noteref") ||
+                        element.getAttribute("class").contains("footnote", true))
+                ) {
+                    builder.append("†", styles.copy(styles = styles.styles + ReaderInlineStyle.SUPERSCRIPT))
+                    return
+                }
                 var child = element.firstChild
                 while (child != null) {
                     visit(child, styles, depth + 1)
@@ -264,30 +278,19 @@ internal fun Element.normalizedStyle(
 }
 
 internal fun Element.matchesCssSelector(rawSelector: String): Boolean {
-    val selector = rawSelector.replace(CSS_PSEUDO, "").trim()
+    // A native semantic renderer has no hover/print/dark CSS DOM. Never broaden an unsupported
+    // pseudo selector (especially :not/::before) into an unconditional rule over normal prose.
+    if (CSS_PSEUDO.findAll(rawSelector).any { it.value != ":root" }) return false
+    val selector = rawSelector.trim()
     if (selector.isBlank()) return false
-    val parts = selector.split(CSS_COMBINATOR).filter(String::isNotBlank)
-    if (parts.isEmpty()) return false
-    var candidate: Element? = this
-    for (index in parts.indices.reversed()) {
-        val part = parts[index]
-        if (index == parts.lastIndex) {
-            if (candidate?.matchesCssCompound(part) != true) return false
-            candidate = candidate.parentNode as? Element
-        } else {
-            while (candidate != null && !candidate.matchesCssCompound(part)) {
-                candidate = candidate.parentNode as? Element
-            }
-            if (candidate == null) return false
-            candidate = candidate.parentNode as? Element
-        }
-    }
-    return true
+    return matchesReaderCssSelector(selector)
 }
 
 internal fun Element.matchesCssCompound(selector: String): Boolean {
     if (selector.startsWith('@')) return false
-    val simpleSelector = selector.replace(CSS_ATTRIBUTE, "")
+    if (":root" in selector && parentNode !is org.w3c.dom.Document) return false
+    if (selector == ":root") return true
+    val simpleSelector = selector.replace(CSS_ATTRIBUTE, "").replace(":root", "")
     val tag = CSS_TAG.find(simpleSelector)?.value?.lowercase()
     val expectedId = CSS_ID.find(simpleSelector)?.groupValues?.get(1)
     val expectedClasses = CSS_CLASS.findAll(simpleSelector).map { it.groupValues[1] }.toList()
@@ -359,6 +362,21 @@ internal fun Element.hasTextBearingContentAncestor(): Boolean {
     return false
 }
 
+internal fun Element.resolvedReaderStyle(stylesheet: CssStylesheet): NormalizedInlineState =
+    generateSequence(this) { it.parentNode as? Element }.toList().asReversed()
+        .fold(NormalizedInlineState(variables = stylesheet.rootVariables)) { state, element ->
+            element.normalizedStyle(stylesheet.rules, state)
+        }
+
+internal fun Element.isFootnoteImage(): Boolean = generateSequence(parentNode as? Element) { it.parentNode as? Element }
+    .any { element ->
+        element.localName == "a" &&
+            (element.getAttributeNS("http://www.idpf.org/2007/ops", "type").contains("noteref") ||
+                element.getAttribute("epub:type").contains("noteref") ||
+                element.getAttribute("role").contains("doc-noteref") ||
+                element.getAttribute("class").contains("footnote", true))
+    }
+
 internal fun Element.hasDescendantReadableBlock(): Boolean {
     val descendants = getElementsByTagNameNS("*", "*")
     for (index in 0 until descendants.length) {
@@ -392,6 +410,7 @@ private val SUPPORTED_CSS_PROPERTIES = setOf(
 )
 private val CASE_SENSITIVE_CSS_PROPERTIES = setOf("background", "background-image")
 private val CSS_COMMENT = Regex("/\\*.*?\\*/", setOf(RegexOption.DOT_MATCHES_ALL))
+private val CSS_HEADER = Regex("@(?:charset|namespace)\\s+[^;]*;", RegexOption.IGNORE_CASE)
 private val CSS_RULE = Regex("([^{}]+)\\{([^{}]*)\\}")
 private val CSS_PSEUDO = Regex("::?[a-zA-Z-]+(?:\\([^)]*\\))?")
 private val CSS_COMBINATOR = Regex("\\s*[>+~]\\s*|\\s+")

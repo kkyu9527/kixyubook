@@ -214,6 +214,8 @@ private fun LoadedReaderRoute(
             jumpChapter = viewModel::jumpToChapter,
             jumpPosition = viewModel::requestLocation,
             savePosition = viewModel::onPageSettled,
+            presentationAnchor = viewModel::presentationAnchor,
+            presentationCurrent = viewModel::isPresentationCurrent,
             updateSettings = viewModel::updateSettings,
             addBookmark = viewModel::addBookmark,
             deleteBookmark = viewModel::deleteBookmark,
@@ -259,7 +261,7 @@ private fun ReaderEntrySurface(
     format: BookFormat?,
     preparation: com.kixyu9527.kixyubook.core.common.model.BookPreparationProgress? = null,
 ) {
-    val palette = readerPalette(settings, androidx.compose.foundation.isSystemInDarkTheme())
+    val palette = rememberReaderPalette(settings)
     var showSlowStatus by remember(stage) { mutableStateOf(false) }
     LaunchedEffect(stage) {
         if (stage == null) return@LaunchedEffect
@@ -307,7 +309,7 @@ private fun ReaderLoadFailureSurface(
     onRetry: () -> Unit,
     onExit: () -> Unit,
 ) {
-    val palette = readerPalette(settings, androidx.compose.foundation.isSystemInDarkTheme())
+    val palette = rememberReaderPalette(settings)
     Box(
         modifier = Modifier.fillMaxSize().background(palette.background).padding(KixyuSpacing.large),
         contentAlignment = Alignment.Center,

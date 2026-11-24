@@ -129,7 +129,6 @@ fun CloudSyncRoute(
         KixyuSection(title = stringResource(R.string.settings_sync_section)) {
             KixyuSettingsRow(
                 title = stringResource(R.string.settings_auto_sync),
-                supportingText = stringResource(R.string.settings_auto_sync_summary),
                 icon = KixyuSymbols.CloudSync,
                 onClick = {
                     if (state.initialSyncDecision != null) {
@@ -171,7 +170,6 @@ fun CloudSyncRoute(
             KixyuSection(title = stringResource(R.string.settings_sync_content_section)) {
                 KixyuSettingsRow(
                     title = stringResource(R.string.settings_original_book_files),
-                    supportingText = stringResource(R.string.settings_sync_books_summary),
                     icon = KixyuSymbols.Backup,
                     onClick = {
                         val enabled = !state.syncOriginalFiles
@@ -207,7 +205,6 @@ fun CloudSyncRoute(
                 KixyuDivider()
                 KixyuSettingsRow(
                     title = stringResource(R.string.settings_user_fonts),
-                    supportingText = stringResource(R.string.settings_sync_fonts_summary),
                     icon = KixyuSymbols.Tune,
                     onClick = {
                         val enabled = !state.syncFonts
@@ -226,12 +223,6 @@ fun CloudSyncRoute(
                     )
                 }
             }
-            Text(
-                stringResource(R.string.settings_always_synced),
-                modifier = Modifier.padding(horizontal = KixyuSpacing.extraSmall),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 

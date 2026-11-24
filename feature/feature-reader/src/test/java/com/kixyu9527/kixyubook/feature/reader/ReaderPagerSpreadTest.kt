@@ -6,6 +6,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReaderPagerSpreadTest {
+    @Test fun nextChapterPublishesFinalizedBatchesWithoutClaimingItsPartialTailIsTheEnd() {
+        val current = chapterPages(chapter = 0, count = 2).mapNotNull { it.page }
+        fun window(count: Int, complete: Boolean) = buildReaderPagerWindow(0, current, emptyList(),
+            chapterPages(chapter = 1, count = count).mapNotNull { it.page }, false, true,
+            currentPlaceholderPageIndex = 0, chapterCount = 3, nextPagesComplete = complete)
+        val partial = window(4, false)
+        val expanded = window(8, false)
+        val completed = window(8, true)
+        assertEquals("1:0", buildReaderPagerSpreads(partial, false)[directChapterTargetSpreadIndex(buildReaderPagerSpreads(partial, false), 0, 1)].key)
+        assertTrue(partial.filter { it.chapterIndex == 1 }.all { it.pageCount == 0 })
+        assertEquals(partial.map { it.key }, expanded.take(partial.size).map { it.key })
+        assertEquals(expanded.map { it.key }, completed.map { it.key })
+        assertTrue(completed.filter { it.chapterIndex == 1 }.all { it.pageCount == 8 })
+    }
     @Test
     fun phoneLayoutKeepsEveryLeafIndependent() {
         val spreads = buildReaderPagerSpreads(chapterPages(chapter = 2, count = 3), false)

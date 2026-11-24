@@ -204,11 +204,6 @@ internal fun CloudSyncOverviewCard(
                         verticalArrangement = Arrangement.spacedBy(KixyuSpacing.extraSmall),
                     ) {
                         Text(stringResource(R.string.settings_sync_continue_title), style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            stringResource(R.string.settings_connect_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
                 KixyuButton(

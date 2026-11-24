@@ -48,6 +48,29 @@ class ReaderViewModelRecoveryTest {
         const val MID_PARAGRAPH_OFFSET = 190
     }
 
+    @Test fun aVisualRecreationCanResumeThePresentedAnchorButAnExplicitJumpCannotReuseIt() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val harness = readerRecoveryHarness()
+            val reader = harness.open()
+            awaitCondition("chapter did not load") { reader.uiState.value.chapter != null }
+            reader.onPageSettled(5, 3, false, 6)
+            val before = reader.uiState.value
+            assertTrue(reader.isPresentationCurrent(before.navigationVersion, before.chapter!!.id))
+            assertFalse(reader.isPresentationCurrent(before.navigationVersion, Long.MAX_VALUE))
+            assertEquals(ReaderLocation(0, 5, 3), reader.presentationAnchor(before.navigationVersion, 0))
+            assertNull(reader.presentationAnchor(before.navigationVersion, 1))
+            reader.jumpToPosition(0, 1)
+            awaitCondition("jump did not complete") { reader.uiState.value.navigationVersion != before.navigationVersion }
+            val version = reader.uiState.value.navigationVersion
+            assertFalse(reader.isPresentationCurrent(before.navigationVersion, before.chapter.id))
+            assertNull(reader.presentationAnchor(version, 0))
+            reader.onPageSettled(1, 0, false, 2)
+            assertEquals(ReaderLocation(0, 1, 0), reader.presentationAnchor(version, 0))
+            harness.closeAll()
+        } finally { Dispatchers.resetMain() }
+    }
+
     @Test fun txtReopensAtLastCheckpointAfterReaderIsCleared() = recreateReader(BookFormat.TXT)
 
     @Test fun epubReopensAtLastCheckpointAfterReaderIsCleared() = recreateReader(BookFormat.EPUB)
@@ -558,18 +581,26 @@ internal class ReaderRecoveryHarness(
     val fonts: MutableStateFlow<List<UserFont>> = MutableStateFlow(emptyList()),
 ) {
     private val stores = mutableListOf<ViewModelStore>()
+    private val readers = mutableListOf<ReaderViewModel>()
 
     fun open(): ReaderViewModel {
         val store = ViewModelStore()
         val viewModel = factory()
         store.put("reader", viewModel)
         stores += store
+        readers += viewModel
         return viewModel
     }
 
     fun closeAll() {
         stores.forEach { it.clear() }
         stores.clear()
+    }
+
+    suspend fun closeAllAndAwait() {
+        closeAll()
+        readers.forEach { it.awaitFinalCheckpoint() }
+        readers.clear()
     }
 }
 
@@ -581,10 +612,20 @@ internal fun readerRecoveryHarness(
     initialSettings: ReaderSettings = ReaderSettings(fontSize = 19f),
     cloudDownload: (suspend () -> Result<Unit>)? = null,
     cloudPublishesChapters: Boolean = true,
+    epubFile: java.io.File? = null,
+    chapterCount: Int = 1,
+    chapterLoader: (suspend (Chapter, ChapterLoadPriority) -> ChapterContent?)? = null,
 ): ReaderRecoveryHarness {
     val globalSettings = MutableStateFlow(initialSettings)
     val durable = MutableStateFlow<ReadingProgress?>(initialProgress)
-    val chapters = listOf(Chapter(1, "book", "第一章", 0, chapterKey = "first"))
+    val epub = epubFile?.let { com.kixyu9527.kixyubook.core.reader.engine.EpubBookParser() }
+    val chapters = if (epubFile != null) requireNotNull(epub).readChapterOutlines(epubFile).map {
+        Chapter(it.sourceIndex.toLong() + 1, "book", it.title, it.sourceIndex, it.volumeTitle, it.volumeIndex,
+            chapterKey = "source-${it.sourceIndex}")
+    } else List(chapterCount) { index ->
+        Chapter(index.toLong() + 1, "book", if (index == 0) "第一章" else "第 ${index + 1} 章", index,
+            chapterKey = if (index == 0) "first" else "chapter-$index")
+    }
     var cloudFileAvailable = false
     val availableChapters = MutableStateFlow(if (cloudDownload == null) chapters else emptyList())
     val repository = object : BookRepository by fake<BookRepository>({ method, _ ->
@@ -595,7 +636,8 @@ internal fun readerRecoveryHarness(
             "getBook" -> Book("book", "测试", "", "", null, format,
                 if (cloudDownload == null) "" else "google-drive://book",
                 if (cloudFileAvailable) "/cached/book" else "", 0, "hash")
-            "readEpubNavigation" -> emptyList<EpubNavigationEntry>()
+            "readEpubNavigation" -> if (epubFile != null) requireNotNull(epub).readNavigation(epubFile) else emptyList<EpubNavigationEntry>()
+            "readEpubBrowserPlan" -> if (epubFile != null) requireNotNull(epub).readBrowserPlan(epubFile) else null
             "setReaderSessionActive", "setReaderInteractionActive", "releaseReaderMemory" -> Unit
             else -> error("Unexpected book call: $method")
         }
@@ -604,9 +646,12 @@ internal fun readerRecoveryHarness(
             bookUuid: String,
             chapterIndex: Int,
             priority: ChapterLoadPriority,
-        ): ChapterContent {
+        ): ChapterContent? {
             val chapter = chapters[chapterIndex]
-            return ChapterContent(chapter, List(paragraphCount) { index -> Paragraph(index.toLong(), chapter.id, index, paragraphText(index)) })
+            if (chapterLoader != null) return chapterLoader(chapter, priority)
+            val texts = if (epubFile != null) requireNotNull(requireNotNull(epub).readChapter(epubFile, chapterIndex)).paragraphs
+                else List(paragraphCount) { paragraphText(it) }
+            return ChapterContent(chapter, texts.mapIndexed { index, text -> Paragraph(index.toLong(), chapter.id, index, text) })
         }
 
         override suspend fun saveProgress(progress: ReadingProgress) {

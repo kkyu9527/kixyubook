@@ -64,6 +64,7 @@ internal fun PagedReader(
     physicalViewportHeightDp: Float,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
     onDocumentLink: (String) -> Unit,
+    resumeAnchor: ReaderLocation? = null,
 ) {
     var retainedPage by remember(
         spec,
@@ -78,7 +79,7 @@ internal fun PagedReader(
     // rotation produces, so the reader restores the visible paragraph instead of the chapter
     // entry; a new navigationVersion resets it so explicit jumps stay authoritative.
     var presentedAnchor by remember(state.navigationVersion) {
-        mutableStateOf(state.restorePosition.takeIf { it >= 0 }?.let {
+        mutableStateOf(resumeAnchor ?: state.restorePosition.takeIf { it >= 0 }?.let {
             ReaderLocation(state.chapterIndex, it, state.restoreCharOffset)
         })
     }
@@ -157,7 +158,9 @@ internal fun PagedReader(
             // reader work, not a late speculative task. Reuse any in-flight layout in place.
             prefetch = !criticalNeighbours,
             paused = resourcePriorityActive,
-            allowPartialResults = false,
+            // Finalized page batches are immutable and already safe to turn into. Do not make
+            // the next chapter's opening wait for its (possibly very long) remaining body.
+            allowPartialResults = true,
             retainedSnapshot = measuredWindow[it],
         )
     } ?: ReaderPaginationSnapshot()
@@ -199,6 +202,7 @@ internal fun PagedReader(
         pages,
         previousPages,
         nextPages,
+        nextPagination.isComplete,
         pagination.isComplete,
         hasPrevious,
         hasNext,
@@ -210,6 +214,7 @@ internal fun PagedReader(
             currentPages = pages,
             previousPages = previousPages,
             nextPages = nextPages,
+            nextPagesComplete = nextPagination.isComplete,
             hasPrevious = hasPrevious,
             hasNext = hasNext,
             currentPagesComplete = pagination.isComplete,
@@ -226,14 +231,24 @@ internal fun PagedReader(
     val selectedSearchResult = state.searchResults.getOrNull(state.selectedSearchIndex)
     val layoutIdentity = listOf(spec, state.fontPath, state.settings.showChapterTitle,
         density.density, density.fontScale, layoutDirection)
+    // settledPageIndex acknowledges a chapter-window handoff, not a permanent page command.
+    // Keep the physical leaf actually settled afterwards (also disambiguates image-only leaves
+    // sharing a text anchor). A palette-only recomposition must not replay that old handoff.
+    var presentedLeaf by remember(state.navigationVersion) {
+        mutableStateOf<Pair<List<Any?>, Int>?>(null)
+    }
+    val leafLayoutIdentity = layoutIdentity + chapter
+    val latestLayoutIdentity by rememberUpdatedState(leafLayoutIdentity)
     val entryLayoutIdentity = remember(state.navigationVersion) { layoutIdentity }
-    val acknowledgingVisibleLeaf = state.settledPageIndex != null && layoutIdentity == entryLayoutIdentity
+    val acknowledgingVisibleLeaf = resumeAnchor == null && state.settledPageIndex != null && layoutIdentity == entryLayoutIdentity
     val targetSearchQuery = state.searchQuery.takeIf {
         selectedSearchResult?.chapterId == chapter.id &&
             selectedSearchResult.paragraphIndex == state.restorePosition
     }
     val initialActual = if (pages.isEmpty()) {
         if (state.restorePosition > 0) Int.MIN_VALUE else 0
+    } else if (presentedLeaf?.first == leafLayoutIdentity && presentedLeaf!!.second in pages.indices) {
+        presentedLeaf!!.second
     } else if (acknowledgingVisibleLeaf) {
         checkNotNull(state.settledPageIndex).coerceIn(pages.indices)
     } else {
@@ -258,6 +273,14 @@ internal fun PagedReader(
         initialPage = desiredSpreadIndex,
         pageCount = { pagerSpreads.size },
     )
+    ReaderReadAheadLayouts(
+        state, spec, paginationCoordinator, paginationMeasurer,
+        paused = resourcePriorityActive || pager.isScrollInProgress || !pagination.isComplete ||
+            (hasPrevious && !previousPagination.isComplete) || (hasNext && !nextPagination.isComplete),
+    )
+    LaunchedEffect(pager.isScrollInProgress) {
+        if (pager.isScrollInProgress) paginationCoordinator.cancelSpeculativeLayouts()
+    }
     // Programmatic turns intentionally have no backlog. Mature readers keep finger dragging
     // interruptible and ignore repeated tap/key turns while an accepted animation is running;
     // replaying an unlimited queue after the finger has taken over makes the page feel sticky.
@@ -266,7 +289,7 @@ internal fun PagedReader(
     var settledSpreadKey by remember(pager) { mutableStateOf(desiredSpreadKey) }
     // Initial measure/restoration must be applied before any leaf can be saved as user progress.
     var appliedNavigationVersion by remember(pager) { mutableIntStateOf(-1) }
-    var pendingDirectChapterTurn by remember { mutableStateOf<Int?>(null) }
+    var pendingChapterTarget by remember(state.sessionId) { mutableStateOf<Int?>(null) }
     val latestPagerSpreads by rememberUpdatedState(pagerSpreads)
     val latestReaderState by rememberUpdatedState(state)
     // The version that measured the currently displayed window. A late settle from that window
@@ -282,7 +305,7 @@ internal fun PagedReader(
         scrolling = pager.isScrollInProgress,
     )
 
-    LaunchedEffect(pager, pagerSpreads, epubPath, resourcePriorityActive, prefetchDensity) {
+    LaunchedEffect(pager, pagerSpreads, epubPath, resourcePriorityActive, prefetchDensity, physicalViewportHeightDp, spec.viewportWidthDp) {
         if (epubPath == null || resourcePriorityActive) return@LaunchedEffect
         snapshotFlow { pager.settledPage to pager.isScrollInProgress }
             .distinctUntilChanged()
@@ -297,6 +320,8 @@ internal fun PagedReader(
                     epubPath = epubPath,
                     pages = nearbyPages,
                     density = prefetchDensity,
+                    fullPageViewportWidthDp = spec.viewportWidthDp,
+                    fullPageViewportHeightDp = physicalViewportHeightDp,
                 )
             }
     }
@@ -308,17 +333,17 @@ internal fun PagedReader(
     // must not replay a chapter-entry restore against the Pager: doing so sent an already-read
     // page back to the chapter opening whenever the controls appeared. Only an explicit logical
     // destination change may drive this positioning effect.
-    LaunchedEffect(state.navigationVersion, desiredSpreadKey) {
+    LaunchedEffect(state.navigationVersion, desiredSpreadKey, desiredSpreadIndex, pages.isNotEmpty()) {
+        if (pages.isEmpty()) return@LaunchedEffect
         if (acknowledgingVisibleLeaf) {
             appliedNavigationVersion = state.navigationVersion
             return@LaunchedEffect
         }
-        if (settledSpreadKey != desiredSpreadKey) {
-            val target = pagerSpreads.indexOfFirst { it.key == desiredSpreadKey }
-            if (target >= 0) {
-                pager.scrollToPage(target)
-                settledSpreadKey = desiredSpreadKey
-            }
+        if (settledSpreadKey != desiredSpreadKey || appliedNavigationVersion != state.navigationVersion) {
+            // A preceding chapter may finish while this restore is awaiting its first measure.
+            // Restart for the same keyed leaf's new numeric index, not the old window's index.
+            pager.restoreReaderLeaf(desiredSpreadIndex, desiredSpreadKey)
+            settledSpreadKey = desiredSpreadKey
         }
         appliedNavigationVersion = state.navigationVersion
     }
@@ -353,6 +378,7 @@ internal fun PagedReader(
                     )
                 }
                 item.page != null -> {
+                    presentedLeaf = latestLayoutIdentity to item.pageIndex
                     retainedPage = RetainedReaderPage(
                         page = item.page,
                         pageNumber = readerPageNumber(readerState, item.pageIndex, item.pageCount),
@@ -403,17 +429,38 @@ internal fun PagedReader(
     }
     LaunchedEffect(chapterTurns) {
         chapterTurns.collectLatest { direction ->
-            if (direction != 0) pendingDirectChapterTurn = if (direction < 0) -1 else 1
+            if (direction != 0) {
+                // Accumulate the requested destination, not a backlog of animations. Read the
+                // physical leaf when a handoff is not yet acknowledged by the ViewModel.
+                val visibleChapter = latestPagerSpreads.getOrNull(pager.settledPage)
+                    ?.items?.firstOrNull()?.chapterIndex ?: latestReaderState.chapterIndex
+                val base = pendingChapterTarget ?: visibleChapter
+                pendingChapterTarget = (base + if (direction < 0) -1 else 1)
+                    .coerceIn(0, latestReaderState.chapters.lastIndex)
+            }
         }
     }
+    LaunchedEffect(state.navigationVersion) {
+        // Directory/search/bookmark navigation supersedes a pending button command; natural
+        // Pager handoffs carry settledPageIndex and must preserve its remaining destination.
+        if (state.settledPageIndex == null) pendingChapterTarget = null
+    }
     LaunchedEffect(
-        pendingDirectChapterTurn,
+        pendingChapterTarget,
         pagerSpreads,
         state.chapterIndex,
         pagination.isComplete,
+        pager.isScrollInProgress,
     ) {
-        val direction = pendingDirectChapterTurn ?: return@LaunchedEffect
-        if (pager.isScrollInProgress || !pagination.isComplete) return@LaunchedEffect
+        val targetChapter = pendingChapterTarget ?: return@LaunchedEffect
+        if (pager.isScrollInProgress) return@LaunchedEffect
+        val visibleChapter = pagerSpreads.getOrNull(pager.settledPage)?.items?.firstOrNull()?.chapterIndex
+        if (visibleChapter != state.chapterIndex) return@LaunchedEffect
+        if (targetChapter == state.chapterIndex) {
+            pendingChapterTarget = null
+            return@LaunchedEffect
+        }
+        val direction = if (targetChapter < state.chapterIndex) -1 else 1
         val target = directChapterTargetSpreadIndex(
             pagerSpreads = pagerSpreads,
             currentChapterIndex = state.chapterIndex,
@@ -425,7 +472,8 @@ internal fun PagedReader(
             // chapter exactly once. This avoids rebuilding the window and correcting its anchor
             // in a second frame.
             pager.scrollToPage(target)
-            pendingDirectChapterTurn = null
+            // Retain the destination until the logical handoff is acknowledged. Otherwise a
+            // second press in that interval is accidentally based on the old chapter again.
         } else {
             // Stay on the current page until the real next page joins this Pager. Never replace
             // readable content with a loading surface or let cache state become a visible target.
@@ -499,6 +547,11 @@ internal fun PagedReader(
             fraction in .33f..67f -> middleTap()
         }
     }
+    val pagePointerDown by rememberUpdatedState<() -> Unit> {
+        // A newer direct touch supersedes older queued chapter-button intent. Commands issued
+        // after this down (while this finger is still dragging) remain pending until release.
+        pendingChapterTarget = null
+    }
     Box(Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pager,
@@ -530,6 +583,7 @@ internal fun PagedReader(
                 }
                 .observePagerTap(
                     onTapFraction = { fraction -> pagerTap(fraction) },
+                    onPointerDown = { pagePointerDown() },
                 ),
             // Keep exactly one measured neighbour attached even while a turn is running. Dropping
             // this to zero in response to isScrollInProgress changes the Pager's composition
@@ -766,9 +820,11 @@ internal fun Modifier.readerPageViewportModifier(
  */
 internal fun Modifier.observePagerTap(
     onTapFraction: (Float) -> Unit,
+    onPointerDown: () -> Unit = {},
 ): Modifier = pointerInput(Unit) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        onPointerDown()
         val up = waitForUpOrCancellation(pass = PointerEventPass.Initial) ?: return@awaitEachGesture
         val delta = up.position - down.position
         val isShortTap = up.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis

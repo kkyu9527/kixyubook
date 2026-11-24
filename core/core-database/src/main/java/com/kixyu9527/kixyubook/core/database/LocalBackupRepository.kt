@@ -422,8 +422,12 @@ class LocalBackupRepository @Inject constructor(
             margin = properties.float("margin", current.margin),
             theme = properties.enum("theme", current.theme),
             pageMode = properties.enum("pageMode", current.pageMode),
-            customThemeEnabled = properties.getProperty("customThemeEnabled")?.toBooleanStrictOrNull()
-                ?: ((properties.getProperty("theme") == "CUSTOM") || current.customThemeEnabled),
+            readerColorScheme = com.kixyu9527.kixyubook.core.common.model.restoreReaderColorScheme(
+                properties.getProperty("readerColorScheme"),
+                properties.getProperty("customThemeEnabled")?.toBooleanStrictOrNull()
+                    ?: ((properties.getProperty("theme") == "CUSTOM") ||
+                        current.readerColorScheme == com.kixyu9527.kixyubook.core.common.model.ReaderColorScheme.CUSTOM),
+            ),
             customDayTheme = current.customDayTheme.copy(
                 backgroundHex = properties.getProperty(
                     "customDayBackground",

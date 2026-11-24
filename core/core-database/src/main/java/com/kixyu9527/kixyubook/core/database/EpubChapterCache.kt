@@ -158,7 +158,7 @@ private fun String.safePathSegment() = replace(Regex("[^a-zA-Z0-9._-]"), "_")
 
 private const val MAGIC = 0x4B584543
 // Version 6 also persists whether publisher CSS requests a cover-style crop.
-private const val VERSION = 7
+private const val VERSION = 9
 private const val NO_ENUM = -1
 private const val MAX_PARAGRAPHS = 100_000
 private const val MAX_IMAGES = 10_000

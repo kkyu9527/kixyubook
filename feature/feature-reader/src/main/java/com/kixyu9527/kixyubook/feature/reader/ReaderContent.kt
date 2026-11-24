@@ -14,6 +14,7 @@ import com.kixyu9527.kixyubook.core.common.model.BookFormat
 import com.kixyu9527.kixyubook.core.common.model.PageMode
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.reader.engine.*
+import com.kixyu9527.kixyubook.feature.reader.browser.BrowserReaderContent
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
@@ -73,8 +74,14 @@ internal fun ReaderContent(
     resourcePriorityActive: Boolean,
     onTextActionTarget: (ReaderTextActionTarget) -> Unit,
     onDocumentLink: (String) -> Unit,
+    presentationAnchor: (Int, Int) -> ReaderLocation? = { _, _ -> null },
+    directChapterTurn: (Int) -> Unit = {},
+    presentationCurrent: (Int, Long) -> Boolean = { _, _ -> true },
 ) {
     val chapter = state.chapter ?: return
+    val resumeAnchor = remember(state.sessionId, state.navigationVersion, state.chapterIndex) {
+        presentationAnchor(state.navigationVersion, state.chapterIndex)
+    }
     val density = LocalDensity.current
     // Scroll mode has no page render callback, so its long-lived collector must read the latest
     // layout version when it reports a position; a captured snapshot would keep reporting an
@@ -98,132 +105,140 @@ internal fun ReaderContent(
     val bottomInsetDp = with(density) {
         WindowInsets.navigationBarsIgnoringVisibility.getBottom(this).toDp().value
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val physicalViewportHeight = maxHeight.value
-        val safeViewportHeight = (physicalViewportHeight - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
-        val twoPageSpread = maxWidth > maxHeight &&
-            (maxWidth >= 840.dp || foldingFeature != null)
-        val physicalHingeWidth = with(density) {
-            foldingFeature?.bounds?.width()?.toDp() ?: 0.dp
-        }
-        val spreadGutter = maxOf(KixyuSize.readerSpreadGutter, physicalHingeWidth)
-        val pageViewportWidth = if (twoPageSpread && state.settings.pageMode != PageMode.SCROLL) {
-            ((maxWidth - spreadGutter) / 2).value
-        } else {
-            maxWidth.value
-        }
-        // Paged mode is measured against one physical leaf. Scroll mode always owns the complete
-        // viewport; tablet spreads render two leaves in one Pager item. Very wide text still
-        // retains a bounded, readable line measure.
-        val adaptiveHorizontalMargin = maxOf(
-            state.settings.margin,
-            (pageViewportWidth - KixyuSize.readerTextMaxWidth.value) / 2f,
-        )
-        val spec = ReaderLayoutSpec(
-            viewportWidthDp = pageViewportWidth,
-            viewportHeightDp = safeViewportHeight,
-            fontSizeSp = state.settings.fontSize,
-            lineHeightMultiplier = state.settings.lineHeight,
-            letterSpacingEm = state.settings.letterSpacing,
-            horizontalMarginDp = adaptiveHorizontalMargin,
-        )
-        if (state.settings.pageMode == PageMode.SCROLL) {
-            key(chapter.id, spec, state.navigationVersion) {
-                val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
-                val restoredItem = remember(contentParagraphs, state.restorePosition) {
-                    ReaderPositionManager().contentItemFor(
-                        contentParagraphs,
-                        scrollAnchor.paragraph ?: state.restorePosition,
-                    )
-                }
-                val listState = rememberReaderListState(state.sessionId, restoredItem + 1)
-                LaunchedEffect(listState, chapter.id) {
-                    snapshotFlow {
-                        val hasVisibleItems = listState.layoutInfo.visibleItemsInfo.isNotEmpty()
-                        if (!hasVisibleItems) return@snapshotFlow null
-                        val chapterComplete = !listState.canScrollForward
-                        val visibleItem = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
-                        val position = if (chapterComplete) {
-                            contentParagraphs.lastOrNull()?.index ?: 0
-                        } else {
-                            contentParagraphs.getOrNull(visibleItem)?.index
-                                ?: contentParagraphs.firstOrNull()?.index
-                                ?: 0
-                        }
-                        val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
-                            ?.minus(1)?.takeIf(contentParagraphs.indices::contains)
-                        val visibleEnd = contentParagraphs.getOrNull(lastVisibleItem ?: 0)?.index ?: position
-                        Triple(position, visibleEnd, chapterComplete)
-                    }.filterNotNull().distinctUntilChanged().collect { (position, visibleEnd, complete) ->
-                        scrollAnchor.paragraph = position
-                        savePosition(position, 0, complete, visibleEnd, latestLayoutVersion)
+    ReaderAnnotationRendering(state.annotations) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val physicalViewportHeight = maxHeight.value
+            val safeViewportHeight = (physicalViewportHeight - topInsetDp - bottomInsetDp).coerceAtLeast(1f)
+            val twoPageSpread = maxWidth > maxHeight &&
+                (maxWidth >= 840.dp || foldingFeature != null)
+            val physicalHingeWidth = with(density) {
+                foldingFeature?.bounds?.width()?.toDp() ?: 0.dp
+            }
+            val spreadGutter = maxOf(KixyuSize.readerSpreadGutter, physicalHingeWidth)
+            val pageViewportWidth = if (twoPageSpread && state.settings.pageMode != PageMode.SCROLL) {
+                ((maxWidth - spreadGutter) / 2).value
+            } else {
+                maxWidth.value
+            }
+            // Paged mode is measured against one physical leaf. Scroll mode always owns the complete
+            // viewport; tablet spreads render two leaves in one Pager item. Very wide text still
+            // retains a bounded, readable line measure.
+            val adaptiveHorizontalMargin = maxOf(
+                state.settings.margin,
+                (pageViewportWidth - KixyuSize.readerTextMaxWidth.value) / 2f,
+            )
+            val spec = ReaderLayoutSpec(
+                viewportWidthDp = pageViewportWidth,
+                viewportHeightDp = safeViewportHeight,
+                fontSizeSp = state.settings.fontSize,
+                lineHeightMultiplier = state.settings.lineHeight,
+                letterSpacingEm = state.settings.letterSpacing,
+                horizontalMarginDp = adaptiveHorizontalMargin,
+            )
+            if (state.browserPlan != null) {
+                BrowserReaderContent(state, palette, resumeAnchor, savePosition, moveChapterFromPage,
+                    middleTap, dismissControls, volumeTurns, chapterTurns, chapterRendered, onDocumentLink,
+                    directChapterTurn, setPageInteractionActive, presentationCurrent,
+                    Modifier.fillMaxSize().padding(top = topInsetDp.dp, bottom = bottomInsetDp.dp))
+            } else if (state.settings.pageMode == PageMode.SCROLL) {
+                key(chapter.id, spec, state.navigationVersion) {
+                    val contentParagraphs = remember(chapter) { chapter.contentParagraphs() }
+                    val restoredItem = remember(contentParagraphs, state.restorePosition) {
+                        ReaderPositionManager().contentItemFor(
+                            contentParagraphs,
+                            scrollAnchor.paragraph ?: resumeAnchor?.paragraphIndex ?: state.restorePosition,
+                        )
                     }
-                }
-                LaunchedEffect(listState) {
-                    snapshotFlow { listState.isScrollInProgress }.distinctUntilChanged().collectLatest { scrolling ->
-                        if (scrolling) {
-                            setPageInteractionActive(true)
-                            dismissControls()
-                        } else {
-                            // Let the settled page draw before resuming speculative EPUB work.
-                            // Frame-based deferral adapts to 60/90/120 Hz and is not a timer delay.
-                            withFrameNanos { }
-                            withFrameNanos { }
-                            setPageInteractionActive(false)
+                    val listState = rememberReaderListState(state.sessionId, restoredItem + 1)
+                    LaunchedEffect(listState, chapter.id) {
+                        snapshotFlow {
+                            val hasVisibleItems = listState.layoutInfo.visibleItemsInfo.isNotEmpty()
+                            if (!hasVisibleItems) return@snapshotFlow null
+                            val chapterComplete = !listState.canScrollForward
+                            val visibleItem = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
+                            val position = if (chapterComplete) {
+                                contentParagraphs.lastOrNull()?.index ?: 0
+                            } else {
+                                contentParagraphs.getOrNull(visibleItem)?.index
+                                    ?: contentParagraphs.firstOrNull()?.index
+                                    ?: 0
+                            }
+                            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                                ?.minus(1)?.takeIf(contentParagraphs.indices::contains)
+                            val visibleEnd = contentParagraphs.getOrNull(lastVisibleItem ?: 0)?.index ?: position
+                            Triple(position, visibleEnd, chapterComplete)
+                        }.filterNotNull().distinctUntilChanged().collect { (position, visibleEnd, complete) ->
+                            scrollAnchor.paragraph = position
+                            savePosition(position, 0, complete, visibleEnd, latestLayoutVersion)
                         }
                     }
-                }
-                DisposableEffect(listState) {
-                    onDispose { setPageInteractionActive(false) }
-                }
-                LaunchedEffect(listState, volumeTurns) {
-                    volumeTurns.collect { direction ->
-                        dismissControls()
-                        when {
-                            direction < 0 && !listState.canScrollBackward -> moveChapterFromPage(state.chapterIndex, -1, true)
-                            direction > 0 && !listState.canScrollForward -> moveChapterFromPage(state.chapterIndex, 1, false)
-                            else -> {
-                                val viewport = listState.layoutInfo.run { viewportEndOffset - viewportStartOffset }
-                                listState.animateScrollBy(viewport * direction.toFloat())
+                    LaunchedEffect(listState) {
+                        snapshotFlow { listState.isScrollInProgress }.distinctUntilChanged().collectLatest { scrolling ->
+                            if (scrolling) {
+                                setPageInteractionActive(true)
+                                dismissControls()
+                            } else {
+                                // Let the settled page draw before resuming speculative EPUB work.
+                                // Frame-based deferral adapts to 60/90/120 Hz and is not a timer delay.
+                                withFrameNanos { }
+                                withFrameNanos { }
+                                setPageInteractionActive(false)
                             }
                         }
                     }
+                    DisposableEffect(listState) {
+                        onDispose { setPageInteractionActive(false) }
+                    }
+                    LaunchedEffect(listState, volumeTurns) {
+                        volumeTurns.collect { direction ->
+                            dismissControls()
+                            when {
+                                direction < 0 && !listState.canScrollBackward -> moveChapterFromPage(state.chapterIndex, -1, true)
+                                direction > 0 && !listState.canScrollForward -> moveChapterFromPage(state.chapterIndex, 1, false)
+                                else -> {
+                                    val viewport = listState.layoutInfo.run { viewportEndOffset - viewportStartOffset }
+                                    listState.animateScrollBy(viewport * direction.toFloat())
+                                }
+                            }
+                        }
+                    }
+                    ReaderScrollRenderer(
+                        chapter, listState, spec, palette, state.fontPath,
+                        { fraction -> if (fraction in .33f..67f) middleTap() else dismissControls() },
+                        { dismissControls(); moveChapterFromPage(state.chapterIndex, -1, true) },
+                        { dismissControls(); moveChapterFromPage(state.chapterIndex, 1, false) },
+                        state.chapterIndex > 0, state.chapterIndex < state.chapters.lastIndex,
+                        topInsetDp, bottomInsetDp,
+                        fullPageViewportHeightDp = physicalViewportHeight,
+                        epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
+                        modifier = Modifier.fillMaxSize(),
+                        highlightQuery = state.searchQuery,
+                        readerAnnotations = state.annotations,
+                        onTextActionTarget = onTextActionTarget,
+                        onDocumentLink = onDocumentLink,
+                    )
+                    LaunchedEffect(chapter.id, state.navigationVersion) {
+                        withFrameNanos { }
+                        chapterRendered(state.navigationVersion)
+                    }
                 }
-                ReaderScrollRenderer(
-                    chapter, listState, spec, palette, state.fontPath,
-                    { fraction -> if (fraction in .33f..67f) middleTap() else dismissControls() },
-                    { dismissControls(); moveChapterFromPage(state.chapterIndex, -1, true) },
-                    { dismissControls(); moveChapterFromPage(state.chapterIndex, 1, false) },
-                    state.chapterIndex > 0, state.chapterIndex < state.chapters.lastIndex,
-                    topInsetDp, bottomInsetDp,
-                    fullPageViewportHeightDp = physicalViewportHeight,
-                    epubPath = state.book?.takeIf { it.format == BookFormat.EPUB }?.storagePath,
-                    modifier = Modifier.fillMaxSize(),
-                    highlightQuery = state.searchQuery,
-                    readerAnnotations = state.annotations,
-                    onTextActionTarget = onTextActionTarget,
-                    onDocumentLink = onDocumentLink,
-                )
-                LaunchedEffect(chapter.id, state.navigationVersion) {
-                    withFrameNanos { }
-                    chapterRendered(state.navigationVersion)
+            } else {
+                Box(Modifier.fillMaxSize()) {
+                    PagedReader(
+                        state, chapter, spec, palette, savePosition, settlePage,
+                        middleTap, dismissControls, volumeTurns, chapterTurns,
+                        paginationCoordinator, paginationMeasurer,
+                        chapterRendered, setPageInteractionActive, resourcePriorityActive, twoPageSpread,
+                        prioritizeAdjacentChapter,
+                        spreadGutter,
+                        topInsetDp,
+                        bottomInsetDp,
+                        physicalViewportHeight,
+                        onTextActionTarget,
+                        onDocumentLink,
+                        resumeAnchor,
+                    )
                 }
-            }
-        } else {
-            Box(Modifier.fillMaxSize()) {
-                PagedReader(
-                    state, chapter, spec, palette, savePosition, settlePage,
-                    middleTap, dismissControls, volumeTurns, chapterTurns,
-                    paginationCoordinator, paginationMeasurer,
-                    chapterRendered, setPageInteractionActive, resourcePriorityActive, twoPageSpread,
-                    prioritizeAdjacentChapter,
-                    spreadGutter,
-                    topInsetDp,
-                    bottomInsetDp,
-                    physicalViewportHeight,
-                    onTextActionTarget,
-                    onDocumentLink,
-                )
             }
         }
     }

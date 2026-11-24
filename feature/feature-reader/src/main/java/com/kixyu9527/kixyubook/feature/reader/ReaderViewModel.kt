@@ -69,6 +69,8 @@ class ReaderViewModel @AssistedInject constructor(
     private val sessionFinished = AtomicBoolean(false)
     private val sessionTimer = ReadingSessionTimer(SystemClock::elapsedRealtime)
     private var lastPosition = 0
+    private var presentedNavigationVersion = -1
+    private var sourceChapters: List<Chapter> = emptyList()
     private var lastCharOffset = 0
     /** Settles older than this layout version came from a layout that is being replaced. */
     private var minimumAcceptedLayoutVersion = 0
@@ -207,7 +209,9 @@ class ReaderViewModel @AssistedInject constructor(
                 }
             }
             launchReaderObserver("chapters") {
-                books.observeChapters(bookUuid).collect { chapters ->
+                books.observeChapters(bookUuid).collect { original ->
+                    sourceChapters = original
+                    val chapters = readerVisibleChapters(original, _uiState.value.epubNavigation)
                     if (chapters.isEmpty()) return@collect
                     val previous = _uiState.value
                     val orderingChanged = previous.chapters.map(Chapter::id) != chapters.map(Chapter::id)
@@ -233,7 +237,7 @@ class ReaderViewModel @AssistedInject constructor(
             }
             launchReaderObserver("bookmarks") {
                 books.observeBookmarks(bookUuid).collect { bookmarks ->
-                    _uiState.update { it.copy(bookmarks = bookmarks) }
+                    _uiState.update { it.copy(bookmarks = readerVisibleBookmarks(bookmarks, it.chapters, it.epubNavigation)) }
                 }
             }
             launchReaderObserver("corrections") {
@@ -323,15 +327,28 @@ class ReaderViewModel @AssistedInject constructor(
             InitialReaderData(book.await(), chapters.await(), progress.await(), presentation.await())
         }
         val book = initialData.book ?: error(context.getString(R.string.reader_error_missing_book))
-        val chapters = initialData.chapters
+        sourceChapters = initialData.chapters
+        val navigation = if (book.format == BookFormat.EPUB) {
+            try { books.readEpubNavigation(bookUuid) }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { emptyList() }
+        } else emptyList()
+        val browserPlan = if (book.format == BookFormat.EPUB) {
+            try { books.readEpubBrowserPlan(bookUuid) }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { null }
+        } else null
+        val chapters = readerVisibleChapters(sourceChapters, navigation)
         require(chapters.isNotEmpty()) { context.getString(R.string.reader_error_no_chapters) }
         val progress = initialData.progress
         acceptedProgressUpdatedAt = progress?.updatedTime ?: Long.MIN_VALUE
-        val index = progress?.let { readerProgressChapterIndex(chapters, it).takeIf { index -> index >= 0 } } ?: 0
+        val index = progress?.let { readerProgressChapterIndex(chapters, it, navigation, sourceChapters).takeIf { index -> index >= 0 } } ?: 0
         _uiState.update {
             it.copy(
                 book = book,
                 chapters = chapters,
+                epubNavigation = navigation,
+                browserPlan = browserPlan,
                 settings = initialData.presentation.settings,
                 settingsLoaded = true,
                 fontPath = initialData.presentation.fontPath,
@@ -375,16 +392,6 @@ class ReaderViewModel @AssistedInject constructor(
         // either direction immediately; pagination promotes them after the first leaf is visible.
         prioritizeAdjacentChapter(index, -1)
         prioritizeAdjacentChapter(index, 1)
-        viewModelScope.launch {
-            try {
-                val navigation = books.readEpubNavigation(bookUuid)
-                _uiState.update { it.copy(epubNavigation = navigation) }
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                // Publisher navigation is optional. The complete spine directory stays usable.
-            }
-        }
     }.onFailure { error ->
         if (error is CancellationException) throw error
         // A throwable without a message must still produce a visible failure surface, never a blank
@@ -421,7 +428,7 @@ class ReaderViewModel @AssistedInject constructor(
         locationJourney.finish("superseded")
         val state = _uiState.value
         val baseIndex = session.pendingIndex ?: state.chapterIndex
-        val target = (baseIndex + delta).coerceIn(0, state.chapters.lastIndex)
+        val target = chapterButtonTarget(state.chapters, state.epubNavigation, baseIndex, delta)
         beginPageTurn(delta, "chapter_button", state.chapterIndex, target)
         navigateToChapter(
             index = target,
@@ -615,7 +622,7 @@ class ReaderViewModel @AssistedInject constructor(
         criticalNeighbourJobs.values.forEach(Job::cancel)
         criticalNeighbourJobs.clear()
         prefetchedAroundChapterIndex = null
-        cancelPendingChapterLoadsExcept(index)
+        cancelPendingChapterLoadsOutsideWindow(index)
 
         // A paged boundary already renders the decoded adjacent chapter. Publishing the same
         // chapter through a new coroutine leaves a short interval in which the old Pager is at
@@ -762,7 +769,7 @@ class ReaderViewModel @AssistedInject constructor(
             )
         ) return
         val state = _uiState.value
-        val targetIndex = readerProgressChapterIndex(state.chapters, progress)
+        val targetIndex = readerProgressChapterIndex(state.chapters, progress, state.epubNavigation, sourceChapters)
         // Only mark the update as accepted once it can actually be applied. Advancing the watermark
         // for an unresolvable chapter would suppress a later valid update.
         if (targetIndex < 0) return
@@ -811,6 +818,7 @@ class ReaderViewModel @AssistedInject constructor(
         }
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun chapterLoad(
         index: Int,
         chapters: List<Chapter>,
@@ -821,12 +829,13 @@ class ReaderViewModel @AssistedInject constructor(
             // A completed failure must not be cached: retrying the same chapter has to start a new
             // load instead of rethrowing the old exception forever.
             val failed = existing.deferred.isCompleted &&
-                runCatching { existing.deferred.getCompleted() }.isFailure
+                runCatching { existing.deferred.getCompleted() }.getOrNull() == null
             val promotesSpeculativeLoad = priority != ChapterLoadPriority.PREFETCH &&
                 existing.priority == ChapterLoadPriority.PREFETCH
-            val promotesReadAheadToUser = priority == ChapterLoadPriority.USER &&
-                existing.priority == ChapterLoadPriority.READ_AHEAD
-            if (!failed && !(promotesSpeculativeLoad || promotesReadAheadToUser)) {
+            // Completed results and required read-ahead are reusable at any priority. Restarting
+            // an already-running READ_AHEAD just because it became visible loses all its work.
+            // Only a gated speculative request needs replacement to escape its pause policy.
+            if (!failed && (existing.deferred.isCompleted || !promotesSpeculativeLoad)) {
                 return existing.deferred
             }
             if (!failed) {
@@ -865,7 +874,13 @@ class ReaderViewModel @AssistedInject constructor(
         // visible chapter has already rendered when this starts, and a user jump cancels the job.
         chapterPrefetchJob = viewModelScope.launch {
             nearbyIndices.forEach { nearbyIndex ->
-                val load = chapterLoad(nearbyIndex, chapters, ChapterLoadPriority.PREFETCH)
+                // The bounded navigation runway must survive interaction; cancelling its
+                // parser on each drag makes a rapid second chapter skip cold again. Only work
+                // outside the render runway is disposable speculative indexing.
+                val priority = if (abs(nearbyIndex - index) <= RENDER_PREFETCH_RADIUS) {
+                    ChapterLoadPriority.READ_AHEAD
+                } else ChapterLoadPriority.PREFETCH
+                val load = chapterLoad(nearbyIndex, chapters, priority)
                 val chapter = load.await() ?: return@forEach
                 if (abs(nearbyIndex - index) <= RENDER_PREFETCH_RADIUS) {
                     _uiState.update { state ->
@@ -934,16 +949,16 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     /**
-     * Directory and search jumps are foreground work. Cancel queued speculative reads so a
-     * distant chapter never waits behind the previous chapter's twenty-item prefetch window.
-     * A load for the requested chapter is retained when it was already prefetched.
+     * Retain useful work in the destination's bounded window. A cached boundary handoff must
+     * not cancel the immediately following chapter and restart it after every turn. Distant
+     * directory/search jumps still discard obsolete requests outside their new window.
      */
-    private fun cancelPendingChapterLoadsExcept(targetIndex: Int) {
+    private fun cancelPendingChapterLoadsOutsideWindow(targetIndex: Int) {
         val loads = chapterLoads.iterator()
         while (loads.hasNext()) {
             val (chapterIndex, request) = loads.next()
-            if (chapterIndex != targetIndex && !request.deferred.isCompleted) {
-                request.deferred.cancel()
+            if (abs(chapterIndex - targetIndex) > CHAPTER_PREFETCH_RADIUS) {
+                if (!request.deferred.isCompleted) request.deferred.cancel()
                 loads.remove()
             }
         }
@@ -966,7 +981,11 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     internal fun requestLocation(request: ReaderLocationRequest) {
-        val target = request.resolve(_uiState.value.chapters) ?: return
+        val state = _uiState.value
+        val resolvedRequest = (request.chapter as? ChapterRef.SourceIndex)?.let {
+            request.copy(chapter = ChapterRef.SourceIndex(readingSourceIndex(it.value, state.epubNavigation)))
+        } ?: request
+        val target = resolvedRequest.resolve(state.chapters) ?: return
         // An explicit destination supersedes any natural page turn still waiting to render.
         pendingPageTurn = null
         if (target != currentLocation()) {
@@ -1105,8 +1124,24 @@ class ReaderViewModel @AssistedInject constructor(
         // the new layout's first settle is accepted even before any render callback arrives.
         if (layoutVersion < minimumAcceptedLayoutVersion) return
         session.onPresented(_uiState.value.chapterIndex, position, charOffset)
+        presentedNavigationVersion = _uiState.value.navigationVersion
         savePosition(position, charOffset, chapterComplete, visibleEndPosition)
     }
+
+    /** A theme/subtree recreation is not navigation. Read the latest *presented* text location,
+     * not the chapter-entry restore command. Version gating keeps explicit same-chapter jumps
+     * authoritative and prevents an old session's location from overriding them.
+     */
+    internal fun presentationAnchor(navigationVersion: Int, chapterPosition: Int): ReaderLocation? {
+        if (presentedNavigationVersion != navigationVersion) return null
+        return session.presentedLocation?.takeIf { it.chapterPosition == chapterPosition }?.let {
+            ReaderLocation(it.chapterPosition, it.paragraphIndex, it.charOffset)
+        }
+    }
+
+    /** Delayed browser messages cannot settle a chapter/navigation that the VM has already left. */
+    internal fun isPresentationCurrent(navigationVersion: Int, chapterId: Long): Boolean =
+        _uiState.value.let { it.navigationVersion == navigationVersion && it.chapter?.id == chapterId }
 
     fun savePosition(
         position: Int,
@@ -1297,7 +1332,7 @@ class ReaderViewModel @AssistedInject constructor(
     }
 
     /**
-     * Stopping the ten-chapter queue must not discard the short navigation runway already in
+     * Stopping the background queue must not discard the short navigation runway already in
      * flight. Keep awaiting the two chapters on either side and publish them for the boundary
      * pager; no new parsing work is started here.
      */
@@ -1375,6 +1410,9 @@ class ReaderViewModel @AssistedInject constructor(
         cloudSync.releaseBook(bookUuid)
         books.releaseReaderMemory(bookUuid)
     }
+
+    /** The final checkpoint deliberately outlives onCleared; await it before disposing a test dispatcher. */
+    internal suspend fun awaitFinalCheckpoint() = progressWriter.awaitClosed()
 }
 
 private const val READER_OBSERVER_RETRY_MILLIS = 1_000L

@@ -7,9 +7,12 @@ object ReaderCacheBudget {
     const val EPUB_PACKAGE_MEMORY_BYTES = 8L * 1024 * 1024
     const val EPUB_CSS_MEMORY_BYTES = 6L * 1024 * 1024
     const val EPUB_DISK_BYTES = 192L * 1024 * 1024
+    const val EPUB_PRESENTATION_DISK_BYTES = 8L * 1024 * 1024
     const val PAGINATION_DISK_BYTES = 96L * 1024 * 1024
     const val MAX_MEMORY_CHAPTERS = 6
     const val DEFAULT_IMAGE_MEMORY_BYTES = 32 * 1024 * 1024
+    /** WebView owns renderer-process allocations; bound the retained leaf count separately. */
+    const val MAX_BROWSER_LEAVES = 3
 
     fun imageMemoryBytes(memoryClassMiB: Int, lowRam: Boolean): Int = if (lowRam) {
         8 * 1024 * 1024

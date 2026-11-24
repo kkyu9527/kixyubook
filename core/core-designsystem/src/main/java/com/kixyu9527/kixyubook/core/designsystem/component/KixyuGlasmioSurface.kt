@@ -25,6 +25,7 @@ import io.github.neoruaa.glasmio.glass.render.effects.blur
 import io.github.neoruaa.glasmio.glass.render.effects.lens
 import io.github.neoruaa.glasmio.glass.render.highlight.Highlight
 import io.github.neoruaa.glasmio.glass.render.highlight.HighlightStyle
+import com.kixyu9527.kixyubook.core.designsystem.theme.LocalKixyuGlassFrostLevel
 
 /** A consumer inside its own recorded source would create a cyclic RenderNode graph. */
 internal fun canSampleKixyuGlassBackdrop(
@@ -58,7 +59,8 @@ internal fun KixyuGlasmioSurface(
     var consumerCoordinates by remember(backdrop) { mutableStateOf<LayoutCoordinates?>(null) }
     val sampleBackdrop = canSampleKixyuGlassBackdrop(backdrop?.coordinates, consumerCoordinates)
     val isDark = MaterialTheme.colorScheme.surface.luminance() < .5f
-    val tint = KixyuGlassStyle.surfaceTint(role, isDark, sampleBackdrop)
+    val frostLevel = LocalKixyuGlassFrostLevel.current
+    val tint = KixyuGlassStyle.surfaceTint(role, isDark, sampleBackdrop, frostLevel)
     val edge = remember(isDark) { KixyuGlassStyle.edgeBrush(isDark) }
     val highlight = remember {
         Highlight.Default.copy(alpha = KixyuGlassStyle.highlightAlpha, style = HighlightStyle.Default(clear = true))
@@ -75,13 +77,13 @@ internal fun KixyuGlasmioSurface(
                 exportedBackdrop = exportedBackdrop,
                 samplingScale = { size, density ->
                     val support = with(density) {
-                        KixyuGlassStyle.frostRadius(role).toPx() * 3f
+                        KixyuGlassStyle.frostRadius(role, frostLevel).toPx() * 3f
                     }
                     KixyuGlassStyle.samplingScale(role, (size.width + support * 2f) * (size.height + support * 2f))
                 },
                 effects = {
                     if (sampleBackdrop) {
-                        val frost = KixyuGlassStyle.frostRadius(role).toPx()
+                        val frost = KixyuGlassStyle.frostRadius(role, frostLevel).toPx()
                         val height = KixyuGlassStyle.refractionHeight.toPx()
                         val amount = KixyuGlassStyle.refractionAmount.toPx()
                         // The Clear inner ray samples inward. Only Gaussian support needs
@@ -95,13 +97,8 @@ internal fun KixyuGlasmioSurface(
                 shadow = null,
                 innerShadow = null,
                 onDrawSurface = {
-                    if (role == KixyuGlassRole.CONTROL || !sampleBackdrop) drawRect(tint)
+                    drawRect(tint)
                 },
-            )
-            .then(
-                if (role == KixyuGlassRole.CONTENT && sampleBackdrop) {
-                    Modifier.kixyuGlassContentBacking(shape, tint)
-                } else Modifier,
             )
             .border(KixyuGlassStyle.edgeWidth, edge, shape),
         contentAlignment = Alignment.Center,

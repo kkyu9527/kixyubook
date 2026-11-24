@@ -9,7 +9,9 @@ fun settingsToJson(value: ReaderSettings) = JSONObject()
     .put("fontSize", value.fontSize).put("lineHeight", value.lineHeight).put("letterSpacing", value.letterSpacing)
     .put("margin", value.margin).put("theme", value.theme.name).put("pageMode", value.pageMode.name)
     .put("pageTurnAnimation", value.pageTurnAnimation.name)
-    .put("customThemeEnabled", value.customThemeEnabled).put("customDayTheme", customThemeJson(value.customDayTheme))
+    .put("readerColorScheme", value.readerColorScheme.name)
+    .put("customThemeEnabled", value.readerColorScheme == ReaderColorScheme.CUSTOM)
+    .put("customDayTheme", customThemeJson(value.customDayTheme))
     .put("customNightTheme", customThemeJson(value.customNightTheme)).put("fontUuid", value.fontUuid)
     .put("appColorTheme", value.appColorTheme.name).put("appUiStyle", value.appUiStyle.name)
     .put("glassEffectEnabled", value.glassEffectEnabled)
@@ -32,7 +34,8 @@ fun jsonToSettings(value: JSONObject) = ReaderSettings(
     theme = enumValue(value, "theme", ReaderTheme.SYSTEM),
     pageMode = enumValue(value, "pageMode", PageMode.SCROLL),
     pageTurnAnimation = enumValue(value, "pageTurnAnimation", PageTurnAnimation.HORIZONTAL_SLIDE),
-    customThemeEnabled = value.optBoolean("customThemeEnabled"),
+    readerColorScheme = restoreReaderColorScheme(value.optString("readerColorScheme"),
+        value.optBoolean("customThemeEnabled") || value.optString("theme") == "CUSTOM"),
     customDayTheme = jsonToCustomTheme(value.optJSONObject("customDayTheme"), CustomReaderTheme()),
     customNightTheme = jsonToCustomTheme(value.optJSONObject("customNightTheme"), ReaderSettings().customNightTheme),
     fontUuid = value.optString("fontUuid").takeIf { it.isNotBlank() && it != "null" },

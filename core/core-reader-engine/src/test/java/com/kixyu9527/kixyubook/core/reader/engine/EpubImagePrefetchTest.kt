@@ -23,6 +23,15 @@ class EpubImagePrefetchTest {
         )
     }
 
+    @Test fun fullPagePrefetchUsesThePhysicalViewportAndTheSamePixelRoundingAsRendering() {
+        val full = imageBlock("cover.png", 400f, 850f).copy(isFullPageImage = true)
+        val inline = imageBlock("drawing.png", 100.5f, 120.5f)
+        val requests = readerEpubImagePrefetchRequests(listOf(page(0, full), page(1, inline)), 2.75f, 3,
+            fullPageViewportWidthDp = 412.5f, fullPageViewportHeightDp = 915.5f)
+        assertEquals(EpubImagePrefetchRequest("cover.png", 1134, 2518), requests[0])
+        assertEquals(EpubImagePrefetchRequest("drawing.png", 276, 331), requests[1])
+    }
+
     private fun page(index: Int, vararg blocks: DocumentBlock) = ReaderPage(
         index = index,
         chapterIndex = 0,

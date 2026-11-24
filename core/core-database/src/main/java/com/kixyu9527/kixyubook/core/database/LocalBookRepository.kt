@@ -91,6 +91,7 @@ class LocalBookRepository @Inject constructor(
         File(context.noBackupFilesDir, "epub-chapters").apply(File::mkdirs),
     )
     private val chapterLoadMutex = Mutex()
+    private val epubPresentationCache = EpubPresentationCache(File(context.noBackupFilesDir, "epub-presentation"))
     private val storageMutationMutex = LibraryStorageGate.mutex
     private val importScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val importEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
@@ -315,6 +316,7 @@ class LocalBookRepository @Inject constructor(
                 BookRepairService(context, database, dao, annotations, textCorrections, chapterLoadMutex) { uuid ->
                     chapterCache.removeBook(uuid)
                     epubChapterCache.clearBook(uuid)
+                    epubPresentationCache.clearBook(uuid)
                     ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, uuid)
                 }.repair(bookUuid, mode, onProgress)
             }
@@ -779,6 +781,7 @@ class LocalBookRepository @Inject constructor(
             // fresh files must not be removed by the older deletion.
             if (dao.getBook(book.uuid) != null) return@forEach
             epubChapterCache.clearBook(book.uuid)
+            epubPresentationCache.clearBook(book.uuid)
             ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, book.uuid)
             File(book.storagePath).delete()
             book.coverPath?.let(::File)?.delete()
@@ -884,7 +887,8 @@ class LocalBookRepository @Inject constructor(
                     }
                 }
                 val paragraphs = if (isSameEpubRevision) {
-                    parsed?.toReaderParagraphs(chapter.id, storedParagraphs)
+                    parsed?.withPersistedTextAnchors(storedParagraphs.map { it.text })
+                        ?.toReaderParagraphs(chapter.id, storedParagraphs)
                         ?: storedParagraphs.map { paragraph ->
                             Paragraph(paragraph.id, paragraph.chapterId, paragraph.paragraphIndex, paragraph.text)
                         }
@@ -1281,8 +1285,19 @@ class LocalBookRepository @Inject constructor(
     override suspend fun readEpubNavigation(bookUuid: String): List<EpubNavigationEntry> = withContext(Dispatchers.IO) {
         val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name }
             ?: return@withContext emptyList()
-        (parsers.parserFor(BookFormat.EPUB) as EpubBookParser).readNavigation(File(book.storagePath))
+        epubPresentation(book.uuid, book.contentHash, File(book.storagePath)).navigation
     }
+
+    override suspend fun readEpubBrowserPlan(bookUuid: String): EpubBrowserPlan? = withContext(Dispatchers.IO) {
+        val book = dao.getBook(bookUuid)?.takeIf { it.format == BookFormat.EPUB.name } ?: return@withContext null
+        epubPresentation(book.uuid, book.contentHash, File(book.storagePath)).browser
+    }
+
+    private fun epubPresentation(uuid: String, hash: String, file: File): EpubPresentation =
+        epubPresentationCache.load(uuid, hash, file) {
+            val parser = parsers.parserFor(BookFormat.EPUB) as EpubBookParser
+            EpubPresentation(parser.readNavigation(file), parser.readBrowserPlan(file))
+        }
 
     private suspend fun importStreamingChapters(
         bookUuid: String,
@@ -1333,6 +1348,7 @@ class LocalBookRepository @Inject constructor(
         File(book.storagePath).delete()
         book.coverPath?.let(::File)?.delete()
         epubChapterCache.clearBook(bookUuid)
+        epubPresentationCache.clearBook(bookUuid)
         ReaderPaginationCacheMaintenance.clearBook(context.noBackupFilesDir, bookUuid)
     }
 
@@ -1345,6 +1361,7 @@ class LocalBookRepository @Inject constructor(
         File(context.filesDir, "books").pruneTo(books.mapTo(hashSetOf()) { File(it.storagePath).absolutePath })
         File(context.filesDir, "covers").pruneTo(books.mapNotNullTo(hashSetOf()) { it.coverPath?.let(::File)?.absolutePath })
         epubChapterCache.retainBooks(books.mapTo(hashSetOf(), BookEntity::uuid))
+        epubPresentationCache.retainBooks(books.mapTo(hashSetOf(), BookEntity::uuid))
     }
 
     suspend fun continueAllEpubIndexes() = epubIndex.continueAll()

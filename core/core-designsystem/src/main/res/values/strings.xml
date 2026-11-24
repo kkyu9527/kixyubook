@@ -1,4 +1,11 @@
 <resources>
+    <string name="kixyu_reader_color_scheme">Reading palette</string>
+    <string name="kixyu_reader_colors_default">Default</string>
+    <string name="kixyu_reader_colors_dynamic">Wallpaper colors</string>
+    <string name="kixyu_reader_colors_paper">Paper</string>
+    <string name="kixyu_reader_colors_sepia">Sepia</string>
+    <string name="kixyu_reader_colors_green">Soft green</string>
+    <string name="kixyu_reader_colors_gray">Soft gray</string>
     <string name="kixyu_decrease_value">Decrease %1$s</string>
     <string name="kixyu_increase_value">Increase %1$s</string>
     <string name="kixyu_enable_auto_brightness">Use system brightness</string>

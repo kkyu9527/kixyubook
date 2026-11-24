@@ -81,19 +81,6 @@ data class ReaderTextSpan(
     val linkTarget: String? = null,
 )
 
-sealed interface EpubLinkResult {
-    data class Footnote(val title: String, val text: String) : EpubLinkResult
-    data class Location(val chapterIndex: Int, val paragraphIndex: Int = 0) : EpubLinkResult
-}
-
-/** Display-only EPUB navigation; it never replaces a persisted chapter or text anchor. */
-data class EpubNavigationEntry(
-    val sourceIndex: Int,
-    val title: String,
-    val target: String,
-    val depth: Int = 0,
-)
-
 data class Paragraph(
     val id: Long,
     val chapterId: Long,
@@ -282,7 +269,7 @@ data class ReaderSettings(
     val theme: ReaderTheme = ReaderTheme.SYSTEM,
     val pageMode: PageMode = PageMode.SCROLL,
     val pageTurnAnimation: PageTurnAnimation = PageTurnAnimation.HORIZONTAL_SLIDE,
-    val customThemeEnabled: Boolean = false,
+    val readerColorScheme: ReaderColorScheme = ReaderColorScheme.DEFAULT,
     val customDayTheme: CustomReaderTheme = CustomReaderTheme(),
     val customNightTheme: CustomReaderTheme = CustomReaderTheme(
         backgroundHex = "#11120F",

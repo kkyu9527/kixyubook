@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -722,9 +723,9 @@ fun KixyuSlider(
     if (LocalAppUiStyle.current == AppUiStyle.MIUIX) {
         MiuixSlider(
             value = value,
-            onValueChange = onValueChange,
+            onValueChange = { if (enabled) onValueChange(it) },
             onValueChangeFinished = onValueChangeFinished,
-            modifier = modifier,
+            modifier = modifier.semantics { if (!enabled) disabled() },
             enabled = enabled,
             valueRange = valueRange,
             steps = steps,

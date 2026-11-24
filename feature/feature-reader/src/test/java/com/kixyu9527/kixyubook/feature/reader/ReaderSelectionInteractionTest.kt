@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -11,6 +12,8 @@ import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.designsystem.theme.KixyuBookTheme
 import com.kixyu9527.kixyubook.core.reader.engine.*
+import com.kixyu9527.kixyubook.feature.reader.browser.BrowserSelection
+import com.kixyu9527.kixyubook.feature.reader.browser.LocalBrowserSelectionHandler
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -27,6 +30,39 @@ class ReaderSelectionInteractionTest {
 
     @Test fun materialLongPressActionsAndOutsideDismissStayInsideReader() = exerciseSelection(AppUiStyle.MATERIAL)
     @Test fun miuixLongPressActionsAndOutsideDismissStayInsideReader() = exerciseSelection(AppUiStyle.MIUIX)
+    @Test fun materialBrowserRangesUseTheSameMenuAndClearLifecycle() = exerciseBrowserSelection(AppUiStyle.MATERIAL)
+    @Test fun miuixBrowserRangesUseTheSameMenuAndClearLifecycle() = exerciseBrowserSelection(AppUiStyle.MIUIX)
+
+    private fun exerciseBrowserSelection(style: AppUiStyle) {
+        val selection = ReaderTextInteractionState()
+        var publish: (BrowserSelection?) -> Unit = {}
+        var highlights = 0
+        var clears = 0
+        var copies = 0
+        compose.setContent {
+            KixyuBookTheme(themeMode = ReaderTheme.DAY, uiStyle = style, glassEffectEnabled = true) {
+                ReaderTextInteractionHost(selection, {}, { highlights++ }, {}, {}) {
+                    publish = LocalBrowserSelectionHandler.current
+                    Box(Modifier.fillMaxSize())
+                }
+            }
+        }
+        compose.waitForIdle()
+        fun request(target: ReaderTextActionTarget) = compose.runOnIdle {
+            publish(BrowserSelection(target, Rect(40f, 200f, 260f, 230f), { copies++ }, { clears++ }))
+        }
+        request(ReaderTextActionTarget(5, 7, "Selected text.", 0, 8))
+        compose.onNodeWithText("标注").assertIsDisplayed().performTouchInput { click() }
+        compose.onNodeWithText("高亮").performTouchInput { click() }
+        compose.runOnIdle { assertEquals(1, highlights); assertTrue(clears > 0); assertNull(selection.target) }
+        // Copy-only multi-paragraph targets must never inherit the previous actionable range.
+        request(ReaderTextActionTarget(5, 7, "First\nSecond"))
+        compose.onNodeWithText("标注").assertDoesNotExist()
+        val copyLabel = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getString(android.R.string.copy)
+        compose.onNodeWithText(copyLabel).performTouchInput { click() }
+        compose.runOnIdle { assertEquals(1, copies); assertNull(selection.target) }
+    }
 
     private fun exerciseSelection(style: AppUiStyle) {
         val selection = ReaderTextInteractionState()

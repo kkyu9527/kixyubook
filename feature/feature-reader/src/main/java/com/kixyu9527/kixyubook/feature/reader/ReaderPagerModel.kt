@@ -70,6 +70,7 @@ internal fun buildReaderPagerWindow(
     currentPagesComplete: Boolean = true,
     currentPlaceholderPageIndex: Int,
     chapterCount: Int,
+    nextPagesComplete: Boolean = true,
 ): List<ReaderPagerItem> = buildList {
     if (hasPrevious && currentChapterIndex > 0) {
         // Keep the previous chapter's complete lightweight page index in the stable Pager. Only
@@ -119,7 +120,7 @@ internal fun buildReaderPagerWindow(
                     ReaderPagerItem(
                         chapterIndex = currentChapterIndex + 1,
                         pageIndex = page.index,
-                        pageCount = nextPages.size,
+                        pageCount = if (nextPagesComplete) nextPages.size else 0,
                         page = page,
                     ),
                 )

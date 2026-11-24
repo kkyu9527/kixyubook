@@ -95,11 +95,6 @@ fun AppearanceRoute(
                 ) {
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_predictive_back),
-                        supportingText = if (state.settings.predictiveBackEnabled) {
-                            stringResource(R.string.settings_predictive_enabled)
-                        } else {
-                            stringResource(R.string.settings_predictive_disabled)
-                        },
                         onClick = {
                             viewModel.update {
                                 it.copy(predictiveBackEnabled = !it.predictiveBackEnabled)

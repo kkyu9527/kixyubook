@@ -6,6 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PortableConfigTest {
+    @Test fun selectingCustomColoursProducesOnlyOneCanonicalSettingIntent() {
+        val before = ReaderSettings()
+        val after = before.copy(readerColorScheme = ReaderColorScheme.CUSTOM)
+        val changes = settingsChanges(before, after)
+        assertEquals(setOf("readerColorScheme"), changes.keys)
+        assertEquals(after, changes.values.fold(before, ::applySettingsPatch))
+    }
     @Test fun returningSliderToOriginalValueStillReplacesPendingWrite() {
         val requests = ReaderSettingsRequests()
         val stored = ReaderSettings(fontSize = 19f)

@@ -27,6 +27,7 @@ import com.kixyu9527.kixyubook.core.common.model.PageMode
 import com.kixyu9527.kixyubook.core.common.model.PageTurnAnimation
 import com.kixyu9527.kixyubook.core.common.model.ReaderBrightnessMode
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
+import com.kixyu9527.kixyubook.core.common.model.ReaderColorScheme
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.designsystem.R
@@ -88,7 +89,7 @@ fun KixyuReaderSettingsGroup.resetToDefaults(current: ReaderSettings): ReaderSet
         )
         KixyuReaderSettingsGroup.THEME_SCREEN -> current.copy(
             theme = defaults.theme,
-            customThemeEnabled = defaults.customThemeEnabled,
+            readerColorScheme = defaults.readerColorScheme,
             customDayTheme = defaults.customDayTheme,
             customNightTheme = defaults.customNightTheme,
             brightnessMode = defaults.brightnessMode,
@@ -208,24 +209,11 @@ fun KixyuReaderSettingsGroupContent(
         KixyuReaderSettingsGroup.THEME_SCREEN -> {
             KixyuThemeModeControl(settings, onSettingsChange)
             KixyuDivider()
-            KixyuSettingsRow(
-                title = stringResource(R.string.kixyu_custom_colors),
-                onClick = {
-                    onSettingsChange { current -> current.copy(customThemeEnabled = !current.customThemeEnabled) }
-                },
-            ) {
-                KixyuSwitch(
-                    checked = settings.customThemeEnabled,
-                    onCheckedChange = { enabled ->
-                        onSettingsChange { current -> current.copy(customThemeEnabled = enabled) }
-                    },
-                )
-            }
-            if (settings.customThemeEnabled) {
+            KixyuReaderColorSchemeControl(settings, onSettingsChange)
+            if (settings.readerColorScheme == ReaderColorScheme.CUSTOM) {
                 KixyuDivider()
                 KixyuSettingsRow(
                     title = stringResource(R.string.kixyu_edit_reader_colors),
-                    supportingText = stringResource(R.string.kixyu_edit_reader_colors_hint),
                     onClick = onEditColors,
                 ) {
                     Icon(KixyuSymbols.KeyboardArrowRight, null)
@@ -332,14 +320,12 @@ private fun KixyuReaderSystemBarControls(
 ) {
     ReaderSwitch(
         title = stringResource(R.string.kixyu_show_status_bar),
-        supportingText = stringResource(R.string.kixyu_show_status_bar_hint),
         checked = settings.showStatusBar,
     ) { onSettingsChange { current -> current.copy(showStatusBar = it) } }
     KixyuDivider()
     // Positive semantics: checked means the bar is shown (includes gesture and three-button bars).
     ReaderSwitch(
         title = stringResource(R.string.kixyu_show_navigation_bar),
-        supportingText = stringResource(R.string.kixyu_show_navigation_bar_hint),
         checked = !settings.hideNavigationBar,
     ) { onSettingsChange { current -> current.copy(hideNavigationBar = !it) } }
 }
@@ -351,25 +337,21 @@ private fun KixyuReaderPageInfoControls(
 ) {
     ReaderSwitch(
         title = stringResource(R.string.kixyu_show_chapter_title),
-        supportingText = stringResource(R.string.kixyu_show_chapter_title_hint),
         checked = settings.showChapterTitle,
     ) { onSettingsChange { current -> current.copy(showChapterTitle = it) } }
     KixyuDivider()
     ReaderSwitch(
         title = stringResource(R.string.kixyu_show_page_number),
-        supportingText = stringResource(R.string.kixyu_show_page_number_hint),
         checked = settings.showPageNumber,
     ) { onSettingsChange { current -> current.copy(showPageNumber = it) } }
     KixyuDivider()
     ReaderSwitch(
         title = stringResource(R.string.kixyu_show_time),
-        supportingText = stringResource(R.string.kixyu_show_time_hint),
         checked = settings.showReadingTime,
     ) { onSettingsChange { current -> current.copy(showReadingTime = it) } }
     KixyuDivider()
     ReaderSwitch(
         title = stringResource(R.string.kixyu_show_battery),
-        supportingText = stringResource(R.string.kixyu_show_battery_hint),
         checked = settings.showBatteryLevel,
     ) { onSettingsChange { current -> current.copy(showBatteryLevel = it) } }
 }

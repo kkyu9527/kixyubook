@@ -242,11 +242,6 @@ internal fun FilenameRuleEditorDialog(
             Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small),
         ) {
-            Text(
-                text = stringResource(R.string.settings_filename_rules_preset_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
                 LocalMetadata.FilenameRulePresets.forEach { preset ->
                     FilterChip(
@@ -328,11 +323,6 @@ internal fun FilenameRuleEditorDialog(
                     Text(stringResource(R.string.settings_filename_rules_adjust))
                 }
                 if (adjusting) {
-                    Text(
-                        text = stringResource(R.string.settings_filename_rules_segment_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
                         tokens.forEachIndexed { index, token ->
                             FilterChip(
@@ -446,11 +436,6 @@ internal fun AdvancedRegexRuleDialog(
         backdropEffect = KixyuPopupBackdropEffect.SURFACE_ONLY,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(KixyuSpacing.small)) {
-            Text(
-                text = stringResource(R.string.settings_filename_rules_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             OutlinedTextField(
                 value = pattern,
                 onValueChange = { pattern = it },

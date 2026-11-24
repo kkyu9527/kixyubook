@@ -31,6 +31,40 @@ import org.robolectric.annotation.Config
 class KixyuBackMotionTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun rootReleasesTheDispatcherToAndroidAndRespectsTheAnimationSwitch() {
+        val enabled = mutableStateOf(true)
+        val rootActive = mutableStateOf(true)
+        val stack = mutableStateListOf<AppRoute>(AppRoute.Home)
+        var exits = 0
+        compose.setContent {
+            CompositionLocalProvider(LocalKixyuPredictiveBackEnabled provides enabled.value) {
+                KixyuRootBackHandler(rootActive.value) { exits++ }
+                KixyuAnimatedNavDisplay(stack, Modifier.fillMaxSize(), { stack.removeAt(stack.lastIndex) }) { route ->
+                    NavEntry(route) { Box(Modifier.fillMaxSize().testTag("root_content")) }
+                }
+            }
+        }
+        val dispatcher = compose.activity.onBackPressedDispatcher
+        compose.runOnIdle {
+            assertFalse("Android must see no enabled callback at the root", dispatcher.hasEnabledCallbacks())
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 300f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(100f, 300f, .5f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackCancelled()
+            assertEquals(0, exits)
+            enabled.value = false
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertTrue(dispatcher.hasEnabledCallbacks())
+            dispatcher.onBackPressed()
+            assertEquals(1, exits)
+            rootActive.value = false
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { assertFalse(dispatcher.hasEnabledCallbacks()) }
+        compose.onNodeWithTag("navigation_gesture_scrim").assertDoesNotExist()
+    }
+
     @Test fun hostHandlesLocaleWithoutRecreatingItsWindow() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val flags = context.packageManager.getActivityInfo(ComponentName(context, MainActivity::class.java), 0).configChanges

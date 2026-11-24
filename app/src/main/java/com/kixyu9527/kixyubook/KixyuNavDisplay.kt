@@ -41,7 +41,6 @@ import com.kixyu9527.kixyubook.core.designsystem.component.KixyuContextualAction
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuContextualBarController
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationBar
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuNavigationItem
-import com.kixyu9527.kixyubook.core.designsystem.component.KixyuPredictiveBackHandler
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuGlassBackdrop
 import com.kixyu9527.kixyubook.core.designsystem.component.LocalKixyuContextualBarController
@@ -50,7 +49,6 @@ import com.kixyu9527.kixyubook.core.designsystem.component.kixyuNavigationBackdr
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuPredictivePopupTransform
 import com.kixyu9527.kixyubook.core.designsystem.component.kixyuUsesNavigationRail
 import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuNavigationBackdrop
-import com.kixyu9527.kixyubook.core.designsystem.component.rememberKixyuPredictiveBackState
 import com.kixyu9527.kixyubook.core.designsystem.icon.KixyuSymbols
 import com.kixyu9527.kixyubook.core.designsystem.theme.kixyuPageBackground
 import com.kixyu9527.kixyubook.core.navigation.AppRoute
@@ -143,14 +141,9 @@ internal fun KixyuNavDisplay(
         }
     }
     val topLevelActive = route == AppRoute.Home
-    val topLevelBackState = rememberKixyuPredictiveBackState<Unit>()
-    // Home, Library and Settings are sibling pages inside the single HOME destination. At that
-    // level Back exits the task; it must never pop an accidentally restored detail/reader entry.
-    KixyuPredictiveBackHandler(
-        target = Unit.takeIf { topLevelActive && contextualBarState == null },
-        state = topLevelBackState,
-        animateOnCommit = false, // Android owns the app-to-home surface, not this overlay state.
-        onBack = { onExitApp() },
+    KixyuRootBackHandler(
+        active = topLevelActive && contextualBarState == null,
+        onExit = onExitApp,
     )
     val prioritizeAnimation: () -> Unit = {
         onAnimationPriorityChanged(true)

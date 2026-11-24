@@ -42,11 +42,35 @@ import com.kixyu9527.kixyubook.core.common.model.PageTurnAnimation
 import com.kixyu9527.kixyubook.core.common.model.ReaderBrightnessMode
 import com.kixyu9527.kixyubook.core.common.model.ReaderSettings
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
+import com.kixyu9527.kixyubook.core.common.model.ReaderColorScheme
 import com.kixyu9527.kixyubook.core.common.model.UserFont
 import com.kixyu9527.kixyubook.core.designsystem.R
 
 /** Field-level intent: applied to the latest pending settings, never to a stale snapshot. */
 typealias ReaderSettingsUpdate = ((ReaderSettings) -> ReaderSettings) -> Unit
+
+/** The global page and the reader sheet use the same single colour selector. */
+@Composable
+fun KixyuReaderColorSchemeControl(settings: ReaderSettings, onSettingsChange: ReaderSettingsUpdate) {
+    KixyuDropdownRow(
+        title = stringResource(R.string.kixyu_reader_color_scheme),
+        selected = settings.readerColorScheme,
+        options = ReaderColorScheme.entries,
+        optionLabel = { it.displayName() },
+        onSelected = { scheme -> onSettingsChange { current -> current.copy(readerColorScheme = scheme) } },
+    )
+}
+
+@Composable
+private fun ReaderColorScheme.displayName(): String = stringResource(when (this) {
+    ReaderColorScheme.DEFAULT -> R.string.kixyu_reader_colors_default
+    ReaderColorScheme.DYNAMIC -> R.string.kixyu_reader_colors_dynamic
+    ReaderColorScheme.PAPER -> R.string.kixyu_reader_colors_paper
+    ReaderColorScheme.SEPIA -> R.string.kixyu_reader_colors_sepia
+    ReaderColorScheme.GREEN -> R.string.kixyu_reader_colors_green
+    ReaderColorScheme.GRAY -> R.string.kixyu_reader_colors_gray
+    ReaderColorScheme.CUSTOM -> R.string.kixyu_custom_colors
+})
 
 /** Glass controls shared by app appearance, global reading settings and the in-reader sheet. */
 @Composable
@@ -56,8 +80,6 @@ fun KixyuGlassEffectControls(
 ) {
     KixyuSettingsRow(
         title = stringResource(R.string.kixyu_glass_effect),
-        supportingText = stringResource(R.string.kixyu_glass_unsupported) + " · " +
-            stringResource(R.string.kixyu_glass_app_wide),
         onClick = {
             onSettingsChange { current -> current.copy(glassEffectEnabled = !settings.glassEffectEnabled) }
         },
@@ -69,6 +91,16 @@ fun KixyuGlassEffectControls(
             },
         )
     }
+    KixyuSliderRow(
+        title = stringResource(R.string.kixyu_frost_level),
+        value = KixyuGlassStyle.sanitizedFrostLevel(settings.glassFrostLevel),
+        valueLabel = "${KixyuGlassStyle.sanitizedFrostLevel(settings.glassFrostLevel).roundToInt()}%",
+        valueRange = 0f..100f,
+        enabled = settings.glassEffectEnabled,
+        onValueChange = { level ->
+            onSettingsChange { current -> current.copy(glassFrostLevel = level) }
+        },
+    )
 }
 
 /** Both surfaces render one font entry that opens the shared font management page. */
@@ -102,14 +134,9 @@ fun KixyuReaderModeControls(
         optionLabel = { it.displayName() },
         onSelected = { mode -> onSettingsChange { current -> current.copy(pageMode = mode) } },
     )
-    KixyuDivider()
-    if (settings.pageMode == PageMode.SCROLL) {
-        // The previous effect is kept in the settings; it applies again when paged reading returns.
-        KixyuSettingsRow(
-            title = stringResource(R.string.kixyu_page_turn_animation),
-            supportingText = stringResource(R.string.kixyu_page_turn_paged_only),
-        )
-    } else {
+    // Keep the saved animation, but only expose the control where it applies.
+    if (settings.pageMode != PageMode.SCROLL) {
+        KixyuDivider()
         KixyuDropdownRow(
             title = stringResource(R.string.kixyu_page_turn_animation),
             selected = settings.pageTurnAnimation,
@@ -163,7 +190,6 @@ fun KixyuReaderBehaviorControls(
 ) {
     ReaderSwitch(
         title = stringResource(R.string.kixyu_volume_page_turn),
-        supportingText = stringResource(R.string.kixyu_volume_page_turn_hint),
         checked = settings.volumeKeyPageTurn,
     ) { onSettingsChange { current -> current.copy(volumeKeyPageTurn = it) } }
 }
@@ -176,7 +202,6 @@ fun KixyuReaderKeepScreenOnControl(
 ) {
     ReaderSwitch(
         title = stringResource(R.string.kixyu_keep_screen_on),
-        supportingText = stringResource(R.string.kixyu_keep_screen_on_hint),
         checked = settings.keepScreenOn,
     ) { onSettingsChange { current -> current.copy(keepScreenOn = it) } }
 }
@@ -283,7 +308,7 @@ fun KixyuReaderBrightnessSlider(
 @Composable
 internal fun ReaderSwitch(
     title: String,
-    supportingText: String,
+    supportingText: String? = null,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {

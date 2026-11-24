@@ -5,10 +5,24 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.kixyu9527.kixyubook.core.common.model.Chapter
 import com.kixyu9527.kixyubook.core.common.model.ReadingProgress
+import com.kixyu9527.kixyubook.core.common.model.EpubNavigationEntry
+import kotlinx.coroutines.flow.first
+
+/** An explicit location request owns the next remeasure, even if an old finger drag is active. */
+internal suspend fun PagerState.restoreReaderLeaf(page: Int, key: String) {
+    requestScrollToPage(page)
+    // Updating currentPage alone does not mean the requested keyed leaf was measured. Keep
+    // progress publication closed until both physical layout and snapped position agree.
+    snapshotFlow {
+        !isScrollInProgress && currentPageOffsetFraction == 0f &&
+            layoutInfo.visiblePagesInfo.any { it.index == currentPage && it.key == key }
+    }.first { it }
+}
 
 /**
  * A pager index belongs to an in-memory chapter window, not to the book. Preserve it during
@@ -50,10 +64,15 @@ internal fun rememberReaderListState(sessionId: String, initialItem: Int): LazyL
 }
 
 /** Stable chapter keys also survive reindexing/reimport when Room row IDs change. */
-internal fun readerProgressChapterIndex(chapters: List<Chapter>, progress: ReadingProgress): Int {
+internal fun readerProgressChapterIndex(chapters: List<Chapter>, progress: ReadingProgress,
+    navigation: List<EpubNavigationEntry> = emptyList(), sourceChapters: List<Chapter> = chapters): Int {
     if (progress.chapterKey.isNotBlank()) {
         chapters.indexOfFirst { it.chapterKey == progress.chapterKey }.takeIf { it >= 0 }
             ?.let { return it }
     }
-    return chapters.indexOfFirst { it.id == progress.chapterId }
+    chapters.indexOfFirst { it.id == progress.chapterId }.takeIf { it >= 0 }?.let { return it }
+    val old = sourceChapters.firstOrNull { it.id == progress.chapterId ||
+        progress.chapterKey.isNotBlank() && it.chapterKey == progress.chapterKey } ?: return -1
+    val source = readingSourceIndex(old.index, navigation)
+    return chapters.indexOfFirst { it.index == source }
 }

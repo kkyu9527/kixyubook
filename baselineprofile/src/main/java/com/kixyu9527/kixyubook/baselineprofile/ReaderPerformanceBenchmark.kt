@@ -95,6 +95,35 @@ class ReaderPerformanceBenchmark {
     @Test
     fun turnCoverPagesContinuously() = measurePageTurnMode("覆盖翻页")
 
+    @Test
+    fun turnPagesInUninterruptedBursts() = measureRapidTurns(alternating = false)
+
+    @Test
+    fun reverseDirectionInUninterruptedBursts() = measureRapidTurns(alternating = true)
+
+    private fun measureRapidTurns(alternating: Boolean) = benchmarkRule.measureRepeated(
+        packageName = PACKAGE_NAME,
+        metrics = listOf(FrameTimingMetric()),
+        compilationMode = CompilationMode.Partial(),
+        iterations = READER_ITERATIONS,
+        setupBlock = {
+            returnToLibrary()
+            findBenchmarkBook().click()
+            check(device.wait(Until.hasObject(By.desc(READER_CONTENT_DESCRIPTION)), READER_TIMEOUT_MILLIS))
+            selectPageTurnMode("左右滑动")
+            device.waitForIdle()
+        },
+    ) {
+        repeat(PAGE_TURN_COUNT) { turn ->
+            val backward = alternating && turn % 6 >= 3
+            val start = device.displayWidth * (if (backward) 1 else 4) / 5
+            val end = device.displayWidth * (if (backward) 4 else 1) / 5
+            device.swipe(start, device.displayHeight / 2, end, device.displayHeight / 2, RAPID_TURN_STEPS)
+            // No waitForIdle here: that masked the overlapping gesture/recenter race entirely.
+        }
+        device.waitForIdle()
+    }
+
     /**
      * The same benchmark runs as a two-leaf book spread on Pad/large landscape devices. Reports
      * expose frameDurationCpuMs P50/P95, so regressions in page turns remain
@@ -188,6 +217,7 @@ class ReaderPerformanceBenchmark {
         const val READER_ITERATIONS = 8
         const val PAGE_TURN_COUNT = 20
         const val PAGE_TURN_STEPS = 12
+        const val RAPID_TURN_STEPS = 5
         const val MAX_BACK_ATTEMPTS = 3
     }
 }

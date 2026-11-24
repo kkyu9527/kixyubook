@@ -1,4 +1,5 @@
 import java.util.Properties
+import com.kixyu9527.kixyubook.buildlogic.PrepareThirdPartyAssets
 
 plugins {
     alias(libs.plugins.android.application)
@@ -6,6 +7,22 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.baselineprofile)
+}
+
+val prepareThirdPartyAssets = tasks.register<PrepareThirdPartyAssets>("prepareThirdPartyAssets") {
+    licenses.set(rootProject.layout.projectDirectory.dir("third_party/licenses"))
+    notices.set(rootProject.layout.projectDirectory.file("THIRD_PARTY_NOTICES.md"))
+    misplacedLicenses.from(rootProject.fileTree(rootDir) {
+        include("core/**/src/main/assets/licenses/**", "feature/**/src/main/assets/licenses/**")
+        exclude("**/build/**")
+    })
+    outputDirectory.set(layout.buildDirectory.dir("generated/third-party-assets"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(prepareThirdPartyAssets, PrepareThirdPartyAssets::outputDirectory)
+    }
 }
 
 android {
@@ -16,8 +33,8 @@ android {
         applicationId = "com.kixyu9527.kixyubook"
         minSdk = 33
         targetSdk = 37
-        versionCode = 3300
-        versionName = "3.3.0"
+        versionCode = 3400
+        versionName = "3.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

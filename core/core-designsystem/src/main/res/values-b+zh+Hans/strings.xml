@@ -1,4 +1,11 @@
 <resources>
+    <string name="kixyu_reader_color_scheme">阅读配色</string>
+    <string name="kixyu_reader_colors_default">默认</string>
+    <string name="kixyu_reader_colors_dynamic">动态取色</string>
+    <string name="kixyu_reader_colors_paper">纸白</string>
+    <string name="kixyu_reader_colors_sepia">暖棕</string>
+    <string name="kixyu_reader_colors_green">柔绿</string>
+    <string name="kixyu_reader_colors_gray">浅灰</string>
     <string name="kixyu_decrease_value">减小%1$s</string>
     <string name="kixyu_increase_value">增大%1$s</string>
     <string name="kixyu_enable_auto_brightness">开启跟随系统亮度</string>

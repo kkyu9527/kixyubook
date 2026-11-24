@@ -23,8 +23,6 @@ import androidx.compose.ui.unit.sp
 import com.kixyu9527.kixyubook.core.common.model.AppColorTheme
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.DEFAULT_GLASS_FROST_LEVEL
-import com.kixyu9527.kixyubook.core.common.model.MAX_GLASS_FROST_LEVEL
-import com.kixyu9527.kixyubook.core.common.model.MIN_GLASS_FROST_LEVEL
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuSize
 import com.kixyu9527.kixyubook.core.designsystem.component.KixyuGlassStyle
@@ -44,6 +42,9 @@ private data class ThemeSeed(
     val darkPrimary: Color,
     val darkContainer: Color,
 )
+
+/** Shared by all in-page, popup and dialog material consumers. */
+val LocalKixyuGlassFrostLevel = staticCompositionLocalOf { DEFAULT_GLASS_FROST_LEVEL }
 
 private val seeds = mapOf(
     AppColorTheme.SAGE to ThemeSeed(Color(0xFF3F5A4B), Color(0xFFD6E5DA), Color(0xFFB8CCBD), Color(0xFF354A3B)),
@@ -274,12 +275,12 @@ fun KixyuBookTheme(
         darkTheme -> darkColors(colorTheme)
         else -> lightColors(colorTheme)
     }
-    val glassColors = remember(darkTheme, colors.primary) {
+    val glassColors = remember(darkTheme, colors.primary, glassFrostLevel) {
         defaultGlassColors(isDark = darkTheme, accent = colors.primary).let { base ->
             // Apple's bars are much clearer than the default 64% container. Keep the native
             // material/refraction, but lower the opaque fill to roughly 30%.
             base.copy(
-                container = KixyuGlassStyle.fallbackTint(darkTheme),
+                container = KixyuGlassStyle.fallbackTint(darkTheme, glassFrostLevel),
             )
         }
     }
@@ -299,6 +300,7 @@ fun KixyuBookTheme(
         CompositionLocalProvider(
             LocalAppUiStyle provides uiStyle,
             LocalKixyuGlassEffectEnabled provides glassEffectEnabled,
+            LocalKixyuGlassFrostLevel provides KixyuGlassStyle.sanitizedFrostLevel(glassFrostLevel),
             LocalKixyuPredictiveBackEnabled provides predictiveBackEnabled,
         ) {
             if (uiStyle == AppUiStyle.MIUIX) {

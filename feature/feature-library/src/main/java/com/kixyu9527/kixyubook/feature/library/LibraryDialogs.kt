@@ -538,7 +538,6 @@ internal fun BatchCategoryDialog(
                 onValueChange = { category = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.library_book_category)) },
-                supportingText = { Text(stringResource(R.string.library_batch_category_hint)) },
                 singleLine = true,
             )
             if (categories.isNotEmpty()) {

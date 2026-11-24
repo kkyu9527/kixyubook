@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.dp
+import com.kixyu9527.kixyubook.core.reader.engine.ReaderPage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.junit.Assert.*
@@ -22,6 +23,42 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class ReaderPagerHandoffTest {
     @get:Rule val rule = createComposeRule()
+
+    @Test fun enteringAnUnfinishedChapterAndAppendingBatchesKeepsThePhysicalLeaf() {
+        fun pages(chapter: Int, count: Int) = List(count) { ReaderPage(it, chapter, "Chapter", it == 0, emptyList()) }
+        var chapter by mutableIntStateOf(0)
+        var count by mutableIntStateOf(4)
+        var complete by mutableStateOf(false)
+        lateinit var pager: PagerState
+        lateinit var scope: CoroutineScope
+        val events = mutableListOf<String>()
+        rule.setContent {
+            val window = if (chapter == 0) buildReaderPagerWindow(0, pages(0, 2), emptyList(), pages(1, count),
+                false, true, currentPlaceholderPageIndex = 0, chapterCount = 3, nextPagesComplete = complete)
+            else buildReaderPagerWindow(1, pages(1, count), pages(0, 2), if (complete) pages(2, 2) else emptyList(),
+                true, true, currentPagesComplete = complete, currentPlaceholderPageIndex = 0, chapterCount = 3)
+            val spreads = buildReaderPagerSpreads(window, false)
+            pager = rememberReaderPagerState("partial-handoff", 1, pageCount = { spreads.size })
+            scope = rememberCoroutineScope()
+            LaunchedEffect(pager) { pager.settledReaderLeaves({ 0 }, { 0 }).collect { it?.let { leaf -> events += leaf.first } } }
+            HorizontalPager(pager, Modifier.size(300.dp, 500.dp), key = { spreads[it].key }) {
+                Box(Modifier.size(300.dp, 500.dp))
+            }
+        }
+        rule.runOnIdle { scope.launch { pager.scrollToPage(2) } }
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals("1:0", events.last()); chapter = 1 }
+        for (batch in listOf(8, 12, 20)) {
+            rule.runOnIdle { count = batch }
+            rule.waitForIdle()
+            rule.runOnIdle { assertEquals("1:0", events.last()); assertEquals(2, pager.currentPage) }
+        }
+        rule.runOnIdle { complete = true }
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals("1:0", events.last()); scope.launch { pager.animateScrollToPage(3) } }
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals("1:1", events.last()) }
+    }
 
     @Test fun recenteringKeepsDisplayedLeafAndSecondTurnReachesNextLeaf() {
         var keys by mutableStateOf(listOf("old:0", "old:1", "current:0", "next:0", "next:1"))

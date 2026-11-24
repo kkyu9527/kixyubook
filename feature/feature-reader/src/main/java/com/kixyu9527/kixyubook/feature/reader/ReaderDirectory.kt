@@ -78,7 +78,7 @@ internal fun DirectorySheet(
     }
     val currentRowIndex = directoryRows.indexOfFirst { row ->
         when (row) {
-            is DirectoryRow.ChapterRow -> row.index == currentIndex
+            is DirectoryRow.ChapterRow -> currentIndex in row.coveredChapterIndices
             is DirectoryRow.Volume -> row.targetChapterIndex == currentIndex
         }
     }.coerceAtLeast(0)
@@ -95,13 +95,13 @@ internal fun DirectorySheet(
             )
         }
     }
-    LaunchedEffect(currentIndex, directoryView) {
+    LaunchedEffect(currentIndex, currentVolume, directoryView) {
         if (directoryView == DirectoryView.CHAPTERS && state.chapters.isNotEmpty()) {
             currentVolume?.let { expandedVolumes[it] = true }
             val targetRows = buildDirectoryRows(state.chapters, expandedVolumes, state.epubNavigation)
             val target = targetRows.indexOfFirst { row ->
                 when (row) {
-                    is DirectoryRow.ChapterRow -> row.index == currentIndex
+                    is DirectoryRow.ChapterRow -> currentIndex in row.coveredChapterIndices
                     is DirectoryRow.Volume -> row.targetChapterIndex == currentIndex
                 }
             }.coerceAtLeast(0)
@@ -121,7 +121,10 @@ internal fun DirectorySheet(
         ) {
             Text(
                 when (directoryView) {
-                    DirectoryView.CHAPTERS -> androidx.compose.ui.res.pluralStringResource(R.plurals.reader_directory_title, state.chapters.size, state.chapters.size)
+                    DirectoryView.CHAPTERS -> {
+                        val count = state.epubNavigation.size.takeIf { it > 0 } ?: state.chapters.size
+                        androidx.compose.ui.res.pluralStringResource(R.plurals.reader_directory_title, count, count)
+                    }
                     DirectoryView.BOOKMARKS -> stringResource(R.string.reader_bookmarks_title, state.bookmarks.size)
                     DirectoryView.ANNOTATIONS -> stringResource(R.string.reader_annotations_title, state.annotations.size)
                 },
@@ -264,8 +267,10 @@ internal fun DirectorySheet(
                                 }
                                 is DirectoryRow.ChapterRow -> {
                                     val chapter = state.chapters[row.index]
-                                    val current = row.index == state.chapterIndex
-                                    val hasBookmark = chapter.id in bookmarkedChapterIds
+                                    val current = state.chapterIndex in row.coveredChapterIndices
+                                    val hasBookmark = row.coveredChapterIndices.any {
+                                        state.chapters.getOrNull(it)?.id in bookmarkedChapterIds
+                                    }
                                     KixyuListRow(
                                         title = row.navigationTitle ?: chapter.title,
                                         titleStyle = MaterialTheme.typography.bodyMedium,
@@ -449,6 +454,8 @@ internal sealed interface DirectoryRow {
         val volumeIndex: Int? = null,
         val navigationTitle: String? = null,
         val navigationTarget: String? = null,
+        /** Physical resources owned by this TOC section, without changing persisted source IDs. */
+        val coveredChapterIndices: IntRange = index..index,
     ) : DirectoryRow {
         override val key = "chapter:$id" + navigationTarget?.let { ":$it" }.orEmpty()
     }
@@ -504,12 +511,30 @@ internal fun buildDirectoryRows(
     expandedVolumes: Map<Int, Boolean>,
     navigation: List<EpubNavigationEntry> = emptyList(),
 ): List<DirectoryRow> {
-    val bySource = navigation.groupBy(EpubNavigationEntry::sourceIndex)
+    val positions = chapters.mapIndexed { position, chapter -> chapter.index to position }.toMap()
+    val validNavigation = navigation.filter { it.sourceIndex in positions }
+    if (validNavigation.isEmpty()) return buildSpineDirectoryRows(chapters, expandedVolumes)
+    val bySource = validNavigation.groupBy(EpubNavigationEntry::sourceIndex)
+    val boundaries = validNavigation.mapNotNull { positions[it.sourceIndex] }.distinct().sorted()
+    val coverage = boundaries.mapIndexed { i, start ->
+        start to (start until (boundaries.getOrNull(i + 1) ?: chapters.size))
+    }.toMap()
     return buildSpineDirectoryRows(chapters, expandedVolumes).flatMap { row ->
         val entries = (row as? DirectoryRow.ChapterRow)?.let { bySource[chapters[it.index].index] }.orEmpty()
-        if (row is DirectoryRow.ChapterRow && entries.isNotEmpty()) {
-            entries.map { row.copy(navigationTitle = it.title, navigationTarget = it.target) }
-        } else listOf(row)
+        when {
+            row is DirectoryRow.ChapterRow && entries.isNotEmpty() -> entries.map {
+                row.copy(navigationTitle = it.title, navigationTarget = it.target,
+                    coveredChapterIndices = coverage.getValue(row.index))
+            }
+            // A publisher TOC is a navigation tree, not one entry per physical file. Unlisted
+            // resources remain readable/searchable and belong to the preceding TOC section.
+            row is DirectoryRow.ChapterRow && row.index >= boundaries.first() -> emptyList()
+            row is DirectoryRow.Volume -> listOf(row.copy(chapterCount = validNavigation.count {
+                chapters[positions.getValue(it.sourceIndex)].id in row.chapterIds &&
+                    it.title.normalizedDirectoryTitle() != row.title.normalizedDirectoryTitle()
+            }))
+            else -> listOf(row)
+        }
     }
 }
 

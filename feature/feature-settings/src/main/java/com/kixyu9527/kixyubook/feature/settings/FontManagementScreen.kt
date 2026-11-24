@@ -99,7 +99,6 @@ fun FontManagementRoute(
                 KixyuSection(title = stringResource(R.string.settings_fonts_section)) {
                     FontChoiceRow(
                         name = stringResource(com.kixyu9527.kixyubook.core.designsystem.R.string.kixyu_system_default),
-                        description = stringResource(R.string.settings_default_font_hint),
                         font = null,
                         selected = state.settings.fontUuid == null,
                         onSelect = { viewModel.update { it.copy(fontUuid = null) } },
@@ -110,7 +109,6 @@ fun FontManagementRoute(
                 KixyuSection(title = stringResource(R.string.settings_my_fonts_section)) {
                     KixyuSettingsRow(
                         title = stringResource(R.string.settings_import_font),
-                        supportingText = stringResource(R.string.settings_import_font_summary),
                         icon = KixyuSymbols.Add,
                         onClick = { fontPicker.launch(FONT_MIME_TYPES) },
                     ) {
@@ -120,7 +118,6 @@ fun FontManagementRoute(
                         KixyuDivider()
                         FontChoiceRow(
                             name = font.name,
-                            description = stringResource(R.string.settings_imported_font_hint),
                             font = font,
                             selected = state.settings.fontUuid == font.uuid,
                             onSelect = { viewModel.update { it.copy(fontUuid = font.uuid) } },
@@ -151,7 +148,6 @@ fun FontManagementRoute(
 @Composable
 private fun FontChoiceRow(
     name: String,
-    description: String,
     font: UserFont?,
     selected: Boolean,
     onSelect: () -> Unit,
@@ -166,7 +162,6 @@ private fun FontChoiceRow(
     }
     KixyuSettingsRow(
         title = name,
-        supportingText = description,
         selected = selected,
         onClick = onSelect,
         leading = {
