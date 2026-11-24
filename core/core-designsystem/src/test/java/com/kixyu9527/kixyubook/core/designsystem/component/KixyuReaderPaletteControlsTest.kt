@@ -35,6 +35,9 @@ class KixyuReaderPaletteControlsTest {
         }
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         compose.onNodeWithText(context.getString(R.string.kixyu_reader_color_scheme)).performClick()
+        compose.onNodeWithText(context.getString(R.string.kixyu_reader_colors_app)).performClick()
+        compose.runOnIdle { assertEquals(ReaderColorScheme.APP, settings.readerColorScheme) }
+        compose.onNodeWithText(context.getString(R.string.kixyu_reader_color_scheme)).performClick()
         compose.onNodeWithText(context.getString(R.string.kixyu_reader_colors_dynamic)).performClick()
         compose.runOnIdle { assertEquals(ReaderColorScheme.DYNAMIC, settings.readerColorScheme) }
         compose.onNodeWithText(context.getString(R.string.kixyu_reader_color_scheme)).performClick()

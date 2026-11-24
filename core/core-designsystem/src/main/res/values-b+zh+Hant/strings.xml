@@ -1,7 +1,13 @@
 <resources>
     <string name="kixyu_reader_color_scheme">閱讀配色</string>
     <string name="kixyu_reader_colors_default">預設</string>
+    <string name="kixyu_reader_colors_app">跟隨應用配色</string>
+    <string name="kixyu_reader_colors_sage">鼠尾草</string>
+    <string name="kixyu_reader_colors_ocean">海藍</string>
+    <string name="kixyu_reader_colors_violet">紫羅蘭</string>
+    <string name="kixyu_reader_colors_amber">琥珀</string>
     <string name="kixyu_reader_colors_dynamic">動態取色</string>
+    <string name="kixyu_reader_colors_white">純白</string>
     <string name="kixyu_reader_colors_paper">紙白</string>
     <string name="kixyu_reader_colors_sepia">暖棕</string>
     <string name="kixyu_reader_colors_green">柔綠</string>

@@ -64,11 +64,17 @@ fun KixyuReaderColorSchemeControl(settings: ReaderSettings, onSettingsChange: Re
 @Composable
 private fun ReaderColorScheme.displayName(): String = stringResource(when (this) {
     ReaderColorScheme.DEFAULT -> R.string.kixyu_reader_colors_default
+    ReaderColorScheme.APP -> R.string.kixyu_reader_colors_app
     ReaderColorScheme.DYNAMIC -> R.string.kixyu_reader_colors_dynamic
+    ReaderColorScheme.WHITE -> R.string.kixyu_reader_colors_white
     ReaderColorScheme.PAPER -> R.string.kixyu_reader_colors_paper
     ReaderColorScheme.SEPIA -> R.string.kixyu_reader_colors_sepia
     ReaderColorScheme.GREEN -> R.string.kixyu_reader_colors_green
     ReaderColorScheme.GRAY -> R.string.kixyu_reader_colors_gray
+    ReaderColorScheme.SAGE -> R.string.kixyu_reader_colors_sage
+    ReaderColorScheme.OCEAN -> R.string.kixyu_reader_colors_ocean
+    ReaderColorScheme.VIOLET -> R.string.kixyu_reader_colors_violet
+    ReaderColorScheme.AMBER -> R.string.kixyu_reader_colors_amber
     ReaderColorScheme.CUSTOM -> R.string.kixyu_custom_colors
 })
 

@@ -1,7 +1,13 @@
 <resources>
     <string name="kixyu_reader_color_scheme">Reading palette</string>
     <string name="kixyu_reader_colors_default">Default</string>
+    <string name="kixyu_reader_colors_app">Follow app colours</string>
+    <string name="kixyu_reader_colors_sage">Sage</string>
+    <string name="kixyu_reader_colors_ocean">Ocean</string>
+    <string name="kixyu_reader_colors_violet">Violet</string>
+    <string name="kixyu_reader_colors_amber">Amber</string>
     <string name="kixyu_reader_colors_dynamic">Wallpaper colors</string>
+    <string name="kixyu_reader_colors_white">White</string>
     <string name="kixyu_reader_colors_paper">Paper</string>
     <string name="kixyu_reader_colors_sepia">Sepia</string>
     <string name="kixyu_reader_colors_green">Soft green</string>

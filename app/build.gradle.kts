@@ -33,8 +33,8 @@ android {
         applicationId = "com.kixyu9527.kixyubook"
         minSdk = 33
         targetSdk = 37
-        versionCode = 3400
-        versionName = "3.4.0"
+        versionCode = 3401
+        versionName = "3.4.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

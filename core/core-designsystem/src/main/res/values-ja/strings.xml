@@ -1,7 +1,13 @@
 <resources>
     <string name="kixyu_reader_color_scheme">読書の配色</string>
     <string name="kixyu_reader_colors_default">標準</string>
+    <string name="kixyu_reader_colors_app">アプリの配色に合わせる</string>
+    <string name="kixyu_reader_colors_sage">セージ</string>
+    <string name="kixyu_reader_colors_ocean">オーシャン</string>
+    <string name="kixyu_reader_colors_violet">バイオレット</string>
+    <string name="kixyu_reader_colors_amber">アンバー</string>
     <string name="kixyu_reader_colors_dynamic">壁紙の色</string>
+    <string name="kixyu_reader_colors_white">ホワイト</string>
     <string name="kixyu_reader_colors_paper">紙色</string>
     <string name="kixyu_reader_colors_sepia">セピア</string>
     <string name="kixyu_reader_colors_green">ソフトグリーン</string>

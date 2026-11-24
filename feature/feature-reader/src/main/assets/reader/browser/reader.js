@@ -160,7 +160,7 @@
       style.textContent = `html{margin:0!important;overflow:hidden!important;background:${cfg.background}!important;}
         body{margin:0!important;width:${width}px!important;height:${height}px!important;transform-origin:0 0!important;
         transform:translate(${Math.max(0,(innerWidth-width*scale)/2)}px,${Math.max(0,(innerHeight-height*scale)/2)}px) scale(${scale})!important;}
-        body:not([style*="background"]){background-color:white;}`;
+        body:not([style*="background"]){background-color:${cfg.background}!important;color:${cfg.foreground}!important;}`;
     } else {
       const authored=getComputedStyle(document.body), vertical=authored.writingMode.startsWith('vertical');
       const flow=`writing-mode:${authored.writingMode}!important;direction:${authored.direction}!important;`;

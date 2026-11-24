@@ -122,6 +122,13 @@ test('mixed-color transparent art gets a subdued backing, while opaque art and a
   }
 });
 
+test('fixed-layout reading background follows the selected reader palette', async ({page}) => {
+  const cfg={...settings([]),fixed:true,viewportWidth:800,viewportHeight:600,dark:true,background:'#101010',foreground:'#eeeeee'};
+  await open(page,'<div>Fixed text</div>',cfg);
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor))
+    .toBe('rgb(16, 16, 16)');
+});
+
 test('fixed-layout pages retain authored geometry and native chapter boundaries', async ({page}) => {
   const cfg={...settings([]),fixed:true,viewportWidth:800,viewportHeight:600};
   await open(page,'<div id="plate" style="position:absolute;left:400px;top:300px;width:100px;height:50px;background:red"></div>',cfg);
