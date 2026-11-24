@@ -21,6 +21,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
+import com.dropbox.differ.SimpleImageComparator
+import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.kixyu9527.kixyubook.core.common.model.AppUiStyle
 import com.kixyu9527.kixyubook.core.common.model.ReaderTheme
@@ -110,6 +112,15 @@ class KixyuNavigationGlassScreenshotTest {
         compose.onNodeWithText("Home").assertExists()
         compose.mainClock.advanceTimeBy(500)
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage("src/test/screenshots/navigation_$suffix.png")
+        compose.onRoot().captureRoboImage(
+            "src/test/screenshots/navigation_$suffix.png",
+            roborazziOptions = RoborazziOptions(
+                compareOptions = RoborazziOptions.CompareOptions(
+                    // Linux and macOS Skia round the lens edge up to 2/255 differently per RGB
+                    // channel. Ignore only that per-pixel noise; no changed-area allowance.
+                    imageComparator = SimpleImageComparator(maxDistance = .014f),
+                ),
+            ),
+        )
     }
 }
