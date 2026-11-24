@@ -64,6 +64,21 @@ class ReaderSelectionInteractionTest {
         compose.runOnIdle { assertEquals(1, copies); assertNull(selection.target) }
     }
 
+    /**
+     * Menu content is added by a coroutine after the platform context-menu callback. On a cold
+     * Linux/Robolectric first test the first layout pass can still report a zero-sized toolbar
+     * even after waitForIdle, so wait for real bounds before asserting display.
+     */
+    private fun awaitDisplayed(text: String) {
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithText(text).fetchSemanticsNodes().any { node ->
+                val bounds = node.boundsInRoot
+                bounds.width > 0f && bounds.height > 0f
+            }
+        }
+        compose.onNodeWithText(text).assertIsDisplayed()
+    }
+
     private fun exerciseSelection(style: AppUiStyle) {
         val selection = ReaderTextInteractionState()
         val text = "Golden passage for selecting and annotating."
@@ -93,13 +108,17 @@ class ReaderSelectionInteractionTest {
         fun selectWord() {
             compose.onNodeWithText(text).performTouchInput { longClick(Offset(60f, centerY)) }
             compose.waitForIdle()
-            compose.onNodeWithText("标注").assertIsDisplayed()
+            awaitDisplayed("标注")
             compose.runOnIdle { assertTrue(selection.target?.isAnnotatable == true) }
         }
         selectWord()
+        awaitDisplayed("标注")
         compose.onNodeWithText("标注").performTouchInput { click() }
+        awaitDisplayed("返回操作")
         compose.onNodeWithText("返回操作").performTouchInput { click() }
+        awaitDisplayed("标注")
         compose.onNodeWithText("标注").performTouchInput { click() }
+        awaitDisplayed("高亮")
         compose.onNodeWithText("高亮").performTouchInput { click() }
         compose.waitForIdle()
         compose.onNodeWithText("高亮").assertDoesNotExist()
